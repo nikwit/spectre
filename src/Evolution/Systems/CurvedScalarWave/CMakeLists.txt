@@ -23,6 +23,7 @@ spectre_target_headers(
   Characteristics.hpp
   Constraints.hpp
   Equations.hpp
+  Initialize.hpp
   System.hpp
   Tags.hpp
   TagsDeclarations.hpp
@@ -32,6 +33,9 @@ spectre_target_headers(
 
 target_link_libraries(
   ${LIBRARY}
-  PUBLIC DataStructures
-  INTERFACE ErrorHandling
+  PUBLIC
+  DataStructures
+  ErrorHandling
+  GeneralRelativity
+  Options
   )

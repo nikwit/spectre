@@ -1,0 +1,66 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+# Executable: EvolveCurvedPlaneWaveMinkowski2D
+# Check: parse;execute
+# Timeout: 1000
+
+AnalyticData:
+  ScalarWaveGr:
+    Background:
+    ScalarField:
+      WaveVector: [1.0, 1.0]
+      Center: [0.0, 0.0]
+      Profile:
+        Sinusoid:
+          Amplitude: 1.0
+          Wavenumber: 1.0
+          Phase: 0.0
+
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.001
+  InitialSlabSize: 0.01
+  TimeStepper:
+    AdamsBashforthN:
+      Order: 3
+  StepController: BinaryFraction
+  StepChoosers:
+    - Constant: 0.05
+    - Increase:
+        Factor: 2
+    - Cfl:
+        SafetyFactor: 0.2
+
+DomainCreator:
+  Rectangle:
+    LowerBound: [0.0, 0.0]
+    UpperBound: [16.283185307179586, 16.283185307179586]
+    IsPeriodicIn: [true, true]
+    InitialRefinement: [2, 2]
+    InitialGridPoints: [4, 4]
+    TimeDependence: None
+
+SpatialDiscretization:
+  DiscontinuousGalerkin:
+    Formulation: StrongInertial
+    Quadrature: GaussLobatto
+
+NumericalFlux:
+  UpwindPenaltyCorrection:
+
+# Filtering is being tested by the 3D executable (see EvolveCurvedScalarWave.hpp)
+# Filtering:
+#   ExpFilter0:
+#     Alpha: 12
+#     HalfPower: 32
+
+EventsAndTriggers:
+  ? Slabs:
+      Specified:
+        Values: [5]
+  : - Completion
+
+Observers:
+  VolumeFileName: "CurvedScalarPlaneWaveMinkowski2DVolume"
+  ReductionFileName: "CurvedScalarPlaneWaveMinkowski2DReductions"
