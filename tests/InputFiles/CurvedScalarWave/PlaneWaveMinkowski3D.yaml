@@ -16,6 +16,8 @@ AnalyticData:
           Wavenumber: 1.0
           Phase: 0.0
 
+PhaseChangeAndTriggers:
+
 Evolution:
   InitialTime: 0.0
   InitialTimeStep: 0.001
@@ -46,11 +48,11 @@ SpatialDiscretization:
     Quadrature: GaussLobatto
 
 # If filtering is enabled in the executable the filter can be controlled using:
-Filtering:
-  ExpFilter0:
-    Alpha: 12
-    HalfPower: 32
-    DisableForDebugging: true
+# Filtering:
+#   ExpFilter0:
+#     Alpha: 12
+#     HalfPower: 32
+#     DisableForDebugging: true
 
 NumericalFlux:
   UpwindPenaltyCorrection:

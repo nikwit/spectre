@@ -2,8 +2,10 @@
 # See LICENSE.txt for details.
 
 # Executable: EvolveCurvedPlaneWaveMinkowski2D
-# Check: parse;execute
+# Check: parse
 # Timeout: 1000
+# ExpectedOutput:
+#   CurvedScalarPlaneWaveMinkowski2DVolume0.h5
 
 AnalyticData:
   ScalarWaveGr:
@@ -16,6 +18,8 @@ AnalyticData:
           Amplitude: 1.0
           Wavenumber: 1.0
           Phase: 0.0
+
+PhaseChangeAndTriggers:
 
 Evolution:
   InitialTime: 0.0
@@ -35,7 +39,7 @@ Evolution:
 DomainCreator:
   Rectangle:
     LowerBound: [0.0, 0.0]
-    UpperBound: [16.283185307179586, 16.283185307179586]
+    UpperBound: [6.283185307179586, 6.283185307179586]
     IsPeriodicIn: [true, true]
     InitialRefinement: [2, 2]
     InitialGridPoints: [4, 4]
@@ -49,17 +53,32 @@ SpatialDiscretization:
 NumericalFlux:
   UpwindPenaltyCorrection:
 
-# Filtering is being tested by the 3D executable (see EvolveCurvedScalarWave.hpp)
-# Filtering:
-#   ExpFilter0:
-#     Alpha: 12
-#     HalfPower: 32
+Filtering:
+  ExpFilter0:
+    Alpha: 12
+    HalfPower: 32
+    DisableForDebugging: true
 
 EventsAndTriggers:
   ? Slabs:
       Specified:
-        Values: [5]
+        Values: [30]
   : - Completion
+  ? Slabs:
+      Specified:
+        Values: [0, 25]
+  : - ObserveFields:
+        SubfileName: VolumePsi0And25
+        VariablesToObserve: ["Psi"]
+        InterpolateToMesh: None
+  ? Slabs:
+      EvenlySpaced:
+        Interval: 10
+        Offset: 0
+  : - ObserveFields:
+        SubfileName: VolumePsiPiPhiEvery10Slabs
+        VariablesToObserve: ["Psi", "Pi", "Phi"]
+        InterpolateToMesh: None
 
 Observers:
   VolumeFileName: "CurvedScalarPlaneWaveMinkowski2DVolume"

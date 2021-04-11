@@ -7,18 +7,16 @@
 #include <cstdint>
 #include <vector>
 
-#include "DataStructures/DataBox/Tag.hpp"
 #include "Domain/Creators/RegisterDerivedWithCharm.hpp"
 #include "Domain/Creators/TimeDependence/RegisterDerivedWithCharm.hpp"
 #include "Domain/FunctionsOfTime/RegisterDerivedWithCharm.hpp"
 #include "Domain/Tags.hpp"
-#include "Domain/TagsCharacteresticSpeeds.hpp"
-#include "Evolution/Actions/AddMeshVelocityNonconservative.hpp"
 #include "Evolution/ComputeTags.hpp"
 #include "Evolution/DiscontinuousGalerkin/Actions/ComputeTimeDerivative.hpp"
 #include "Evolution/DiscontinuousGalerkin/DgElementArray.hpp"  // IWYU pragma: keep
+#include "Evolution/DiscontinuousGalerkin/Initialization/Mortars.hpp"
+#include "Evolution/DiscontinuousGalerkin/Initialization/QuadratureTag.hpp"
 #include "Evolution/Initialization/DgDomain.hpp"
-#include "Evolution/Initialization/DiscontinuousGalerkin.hpp"
 #include "Evolution/Initialization/Evolution.hpp"
 #include "Evolution/Initialization/NonconservativeSystem.hpp"
 #include "Evolution/Initialization/SetVariables.hpp"
@@ -31,8 +29,8 @@
 #include "IO/Observer/Actions/RegisterEvents.hpp"
 #include "IO/Observer/Helpers.hpp"            // IWYU pragma: keep
 #include "IO/Observer/ObserverComponent.hpp"  // IWYU pragma: keep
-#include "NumericalAlgorithms/DiscontinuousGalerkin/Actions/ComputeNonconservativeBoundaryFluxes.hpp"  // IWYU pragma: keep
-#include "NumericalAlgorithms/DiscontinuousGalerkin/Actions/ImposeBoundaryConditions.hpp"  // IWYU pragma: keep
+#include "NumericalAlgorithms/DiscontinuousGalerkin/Actions/ComputeNonconservativeBoundaryFluxes.hpp"
+#include "NumericalAlgorithms/DiscontinuousGalerkin/Actions/ImposeBoundaryConditions.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/BoundarySchemes/FirstOrder/FirstOrderScheme.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/BoundarySchemes/FirstOrder/FirstOrderSchemeLts.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Formulation.hpp"
@@ -43,12 +41,14 @@
 #include "Parallel/Actions/SetupDataBox.hpp"
 #include "Parallel/Actions/TerminatePhase.hpp"
 #include "Parallel/InitializationFunctions.hpp"
+#include "Parallel/PhaseControl/ExecutePhaseChange.hpp"
+#include "Parallel/PhaseControl/PhaseControlTags.hpp"
+#include "Parallel/PhaseControl/VisitAndReturn.hpp"
 #include "Parallel/PhaseDependentActionList.hpp"
 #include "Parallel/Reduction.hpp"
 #include "Parallel/RegisterDerivedClassesWithCharm.hpp"
 #include "ParallelAlgorithms/Actions/MutateApply.hpp"
 #include "ParallelAlgorithms/DiscontinuousGalerkin/CollectDataForFluxes.hpp"
-#include "ParallelAlgorithms/DiscontinuousGalerkin/FluxCommunication.hpp"
 #include "ParallelAlgorithms/DiscontinuousGalerkin/InitializeDomain.hpp"
 #include "ParallelAlgorithms/DiscontinuousGalerkin/InitializeInterfaces.hpp"
 #include "ParallelAlgorithms/DiscontinuousGalerkin/InitializeMortars.hpp"
@@ -61,15 +61,12 @@
 #include "ParallelAlgorithms/EventsAndTriggers/Tags.hpp"
 #include "ParallelAlgorithms/Initialization/Actions/AddComputeTags.hpp"
 #include "ParallelAlgorithms/Initialization/Actions/RemoveOptionsAndTerminatePhase.hpp"
+#include "PointwiseFunctions/AnalyticData/CurvedWaveEquation/PlaneWaveMinkowski.hpp"
 #include "PointwiseFunctions/AnalyticData/CurvedWaveEquation/ScalarWaveGr.hpp"
+#include "PointwiseFunctions/AnalyticData/Tags.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/Minkowski.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/Tags.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/WaveEquation/PlaneWave.hpp"  // IWYU pragma: keep
-#include "PointwiseFunctions/GeneralRelativity/Christoffel.hpp"
-#include "PointwiseFunctions/GeneralRelativity/IndexManipulation.hpp"
-#include "PointwiseFunctions/GeneralRelativity/Ricci.hpp"
-#include "PointwiseFunctions/GeneralRelativity/SpatialMetric.hpp"
-#include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "PointwiseFunctions/MathFunctions/MathFunction.hpp"
 #include "Time/Actions/AdvanceTime.hpp"                // IWYU pragma: keep
 #include "Time/Actions/ChangeSlabSize.hpp"             // IWYU pragma: keep
@@ -110,11 +107,10 @@ template <size_t Dim, typename InitialData>
 struct EvolutionMetavars {
   static constexpr size_t volume_dim = Dim;
   // Customization/"input options" to simulation
-  using initial_data = InitialData;
   using initial_data_tag =
-      tmpl::conditional_t<evolution::is_analytic_solution_v<initial_data>,
-                          Tags::AnalyticSolution<initial_data>,
-                          Tags::AnalyticData<initial_data>>;
+      tmpl::conditional_t<evolution::is_analytic_solution_v<InitialData>,
+                          Tags::AnalyticSolution<InitialData>,
+                          Tags::AnalyticData<InitialData>>;
   static_assert(
       evolution::is_analytic_data_v<InitialData> xor
           evolution::is_analytic_solution_v<InitialData>,
@@ -126,11 +122,11 @@ struct EvolutionMetavars {
   using temporal_id = Tags::TimeStepId;
   static constexpr bool local_time_stepping = true;
   static constexpr bool moving_mesh = true;
-  using boundary_condition_tag = initial_data_tag;
-  using normal_dot_numerical_flux =
-      Tags::NumericalFlux<CurvedScalarWave::UpwindPenaltyCorrection<Dim>>;
   using time_stepper_tag = Tags::TimeStepper<
       tmpl::conditional_t<local_time_stepping, LtsTimeStepper, TimeStepper>>;
+
+  using normal_dot_numerical_flux =
+      Tags::NumericalFlux<CurvedScalarWave::UpwindPenaltyCorrection<Dim>>;
   using boundary_scheme = tmpl::conditional_t<
       local_time_stepping,
       dg::FirstOrderScheme::FirstOrderSchemeLts<
@@ -142,11 +138,10 @@ struct EvolutionMetavars {
           db::add_tag_prefix<::Tags::dt, typename system::variables_tag>,
           normal_dot_numerical_flux, Tags::TimeStepId>>;
 
-  using step_choosers_common =
-      tmpl::list<StepChoosers::Registrars::ByBlock<volume_dim>,
-                 StepChoosers::Registrars::Cfl<volume_dim, Frame::Inertial>,
-                 StepChoosers::Registrars::Constant,
-                 StepChoosers::Registrars::Increase>;
+  using step_choosers_common = tmpl::list<
+      StepChoosers::Registrars::ByBlock<volume_dim>,
+      StepChoosers::Registrars::Cfl<volume_dim, Frame::Inertial, system>,
+      StepChoosers::Registrars::Constant, StepChoosers::Registrars::Increase>;
   using step_choosers_for_step_only =
       tmpl::list<StepChoosers::Registrars::PreventRapidIncrease>;
   using step_choosers_for_slab_only =
@@ -164,7 +159,7 @@ struct EvolutionMetavars {
   // public for use by the Charm++ registration code
   using analytic_solution_fields = typename system::variables_tag::tags_list;
   using observe_fields = tmpl::append<
-      typename system::variables_tag::tags_list,
+      analytic_solution_fields,
       tmpl::list<::Tags::PointwiseL2Norm<
                      CurvedScalarWave::Tags::OneIndexConstraint<volume_dim>>,
                  ::Tags::PointwiseL2Norm<
@@ -175,42 +170,29 @@ struct EvolutionMetavars {
       Events::Registrars::ChangeSlabSize<slab_choosers>>;
   using triggers = Triggers::time_triggers;
 
-  // A tmpl::list of tags to be added to the GlobalCache by the
-  // metavariables
-  using const_global_cache_tags =
-      tmpl::list<initial_data_tag, normal_dot_numerical_flux, time_stepper_tag,
-                 Tags::EventsAndTriggers<events, triggers>>;
-
   using observed_reduction_data_tags = observers::collect_reduction_data_tags<
       typename Event<events>::creatable_classes>;
 
   // The scalar wave system generally does not require filtering, except
-  // possibly on certain deformed domains.  Here a filter is added in 3D for
+  // possibly on certain deformed domains.  Here a filter is added in 2D for
   // testing purposes.  When performing numerical experiments with the scalar
   // wave system, the user should determine whether this filter can be removed.
-  static constexpr bool use_filtering = (3 == volume_dim);
+  static constexpr bool use_filtering = (2 == volume_dim);
 
   using step_actions = tmpl::flatten<tmpl::list<
       evolution::dg::Actions::ComputeTimeDerivative<EvolutionMetavars>,
+      // compute, communicate fluxes and lift to volume the old
+      // fashioned way!
       dg::Actions::ComputeNonconservativeBoundaryFluxes<
-          domain::Tags::BoundaryDirectionsInterior<Dim>>,
-      // Dirichlet boundary conditions can only be applied if there
-      // is an analytic soln available
-      tmpl::conditional_t<
-          evolution::is_analytic_solution_v<initial_data>,
-          tmpl::list<
-              dg::Actions::ImposeDirichletBoundaryConditions<EvolutionMetavars>,
-              dg::Actions::CollectDataForFluxes<
-                  boundary_scheme,
-                  domain::Tags::BoundaryDirectionsInterior<volume_dim>>>,
-          tmpl::list<>>,
+          domain::Tags::BoundaryDirectionsInterior<volume_dim>>,
+      dg::Actions::CollectDataForFluxes<
+          boundary_scheme,
+          domain::Tags::BoundaryDirectionsInterior<volume_dim>>,
       dg::Actions::ReceiveDataForFluxes<boundary_scheme>,
-      tmpl::conditional_t<local_time_stepping,
-                          tmpl::list<Actions::RecordTimeStepperData<>,
-                                     Actions::MutateApply<boundary_scheme>>,
-                          tmpl::list<Actions::MutateApply<boundary_scheme>,
-                                     Actions::RecordTimeStepperData<>>>,
-      Actions::UpdateU<>,
+      Actions::MutateApply<boundary_scheme>,
+      tmpl::conditional_t<
+          local_time_stepping, tmpl::list<>,
+          tmpl::list<Actions::RecordTimeStepperData<>, Actions::UpdateU<>>>,
       tmpl::conditional_t<
           use_filtering,
           dg::Actions::Filter<
@@ -223,9 +205,37 @@ struct EvolutionMetavars {
     Initialization,
     RegisterWithObserver,
     InitializeTimeStepperHistory,
+    LoadBalancing,
     Evolve,
     Exit
   };
+
+  static std::string phase_name(Phase phase) noexcept {
+    if (phase == Phase::LoadBalancing) {
+      return "LoadBalancing";
+    }
+    ERROR(
+        "Passed phase that should not be used in input file. Integer "
+        "corresponding to phase is: "
+        << static_cast<int>(phase));
+  }
+
+  using phase_changes = tmpl::list<PhaseControl::Registrars::VisitAndReturn<
+      EvolutionMetavars, Phase::LoadBalancing>>;
+
+  using initialize_phase_change_decision_data =
+      PhaseControl::InitializePhaseChangeDecisionData<phase_changes, triggers>;
+
+  using phase_change_tags_and_combines_list =
+      PhaseControl::get_phase_change_tags<phase_changes>;
+
+  using const_global_cache_tags = tmpl::list<
+      initial_data_tag, normal_dot_numerical_flux, time_stepper_tag,
+      Tags::EventsAndTriggers<events, triggers>,
+      PhaseControl::Tags::PhaseChangeAndTriggers<phase_changes, triggers>>;
+
+  using dg_registration_list =
+      tmpl::list<observers::Actions::RegisterEventsWithObservers>;
 
   using initialization_actions = tmpl::list<
       Actions::SetupDataBox,
@@ -259,9 +269,11 @@ struct EvolutionMetavars {
           dg::Initialization::exterior_compute_tags<
               CurvedScalarWave::CharacteristicFieldsCompute<volume_dim>>,
           true, moving_mesh>>,
+      Initialization::Actions::AddComputeTags<tmpl::list<
+          StepChoosers::step_chooser_compute_tags<EvolutionMetavars>>>,
 
       tmpl::conditional_t<
-          evolution::is_analytic_solution_v<initial_data>,
+          evolution::is_analytic_solution_v<InitialData>,
           Initialization::Actions::AddComputeTags<
               tmpl::list<evolution::Tags::AnalyticCompute<
                   Dim, initial_data_tag, analytic_solution_fields>>>,
@@ -271,45 +283,57 @@ struct EvolutionMetavars {
       Initialization::Actions::DiscontinuousGalerkin<EvolutionMetavars>,
       Initialization::Actions::RemoveOptionsAndTerminatePhase>;
 
-  using component_list = tmpl::list<
-      observers::Observer<EvolutionMetavars>,
-      observers::ObserverWriter<EvolutionMetavars>,
-      DgElementArray<
-          EvolutionMetavars,
-          tmpl::list<
-              Parallel::PhaseActions<Phase, Phase::Initialization,
-                                     initialization_actions>,
+  using dg_element_array = DgElementArray<
+      EvolutionMetavars,
+      tmpl::list<
+          Parallel::PhaseActions<Phase, Phase::Initialization,
+                                 initialization_actions>,
 
-              Parallel::PhaseActions<
-                  Phase, Phase::InitializeTimeStepperHistory,
-                  SelfStart::self_start_procedure<step_actions, system>>,
+          Parallel::PhaseActions<
+              Phase, Phase::InitializeTimeStepperHistory,
+              SelfStart::self_start_procedure<step_actions, system>>,
 
-              Parallel::PhaseActions<
-                  Phase, Phase::RegisterWithObserver,
-                  tmpl::list<observers::Actions::RegisterEventsWithObservers,
-                             Parallel::Actions::TerminatePhase>>,
+          Parallel::PhaseActions<Phase, Phase::RegisterWithObserver,
+                                 tmpl::list<dg_registration_list,
+                                            Parallel::Actions::TerminatePhase>>,
 
-              Parallel::PhaseActions<
-                  Phase, Phase::Evolve,
-                  tmpl::list<
-                      Actions::RunEventsAndTriggers, Actions::ChangeSlabSize,
-                      tmpl::conditional_t<
-                          local_time_stepping,
-                          Actions::ChangeStepSize<step_choosers>, tmpl::list<>>,
-                      step_actions, Actions::AdvanceTime>>>>>;
+          Parallel::PhaseActions<
+              Phase, Phase::Evolve,
+              tmpl::list<Actions::RunEventsAndTriggers, Actions::ChangeSlabSize,
+                         step_actions, Actions::AdvanceTime,
+                         PhaseControl::Actions::ExecutePhaseChange<
+                             phase_changes, triggers>>>>>;
+
+  template <typename ParallelComponent>
+  struct registration_list {
+    using type =
+        std::conditional_t<std::is_same_v<ParallelComponent, dg_element_array>,
+                           dg_registration_list, tmpl::list<>>;
+  };
+
+  using component_list =
+      tmpl::list<observers::Observer<EvolutionMetavars>,
+                 observers::ObserverWriter<EvolutionMetavars>,
+                 dg_element_array>;
 
   static constexpr Options::String help{
-      "Evolve a Scalar Wave in Dim spatial dimension on a curved spacetime "
-      "background.\n\n"
+      "Evolve a Scalar Wave in Dim spatial dimension.\n\n"
       "The numerical flux is:    UpwindFlux\n"};
 
   template <typename... Tags>
   static Phase determine_next_phase(
-      const gsl::not_null<
-          tuples::TaggedTuple<Tags...>*> /*phase_change_decision_data*/,
+      const gsl::not_null<tuples::TaggedTuple<Tags...>*>
+          phase_change_decision_data,
       const Phase& current_phase,
-      const Parallel::CProxy_GlobalCache<
-          EvolutionMetavars>& /*cache_proxy*/) noexcept {
+      const Parallel::CProxy_GlobalCache<EvolutionMetavars>&
+          cache_proxy) noexcept {
+    const auto next_phase =
+        PhaseControl::arbitrate_phase_change<phase_changes, triggers>(
+            phase_change_decision_data, current_phase,
+            *(cache_proxy.ckLocalBranch()));
+    if (next_phase.has_value()) {
+      return next_phase.value();
+    }
     switch (current_phase) {
       case Phase::Initialization:
         return Phase::InitializeTimeStepperHistory;
@@ -350,6 +374,9 @@ static const std::vector<void (*)()> charm_init_node_funcs{
     &Parallel::register_derived_classes_with_charm<TimeSequence<std::uint64_t>>,
     &Parallel::register_derived_classes_with_charm<TimeStepper>,
     &Parallel::register_derived_classes_with_charm<
-        Trigger<metavariables::triggers>>};
+        Trigger<metavariables::triggers>>,
+    &Parallel::register_derived_classes_with_charm<
+        PhaseChange<metavariables::phase_changes>>};
+
 static const std::vector<void (*)()> charm_init_proc_funcs{
     &enable_floating_point_exceptions};
