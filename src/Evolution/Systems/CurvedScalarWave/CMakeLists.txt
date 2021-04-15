@@ -39,3 +39,6 @@ target_link_libraries(
   GeneralRelativity
   Options
   )
+
+add_subdirectory(BoundaryConditions)
+add_subdirectory(BoundaryCorrections)

@@ -12,6 +12,7 @@
 #include "Domain/FunctionsOfTime/RegisterDerivedWithCharm.hpp"
 #include "Domain/Tags.hpp"
 #include "Evolution/ComputeTags.hpp"
+#include "Evolution/DiscontinuousGalerkin/Actions/ApplyBoundaryCorrections.hpp"
 #include "Evolution/DiscontinuousGalerkin/Actions/ComputeTimeDerivative.hpp"
 #include "Evolution/DiscontinuousGalerkin/DgElementArray.hpp"  // IWYU pragma: keep
 #include "Evolution/DiscontinuousGalerkin/Initialization/Mortars.hpp"
@@ -20,19 +21,20 @@
 #include "Evolution/Initialization/Evolution.hpp"
 #include "Evolution/Initialization/NonconservativeSystem.hpp"
 #include "Evolution/Initialization/SetVariables.hpp"
+#include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/Factory.hpp"
+#include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/RegisterDerivedWithCharm.hpp"
+#include "Evolution/Systems/CurvedScalarWave/BoundaryCorrections/Factory.hpp"
+#include "Evolution/Systems/CurvedScalarWave/BoundaryCorrections/RegisterDerived.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Equations.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Initialize.hpp"
 #include "Evolution/Systems/CurvedScalarWave/System.hpp"
-#include "Evolution/Systems/CurvedScalarWave/TimeDerivative.hpp"
-#include "Evolution/Systems/CurvedScalarWave/UpwindPenaltyCorrection.hpp"
+//#include "Evolution/Systems/CurvedScalarWave/TimeDerivative.hpp"
+//#include "Evolution/Systems/CurvedScalarWave/UpwindPenaltyCorrection.hpp"
 #include "Evolution/TypeTraits.hpp"
 #include "IO/Observer/Actions/RegisterEvents.hpp"
 #include "IO/Observer/Helpers.hpp"            // IWYU pragma: keep
 #include "IO/Observer/ObserverComponent.hpp"  // IWYU pragma: keep
-#include "NumericalAlgorithms/DiscontinuousGalerkin/Actions/ComputeNonconservativeBoundaryFluxes.hpp"
-#include "NumericalAlgorithms/DiscontinuousGalerkin/Actions/ImposeBoundaryConditions.hpp"
-#include "NumericalAlgorithms/DiscontinuousGalerkin/BoundarySchemes/FirstOrder/FirstOrderScheme.hpp"
-#include "NumericalAlgorithms/DiscontinuousGalerkin/BoundarySchemes/FirstOrder/FirstOrderSchemeLts.hpp"
+
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Formulation.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Tags.hpp"
 #include "NumericalAlgorithms/LinearOperators/ExponentialFilter.hpp"
@@ -48,7 +50,7 @@
 #include "Parallel/Reduction.hpp"
 #include "Parallel/RegisterDerivedClassesWithCharm.hpp"
 #include "ParallelAlgorithms/Actions/MutateApply.hpp"
-#include "ParallelAlgorithms/DiscontinuousGalerkin/CollectDataForFluxes.hpp"
+//#include "ParallelAlgorithms/DiscontinuousGalerkin/CollectDataForFluxes.hpp"
 #include "ParallelAlgorithms/DiscontinuousGalerkin/InitializeDomain.hpp"
 #include "ParallelAlgorithms/DiscontinuousGalerkin/InitializeInterfaces.hpp"
 #include "ParallelAlgorithms/DiscontinuousGalerkin/InitializeMortars.hpp"
@@ -125,6 +127,7 @@ struct EvolutionMetavars {
   using time_stepper_tag = Tags::TimeStepper<
       tmpl::conditional_t<local_time_stepping, LtsTimeStepper, TimeStepper>>;
 
+  /*
   using normal_dot_numerical_flux =
       Tags::NumericalFlux<CurvedScalarWave::UpwindPenaltyCorrection<Dim>>;
   using boundary_scheme = tmpl::conditional_t<
@@ -137,7 +140,7 @@ struct EvolutionMetavars {
           Dim, typename system::variables_tag,
           db::add_tag_prefix<::Tags::dt, typename system::variables_tag>,
           normal_dot_numerical_flux, Tags::TimeStepId>>;
-
+  */
   using step_choosers_common = tmpl::list<
       StepChoosers::Registrars::ByBlock<volume_dim>,
       StepChoosers::Registrars::Cfl<volume_dim, Frame::Inertial, system>,
@@ -183,13 +186,14 @@ struct EvolutionMetavars {
       evolution::dg::Actions::ComputeTimeDerivative<EvolutionMetavars>,
       // compute, communicate fluxes and lift to volume the old
       // fashioned way!
-      dg::Actions::ComputeNonconservativeBoundaryFluxes<
-          domain::Tags::BoundaryDirectionsInterior<volume_dim>>,
-      dg::Actions::CollectDataForFluxes<
-          boundary_scheme,
-          domain::Tags::BoundaryDirectionsInterior<volume_dim>>,
-      dg::Actions::ReceiveDataForFluxes<boundary_scheme>,
-      Actions::MutateApply<boundary_scheme>,
+      evolution::dg::Actions::ApplyBoundaryCorrections<EvolutionMetavars>,
+      // dg::Actions::ComputeNonconservativeBoundaryFluxes<
+      //     domain::Tags::BoundaryDirectionsInterior<volume_dim>>,
+      // dg::Actions::CollectDataForFluxes<
+      //     boundary_scheme,
+      //     domain::Tags::BoundaryDirectionsInterior<volume_dim>>,
+      // dg::Actions::ReceiveDataForFluxes<boundary_scheme>,
+      // Actions::MutateApply<boundary_scheme>,
       tmpl::conditional_t<
           local_time_stepping, tmpl::list<>,
           tmpl::list<Actions::RecordTimeStepperData<>, Actions::UpdateU<>>>,
@@ -230,7 +234,7 @@ struct EvolutionMetavars {
       PhaseControl::get_phase_change_tags<phase_changes>;
 
   using const_global_cache_tags = tmpl::list<
-      initial_data_tag, normal_dot_numerical_flux, time_stepper_tag,
+      initial_data_tag, time_stepper_tag,
       Tags::EventsAndTriggers<events, triggers>,
       PhaseControl::Tags::PhaseChangeAndTriggers<phase_changes, triggers>>;
 
@@ -279,8 +283,9 @@ struct EvolutionMetavars {
                   Dim, initial_data_tag, analytic_solution_fields>>>,
           tmpl::list<>>,
       CurvedScalarWave::Actions::InitializeConstraints<volume_dim>,
-      dg::Actions::InitializeMortars<boundary_scheme>,
-      Initialization::Actions::DiscontinuousGalerkin<EvolutionMetavars>,
+      // dg::Actions::InitializeMortars<boundary_scheme>,
+      // Initialization::Actions::DiscontinuousGalerkin<EvolutionMetavars>,
+      ::evolution::dg::Initialization::Mortars<volume_dim, system>,
       Initialization::Actions::RemoveOptionsAndTerminatePhase>;
 
   using dg_element_array = DgElementArray<

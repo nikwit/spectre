@@ -52,7 +52,7 @@ namespace CurvedScalarWave {
 template <size_t Dim>
 struct TimeDerivative {
  public:
-  using temporary_tags = tmpl::list<>;
+  using temporary_tags = tmpl::list<Tags::ConstraintGamma2>;
 
   using argument_tags = tmpl::list<
       Pi, Phi<Dim>, gr::Tags::Lapse<DataVector>,
@@ -71,6 +71,7 @@ struct TimeDerivative {
       gsl::not_null<Scalar<DataVector>*> dt_pi,
       gsl::not_null<tnsr::i<DataVector, Dim, Frame::Inertial>*> dt_phi,
       gsl::not_null<Scalar<DataVector>*> dt_psi,
+      gsl::not_null<Scalar<DataVector>*> result_gamma2,
       const tnsr::i<DataVector, Dim>& d_pi,
       const tnsr::ij<DataVector, Dim>& d_phi,
       const tnsr::i<DataVector, Dim>& d_psi, const Scalar<DataVector>& pi,

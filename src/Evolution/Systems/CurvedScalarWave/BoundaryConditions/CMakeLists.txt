@@ -1,0 +1,24 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+spectre_target_sources(
+  CurvedScalarWave
+  PRIVATE
+  BoundaryCondition.cpp
+  #ConstraintPreservingSphericalRadiation.cpp
+  DirichletAnalytic.cpp
+  RegisterDerivedWithCharm.cpp
+  #SphericalRadiation.cpp
+  )
+
+spectre_target_headers(
+  CurvedScalarWave
+  INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
+  HEADERS
+  BoundaryCondition.hpp
+  #ConstraintPreservingSphericalRadiation.hpp
+  DirichletAnalytic.hpp
+  Factory.hpp
+  RegisterDerivedWithCharm.hpp
+  #SphericalRadiation.hpp
+  )
