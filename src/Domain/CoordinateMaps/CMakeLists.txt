@@ -59,6 +59,7 @@ spectre_target_headers(
   MapInstantiationMacros.hpp
   ProductMaps.hpp
   ProductMaps.tpp
+  Protocols.hpp
   Rotation.hpp
   SpecialMobius.hpp
   Tags.hpp
@@ -70,6 +71,7 @@ target_link_libraries(
   ${LIBRARY}
   PRIVATE
   PUBLIC
+  ApparentHorizons
   Boost::boost
   DataStructures
   DomainStructure
