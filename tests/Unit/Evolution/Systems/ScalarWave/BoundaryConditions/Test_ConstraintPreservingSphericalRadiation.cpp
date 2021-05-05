@@ -34,7 +34,7 @@ void test() {
         ScalarWave::BoundaryConditions::BoundaryCondition<Dim>,
         ScalarWave::System<Dim>,
         tmpl::list<ScalarWave::BoundaryCorrections::UpwindPenalty<Dim>>>(
-        make_not_null(&gen), "ConstraintPreservingSphericalRadiation",
+        make_not_null(&gen), "ConstraintPreserving",
         tuples::TaggedTuple<
             helpers::Tags::PythonFunctionForErrorMessage<>,
             helpers::Tags::PythonFunctionName<::Tags::dt<ScalarWave::Psi>>,
@@ -42,7 +42,7 @@ void test() {
             helpers::Tags::PythonFunctionName<
                 ::Tags::dt<ScalarWave::Phi<Dim>>>>{
             "error", "dt_psi", "dt_pi_" + bc_string, "dt_phi"},
-        "ConstraintPreservingSphericalRadiation:\n"
+        "ConstraintPreserving:\n"
         "  Type: " +
             bc_string,
         Index<Dim - 1>{Dim == 1 ? 1 : 5}, db::DataBox<tmpl::list<>>{},
@@ -53,9 +53,8 @@ void test() {
 }
 }  // namespace
 
-SPECTRE_TEST_CASE(
-    "Unit.ScalarWave.BoundaryConditions.ConstraintPreservingSphericalRadiation",
-    "[Unit][Evolution]") {
+SPECTRE_TEST_CASE("Unit.ScalarWave.BoundaryConditions.ConstraintPreserving",
+                  "[Unit][Evolution]") {
   pypp::SetupLocalPythonEnvironment local_python_env{
       "Evolution/Systems/ScalarWave/BoundaryConditions/"};
   test<1>();

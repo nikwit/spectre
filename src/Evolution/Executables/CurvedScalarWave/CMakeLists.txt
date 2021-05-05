@@ -46,3 +46,9 @@ endfunction(add_flat_plane_wave_executable)
 add_flat_plane_wave_executable(1)
 add_flat_plane_wave_executable(2)
 add_flat_plane_wave_executable(3)
+
+add_scalar_wave_executable(
+        CurvedPlaneWaveKerr
+        3
+        CurvedScalarWave::AnalyticData::ScalarWaveGr<ScalarWave::Solutions::PlaneWave<3>,gr::Solutions::KerrSchild>
+)

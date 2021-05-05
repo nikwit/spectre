@@ -5,3 +5,4 @@
 
 #include "Evolution/Systems/CurvedScalarWave/BoundaryCorrections/BoundaryCorrection.hpp"
 #include "Evolution/Systems/CurvedScalarWave/BoundaryCorrections/UpwindPenalty.hpp"
+#include "Evolution/Systems/CurvedScalarWave/BoundaryCorrections/UpwindPenaltyFlat.hpp"

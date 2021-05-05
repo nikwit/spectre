@@ -51,6 +51,7 @@
 #include "Parallel/RegisterDerivedClassesWithCharm.hpp"
 #include "ParallelAlgorithms/Actions/MutateApply.hpp"
 //#include "ParallelAlgorithms/DiscontinuousGalerkin/CollectDataForFluxes.hpp"
+#include "Options/Protocols/FactoryCreation.hpp"
 #include "ParallelAlgorithms/DiscontinuousGalerkin/InitializeDomain.hpp"
 #include "ParallelAlgorithms/DiscontinuousGalerkin/InitializeInterfaces.hpp"
 #include "ParallelAlgorithms/DiscontinuousGalerkin/InitializeMortars.hpp"
@@ -66,6 +67,7 @@
 #include "PointwiseFunctions/AnalyticData/CurvedWaveEquation/PlaneWaveMinkowski.hpp"
 #include "PointwiseFunctions/AnalyticData/CurvedWaveEquation/ScalarWaveGr.hpp"
 #include "PointwiseFunctions/AnalyticData/Tags.hpp"
+#include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/KerrSchild.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/Minkowski.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/Tags.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/WaveEquation/PlaneWave.hpp"  // IWYU pragma: keep
@@ -83,6 +85,7 @@
 #include "Time/StepChoosers/PreventRapidIncrease.hpp"  // IWYU pragma: keep
 #include "Time/StepChoosers/StepChooser.hpp"
 #include "Time/StepChoosers/StepToTimes.hpp"
+#include "Time/StepControllers/Factory.hpp"
 #include "Time/StepControllers/StepController.hpp"
 #include "Time/Tags.hpp"
 #include "Time/TimeSequence.hpp"
@@ -103,6 +106,9 @@ namespace Parallel {
 template <typename Metavariables>
 class CProxy_GlobalCache;
 }  // namespace Parallel
+namespace PUP {
+class er;
+}  // namespace PUP
 /// \endcond
 
 template <size_t Dim, typename InitialData>
@@ -181,6 +187,12 @@ struct EvolutionMetavars {
   // testing purposes.  When performing numerical experiments with the scalar
   // wave system, the user should determine whether this filter can be removed.
   static constexpr bool use_filtering = (2 == volume_dim);
+
+  struct factory_creation
+      : tt::ConformsTo<Options::protocols::FactoryCreation> {
+    using factory_classes = tmpl::map<
+        tmpl::pair<StepController, StepControllers::standard_step_controllers>>;
+  };
 
   using step_actions = tmpl::flatten<tmpl::list<
       evolution::dg::Actions::ComputeTimeDerivative<EvolutionMetavars>,
@@ -358,6 +370,9 @@ struct EvolutionMetavars {
             "value?");
     }
   }
+
+  // NOLINTNEXTLINE(google-runtime-references)
+  void pup(PUP::er& /*p*/) noexcept {}
 };
 
 static const std::vector<void (*)()> charm_init_node_funcs{
@@ -366,6 +381,8 @@ static const std::vector<void (*)()> charm_init_node_funcs{
     &domain::creators::register_derived_with_charm,
     &domain::creators::time_dependence::register_derived_with_charm,
     &domain::FunctionsOfTime::register_derived_with_charm,
+    &CurvedScalarWave::BoundaryConditions::register_derived_with_charm,
+    &CurvedScalarWave::BoundaryCorrections::register_derived_with_charm,
     &Parallel::register_derived_classes_with_charm<
         Event<metavariables::events>>,
     &Parallel::register_derived_classes_with_charm<
@@ -374,14 +391,14 @@ static const std::vector<void (*)()> charm_init_node_funcs{
         StepChooser<metavariables::slab_choosers>>,
     &Parallel::register_derived_classes_with_charm<
         StepChooser<metavariables::step_choosers>>,
-    &Parallel::register_derived_classes_with_charm<StepController>,
     &Parallel::register_derived_classes_with_charm<TimeSequence<double>>,
     &Parallel::register_derived_classes_with_charm<TimeSequence<std::uint64_t>>,
     &Parallel::register_derived_classes_with_charm<TimeStepper>,
     &Parallel::register_derived_classes_with_charm<
         Trigger<metavariables::triggers>>,
     &Parallel::register_derived_classes_with_charm<
-        PhaseChange<metavariables::phase_changes>>};
+        PhaseChange<metavariables::phase_changes>>,
+    &Parallel::register_factory_classes_with_charm<metavariables>};
 
 static const std::vector<void (*)()> charm_init_proc_funcs{
     &enable_floating_point_exceptions};

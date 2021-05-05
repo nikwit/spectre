@@ -229,22 +229,17 @@ class ConstraintPreservingSphericalRadiation final
 
   std::optional<std::string> dg_time_derivative(
       gsl::not_null<Scalar<DataVector>*> dt_pi_correction,
-      gsl::not_null<tnsr::i<DataVector, Dim, Frame::Inertial>*>
-          dt_phi_correction,
+      gsl::not_null<tnsr::i<DataVector, Dim>*> dt_phi_correction,
       gsl::not_null<Scalar<DataVector>*> dt_psi_correction,
-      const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
-          face_mesh_velocity,
-      const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_covector,
-      const Scalar<DataVector>& pi,
-      const tnsr::i<DataVector, Dim, Frame::Inertial>& phi,
-      const Scalar<DataVector>& psi,
-      const tnsr::I<DataVector, Dim, Frame::Inertial>& coords,
+      const std::optional<tnsr::I<DataVector, Dim>>& face_mesh_velocity,
+      const tnsr::i<DataVector, Dim>& normal_covector,
+      const Scalar<DataVector>& pi, const tnsr::i<DataVector, Dim>& phi,
+      const Scalar<DataVector>& psi, const tnsr::I<DataVector, Dim>& coords,
       const Scalar<DataVector>& gamma2, const Scalar<DataVector>& dt_pi,
-      const tnsr::i<DataVector, Dim, Frame::Inertial>& dt_phi,
-      const Scalar<DataVector>& dt_psi,
-      const tnsr::i<DataVector, Dim, Frame::Inertial>& d_pi,
-      const tnsr::i<DataVector, Dim, Frame::Inertial>& d_psi,
-      const tnsr::ij<DataVector, Dim, Frame::Inertial>& d_phi) const noexcept;
+      const tnsr::i<DataVector, Dim>& dt_phi, const Scalar<DataVector>& dt_psi,
+      const tnsr::i<DataVector, Dim>& d_pi,
+      const tnsr::i<DataVector, Dim>& d_psi,
+      const tnsr::ij<DataVector, Dim>& d_phi) const noexcept;
 
  private:
   detail::ConstraintPreservingSphericalRadiationType type_{

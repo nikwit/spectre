@@ -52,7 +52,15 @@ namespace CurvedScalarWave {
 template <size_t Dim>
 struct TimeDerivative {
  public:
-  using temporary_tags = tmpl::list<Tags::ConstraintGamma2>;
+  using temporary_tags = tmpl::list<
+      Tags::ConstraintGamma1, Tags::ConstraintGamma2,
+      gr::Tags::Lapse<DataVector>,
+      ::Tags::deriv<gr::Tags::Lapse<DataVector>, tmpl::size_t<Dim>,
+                    Frame::Inertial>,
+      gr::Tags::Shift<Dim, Frame::Inertial, DataVector>,
+      ::Tags::deriv<gr::Tags::Shift<Dim, Frame::Inertial, DataVector>,
+                    tmpl::size_t<Dim>, Frame::Inertial>,
+      gr::Tags::InverseSpatialMetric<Dim, Frame::Inertial, DataVector>>;
 
   using argument_tags = tmpl::list<
       Pi, Phi<Dim>, gr::Tags::Lapse<DataVector>,
@@ -71,7 +79,13 @@ struct TimeDerivative {
       gsl::not_null<Scalar<DataVector>*> dt_pi,
       gsl::not_null<tnsr::i<DataVector, Dim, Frame::Inertial>*> dt_phi,
       gsl::not_null<Scalar<DataVector>*> dt_psi,
+      gsl::not_null<Scalar<DataVector>*> result_gamma1,
       gsl::not_null<Scalar<DataVector>*> result_gamma2,
+      gsl::not_null<Scalar<DataVector>*> result_lapse,
+      gsl::not_null<tnsr::i<DataVector, Dim>*> result_d_lapse,
+      gsl::not_null<tnsr::I<DataVector, Dim>*> result_shift,
+      gsl::not_null<tnsr::iJ<DataVector, Dim>*> result_d_shift,
+      gsl::not_null<tnsr::II<DataVector, Dim>*> result_inverse_spatial_metric,
       const tnsr::i<DataVector, Dim>& d_pi,
       const tnsr::ij<DataVector, Dim>& d_phi,
       const tnsr::i<DataVector, Dim>& d_psi, const Scalar<DataVector>& pi,

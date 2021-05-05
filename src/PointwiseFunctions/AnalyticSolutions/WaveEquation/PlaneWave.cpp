@@ -5,7 +5,8 @@
 
 #include <algorithm>
 
-#include "DataStructures/DataBox/Prefixes.hpp"    // IWYU pragma: keep
+#include "DataStructures/DataBox/Prefixes.hpp"  // IWYU pragma: keep
+#include "DataStructures/Tensor/EagerMath/Magnitude.hpp"
 #include "DataStructures/Variables.hpp"           // IWYU pragma: keep
 #include "Evolution/Systems/ScalarWave/Tags.hpp"  // IWYU pragma: keep
 #include "Utilities/ConstantExpressions.hpp"
@@ -27,15 +28,21 @@ PlaneWave<Dim>::PlaneWave(
 
 template <size_t Dim>
 template <typename T>
-Scalar<T> PlaneWave<Dim>::psi(const tnsr::I<T, Dim>& x, const double t) const
-    noexcept {
-  return Scalar<T>(profile_->operator()(u(x, t)));
+Scalar<T> PlaneWave<Dim>::psi(const tnsr::I<T, Dim>& x,
+                              const double t) const noexcept {
+  return make_with_value<Scalar<T>>(x.get(0), 0.);
+  // return Scalar<T>(profile_->operator()(u(x, t)));
 }
 
 template <size_t Dim>
 template <typename T>
 Scalar<T> PlaneWave<Dim>::dpsi_dt(const tnsr::I<T, Dim>& x,
                                   const double t) const noexcept {
+  T result = get(magnitude(x)) - 12.;
+  result *= result / 4.;
+  result = exp(-result) * sqrt(M_1_PI) * 0.5;
+  return Scalar<T>(result);
+
   return Scalar<T>(-omega_ * profile_->first_deriv(u(x, t)));
 }
 
@@ -44,6 +51,7 @@ template <typename T>
 tnsr::i<T, Dim> PlaneWave<Dim>::dpsi_dx(const tnsr::I<T, Dim>& x,
                                         const double t) const noexcept {
   auto result = make_with_value<tnsr::i<T, Dim>>(x, 0.0);
+  return result;
   const auto du = profile_->first_deriv(u(x, t));
   for (size_t i = 0; i < Dim; ++i) {
     result.get(i) = gsl::at(wave_vector_, i) * du;
@@ -87,10 +95,10 @@ tnsr::ii<T, Dim> PlaneWave<Dim>::d2psi_dxdx(const tnsr::I<T, Dim>& x,
 
 template <size_t Dim>
 tuples::TaggedTuple<ScalarWave::Pi, ScalarWave::Phi<Dim>, ScalarWave::Psi>
-PlaneWave<Dim>::variables(const tnsr::I<DataVector, Dim>& x, double t,
-                          const tmpl::list<ScalarWave::Pi, ScalarWave::Phi<Dim>,
-                                           ScalarWave::Psi> /*meta*/) const
-    noexcept {
+PlaneWave<Dim>::variables(
+    const tnsr::I<DataVector, Dim>& x, double t,
+    const tmpl::list<ScalarWave::Pi, ScalarWave::Phi<Dim>,
+                     ScalarWave::Psi> /*meta*/) const noexcept {
   tuples::TaggedTuple<ScalarWave::Pi, ScalarWave::Phi<Dim>, ScalarWave::Psi>
       variables{dpsi_dt(x, t), dpsi_dx(x, t), psi(x, t)};
   get<ScalarWave::Pi>(variables).get() *= -1.0;

@@ -2,23 +2,27 @@
 # See LICENSE.txt for details.
 
 spectre_target_sources(
-  CurvedScalarWave
+  ${LIBRARY}
   PRIVATE
   BoundaryCondition.cpp
-  #ConstraintPreservingSphericalRadiation.cpp
-  DirichletAnalytic.cpp
+  ConstraintPreserving.cpp
+  ConstraintPreservingBaylissTurkel.cpp
+  #DirichletAnalytic.cpp
+  Freezing.cpp
   RegisterDerivedWithCharm.cpp
   #SphericalRadiation.cpp
   )
 
 spectre_target_headers(
-  CurvedScalarWave
+  ${LIBRARY}
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
   BoundaryCondition.hpp
-  #ConstraintPreservingSphericalRadiation.hpp
-  DirichletAnalytic.hpp
+  ConstraintPreserving.hpp
+  ConstraintPreservingBaylissTurkel.hpp
+  #DirichletAnalytic.hpp
   Factory.hpp
+  Freezing.hpp
   RegisterDerivedWithCharm.hpp
   #SphericalRadiation.hpp
   )

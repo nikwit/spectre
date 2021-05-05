@@ -4,10 +4,13 @@
 #include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/RegisterDerivedWithCharm.hpp"
 
 #include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/BoundaryCondition.hpp"
+#include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/ConstraintPreserving.hpp"
+#include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/ConstraintPreservingBaylissTurkel.hpp"
+#include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/Freezing.hpp"
+
 //#include
-//"Evolution/Systems/CurvedScalarWave/
-// BoundaryConditions/ConstraintPreservingSphericalRadiation.hpp"
-#include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/DirichletAnalytic.hpp"
+//"Evolution/Systems/CurvedScalarWave/BoundaryConditions/DirichletAnalytic.hpp"
+
 //#include
 //"Evolution/Systems/CurvedScalarWave/
 // BoundaryConditions/SphericalRadiation.hpp"
@@ -15,11 +18,8 @@
 
 namespace CurvedScalarWave::BoundaryConditions {
 void register_derived_with_charm() noexcept {
-  Parallel::register_classes_in_list<
-      typename BoundaryCondition<1>::creatable_classes>();
-  Parallel::register_classes_in_list<
-      typename BoundaryCondition<2>::creatable_classes>();
-  Parallel::register_classes_in_list<
-      typename BoundaryCondition<3>::creatable_classes>();
+  Parallel::register_derived_classes_with_charm<BoundaryCondition<1>>();
+  Parallel::register_derived_classes_with_charm<BoundaryCondition<2>>();
+  Parallel::register_derived_classes_with_charm<BoundaryCondition<3>>();
 }
 }  // namespace CurvedScalarWave::BoundaryConditions

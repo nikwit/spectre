@@ -30,7 +30,7 @@ convert_constraint_preserving_spherical_radiation_type_from_yaml(
   PARSE_ERROR(options.context(),
               "Failed to convert \""
                   << type_read
-                  << "\" to ConstraintPreservingSphericalRadiation::Type. Must "
+                  << "\" to ConstraintPreserving::Type. Must "
                      "be one of Sommerfeld, FirstOrderBaylissTurkel, or "
                      "SecondOrderBaylissTurkel.");
 }

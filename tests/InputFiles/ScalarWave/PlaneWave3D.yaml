@@ -32,13 +32,15 @@ Evolution:
         SafetyFactor: 0.2
 
 DomainCreator:
-  Brick:
-    LowerBound: [0.0, 0.0, 0.0]
-    UpperBound: [6.283185307179586, 6.283185307179586, 6.283185307179586]
-    InitialRefinement: [1, 1, 1]
-    InitialGridPoints: [5, 5, 5]
-    TimeDependence: None
-    BoundaryCondition: Periodic
+  Sphere:
+    InnerRadius: 4
+    OuterRadius: 10.
+    InitialRefinement: 1
+    InitialGridPoints: [8, 8]
+    UseEquiangularMap: false
+    BoundaryCondition:
+      ConstraintPreservingSphericalRadiation:
+        Type: SecondOrderBaylissTurkel
 
 SpatialDiscretization:
   BoundaryCorrection:
@@ -55,10 +57,19 @@ SpatialDiscretization:
 
 EventsAndTriggers:
   ? Slabs:
+      EvenlySpaced:
+        Interval: 10
+        Offset: 0
+  : - ObserveFields:
+        SubfileName: VolumePsi0And100
+        VariablesToObserve: ["Psi"]
+        InterpolateToMesh: None
+  ? Slabs:
       Specified:
-        Values: [5]
+        Values: [2000]
   : - Completion
 
+
 Observers:
-  VolumeFileName: "ScalarWavePlaneWave3DVolume"
+  VolumeFileName: "ScalarWavePlaneWave3DVolumeturkel"
   ReductionFileName: "ScalarWavePlaneWave3DReductions"

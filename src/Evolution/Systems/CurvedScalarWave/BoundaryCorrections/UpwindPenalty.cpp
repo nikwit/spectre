@@ -7,6 +7,7 @@
 #include <optional>
 #include <pup.h>
 
+#include <iostream>
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tags/TempTensor.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
@@ -15,6 +16,73 @@
 #include "Utilities/GenerateInstantiations.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"  // IWYU pragma: keep
+
+namespace CurvedScalarWave::BoundaryCorrections::CurvedScalarWave_detail {
+template <typename FieldTag>
+typename FieldTag::type weight_char_field(
+    const typename FieldTag::type& char_field_int,
+    const DataVector& char_speed_int,
+    const typename FieldTag::type& char_field_ext,
+    const DataVector& char_speed_ext) noexcept {
+  const DataVector char_speed_avg{0.5 * (char_speed_int + char_speed_ext)};
+  /*
+  for (size_t i = 0; i < char_field_int.size(); ++i) {
+    std::cout << "interior: " << char_field_int[i] << std::endl;
+    std::cout <<"exterior: " <<  char_field_ext[i] << std::endl;
+  }
+*/
+  auto weighted_char_field = char_field_int;
+  auto weighted_char_field_it = weighted_char_field.begin();
+  for (auto int_it = char_field_int.begin(), ext_it = char_field_ext.begin();
+       int_it != char_field_int.end();
+       ++int_it, ++ext_it, ++weighted_char_field_it) {
+    *weighted_char_field_it *= step_function(char_speed_avg) * char_speed_avg;
+    *weighted_char_field_it +=
+        step_function(-char_speed_avg) * char_speed_avg * *ext_it;
+  }
+  return weighted_char_field;
+}
+
+template <size_t Dim>
+using char_field_tags =
+    tmpl::list<Tags::VPsi, Tags::VZero<Dim>, Tags::VPlus, Tags::VMinus>;
+
+template <size_t Dim>
+Variables<char_field_tags<Dim>> weight_char_fields(
+    const Scalar<DataVector>& v_psi_int,
+    const tnsr::i<DataVector, Dim, Frame::Inertial>& v_zero_int,
+    const Scalar<DataVector>& v_plus_int, const Scalar<DataVector>& v_minus_int,
+    const tnsr::a<DataVector, 3, Frame::Inertial>& char_speeds_int,
+    const Scalar<DataVector>& v_psi_ext,
+    const tnsr::i<DataVector, Dim, Frame::Inertial>& v_zero_ext,
+    const Scalar<DataVector>& v_plus_ext, const Scalar<DataVector>& v_minus_ext,
+    const tnsr::a<DataVector, 3, Frame::Inertial>& char_speeds_ext) noexcept {
+  const DataVector& char_speed_v_psi_int{get<0>(char_speeds_int)};
+  const DataVector& char_speed_v_zero_int{get<1>(char_speeds_int)};
+  const DataVector& char_speed_v_plus_int{get<2>(char_speeds_int)};
+  const DataVector& char_speed_v_minus_int{get<3>(char_speeds_int)};
+
+  const DataVector& char_speed_v_psi_ext{get<0>(char_speeds_ext)};
+  const DataVector& char_speed_v_zero_ext{get<1>(char_speeds_ext)};
+  const DataVector& char_speed_v_plus_ext{get<2>(char_speeds_ext)};
+  const DataVector& char_speed_v_minus_ext{get<3>(char_speeds_ext)};
+
+  Variables<char_field_tags<Dim>> weighted_char_fields{
+      get<0>(char_speeds_int).size()};
+
+  get<Tags::VPsi>(weighted_char_fields) = weight_char_field<Tags::VPsi>(
+      v_psi_int, char_speed_v_psi_int, v_psi_ext, char_speed_v_psi_ext);
+  get<Tags::VZero<Dim>>(weighted_char_fields) =
+      weight_char_field<Tags::VZero<Dim>>(v_zero_int, char_speed_v_zero_int,
+                                          v_zero_ext, char_speed_v_zero_ext);
+  get<Tags::VPlus>(weighted_char_fields) = weight_char_field<Tags::VPlus>(
+      v_plus_int, char_speed_v_plus_int, v_plus_ext, char_speed_v_plus_ext);
+  get<Tags::VMinus>(weighted_char_fields) = weight_char_field<Tags::VMinus>(
+      v_minus_int, char_speed_v_minus_int, v_minus_ext, char_speed_v_minus_ext);
+
+  return weighted_char_fields;
+}
+}  // namespace CurvedScalarWave::BoundaryCorrections::CurvedScalarWave_detail
 
 namespace CurvedScalarWave::BoundaryCorrections {
 template <size_t Dim>
@@ -34,76 +102,65 @@ void UpwindPenalty<Dim>::pup(PUP::er& p) {
 
 template <size_t Dim>
 double UpwindPenalty<Dim>::dg_package_data(
-    const gsl::not_null<Scalar<DataVector>*> packaged_char_speed_v_psi,
+    const gsl::not_null<Scalar<DataVector>*> packaged_v_psi,
     const gsl::not_null<tnsr::i<DataVector, Dim, Frame::Inertial>*>
-        packaged_char_speed_v_zero,
-    const gsl::not_null<Scalar<DataVector>*> packaged_char_speed_v_plus,
-    const gsl::not_null<Scalar<DataVector>*> packaged_char_speed_v_minus,
+        packaged_v_zero,
+    const gsl::not_null<Scalar<DataVector>*> packaged_v_plus,
+    const gsl::not_null<Scalar<DataVector>*> packaged_v_minus,
+    const gsl::not_null<Scalar<DataVector>*> packaged_gamma2,
     const gsl::not_null<tnsr::i<DataVector, Dim, Frame::Inertial>*>
-        packaged_char_speed_n_times_v_plus,
-    const gsl::not_null<tnsr::i<DataVector, Dim, Frame::Inertial>*>
-        packaged_char_speed_n_times_v_minus,
-    const gsl::not_null<Scalar<DataVector>*> packaged_char_speed_gamma2_v_psi,
-    const gsl::not_null<tnsr::i<DataVector, 3, Frame::Inertial>*>
+        packaged_interface_unit_normal,
+    const gsl::not_null<tnsr::a<DataVector, 3, Frame::Inertial>*>
         packaged_char_speeds,
 
     const Scalar<DataVector>& pi,
     const tnsr::i<DataVector, Dim, Frame::Inertial>& phi,
     const Scalar<DataVector>& psi,
 
+    const Scalar<DataVector>& lapse,
+    const tnsr::I<DataVector, Dim, Frame::Inertial>& shift,
+    const tnsr::II<DataVector, Dim, Frame::Inertial>& inverse_spatial_metric,
+    const Scalar<DataVector>& constraint_gamma1,
     const Scalar<DataVector>& constraint_gamma2,
 
-    const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_covector,
+    const tnsr::i<DataVector, Dim, Frame::Inertial>& interface_unit_normal,
     const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
     /*mesh_velocity*/,
     const std::optional<Scalar<DataVector>>& normal_dot_mesh_velocity)
     const noexcept {
-  if (normal_dot_mesh_velocity.has_value()) {
-    get<0>(*packaged_char_speeds) = -get(*normal_dot_mesh_velocity);
-    get<1>(*packaged_char_speeds) = 1.0 - get(*normal_dot_mesh_velocity);
-    get<2>(*packaged_char_speeds) = -1.0 - get(*normal_dot_mesh_velocity);
-  } else {
-    get<0>(*packaged_char_speeds) = 0.0;
-    get<1>(*packaged_char_speeds) = 1.0;
-    get<2>(*packaged_char_speeds) = -1.0;
+  *packaged_gamma2 = constraint_gamma2;
+  *packaged_interface_unit_normal = interface_unit_normal;
+
+  {  // package characteristic fields
+    const auto char_fields =
+        characteristic_fields(constraint_gamma2, inverse_spatial_metric, psi,
+                              pi, phi, interface_unit_normal);
+    *packaged_v_psi = get<Tags::VPsi>(char_fields);
+    *packaged_v_zero = get<Tags::VZero<Dim>>(char_fields);
+    *packaged_v_plus = get<Tags::VPlus>(char_fields);
+    *packaged_v_minus = get<Tags::VMinus>(char_fields);
   }
 
-  // Computes the contribution to the boundary correction from one side of the
-  // interface.
-  //
-  // Note: when UpwindPenalty::dg_boundary_terms() is called, an Element passes
-  // in its own packaged data to fill the interior fields, and its neighbor's
-  // packaged data to fill the exterior fields. This introduces a sign flip for
-  // each normal used in computing the exterior fields.
-  get(*packaged_char_speed_gamma2_v_psi) = get(constraint_gamma2) * get(psi);
-  {
-    // Use v_psi allocation as n^i Phi_i
-    dot_product(packaged_char_speed_v_psi, normal_covector, phi);
-    const auto& normal_dot_phi = get(*packaged_char_speed_v_psi);
+  {  // package characteristic speeds
+    Scalar<DataVector> shift_dot_normal{};
+    get(shift_dot_normal)
+        .set_data_ref(make_not_null(&get<1>(*packaged_char_speeds)));
+    dot_product(make_not_null(&shift_dot_normal), shift, interface_unit_normal);
+    get(shift_dot_normal) *= -1.;
 
-    for (size_t i = 0; i < Dim; ++i) {
-      packaged_char_speed_v_zero->get(i) =
-          get<0>(*packaged_char_speeds) *
-          (phi.get(i) - normal_covector.get(i) * normal_dot_phi);
+    get<0>(*packaged_char_speeds) =
+        (1. + get(constraint_gamma1)) * get(shift_dot_normal);
+
+    get<2>(*packaged_char_speeds) = get(shift_dot_normal) + get(lapse);
+    get<3>(*packaged_char_speeds) = get(shift_dot_normal) - get(lapse);
+
+    if (normal_dot_mesh_velocity.has_value()) {
+      get<0>(*packaged_char_speeds) -= get(*normal_dot_mesh_velocity);
+      get<1>(*packaged_char_speeds) -= get(*normal_dot_mesh_velocity);
+      get<2>(*packaged_char_speeds) -= get(*normal_dot_mesh_velocity);
+      get<3>(*packaged_char_speeds) -= get(*normal_dot_mesh_velocity);
     }
-
-    get(*packaged_char_speed_v_plus) =
-        get<1>(*packaged_char_speeds) *
-        (get(pi) + normal_dot_phi - get(*packaged_char_speed_gamma2_v_psi));
-    get(*packaged_char_speed_v_minus) =
-        get<2>(*packaged_char_speeds) *
-        (get(pi) - normal_dot_phi - get(*packaged_char_speed_gamma2_v_psi));
   }
-
-  for (size_t d = 0; d < Dim; ++d) {
-    packaged_char_speed_n_times_v_plus->get(d) =
-        get(*packaged_char_speed_v_plus) * normal_covector.get(d);
-    packaged_char_speed_n_times_v_minus->get(d) =
-        get(*packaged_char_speed_v_minus) * normal_covector.get(d);
-  }
-
-  get(*packaged_char_speed_v_psi) = get<0>(*packaged_char_speeds) * get(psi);
-  get(*packaged_char_speed_gamma2_v_psi) *= get<0>(*packaged_char_speeds);
 
   return max(max(get<0>(*packaged_char_speeds), get<1>(*packaged_char_speeds),
                  get<2>(*packaged_char_speeds)));
@@ -116,94 +173,39 @@ void UpwindPenalty<Dim>::dg_boundary_terms(
         phi_boundary_correction,
     const gsl::not_null<Scalar<DataVector>*> psi_boundary_correction,
 
-    const Scalar<DataVector>& char_speed_v_psi_int,
-    const tnsr::i<DataVector, Dim, Frame::Inertial>& char_speed_v_zero_int,
-    const Scalar<DataVector>& char_speed_v_plus_int,
-    const Scalar<DataVector>& char_speed_v_minus_int,
-    const tnsr::i<DataVector, Dim, Frame::Inertial>&
-        char_speed_normal_times_v_plus_int,
-    const tnsr::i<DataVector, Dim, Frame::Inertial>&
-        char_speed_normal_times_v_minus_int,
-    const Scalar<DataVector>& char_speed_constraint_gamma2_v_psi_int,
-    const tnsr::i<DataVector, 3, Frame::Inertial>& char_speeds_int,
+    const Scalar<DataVector>& v_psi_int,
+    const tnsr::i<DataVector, Dim, Frame::Inertial>& v_zero_int,
+    const Scalar<DataVector>& v_plus_int, const Scalar<DataVector>& v_minus_int,
+    const Scalar<DataVector>& gamma2_int,
+    const tnsr::i<DataVector, Dim, Frame::Inertial>& interface_unit_normal_int,
+    const tnsr::a<DataVector, 3, Frame::Inertial>& char_speeds_int,
 
-    const Scalar<DataVector>& char_speed_v_psi_ext,
-    const tnsr::i<DataVector, Dim, Frame::Inertial>& char_speed_v_zero_ext,
-    const Scalar<DataVector>& char_speed_v_plus_ext,
-    const Scalar<DataVector>& char_speed_v_minus_ext,
-    const tnsr::i<DataVector, Dim, Frame::Inertial>&
-        char_speed_minus_normal_times_v_plus_ext,
-    const tnsr::i<DataVector, Dim, Frame::Inertial>&
-        char_speed_minus_normal_times_v_minus_ext,
-    const Scalar<DataVector>& char_speed_constraint_gamma2_v_psi_ext,
-    const tnsr::i<DataVector, 3, Frame::Inertial>& char_speeds_ext,
+    const Scalar<DataVector>& v_psi_ext,
+    const tnsr::i<DataVector, Dim, Frame::Inertial>& v_zero_ext,
+    const Scalar<DataVector>& v_plus_ext, const Scalar<DataVector>& v_minus_ext,
+    const Scalar<DataVector>& gamma2_ext,
+    const tnsr::i<DataVector, Dim,
+                  Frame::Inertial>& /*interface_unit_normal_ext*/,
+    const tnsr::a<DataVector, 3, Frame::Inertial>& char_speeds_ext,
     dg::Formulation /*dg_formulation*/) const noexcept {
-  const size_t num_pts = char_speeds_int[0].size();
-  Variables<tmpl::list<::Tags::TempScalar<0>, ::Tags::TempScalar<1>,
-                       ::Tags::TempScalar<2>, ::Tags::TempScalar<3>,
-                       ::Tags::TempScalar<4>, ::Tags::TempScalar<5>,
-                       ::Tags::TempScalar<6>, ::Tags::TempScalar<7>>>
-      buffer(num_pts);
-  DataVector& weighted_lambda_psi_int = get(get<::Tags::TempScalar<0>>(buffer));
-  weighted_lambda_psi_int = step_function(-char_speeds_int[0]);
-  DataVector& weighted_lambda_psi_ext = get(get<::Tags::TempScalar<1>>(buffer));
-  weighted_lambda_psi_ext = -step_function(char_speeds_ext[0]);
+  const Scalar<DataVector> gamma2_avg{0.5 *
+                                      (get(gamma2_int) + get(gamma2_ext))};
 
-  DataVector& weighted_lambda_zero_int =
-      get(get<::Tags::TempScalar<2>>(buffer));
-  weighted_lambda_zero_int = step_function(-char_speeds_int[0]);
-  DataVector& weighted_lambda_zero_ext =
-      get(get<::Tags::TempScalar<3>>(buffer));
-  weighted_lambda_zero_ext = -step_function(char_speeds_ext[0]);
+  const auto weighted_char_fields =
+      CurvedScalarWave_detail::weight_char_fields<Dim>(
+          v_psi_int, v_zero_int, v_plus_int, v_minus_int, char_speeds_int,
+          v_psi_ext, v_zero_ext, v_plus_ext, v_minus_ext, char_speeds_ext);
 
-  DataVector& weighted_lambda_plus_int =
-      get(get<::Tags::TempScalar<4>>(buffer));
-  weighted_lambda_plus_int = step_function(-char_speeds_int[1]);
-  DataVector& weighted_lambda_plus_ext =
-      get(get<::Tags::TempScalar<5>>(buffer));
-  weighted_lambda_plus_ext = -step_function(char_speeds_ext[1]);
+  const auto weighted_evolved_fields =
+      evolved_fields_from_characteristic_fields(
+          gamma2_avg, get<Tags::VPsi>(weighted_char_fields),
+          get<Tags::VZero<Dim>>(weighted_char_fields),
+          get<Tags::VPlus>(weighted_char_fields),
+          get<Tags::VMinus>(weighted_char_fields), interface_unit_normal_int);
 
-  DataVector& weighted_lambda_minus_int =
-      get(get<::Tags::TempScalar<6>>(buffer));
-  weighted_lambda_minus_int = step_function(-char_speeds_int[2]);
-  DataVector& weighted_lambda_minus_ext =
-      get(get<::Tags::TempScalar<7>>(buffer));
-  weighted_lambda_minus_ext = -step_function(char_speeds_ext[2]);
-
-  // D_psi = Theta(-lambda_psi^{ext}) lambda_psi^{ext} v_psi^{ext}
-  //       - Theta(-lambda_psi^{int}) lambda_psi^{int} v_psi^{int}
-  // where the unit normals on both sides point in the same direction, out
-  // of the current element. Since lambda_psi from the neighbor is computing
-  // with the normal vector pointing into the current element in the code,
-  // we need to swap the sign of lambda_psi^{ext}. Theta is the heaviside step
-  // function.
-  psi_boundary_correction->get() =
-      weighted_lambda_psi_ext * get(char_speed_v_psi_ext) -
-      weighted_lambda_psi_int * get(char_speed_v_psi_int);
-
-  get(*pi_boundary_correction) =
-      0.5 * (weighted_lambda_plus_ext * get(char_speed_v_plus_ext) +
-             weighted_lambda_minus_ext * get(char_speed_v_minus_ext)) +
-      weighted_lambda_psi_ext * get(char_speed_constraint_gamma2_v_psi_ext)
-
-      - 0.5 * (weighted_lambda_plus_int * get(char_speed_v_plus_int) +
-               weighted_lambda_minus_int * get(char_speed_v_minus_int)) -
-      weighted_lambda_psi_int * get(char_speed_constraint_gamma2_v_psi_int);
-
-  for (size_t d = 0; d < Dim; ++d) {
-    phi_boundary_correction->get(d) =
-        0.5 * (weighted_lambda_plus_ext *
-                   char_speed_minus_normal_times_v_plus_ext.get(d) -
-               weighted_lambda_minus_ext *
-                   char_speed_minus_normal_times_v_minus_ext.get(d)) +
-        weighted_lambda_zero_ext * char_speed_v_zero_ext.get(d)
-
-        - 0.5 * (weighted_lambda_plus_int *
-                     char_speed_normal_times_v_plus_int.get(d) -
-                 weighted_lambda_minus_int *
-                     char_speed_normal_times_v_minus_int.get(d)) -
-        weighted_lambda_zero_int * char_speed_v_zero_int.get(d);
-  }
+  *psi_boundary_correction = get<Psi>(weighted_evolved_fields);
+  *pi_boundary_correction = get<Pi>(weighted_evolved_fields);
+  *phi_boundary_correction = get<Phi<Dim>>(weighted_evolved_fields);
 }
 
 template <size_t Dim>
