@@ -645,7 +645,7 @@ template <typename Frame>
 double surface_integral_of_scalar(
     const Scalar<DataVector>& area_element, const Scalar<DataVector>& scalar,
     const Strahlkorper<Frame>& strahlkorper) noexcept {
-  const DataVector integrand = get(area_element) * get(scalar);
+  const DataVector integrand = get(area_element) * get(scalar) * get(scalar);
   return strahlkorper.ylm_spherepack().definite_integral(integrand.data());
 }
 

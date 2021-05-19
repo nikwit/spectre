@@ -71,16 +71,29 @@ SpatialDiscretization:
 EventsAndTriggers:
   ? Slabs:
       EvenlySpaced:
-        Interval: 5
+        Interval: 1
+        Offset: 0
+  : - Shell:
+  ? Slabs:
+      EvenlySpaced:
+        Interval: 10
         Offset: 0
   : - ObserveFields:
-        SubfileName: VolumePsi0And100
+        SubfileName: VolumePsi
         VariablesToObserve: ["Psi"]
         InterpolateToMesh: None
   ? Slabs:
       Specified:
         Values: [1000]
   : - Completion
+
+InterpolationTargets:
+  Shell:
+    Lmax: 2
+    Center: [0., 0., 0.]
+    DimensionlessSpin: [0., 0., 0.]
+    Mass: 5.75
+    ThetaVariesFastest: false
 
 Observers:
   VolumeFileName: "CurvedScalarPlaneWaveKerr3DVolumeBoundary"

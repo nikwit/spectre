@@ -28,18 +28,38 @@
 #include "Evolution/Systems/CurvedScalarWave/Equations.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Initialize.hpp"
 #include "Evolution/Systems/CurvedScalarWave/System.hpp"
-//#include "Evolution/Systems/CurvedScalarWave/TimeDerivative.hpp"
-//#include "Evolution/Systems/CurvedScalarWave/UpwindPenaltyCorrection.hpp"
 #include "Evolution/TypeTraits.hpp"
+#include "IO/Importers/Actions/ReadVolumeData.hpp"
+#include "IO/Importers/Actions/ReceiveVolumeData.hpp"
+#include "IO/Importers/Actions/RegisterWithElementDataReader.hpp"
+#include "IO/Importers/ElementDataReader.hpp"
 #include "IO/Observer/Actions/RegisterEvents.hpp"
-#include "IO/Observer/Helpers.hpp"            // IWYU pragma: keep
-#include "IO/Observer/ObserverComponent.hpp"  // IWYU pragma: keep
-
+#include "IO/Observer/Helpers.hpp"
+#include "IO/Observer/ObserverComponent.hpp"
+#include "IO/Observer/Tags.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Formulation.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Tags.hpp"
+#include "NumericalAlgorithms/Interpolation/Actions/ElementInitInterpPoints.hpp"
+#include "NumericalAlgorithms/Interpolation/AddTemporalIdsToInterpolationTarget.hpp"
+#include "NumericalAlgorithms/Interpolation/Callbacks/FindApparentHorizon.hpp"
+#include "NumericalAlgorithms/Interpolation/Callbacks/ObserveTimeSeriesOnSurface.hpp"
+#include "NumericalAlgorithms/Interpolation/CleanUpInterpolator.hpp"
+#include "NumericalAlgorithms/Interpolation/InitializeInterpolationTarget.hpp"
+#include "NumericalAlgorithms/Interpolation/Interpolate.hpp"
+#include "NumericalAlgorithms/Interpolation/InterpolationTarget.hpp"
+#include "NumericalAlgorithms/Interpolation/InterpolationTargetApparentHorizon.hpp"
+#include "NumericalAlgorithms/Interpolation/InterpolationTargetKerrHorizon.hpp"
+#include "NumericalAlgorithms/Interpolation/InterpolationTargetReceiveVars.hpp"
+#include "NumericalAlgorithms/Interpolation/Interpolator.hpp"
+#include "NumericalAlgorithms/Interpolation/InterpolatorReceivePoints.hpp"
+#include "NumericalAlgorithms/Interpolation/InterpolatorReceiveVolumeData.hpp"
+#include "NumericalAlgorithms/Interpolation/InterpolatorRegisterElement.hpp"
+#include "NumericalAlgorithms/Interpolation/Tags.hpp"
+#include "NumericalAlgorithms/Interpolation/TryToInterpolate.hpp"
 #include "NumericalAlgorithms/LinearOperators/ExponentialFilter.hpp"
 #include "NumericalAlgorithms/LinearOperators/FilterAction.hpp"  // IWYU pragma: keep
 #include "Options/Options.hpp"
+#include "Options/Protocols/FactoryCreation.hpp"
 #include "Parallel/Actions/SetupDataBox.hpp"
 #include "Parallel/Actions/TerminatePhase.hpp"
 #include "Parallel/InitializationFunctions.hpp"
@@ -50,8 +70,6 @@
 #include "Parallel/Reduction.hpp"
 #include "Parallel/RegisterDerivedClassesWithCharm.hpp"
 #include "ParallelAlgorithms/Actions/MutateApply.hpp"
-//#include "ParallelAlgorithms/DiscontinuousGalerkin/CollectDataForFluxes.hpp"
-#include "Options/Protocols/FactoryCreation.hpp"
 #include "ParallelAlgorithms/DiscontinuousGalerkin/InitializeDomain.hpp"
 #include "ParallelAlgorithms/DiscontinuousGalerkin/InitializeInterfaces.hpp"
 #include "ParallelAlgorithms/DiscontinuousGalerkin/InitializeMortars.hpp"
@@ -71,6 +89,7 @@
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/Minkowski.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/Tags.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/WaveEquation/PlaneWave.hpp"  // IWYU pragma: keep
+#include "PointwiseFunctions/GeneralRelativity/SpatialMetric.hpp"
 #include "PointwiseFunctions/MathFunctions/MathFunction.hpp"
 #include "Time/Actions/AdvanceTime.hpp"                // IWYU pragma: keep
 #include "Time/Actions/ChangeSlabSize.hpp"             // IWYU pragma: keep
@@ -133,20 +152,6 @@ struct EvolutionMetavars {
   using time_stepper_tag = Tags::TimeStepper<
       tmpl::conditional_t<local_time_stepping, LtsTimeStepper, TimeStepper>>;
 
-  /*
-  using normal_dot_numerical_flux =
-      Tags::NumericalFlux<CurvedScalarWave::UpwindPenaltyCorrection<Dim>>;
-  using boundary_scheme = tmpl::conditional_t<
-      local_time_stepping,
-      dg::FirstOrderScheme::FirstOrderSchemeLts<
-          Dim, typename system::variables_tag,
-          db::add_tag_prefix<::Tags::dt, typename system::variables_tag>,
-          normal_dot_numerical_flux, Tags::TimeStepId, time_stepper_tag>,
-      dg::FirstOrderScheme::FirstOrderScheme<
-          Dim, typename system::variables_tag,
-          db::add_tag_prefix<::Tags::dt, typename system::variables_tag>,
-          normal_dot_numerical_flux, Tags::TimeStepId>>;
-  */
   using step_choosers_common = tmpl::list<
       StepChoosers::Registrars::ByBlock<volume_dim>,
       StepChoosers::Registrars::Cfl<volume_dim, Frame::Inertial, system>,
@@ -165,94 +170,25 @@ struct EvolutionMetavars {
       tmpl::append<step_choosers_common, step_choosers_for_step_only,
                    step_choosers_for_slab_only>>;
 
-  // public for use by the Charm++ registration code
-  using analytic_solution_fields = typename system::variables_tag::tags_list;
-  using observe_fields = tmpl::append<
-      analytic_solution_fields,
-      tmpl::list<::Tags::PointwiseL2Norm<
-                     CurvedScalarWave::Tags::OneIndexConstraint<volume_dim>>,
-                 ::Tags::PointwiseL2Norm<
-                     CurvedScalarWave::Tags::TwoIndexConstraint<volume_dim>>>>;
-  using events = tmpl::list<
-      dg::Events::Registrars::ObserveFields<Dim, Tags::Time, observe_fields>,
-      Events::Registrars::ObserveTimeStep<EvolutionMetavars>,
-      Events::Registrars::ChangeSlabSize<slab_choosers>>;
-  using triggers = Triggers::time_triggers;
-
-  using observed_reduction_data_tags = observers::collect_reduction_data_tags<
-      typename Event<events>::creatable_classes>;
-
-  // The scalar wave system generally does not require filtering, except
-  // possibly on certain deformed domains.  Here a filter is added in 2D for
-  // testing purposes.  When performing numerical experiments with the scalar
-  // wave system, the user should determine whether this filter can be removed.
-  static constexpr bool use_filtering = (2 == volume_dim);
-
-  struct factory_creation
-      : tt::ConformsTo<Options::protocols::FactoryCreation> {
-    using factory_classes = tmpl::map<
-        tmpl::pair<StepController, StepControllers::standard_step_controllers>>;
-  };
-
-  using step_actions = tmpl::flatten<tmpl::list<
-      evolution::dg::Actions::ComputeTimeDerivative<EvolutionMetavars>,
-      // compute, communicate fluxes and lift to volume the old
-      // fashioned way!
-      evolution::dg::Actions::ApplyBoundaryCorrections<EvolutionMetavars>,
-      // dg::Actions::ComputeNonconservativeBoundaryFluxes<
-      //     domain::Tags::BoundaryDirectionsInterior<volume_dim>>,
-      // dg::Actions::CollectDataForFluxes<
-      //     boundary_scheme,
-      //     domain::Tags::BoundaryDirectionsInterior<volume_dim>>,
-      // dg::Actions::ReceiveDataForFluxes<boundary_scheme>,
-      // Actions::MutateApply<boundary_scheme>,
-      tmpl::conditional_t<
-          local_time_stepping, tmpl::list<>,
-          tmpl::list<Actions::RecordTimeStepperData<>, Actions::UpdateU<>>>,
-      tmpl::conditional_t<
-          use_filtering,
-          dg::Actions::Filter<
-              Filters::Exponential<0>,
-              tmpl::list<CurvedScalarWave::Pi, CurvedScalarWave::Psi,
-                         CurvedScalarWave::Phi<Dim>>>,
-          tmpl::list<>>>>;
-
   enum class Phase {
     Initialization,
     RegisterWithObserver,
     InitializeTimeStepperHistory,
+    Register,
     LoadBalancing,
     Evolve,
     Exit
   };
 
-  static std::string phase_name(Phase phase) noexcept {
-    if (phase == Phase::LoadBalancing) {
-      return "LoadBalancing";
-    }
-    ERROR(
-        "Passed phase that should not be used in input file. Integer "
-        "corresponding to phase is: "
-        << static_cast<int>(phase));
-  }
+  using step_actions = tmpl::flatten<tmpl::list<
+      evolution::dg::Actions::ComputeTimeDerivative<EvolutionMetavars>,
+      evolution::dg::Actions::ApplyBoundaryCorrections<EvolutionMetavars>,
+      tmpl::conditional_t<
+          local_time_stepping, tmpl::list<>,
+          tmpl::list<Actions::RecordTimeStepperData<>, Actions::UpdateU<>>>>>;
 
-  using phase_changes = tmpl::list<PhaseControl::Registrars::VisitAndReturn<
-      EvolutionMetavars, Phase::LoadBalancing>>;
-
-  using initialize_phase_change_decision_data =
-      PhaseControl::InitializePhaseChangeDecisionData<phase_changes, triggers>;
-
-  using phase_change_tags_and_combines_list =
-      PhaseControl::get_phase_change_tags<phase_changes>;
-
-  using const_global_cache_tags = tmpl::list<
-      initial_data_tag, time_stepper_tag,
-      Tags::EventsAndTriggers<events, triggers>,
-      PhaseControl::Tags::PhaseChangeAndTriggers<phase_changes, triggers>>;
-
-  using dg_registration_list =
-      tmpl::list<observers::Actions::RegisterEventsWithObservers>;
-
+  // public for use by the Charm++ registration code
+  using analytic_solution_fields = typename system::variables_tag::tags_list;
   using initialization_actions = tmpl::list<
       Actions::SetupDataBox,
       Initialization::Actions::TimeAndTimeStep<EvolutionMetavars>,
@@ -298,7 +234,18 @@ struct EvolutionMetavars {
       // dg::Actions::InitializeMortars<boundary_scheme>,
       // Initialization::Actions::DiscontinuousGalerkin<EvolutionMetavars>,
       ::evolution::dg::Initialization::Mortars<volume_dim, system>,
+      intrp::Actions::ElementInitInterpPoints<
+          intrp::Tags::InterpPointInfo<EvolutionMetavars>>,
       Initialization::Actions::RemoveOptionsAndTerminatePhase>;
+
+  using dg_registration_list =
+      tmpl::list<intrp::Actions::RegisterElementWithInterpolator,
+                 observers::Actions::RegisterEventsWithObservers>;
+
+  using phase_changes = tmpl::list<PhaseControl::Registrars::VisitAndReturn<
+      EvolutionMetavars, Phase::LoadBalancing>>;
+
+  using triggers = Triggers::time_triggers;
 
   using dg_element_array = DgElementArray<
       EvolutionMetavars,
@@ -313,13 +260,85 @@ struct EvolutionMetavars {
           Parallel::PhaseActions<Phase, Phase::RegisterWithObserver,
                                  tmpl::list<dg_registration_list,
                                             Parallel::Actions::TerminatePhase>>,
-
           Parallel::PhaseActions<
               Phase, Phase::Evolve,
               tmpl::list<Actions::RunEventsAndTriggers, Actions::ChangeSlabSize,
                          step_actions, Actions::AdvanceTime,
                          PhaseControl::Actions::ExecutePhaseChange<
                              phase_changes, triggers>>>>>;
+
+  struct Shell {
+    using vars_to_interpolate_to_target = tmpl::list<
+        gr::Tags::SpatialMetric<volume_dim, ::Frame::Inertial, DataVector>,
+        CurvedScalarWave::Psi>;
+    using compute_items_on_source = tmpl::list<>;
+    using compute_items_on_target =
+        tmpl::list<StrahlkorperGr::Tags::AreaElementCompute<::Frame::Inertial>,
+                   StrahlkorperGr::Tags::SurfaceIntegralCompute<
+                       CurvedScalarWave::Psi, ::Frame::Inertial>>;
+    using compute_target_points =
+        intrp::TargetPoints::KerrHorizon<Shell, ::Frame::Inertial>;
+    using post_interpolation_callback =
+        intrp::callbacks::ObserveTimeSeriesOnSurface<
+            tmpl::list<StrahlkorperGr::Tags::SurfaceIntegralCompute<
+                CurvedScalarWave::Psi, ::Frame::Inertial>>,
+            Shell, Shell>;
+    using interpolating_component = dg_element_array;
+  };
+  using interpolation_target_tags = tmpl::list<Shell>;
+  using interpolator_source_vars = tmpl::list<
+      gr::Tags::SpatialMetric<volume_dim, ::Frame::Inertial, DataVector>,
+      CurvedScalarWave::Psi>;
+
+  using observe_fields = tmpl::append<
+      analytic_solution_fields,
+      tmpl::list<::Tags::PointwiseL2Norm<
+          CurvedScalarWave::Tags::OneIndexConstraint<volume_dim>>,
+          ::Tags::PointwiseL2Norm<
+              CurvedScalarWave::Tags::TwoIndexConstraint<volume_dim>>>>;
+  using events = tmpl::list<
+      dg::Events::Registrars::ObserveFields<Dim, Tags::Time, observe_fields>,
+      intrp::Events::Registrars::Interpolate<3, Shell,
+                                             interpolator_source_vars>,
+      Events::Registrars::ObserveTimeStep<EvolutionMetavars>,
+      Events::Registrars::ChangeSlabSize<slab_choosers>>;
+
+  using observed_reduction_data_tags = observers::collect_reduction_data_tags<
+      tmpl::push_back<typename Event<events>::creatable_classes,
+                      typename Shell::post_interpolation_callback>>;
+
+  // The scalar wave system generally does not require filtering, except
+  // possibly on certain deformed domains.  Here a filter is added in 2D for
+  // testing purposes.  When performing numerical experiments with the scalar
+  // wave system, the user should determine whether this filter can be removed.
+  static constexpr bool use_filtering = (2 == volume_dim);
+
+  struct factory_creation
+      : tt::ConformsTo<Options::protocols::FactoryCreation> {
+    using factory_classes = tmpl::map<
+        tmpl::pair<StepController, StepControllers::standard_step_controllers>>;
+  };
+
+  static std::string phase_name(Phase phase) noexcept {
+    if (phase == Phase::LoadBalancing) {
+      return "LoadBalancing";
+    }
+    ERROR(
+        "Passed phase that should not be used in input file. Integer "
+        "corresponding to phase is: "
+        << static_cast<int>(phase));
+  }
+
+  using initialize_phase_change_decision_data =
+      PhaseControl::InitializePhaseChangeDecisionData<phase_changes, triggers>;
+
+  using phase_change_tags_and_combines_list =
+      PhaseControl::get_phase_change_tags<phase_changes>;
+
+  using const_global_cache_tags = tmpl::list<
+      initial_data_tag, time_stepper_tag,
+      Tags::EventsAndTriggers<events, triggers>,
+      PhaseControl::Tags::PhaseChangeAndTriggers<phase_changes, triggers>>;
 
   template <typename ParallelComponent>
   struct registration_list {
@@ -331,6 +350,8 @@ struct EvolutionMetavars {
   using component_list =
       tmpl::list<observers::Observer<EvolutionMetavars>,
                  observers::ObserverWriter<EvolutionMetavars>,
+                 intrp::Interpolator<EvolutionMetavars>,
+                 intrp::InterpolationTarget<EvolutionMetavars, Shell>,
                  dg_element_array>;
 
   static constexpr Options::String help{
@@ -357,6 +378,8 @@ struct EvolutionMetavars {
       case Phase::InitializeTimeStepperHistory:
         return Phase::RegisterWithObserver;
       case Phase::RegisterWithObserver:
+        return Phase::Register;
+      case Phase::Register:
         return Phase::Evolve;
       case Phase::Evolve:
         return Phase::Exit;

@@ -62,6 +62,8 @@ template <typename Frame>
 struct AreaElement;
 template <typename IntegrandTag, typename Frame>
 struct SurfaceIntegral;
+template <typename IntegrandTag, typename Frame>
+struct SurfaceIntegralCompute;
 struct Area;
 template <typename Frame>
 struct AreaCompute;
