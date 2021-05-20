@@ -39,14 +39,16 @@ Evolution:
 DomainCreator:
   Shell:
     InnerRadius: 1.9
-    OuterRadius: 500
+    OuterRadius: 100
     InitialRefinement: 1
-    InitialGridPoints: [10, 5]
+    InitialGridPoints: [10, 10]
     UseEquiangularMap: false
     AspectRatio: 1.
-    UseLogarithmicMap: false
     WhichWedges: All
-    RadialBlockLayers: 10
+    TimeDependence: None
+    RadialPartitioning: [2.2, 3., 4.5, 7., 11., 20., 40., 60.]
+    RadialDistribution: [Linear, Linear, Linear, Linear, Linear,
+                         Linear, Linear, Linear, Linear]
     BoundaryConditions:
       InnerBoundary:
         ConstraintPreservingBaylissTurkel:
@@ -80,7 +82,7 @@ EventsAndTriggers:
         Offset: 0
   : - ObserveFields:
         SubfileName: VolumePsi
-        VariablesToObserve: ["Psi"]
+        VariablesToObserve: ["Psi", "Pi"]
         InterpolateToMesh: None
   ? Slabs:
       Specified:
