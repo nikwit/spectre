@@ -10,6 +10,7 @@
 //#include
 //"Evolution/Systems/CurvedScalarWave/BoundaryConditions/DirichletAnalytic.hpp"
 #include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/Freezing.hpp"
+#include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/Outflowing.hpp"
 
 //#include
 //"Evolution/Systems/CurvedScalarWave/BoundaryConditions/SphericalRadiation.hpp"

@@ -39,19 +39,18 @@ Evolution:
 DomainCreator:
   Shell:
     InnerRadius: 1.9
-    OuterRadius: 100
-    InitialRefinement: 1
-    InitialGridPoints: [10, 10]
+    OuterRadius: 200
+    InitialRefinement: 0
+    InitialGridPoints: [6, 6]
     UseEquiangularMap: false
     AspectRatio: 1.
     WhichWedges: All
     TimeDependence: None
-    RadialPartitioning: [2.2, 3., 4.5, 7., 11., 20., 40., 60.]
-    RadialDistribution: [Linear, Linear, Linear, Linear, Linear,
-                         Linear, Linear, Linear, Linear]
+    RadialPartitioning: []
+    RadialDistribution: [Linear]
     BoundaryConditions:
       InnerBoundary:
-        ConstraintPreservingBaylissTurkel:
+        Outflowing:
       OuterBoundary:
         ConstraintPreservingBaylissTurkel:
 
@@ -77,16 +76,8 @@ EventsAndTriggers:
         Offset: 0
   : - Shell:
   ? Slabs:
-      EvenlySpaced:
-        Interval: 10
-        Offset: 0
-  : - ObserveFields:
-        SubfileName: VolumePsi
-        VariablesToObserve: ["Psi", "Pi"]
-        InterpolateToMesh: None
-  ? Slabs:
       Specified:
-        Values: [1000]
+        Values: [3000]
   : - Completion
 
 InterpolationTargets:
@@ -99,4 +90,4 @@ InterpolationTargets:
 
 Observers:
   VolumeFileName: "CurvedScalarPlaneWaveKerr3DVolumeBoundary"
-  ReductionFileName: "CurvedScalarPlaneWaveMinkowski3DReductions"
+  ReductionFileName: "CurvedScalarPlaneWaveMinkowski3DReductionst"

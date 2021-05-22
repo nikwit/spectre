@@ -7,6 +7,8 @@
 #include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/ConstraintPreserving.hpp"
 #include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/ConstraintPreservingBaylissTurkel.hpp"
 #include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/Freezing.hpp"
+#include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/Outflowing.hpp"
+
 
 //#include
 //"Evolution/Systems/CurvedScalarWave/BoundaryConditions/DirichletAnalytic.hpp"

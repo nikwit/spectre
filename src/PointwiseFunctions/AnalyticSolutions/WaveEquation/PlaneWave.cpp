@@ -38,12 +38,13 @@ template <size_t Dim>
 template <typename T>
 Scalar<T> PlaneWave<Dim>::dpsi_dt(const tnsr::I<T, Dim>& x,
                                   const double t) const noexcept {
-  T result = get(magnitude(x)) - 12.;
-  result *= result / 4.;
-  result = exp(-result) * sqrt(M_1_PI) * 0.5;
+  T exponent = get(magnitude(x)) - 12.;
+  exponent *= exponent / 4.;
+  T result = exp(-exponent) * sqrt(M_1_PI) * 0.5;
+
   return Scalar<T>(result);
 
-  return Scalar<T>(-omega_ * profile_->first_deriv(u(x, t)));
+  // return Scalar<T>(-omega_ * profile_->first_deriv(u(x, t)));
 }
 
 template <size_t Dim>
@@ -99,9 +100,18 @@ PlaneWave<Dim>::variables(
     const tnsr::I<DataVector, Dim>& x, double t,
     const tmpl::list<ScalarWave::Pi, ScalarWave::Phi<Dim>,
                      ScalarWave::Psi> /*meta*/) const noexcept {
+  /*
   tuples::TaggedTuple<ScalarWave::Pi, ScalarWave::Phi<Dim>, ScalarWave::Psi>
       variables{dpsi_dt(x, t), dpsi_dx(x, t), psi(x, t)};
   get<ScalarWave::Pi>(variables).get() *= -1.0;
+   */
+
+  DataVector exponent = get(magnitude(x)) - 12.;
+  exponent *= exponent / 4.;
+  Scalar<DataVector> pi{exp(-exponent) * sqrt(M_1_PI) * 0.5};
+  tuples::TaggedTuple<ScalarWave::Pi, ScalarWave::Phi<Dim>, ScalarWave::Psi>
+      variables{pi, make_with_value<tnsr::i<DataVector, Dim>>(x, 0.),
+                make_with_value<Scalar<DataVector>>(x, 0.)};
   return variables;
 }
 

@@ -10,6 +10,7 @@ spectre_target_sources(
   #DirichletAnalytic.cpp
   Freezing.cpp
   RegisterDerivedWithCharm.cpp
+  Outflowing.cpp
   #SphericalRadiation.cpp
   )
 
@@ -23,6 +24,7 @@ spectre_target_headers(
   #DirichletAnalytic.hpp
   Factory.hpp
   Freezing.hpp
+  Outflowing.hpp
   RegisterDerivedWithCharm.hpp
   #SphericalRadiation.hpp
   )
