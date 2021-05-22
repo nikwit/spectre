@@ -25,7 +25,8 @@ struct Logical;
 
 namespace domain::creators {
 Shell::Shell(
-    double inner_radius, double outer_radius, size_t initial_refinement,
+    double inner_radius, double outer_radius,
+    std::array<size_t, 2> initial_refinement,
     std::array<size_t, 2> initial_number_of_grid_points,
     bool use_equiangular_map, double aspect_ratio,
     std::vector<double> radial_partitioning,
@@ -188,7 +189,9 @@ std::vector<std::array<size_t, 3>> Shell::initial_refinement_levels()
   } else if (UNLIKELY(which_wedges_ == ShellWedges::OneAlongMinusX)) {
     num_wedges = number_of_layers_;
   }
-  return {num_wedges, make_array<3>(initial_refinement_)};
+  return {
+      num_wedges,
+      {initial_refinement_[1], initial_refinement_[1], initial_refinement_[0]}};
 }
 
 std::unordered_map<std::string,

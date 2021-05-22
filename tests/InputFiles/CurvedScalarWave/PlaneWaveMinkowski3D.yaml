@@ -40,7 +40,7 @@ DomainCreator:
   Shell:
     InnerRadius: 1.9
     OuterRadius: 200
-    InitialRefinement: 0
+    InitialRefinement: [3, 0]
     InitialGridPoints: [6, 6]
     UseEquiangularMap: false
     AspectRatio: 1.

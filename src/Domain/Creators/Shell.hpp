@@ -60,9 +60,12 @@ class Shell : public DomainCreator<3> {
   };
 
   struct InitialRefinement {
-    using type = size_t;
+    using type = std::array<size_t, 2>;
     static constexpr Options::String help = {
-        "Initial refinement level in each dimension."};
+        "Initial refinement level. Specify one of: a single number, a list "
+        "representing [r, theta, z], or such a list for every block in the "
+        "domain. The central cube always uses the value for 'theta' in both "
+        "x- and y-direction."};
   };
 
   struct InitialGridPoints {
@@ -170,7 +173,8 @@ class Shell : public DomainCreator<3> {
       "option. Using the RadialBlockLayers option, a user may increase the\n"
       "number of Blocks in the radial direction."};
 
-  Shell(double inner_radius, double outer_radius, size_t initial_refinement,
+  Shell(double inner_radius, double outer_radius,
+        std::array<size_t, 2> initial_refinement,
         std::array<size_t, 2> initial_number_of_grid_points,
         bool use_equiangular_map = true, double aspect_ratio = 1.0,
         std::vector<double> radial_partitioning = {},
@@ -206,7 +210,7 @@ class Shell : public DomainCreator<3> {
  private:
   double inner_radius_{};
   double outer_radius_{};
-  size_t initial_refinement_{};
+  std::array<size_t, 2> initial_refinement_{};
   std::array<size_t, 2> initial_number_of_grid_points_{};
   bool use_equiangular_map_ = true;
   double aspect_ratio_ = 1.0;
