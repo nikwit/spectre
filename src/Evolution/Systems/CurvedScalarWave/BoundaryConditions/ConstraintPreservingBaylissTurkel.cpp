@@ -43,17 +43,15 @@ ConstraintPreservingBaylissTurkel<Dim>::dg_time_derivative(
     const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
         face_mesh_velocity,
     const tnsr::i<DataVector, Dim>& normal_covector,
-    const Scalar<DataVector>& pi, const tnsr::i<DataVector, Dim>& phi,
-    const Scalar<DataVector>& psi,
+    const tnsr::I<DataVector, Dim>& normal_vector, const Scalar<DataVector>& pi,
+    const tnsr::i<DataVector, Dim>& phi, const Scalar<DataVector>& psi,
     const tnsr::I<DataVector, Dim, Frame::Inertial>& coords,
     const Scalar<DataVector>& gamma1, const Scalar<DataVector>& gamma2,
     const Scalar<DataVector>& lapse, const tnsr::i<DataVector, Dim>& d_lapse,
     const tnsr::I<DataVector, Dim>& shift,
-    const tnsr::iJ<DataVector, Dim>& d_shift,
-    const tnsr::II<DataVector, Dim>& inverse_spatial_metric,
-    const Scalar<DataVector>& dt_pi, const tnsr::i<DataVector, Dim>& dt_phi,
-    const Scalar<DataVector>& dt_psi, const tnsr::i<DataVector, Dim>& d_pi,
-    const tnsr::i<DataVector, Dim>& d_psi,
+    const tnsr::iJ<DataVector, Dim>& d_shift, const Scalar<DataVector>& dt_pi,
+    const tnsr::i<DataVector, Dim>& dt_phi, const Scalar<DataVector>& dt_psi,
+    const tnsr::i<DataVector, Dim>& d_pi, const tnsr::i<DataVector, Dim>& d_psi,
     const tnsr::ij<DataVector, Dim>& d_phi) const noexcept {
   const DataVector inv_radius = 1. / get(magnitude(coords));
 

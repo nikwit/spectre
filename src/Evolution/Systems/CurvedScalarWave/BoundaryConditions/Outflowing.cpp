@@ -41,9 +41,10 @@ std::optional<std::string> Outflowing<Dim>::dg_time_derivative(
     const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
         face_mesh_velocity,
     const tnsr::i<DataVector, Dim>& normal_covector,
-    const Scalar<DataVector>& pi, const tnsr::i<DataVector, Dim>& phi,
-    const Scalar<DataVector>& psi, const Scalar<DataVector>& gamma1,
-    const Scalar<DataVector>& lapse,
+    const tnsr::I<DataVector, Dim>& normal_vector, const Scalar<DataVector>& pi,
+    const tnsr::i<DataVector, Dim>& phi, const Scalar<DataVector>& psi,
+    const tnsr::I<DataVector, Dim, Frame::Inertial>& coords,
+    const Scalar<DataVector>& gamma1, const Scalar<DataVector>& lapse,
     const tnsr::I<DataVector, Dim>& shift) const noexcept {
   auto char_speeds =
       characteristic_speeds(gamma1, lapse, shift, normal_covector);

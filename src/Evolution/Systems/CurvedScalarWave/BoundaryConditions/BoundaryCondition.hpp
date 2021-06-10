@@ -11,12 +11,12 @@
 
 /// \cond
 namespace CurvedScalarWave::BoundaryConditions {
-template <size_t Dim>
-class ConstraintPreserving;
+// template <size_t Dim>
+// class ConstraintPreserving;
 template <size_t Dim>
 class ConstraintPreservingBaylissTurkel;
-template <size_t Dim>
-class Freezing;
+// template <size_t Dim>
+// class Freezing;
 template <size_t Dim>
 class Outflowing;
 
@@ -30,8 +30,7 @@ template <size_t Dim>
 class BoundaryCondition : public domain::BoundaryConditions::BoundaryCondition {
  public:
   using creatable_classes =
-      tmpl::list<ConstraintPreserving<Dim>, Freezing<Dim>,
-                 ConstraintPreservingBaylissTurkel<Dim>, Outflowing<Dim>,
+      tmpl::list<ConstraintPreservingBaylissTurkel<Dim>, Outflowing<Dim>,
                  domain::BoundaryConditions::Periodic<BoundaryCondition<Dim>>>;
 
   BoundaryCondition() = default;

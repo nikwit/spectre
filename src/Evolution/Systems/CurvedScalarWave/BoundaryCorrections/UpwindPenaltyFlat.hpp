@@ -244,6 +244,7 @@ class UpwindPenaltyFlat final : public BoundaryCorrection<Dim> {
       const Scalar<DataVector>& constraint_gamma2,
 
       const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_covector,
+      const tnsr::I<DataVector, 3, Frame::Inertial>& normal_vector,
       const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
       /*mesh_velocity*/,
       const std::optional<Scalar<DataVector>>& normal_dot_mesh_velocity)

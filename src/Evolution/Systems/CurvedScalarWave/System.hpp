@@ -35,6 +35,9 @@ struct System {
   using flux_variables = tmpl::list<>;
   using gradient_variables = tmpl::list<Pi, Phi<Dim>, Psi>;
 
+  using inverse_spatial_metric_tag =
+      gr::Tags::InverseSpatialMetric<volume_dim, Frame::Inertial, DataVector>;
+
   // Relic alias: needs to be removed once all evolution systems
   // convert to using dg::ComputeTimeDerivative
   using gradients_tags = gradient_variables;

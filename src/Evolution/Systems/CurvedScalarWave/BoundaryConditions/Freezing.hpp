@@ -69,8 +69,7 @@ class Freezing final : public BoundaryCondition<Dim> {
   using dg_interior_temporary_tags =
       tmpl::list<Tags::ConstraintGamma1, Tags::ConstraintGamma2,
                  gr::Tags::Lapse<DataVector>,
-                 gr::Tags::Shift<Dim, Frame::Inertial, DataVector>,
-                 gr::Tags::InverseSpatialMetric<Dim>>;
+                 gr::Tags::Shift<Dim, Frame::Inertial, DataVector>>;
   using dg_interior_dt_vars_tags =
       tmpl::list<::Tags::dt<Pi>, ::Tags::dt<Phi<Dim>>, ::Tags::dt<Psi>>;
   using dg_interior_deriv_vars_tags = tmpl::list<>;
@@ -83,12 +82,12 @@ class Freezing final : public BoundaryCondition<Dim> {
       gsl::not_null<Scalar<DataVector>*> dt_psi_correction,
       const std::optional<tnsr::I<DataVector, Dim>>& face_mesh_velocity,
       const tnsr::i<DataVector, Dim>& normal_covector,
+      const tnsr::I<DataVector, Dim>& normal_vector,
       const Scalar<DataVector>& pi, const tnsr::i<DataVector, Dim>& phi,
       const Scalar<DataVector>& psi, const Scalar<DataVector>& gamma1,
       const Scalar<DataVector>& gamma2, const Scalar<DataVector>& lapse,
-      const tnsr::I<DataVector, Dim>& shift,
-      const tnsr::II<DataVector, Dim>& inverse_spatial_metric,
-      const Scalar<DataVector>& dt_pi, const tnsr::i<DataVector, Dim>& dt_phi,
+      const tnsr::I<DataVector, Dim>& shift, const Scalar<DataVector>& dt_pi,
+      const tnsr::i<DataVector, Dim>& dt_phi,
       const Scalar<DataVector>& dt_psi) const noexcept;
 };
 }  // namespace CurvedScalarWave::BoundaryConditions

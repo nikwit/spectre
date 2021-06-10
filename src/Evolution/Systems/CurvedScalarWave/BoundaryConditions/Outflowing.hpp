@@ -11,8 +11,10 @@
 
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/Tensor/EagerMath/Magnitude.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Variables.hpp"
+#include "Domain/FaceNormal.hpp"
 #include "Evolution/BoundaryConditions/Type.hpp"
 #include "Evolution/Systems/CurvedScalarWave/BoundaryConditions/BoundaryCondition.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
@@ -65,7 +67,8 @@ class Outflowing final : public BoundaryCondition<Dim> {
 
   using dg_interior_evolved_variables_tags = tmpl::list<Pi, Phi<Dim>, Psi>;
   using dg_interior_temporary_tags =
-      tmpl::list<Tags::ConstraintGamma1, gr::Tags::Lapse<DataVector>,
+      tmpl::list<domain::Tags::Coordinates<Dim, Frame::Inertial>,
+                 Tags::ConstraintGamma1, gr::Tags::Lapse<DataVector>,
                  gr::Tags::Shift<Dim, Frame::Inertial, DataVector>>;
   using dg_interior_dt_vars_tags = tmpl::list<>;
   using dg_interior_deriv_vars_tags = tmpl::list<>;
@@ -74,13 +77,15 @@ class Outflowing final : public BoundaryCondition<Dim> {
   std::optional<std::string> dg_time_derivative(
       gsl::not_null<Scalar<DataVector>*> dt_pi_correction,
       gsl::not_null<tnsr::i<DataVector, Dim, Frame::Inertial>*>
-      dt_phi_correction,
+          dt_phi_correction,
       gsl::not_null<Scalar<DataVector>*> dt_psi_correction,
       const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
-      face_mesh_velocity,
+          face_mesh_velocity,
       const tnsr::i<DataVector, Dim>& normal_covector,
+      const tnsr::I<DataVector, Dim>& normal_vector,
       const Scalar<DataVector>& pi, const tnsr::i<DataVector, Dim>& phi,
       const Scalar<DataVector>& psi,
+      const tnsr::I<DataVector, Dim, Frame::Inertial>& coords,
       const Scalar<DataVector>& gamma1, const Scalar<DataVector>& lapse,
       const tnsr::I<DataVector, Dim>& shift) const noexcept;
 };

@@ -88,6 +88,7 @@ class ConstraintPreserving final : public BoundaryCondition<Dim> {
       gsl::not_null<Scalar<DataVector>*> dt_psi_correction,
       const std::optional<tnsr::I<DataVector, Dim>>& face_mesh_velocity,
       const tnsr::i<DataVector, Dim>& normal_covector,
+      const tnsr::I<DataVector, Dim>& normal_vector,
       const Scalar<DataVector>& pi, const tnsr::i<DataVector, Dim>& phi,
       const Scalar<DataVector>& psi,
       const tnsr::I<DataVector, Dim, Frame::Inertial>& coords,

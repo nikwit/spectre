@@ -42,8 +42,8 @@ std::optional<std::string> ConstraintPreserving<Dim>::dg_time_derivative(
     const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
         face_mesh_velocity,
     const tnsr::i<DataVector, Dim>& normal_covector,
-    const Scalar<DataVector>& pi, const tnsr::i<DataVector, Dim>& phi,
-    const Scalar<DataVector>& psi,
+    const tnsr::I<DataVector, Dim>& normal_vector, const Scalar<DataVector>& pi,
+    const tnsr::i<DataVector, Dim>& phi, const Scalar<DataVector>& psi,
     const tnsr::I<DataVector, Dim, Frame::Inertial>& coords,
     const Scalar<DataVector>& gamma1, const Scalar<DataVector>& gamma2,
     const Scalar<DataVector>& lapse, const tnsr::i<DataVector, Dim>& d_lapse,
