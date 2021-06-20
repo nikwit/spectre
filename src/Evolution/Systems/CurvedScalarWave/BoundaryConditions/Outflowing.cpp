@@ -57,16 +57,17 @@ std::optional<std::string> Outflowing<Dim>::dg_time_derivative(
   }
   for (const auto& char_speed : char_speeds) {
     for (const auto& char_speed_point : char_speed) {
-      ASSERT(char_speed_point > 0.,
-             "characteristic speed should be outflowing but detected negative "
-             "speed "
-                 << char_speed_point);
+      if (char_speed_point < 0.) {
+        ERROR("characteristic speed should be outflowing but detected negative "
+            "speed "
+            << char_speed_point);
+      }
     }
   }
   get(*dt_pi_correction) = 0.;
   get(*dt_psi_correction) = 0.;
-  for (auto& val : *dt_phi_correction) {
-    val = 0.;
+  for (size_t i =0; i < Dim; ++i) {
+    dt_phi_correction->get(i) = 0.;
   }
   return {};
 }

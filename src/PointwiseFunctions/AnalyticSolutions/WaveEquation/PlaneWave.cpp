@@ -108,7 +108,10 @@ PlaneWave<Dim>::variables(
 
   DataVector exponent = get(magnitude(x)) - 12.;
   exponent *= exponent / 4.;
-  Scalar<DataVector> pi{exp(-exponent) * sqrt(M_1_PI) * 0.5};
+  const DataVector r_sq = get(magnitude(x)) * get(magnitude(x));
+  const DataVector Y20 =
+      0.25 * sqrt(5. / M_PI) * (3 * x.get(2) * x.get(2) - r_sq) / r_sq;
+  Scalar<DataVector> pi{exp(-exponent) * 0.5 * sqrt(1. / M_PI)};
   tuples::TaggedTuple<ScalarWave::Pi, ScalarWave::Phi<Dim>, ScalarWave::Psi>
       variables{pi, make_with_value<tnsr::i<DataVector, Dim>>(x, 0.),
                 make_with_value<Scalar<DataVector>>(x, 0.)};

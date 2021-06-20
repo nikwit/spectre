@@ -10,6 +10,7 @@
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tags/TempTensor.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Characteristics.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Formulation.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/NormalDotFlux.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
@@ -62,35 +63,19 @@ double UpwindPenaltyFlat<Dim>::dg_package_data(
     /*mesh_velocity*/,
     const std::optional<Scalar<DataVector>>& normal_dot_mesh_velocity)
     const noexcept {
+  std::array<DataVector, 4> char_speeds =
+      characteristic_speeds(constraint_gamma1, lapse, shift, normal_covector);
+
   if (normal_dot_mesh_velocity.has_value()) {
-    get<0>(*packaged_char_speeds) = -get(*normal_dot_mesh_velocity);
-    get<1>(*packaged_char_speeds) = 1.0 - get(*normal_dot_mesh_velocity);
-    get<2>(*packaged_char_speeds) = -1.0 - get(*normal_dot_mesh_velocity);
-  } else {
-    get<0>(*packaged_char_speeds) = 0.0;
-    get<1>(*packaged_char_speeds) = 1.0;
-    get<2>(*packaged_char_speeds) = -1.0;
-  }
-
-  {  // package characteristic speeds
-
-    auto shift_dot_normal = dot_product(shift, normal_covector);
-    get(shift_dot_normal) *= -1.;
-
-    get<0>(*packaged_char_speeds) =
-        (1. + get(constraint_gamma1)) * get(shift_dot_normal);
-
-    get<1>(*packaged_char_speeds) = get(shift_dot_normal);
-    get<2>(*packaged_char_speeds) = get(shift_dot_normal) + get(lapse);
-    get<3>(*packaged_char_speeds) = get(shift_dot_normal) - get(lapse);
-
-    if (normal_dot_mesh_velocity.has_value()) {
-      get<0>(*packaged_char_speeds) -= get(*normal_dot_mesh_velocity);
-      get<1>(*packaged_char_speeds) -= get(*normal_dot_mesh_velocity);
-      get<2>(*packaged_char_speeds) -= get(*normal_dot_mesh_velocity);
-      get<3>(*packaged_char_speeds) -= get(*normal_dot_mesh_velocity);
+    for (auto& char_speed : char_speeds) {
+      char_speed -= get(*normal_dot_mesh_velocity);
     }
   }
+
+  get<0>(*packaged_char_speeds) = char_speeds[0];
+  get<1>(*packaged_char_speeds) = char_speeds[1];
+  get<2>(*packaged_char_speeds) = char_speeds[2];
+  get<3>(*packaged_char_speeds) = char_speeds[3];
 
   // Computes the contribution to the boundary correction from one side of the
   // interface.

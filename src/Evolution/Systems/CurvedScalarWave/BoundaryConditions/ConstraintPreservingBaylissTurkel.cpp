@@ -101,19 +101,19 @@ ConstraintPreservingBaylissTurkel<Dim>::dg_time_derivative(
   }
 
   get(*dt_psi_correction) =
-      get<0>(normal_covector) * (get<0>(d_psi) - get<0>(phi));
+      get<0>(normal_vector) * (get<0>(d_psi) - get<0>(phi));
   for (size_t i = 1; i < Dim; ++i) {
     get(*dt_psi_correction) +=
-        normal_covector.get(i) * (d_psi.get(i) - phi.get(i));
+        normal_vector.get(i) * (d_psi.get(i) - phi.get(i));
   }
 
   // Compute dt Phi 2-index constraint correction
   for (size_t i = 0; i < Dim; ++i) {
     dt_phi_correction->get(i) =
-        get<0>(normal_covector) * (d_phi.get(0, i) - d_phi.get(i, 0));
+        get<0>(normal_vector) * (d_phi.get(0, i) - d_phi.get(i, 0));
     for (size_t j = 1; j < Dim; ++j) {
       dt_phi_correction->get(i) +=
-          normal_covector.get(j) * (d_phi.get(j, i) - d_phi.get(i, j));
+          normal_vector.get(j) * (d_phi.get(j, i) - d_phi.get(i, j));
     }
   }
 
@@ -125,21 +125,15 @@ ConstraintPreservingBaylissTurkel<Dim>::dg_time_derivative(
     }
   }
 
-  for (const auto& char_speed : char_speeds[2]) {
-    ASSERT(char_speed > 0.,
-           "characteristic speed should be outflowing but has speed "
-               << char_speed);
-  }
-
   get(*dt_pi_correction) =
       -get(dt_pi) - 2.0 * inv_radius * (2.0 * get(pi) - inv_radius * get(psi));
   for (size_t i = 0; i < Dim; ++i) {
     get(*dt_pi_correction) +=
-        normal_covector.get(i) *
+        normal_vector.get(i) *
         (dt_phi.get(i) - d_pi.get(i) + 4.0 * inv_radius * phi.get(i));
     for (size_t j = 0; j < Dim; ++j) {
       get(*dt_pi_correction) +=
-          normal_covector.get(i) * normal_covector.get(j) * d_phi.get(i, j);
+          normal_vector.get(i) * normal_vector.get(j) * d_phi.get(i, j);
     }
   }
   get(*dt_pi_correction) += get(gamma2) * get(*dt_psi_correction);

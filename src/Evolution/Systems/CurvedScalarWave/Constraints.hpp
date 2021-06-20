@@ -47,7 +47,7 @@ struct ConstraintGamma2Compute : ConstraintGamma2, db::ComputeTag {
   static auto function(const gsl::not_null<Scalar<DataVector>*> gamma2,
                        const Scalar<DataVector> psi) noexcept {
     destructive_resize_components(gamma2, get_size(get(psi)));
-    get(*gamma2) = 0.;
+    get(*gamma2) = 1.;
   }
   using base = ConstraintGamma2;
 };

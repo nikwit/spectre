@@ -39,9 +39,9 @@ Evolution:
 DomainCreator:
   Shell:
     InnerRadius: 1.9
-    OuterRadius: 200
-    InitialRefinement: [3, 0]
-    InitialGridPoints: [6, 6]
+    OuterRadius: 50
+    InitialRefinement: [1, 0]
+    InitialGridPoints: [8, 8]
     UseEquiangularMap: false
     AspectRatio: 1.
     WhichWedges: All
@@ -77,25 +77,26 @@ EventsAndTriggers:
   : - Shell:
   ? Slabs:
       EvenlySpaced:
-        Interval: 1
+        Interval: 10
         Offset: 0
   : - ObserveFields:
-        SubfileName: Volume
-        VariablesToObserve: ["Psi"]
-        InterpolateToMesh: None
+          SubfileName: Volume
+          VariablesToObserve: ["Psi"]
+          InterpolateToMesh: None
   ? Slabs:
       Specified:
-        Values: [3000]
+        Values: [700]
   : - Completion
+
 
 InterpolationTargets:
   Shell:
-    Lmax: 2
+    Lmax: 10
     Center: [0., 0., 0.]
     DimensionlessSpin: [0., 0., 0.]
     Mass: 5.75
     ThetaVariesFastest: false
 
 Observers:
-  VolumeFileName: "CurvedScalarPlaneWaveKerr3DVolumeBoundary"
-  ReductionFileName: "CurvedScalarPlaneWaveMinkowski3DReductionst"
+  VolumeFileName: "Volume"
+  ReductionFileName: "Reductions"
