@@ -16,8 +16,8 @@ namespace domain::creators::py_bindings {
 
 void bind_shell(py::module& m) {  // NOLINT
   py::class_<Shell, DomainCreator<3>>(m, "Shell")
-      .def(py::init<double, double, size_t, std::array<size_t, 2>, bool,
-                    double>(),
+      .def(py::init<double, double, std::array<size_t, 2>,
+                    std::array<size_t, 2>, bool, double>(),
            py::arg("inner_radius"), py::arg("outer_radius"),
            py::arg("initial_refinement"),
            py::arg("initial_number_of_grid_points"),
