@@ -180,12 +180,20 @@ struct EvolutionMetavars {
     Exit
   };
 
+  static constexpr bool use_filtering = true;
+
   using step_actions = tmpl::flatten<tmpl::list<
       evolution::dg::Actions::ComputeTimeDerivative<EvolutionMetavars>,
       evolution::dg::Actions::ApplyBoundaryCorrections<EvolutionMetavars>,
       tmpl::conditional_t<
           local_time_stepping, tmpl::list<>,
-          tmpl::list<Actions::RecordTimeStepperData<>, Actions::UpdateU<>>>>>;
+          tmpl::list<Actions::RecordTimeStepperData<>, Actions::UpdateU<>>>,
+      tmpl::conditional_t<
+          use_filtering,
+          dg::Actions::Filter<Filters::Exponential<0>,
+              tmpl::list<CurvedScalarWave::Pi, CurvedScalarWave::Psi,
+                  CurvedScalarWave::Phi<Dim>>>,
+          tmpl::list<>>>>;
 
   // public for use by the Charm++ registration code
   using analytic_solution_fields = typename system::variables_tag::tags_list;
@@ -306,12 +314,6 @@ struct EvolutionMetavars {
   using observed_reduction_data_tags = observers::collect_reduction_data_tags<
       tmpl::push_back<typename Event<events>::creatable_classes,
                       typename Shell::post_interpolation_callback>>;
-
-  // The scalar wave system generally does not require filtering, except
-  // possibly on certain deformed domains.  Here a filter is added in 2D for
-  // testing purposes.  When performing numerical experiments with the scalar
-  // wave system, the user should determine whether this filter can be removed.
-  static constexpr bool use_filtering = (2 == volume_dim);
 
   struct factory_creation
       : tt::ConformsTo<Options::protocols::FactoryCreation> {
