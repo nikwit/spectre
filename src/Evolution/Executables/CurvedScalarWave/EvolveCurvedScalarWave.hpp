@@ -190,9 +190,10 @@ struct EvolutionMetavars {
           tmpl::list<Actions::RecordTimeStepperData<>, Actions::UpdateU<>>>,
       tmpl::conditional_t<
           use_filtering,
-          dg::Actions::Filter<Filters::Exponential<0>,
+          dg::Actions::Filter<
+              Filters::Exponential<0>,
               tmpl::list<CurvedScalarWave::Pi, CurvedScalarWave::Psi,
-                  CurvedScalarWave::Phi<Dim>>>,
+                         CurvedScalarWave::Phi<Dim>>>,
           tmpl::list<>>>>;
 
   // public for use by the Charm++ registration code
@@ -278,32 +279,36 @@ struct EvolutionMetavars {
   struct Shell {
     using vars_to_interpolate_to_target = tmpl::list<
         gr::Tags::SpatialMetric<volume_dim, ::Frame::Inertial, DataVector>,
-        CurvedScalarWave::Psi>;
+        CurvedScalarWave::Psi, CurvedScalarWave::Pi>;
     using compute_items_on_source = tmpl::list<>;
     using compute_items_on_target =
         tmpl::list<StrahlkorperGr::Tags::AreaElementCompute<::Frame::Inertial>,
                    StrahlkorperGr::Tags::SurfaceIntegralCompute<
-                       CurvedScalarWave::Psi, ::Frame::Inertial>>;
+                       CurvedScalarWave::Psi, ::Frame::Inertial>,
+                   StrahlkorperGr::Tags::SurfaceIntegralCompute<
+                       CurvedScalarWave::Pi, ::Frame::Inertial>>;
     using compute_target_points =
         intrp::TargetPoints::KerrHorizon<Shell, ::Frame::Inertial>;
     using post_interpolation_callback =
         intrp::callbacks::ObserveTimeSeriesOnSurface<
             tmpl::list<StrahlkorperGr::Tags::SurfaceIntegralCompute<
-                CurvedScalarWave::Psi, ::Frame::Inertial>>,
+                           CurvedScalarWave::Psi, ::Frame::Inertial>,
+                       StrahlkorperGr::Tags::SurfaceIntegralCompute<
+                           CurvedScalarWave::Pi, ::Frame::Inertial>>,
             Shell, Shell>;
     using interpolating_component = dg_element_array;
   };
   using interpolation_target_tags = tmpl::list<Shell>;
   using interpolator_source_vars = tmpl::list<
       gr::Tags::SpatialMetric<volume_dim, ::Frame::Inertial, DataVector>,
-      CurvedScalarWave::Psi>;
+      CurvedScalarWave::Psi, CurvedScalarWave::Pi>;
 
   using observe_fields = tmpl::append<
       analytic_solution_fields,
       tmpl::list<::Tags::PointwiseL2Norm<
-          CurvedScalarWave::Tags::OneIndexConstraint<volume_dim>>,
-          ::Tags::PointwiseL2Norm<
-              CurvedScalarWave::Tags::TwoIndexConstraint<volume_dim>>>>;
+                     CurvedScalarWave::Tags::OneIndexConstraint<volume_dim>>,
+                 ::Tags::PointwiseL2Norm<
+                     CurvedScalarWave::Tags::TwoIndexConstraint<volume_dim>>>>;
   using events = tmpl::list<
       dg::Events::Registrars::ObserveFields<Dim, Tags::Time, observe_fields>,
       intrp::Events::Registrars::Interpolate<3, Shell,

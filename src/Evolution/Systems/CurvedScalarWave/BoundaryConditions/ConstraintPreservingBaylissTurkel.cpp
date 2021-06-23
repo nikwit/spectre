@@ -55,41 +55,6 @@ ConstraintPreservingBaylissTurkel<Dim>::dg_time_derivative(
     const tnsr::ij<DataVector, Dim>& d_phi) const noexcept {
   const DataVector inv_radius = 1. / get(magnitude(coords));
 
-  /*
-  auto dt_char_fields = characteristic_fields(
-      gamma2, inverse_spatial_metric, dt_psi, dt_pi, dt_phi, normal_covector);
-
-  // set them to the negative value, so the correction starts from 0
-  dt_char_fields *= -1.;
-
-  auto& dt_VPsi = get<Tags::VPsi>(dt_char_fields);
-  auto& dt_VZero = get<Tags::VZero<Dim>>(dt_char_fields);
-  auto& dt_VPlus = get<Tags::VPlus>(dt_char_fields);
-  auto& dt_VMinus = get<Tags::VMinus>(dt_char_fields);
-
-  get(dt_VPsi) += get(dot_product(shift, phi)) - get(lapse) * get(pi);
-
-  auto tmp = make_with_value<tnsr::i<DataVector, Dim, Frame::Inertial>>(pi, 0.);
-  for (size_t j = 0; j < Dim; ++j) {
-    tmp.get(j) = -get(lapse) * d_pi.get(j) - get(pi) * d_lapse.get(j);
-    for (size_t k = 0; k < Dim; ++k) {
-      tmp.get(j) +=
-          d_shift.get(j, k) * phi.get(k) + shift.get(k) * d_phi.get(j, k);
-    }
-  }
-
-  for (size_t i = 0; i < Dim; ++i) {
-    dt_VZero.get(i) += tmp.get(i);
-    for (size_t j = 0; j < Dim; ++j) {
-      dt_VZero.get(i) -=
-          normal_covector.get(i) *
-          raise_or_lower_index(normal_covector, inverse_spatial_metric).get(j) *
-          tmp.get(j);
-    }
-  }
-  get(dt_VMinus) -= get(gamma2) * get(dt_VPsi);  // * inv_radius;
-*/
-
   auto char_speeds =
       characteristic_speeds(gamma1, lapse, shift, normal_covector);
 

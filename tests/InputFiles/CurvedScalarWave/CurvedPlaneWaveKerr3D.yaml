@@ -77,7 +77,7 @@ EventsAndTriggers:
   : - Shell:
   ? Slabs:
       EvenlySpaced:
-        Interval: 10
+        Interval: 100
         Offset: 0
   : - ObserveFields:
           SubfileName: Volume
@@ -85,7 +85,7 @@ EventsAndTriggers:
           InterpolateToMesh: None
   ? Slabs:
       Specified:
-        Values: [700]
+        Values: [1500]
   : - Completion
 
 Filtering:
