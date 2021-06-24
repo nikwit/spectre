@@ -7,6 +7,7 @@
 #include <memory>
 #include <pup.h>
 
+#include <iostream>
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/EagerMath/DotProduct.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
@@ -90,15 +91,18 @@ ConstraintPreservingBaylissTurkel<Dim>::dg_time_derivative(
     }
   }
 
-  get(*dt_pi_correction) =
-      -get(dt_pi) - 2.0 * inv_radius * (2.0 * get(pi) - inv_radius * get(psi));
+  get(*dt_pi_correction) = -get(dt_pi) + (3.0 * inv_radius * get(psi)  +
+                                          4.0 * get(dt_psi)) *
+                                             inv_radius / get(lapse);
   for (size_t i = 0; i < Dim; ++i) {
     get(*dt_pi_correction) +=
-        normal_vector.get(i) *
-        (dt_phi.get(i) - d_pi.get(i) + 4.0 * inv_radius * phi.get(i));
+        (normal_vector.get(i) *
+             (2. * dt_phi.get(i) + 4.0 * inv_radius * phi.get(i)) +
+         shift.get(i) * dt_phi.get(i)) /
+        get(lapse);
     for (size_t j = 0; j < Dim; ++j) {
-      get(*dt_pi_correction) +=
-          normal_vector.get(i) * normal_vector.get(j) * d_phi.get(i, j);
+      get(*dt_pi_correction) += normal_vector.get(i) * normal_vector.get(j) *
+                                d_phi.get(i, j) / get(lapse);
     }
   }
   get(*dt_pi_correction) += get(gamma2) * get(*dt_psi_correction);
