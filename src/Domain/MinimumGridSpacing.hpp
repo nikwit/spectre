@@ -46,7 +46,10 @@ struct MinimumGridSpacingCompute : MinimumGridSpacing<Dim, Frame>,
   static void function(
       const gsl::not_null<double*> result, const ::Mesh<Dim>& mesh,
       const tnsr::I<DataVector, Dim, Frame>& coordinates) noexcept {
-    *result = minimum_grid_spacing(mesh.extents(), coordinates);
+    static double call_once = [&]() {
+      return minimum_grid_spacing(mesh.extents(), coordinates);
+    }();
+    *result = call_once;
   }
   using argument_tags = tmpl::list<Mesh<Dim>, Coordinates<Dim, Frame>>;
 };
