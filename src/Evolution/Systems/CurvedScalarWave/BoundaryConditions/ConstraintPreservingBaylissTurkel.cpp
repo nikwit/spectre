@@ -91,7 +91,7 @@ ConstraintPreservingBaylissTurkel<Dim>::dg_time_derivative(
     }
   }
 
-  get(*dt_pi_correction) = -get(dt_pi) + (3.0 * inv_radius * get(psi)  +
+  get(*dt_pi_correction) = -get(dt_pi) + (2.0 * inv_radius * get(psi)  +
                                           4.0 * get(dt_psi)) *
                                              inv_radius / get(lapse);
   for (size_t i = 0; i < Dim; ++i) {
