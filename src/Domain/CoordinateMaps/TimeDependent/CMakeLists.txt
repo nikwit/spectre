@@ -20,7 +20,6 @@ spectre_target_headers(
   ProductMaps.tpp
   Rotation.hpp
   Shape.hpp
-  ShapeTransitionFunctions.hpp
   SphericalCompression.hpp
   Translation.hpp
   )

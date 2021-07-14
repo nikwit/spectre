@@ -83,11 +83,6 @@ using SphericalHarmonic = std::function<std::complex<double>(double, double)>;
 std::vector<std::vector<SphericalHarmonic>> harmonics = {
     {Y00}, {Y10, Y11}, {Y20, Y21, Y22}, {Y30, Y31, Y32, Y33}};
 
-auto c_coef = [](size_t l, size_t m) {
-  return sqrt(static_cast<double>((l + m) * (l - m)) /
-              ((2. * l - 1.) * (2. * l + 1.)));
-};
-
 // returns Ylm
 auto identity = [](size_t l, size_t m) {
   return [l, m](double theta, double phi) {
@@ -95,7 +90,13 @@ auto identity = [](size_t l, size_t m) {
   };
 };
 
-// returns sin(\theta) \partial_\theta Y_{l m} = n C_{l+1 m} Y_{l+1 m} -
+// computes the coefficient C_{lm} = sqrt((l+m)(l-m)/(2l-1)(2l+1))
+double c_coef(size_t l, size_t m) {
+  return sqrt(static_cast<double>((l + m) * (l - m)) /
+              ((2. * l - 1.) * (2. * l + 1.)));
+}
+
+// returns sin(\theta) \partial_\theta Y_{l m} = l C_{l+1 m} Y_{l+1 m} -
 // (l+1) C_{l m} Y_{l m}
 auto dtheta = [](size_t l, size_t m) {
   return [l, m](double theta, double phi) {
@@ -146,17 +147,24 @@ std::vector<std::vector<std::complex<double>>> generate_random_coefs(
     size_t l_max, size_t m_max, gsl::not_null<std::mt19937*> generator) {
   std::vector<std::vector<std::complex<double>>> coefs{};
   // if the coefficients are made too large, the map has a good chance of
-  // mapping through the center, causing the test to fail
-  std::uniform_real_distribution<double> coef_dis{0.1, 0.2};
-  const auto ran = [&coef_dis, &generator]() { return coef_dis(*generator); };
+  // mapping through the center, causing the test to fail which is why we damp
+  // higher mode coefficients. The factor was found empirically by trial and
+  // error.
+  std::uniform_real_distribution<double> coef_dist{0., 1.};
 
   for (size_t l = 0; l <= l_max; ++l) {
-    std::vector<std::complex<double>> tmp{ran()};
+    // m=0 is real
+    std::vector<std::complex<double>> tmp{
+        make_with_random_values<double>(generator, coef_dist, 1) /
+        double(8 * l * l + 1)};
     for (size_t m = 1; m <= std::min(l, m_max); ++m) {
-      tmp.emplace_back(ran() + ran() * imag);
+      tmp.emplace_back(make_with_random_values<std::complex<double>>(
+                           generator, coef_dist, 2) /
+                       double(8 * l * l + 1));
     }
     coefs.emplace_back(tmp);
   }
+
   // set monopole and dipole to zero
   coefs.at(0).at(0) = 0.;
   coefs.at(1).at(0) = 0.;
@@ -164,8 +172,7 @@ std::vector<std::vector<std::complex<double>>> generate_random_coefs(
   return coefs;
 }
 
-// converts complex coefficients to format expected by spherepack (eq. 25 of
-// spherical harmonics notes)
+// converts complex coefficients to format expected by spherepack
 DataVector convert_coefs_to_spherepack(
     const std::vector<std::vector<std::complex<double>>>& coefs, size_t l_max,
     size_t m_max) {
@@ -190,7 +197,9 @@ DataVector convert_coefs_to_spherepack(
   return spherepack_coefs;
 }
 
-// Generates the map, time, and a FunctionOfTime
+// Generates the map, time, and a FunctionOfTime. `const_f_of_t` decides whether
+// the function of time will be constant which is needed for the analytical
+// comparisons.
 template <typename TransitionFunction>
 void generate_random_map_time_and_f_of_time(
     const gsl::not_null<CoordinateMaps::TimeDependent::Shape*> map,
@@ -198,22 +207,26 @@ void generate_random_map_time_and_f_of_time(
     const gsl::not_null<FunctionsOfTimeMap*> functions_of_time, size_t l_max,
     size_t m_max, const std::array<double, 3>& center,
     const TransitionFunction& transition_func, const DataVector& ylm_coefs,
-    gsl::not_null<std::mt19937*> generator) {
+    bool const_f_of_t, gsl::not_null<std::mt19937*> generator) {
   std::string f_of_t_name{"test_coefs"};
 
-  auto transition_func_ptr =
-      std::make_unique<TransitionFunction>(transition_func);
-
   *map = CoordinateMaps::TimeDependent::Shape(
-      center, l_max, m_max, std::move(transition_func_ptr), f_of_t_name);
+      center, l_max, m_max,
+      std::make_unique<TransitionFunction>(transition_func), f_of_t_name);
   // Choose a random time for evaluating the FunctionOfTime
-  std::uniform_real_distribution<double> time_dis{-1.0, 1.0};
-  *time = time_dis(*generator);
-  std::uniform_real_distribution<double> coef_dis{0.2, 2.};
+  std::uniform_real_distribution<double> time_dist{-1.0, 1.0};
+  *time = time_dist(*generator);
 
-  // Set derivatives to zero
-  const auto dtcoefs = DataVector(ylm_coefs.size(), 0.);
-  const auto ddtcoefs = DataVector(ylm_coefs.size(), 0.);
+  DataVector dtcoefs{ylm_coefs.size(), 0.};
+  DataVector ddtcoefs{ylm_coefs.size(), 0.};
+
+  if (not const_f_of_t) {
+    const auto dt_random_coefs = generate_random_coefs(l_max, m_max, generator);
+    dtcoefs = convert_coefs_to_spherepack(dt_random_coefs, l_max, m_max);
+    const auto ddt_random_coefs =
+        generate_random_coefs(l_max, m_max, generator);
+    ddtcoefs = convert_coefs_to_spherepack(ddt_random_coefs, l_max, m_max);
+  }
 
   const std::array<DataVector, 3> initial_coefficients = {ylm_coefs, dtcoefs,
                                                           ddtcoefs};
@@ -242,7 +255,7 @@ void test_map_helpers(const TransitionFunction& transition_func, size_t l_max,
   generate_random_map_time_and_f_of_time<TransitionFunction>(
       make_not_null(&map), make_not_null(&time),
       make_not_null(&functions_of_time), l_max, m_max, center, transition_func,
-      spherepack_coefs, generator);
+      spherepack_coefs, false, generator);
 
   const auto random_point =
       make_with_random_values<std::array<double, 3>>(generator, dist, 3);
@@ -291,7 +304,7 @@ void test_analytical_solution(const TransitionFunction& transition_func,
   std::uniform_real_distribution dist{-10., 10.};
   const auto center =
       make_with_random_values<std::array<double, 3>>(generator, dist, 3);
-  auto target_data = make_with_random_values<std::array<DataVector, 3>>(
+  const auto target_data = make_with_random_values<std::array<DataVector, 3>>(
       generator, dist, num_points);
 
   const auto random_coefs = generate_random_coefs(l_max, m_max, generator);
@@ -304,7 +317,7 @@ void test_analytical_solution(const TransitionFunction& transition_func,
   generate_random_map_time_and_f_of_time<TransitionFunction>(
       make_not_null(&map), make_not_null(&time),
       make_not_null(&functions_of_time), l_max, m_max, center, transition_func,
-      spherepack_coefs, generator);
+      spherepack_coefs, true, generator);
   const auto mapped_result = map(target_data, time, functions_of_time);
   const auto analytical_result = calculate_analytical_map(
       target_data, center, l_max, m_max, random_coefs, transition_func);
@@ -399,7 +412,7 @@ void test_analytical_jacobian(const TransitionFunction& transition_func,
   generate_random_map_time_and_f_of_time<TransitionFunction>(
       make_not_null(&map), make_not_null(&time),
       make_not_null(&functions_of_time), l_max, m_max, center, transition_func,
-      spherepack_coefs, generator);
+      spherepack_coefs, true, generator);
   const auto mapped_jacobian =
       map.jacobian(target_data, time, functions_of_time);
   const auto analytical_jacobian = calculate_analytical_jacobian(
@@ -415,9 +428,9 @@ SPECTRE_TEST_CASE("Unit.Domain.CoordinateMaps.TimeDependent.Shape",
 
   MAKE_GENERATOR(generator);
   {
-    const CoordinateMaps::SphereTransition sphere_transition{0.01, 100.};
+    const CoordinateMaps::SphereTransition sphere_transition{1e-7, 100.};
     INFO("Testing MapHelpers");
-    for (size_t l_max = 2; l_max < 8; ++l_max) {
+    for (size_t l_max = 2; l_max < 12; ++l_max) {
       for (size_t m_max = 2; m_max <= l_max; ++m_max) {
         CAPTURE(l_max, m_max);
         test_map_helpers<CoordinateMaps::SphereTransition>(
@@ -427,7 +440,7 @@ SPECTRE_TEST_CASE("Unit.Domain.CoordinateMaps.TimeDependent.Shape",
   }
   {
     INFO("Testing analytical solution");
-    const CoordinateMaps::SphereTransition sphere_transition{0.01, 100.};
+    const CoordinateMaps::SphereTransition sphere_transition{1e-7, 100.};
     for (size_t l_max = 2; l_max <= 3; ++l_max) {
       for (size_t m_max = 2; m_max <= l_max; ++m_max) {
         CAPTURE(l_max, m_max);
@@ -438,7 +451,7 @@ SPECTRE_TEST_CASE("Unit.Domain.CoordinateMaps.TimeDependent.Shape",
   }
   {
     INFO("Testing analytical gradient");
-    const CoordinateMaps::SphereTransition sphere_transition{0.01, 100.};
+    const CoordinateMaps::SphereTransition sphere_transition{1e-7, 100.};
     const size_t l_max = 2;
     const size_t m_max = 2;
     test_analytical_jacobian<CoordinateMaps::SphereTransition>(

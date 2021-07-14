@@ -27,7 +27,10 @@ namespace domain::CoordinateMaps::TimeDependent {
 
 /*!
  * \ingroup CoordMapsTimeDependentGroup
- * \brief Given a point with cartesian coordinates \f$\xi^i\f$, let the polar
+ * \brief Distorts a distribution of points radially according to a spherical
+ * harmonic expansion while preserving angles.
+ *
+ * \details Given a point with cartesian coordinates \f$\xi^i\f$, let the polar
  * coordinates \f$(r, \theta, \phi)\f$ with respect to a center \f$x_c^i\f$ be
  * defined in the usual way: \f{align}{
  * \xi^0 - x_c^0 &= r sin(\theta) cos(\phi)\\
@@ -56,12 +59,11 @@ namespace domain::CoordinateMaps::TimeDependent {
  * \f}
  * where \f$\tilde{r}\f$ is the radius of \f$\xi\f$, calculated by the
  * transition map. For more details, see
- * `TransitionFunc::original_radius_over_radius` in
- * `Domain/CoordinateMaps/Protocols.hpp`.
+ * ShapeMapTransitionFunction::original_radius_over_radius .
  *
  * The frame velocity \f$v^i\ = dx^i / dt\f$ is calculated trivially:
  * \f{equation}{
- * v^i = x^i - (x^i - x_c^i) f(r, \theta, \phi) \sum_{lm}
+ * v^i = - (xi^i - x_c^i) f(r, \theta, \phi) \sum_{lm}
  * \dot{\lambda}_{lm}(t)Y_{lm}(\theta, \phi).
  * \f}
  *
@@ -120,8 +122,8 @@ class Shape {
       const std::array<T, 3>& source_coords, double time,
       const FunctionsOfTimeMap& functions_of_time) const noexcept;
 
-  // clang-tidy: google-runtime-references
-  void pup(PUP::er& p) noexcept;  // NOLINT
+  // NOLINTNEXTLINE(google-runtime-references)
+  void pup(PUP::er& p) noexcept;
   static bool is_identity() noexcept { return false; }
   static constexpr size_t dim = 3;
 
@@ -134,7 +136,7 @@ class Shape {
   std::unique_ptr<ShapeMapTransitionFunction> transition_func_;
 
   template <typename T>
-  inline std::array<tt::remove_cvref_wrap_t<T>, 3> center_coordinates_(
+  std::array<tt::remove_cvref_wrap_t<T>, 3> center_coordinates_(
       const std::array<T, 3>& coords) const noexcept {
     return {coords[0] - center_[0], coords[1] - center_[1],
             coords[2] - center_[2]};
@@ -142,18 +144,10 @@ class Shape {
 
   // Checks that the vector of coefficients has the right size and that the
   // monopole and dipole coefficients are zero.
-  void check_coefficients_(const DataVector& coefs) const noexcept;
+  void check_coefficients(const DataVector& coefs) const noexcept;
 
-  friend bool operator==(const Shape& lhs, const Shape& rhs) noexcept {
-    return lhs.f_of_t_name_ == rhs.f_of_t_name_ and
-           lhs.center_ == rhs.center_ and lhs.l_max_ == rhs.l_max_ and
-           lhs.m_max_ == rhs.m_max_ and
-           *lhs.transition_func_ == *rhs.transition_func_;
-  }
+  friend bool operator==(const Shape& lhs, const Shape& rhs) noexcept;
 };
-
-bool operator!=(const Shape& lhs, const Shape& rhs) noexcept {
-  return not(lhs == rhs);
-}
+bool operator!=(const Shape& lhs, const Shape& rhs) noexcept;
 
 }  // namespace domain::CoordinateMaps::TimeDependent

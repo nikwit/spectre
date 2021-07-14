@@ -18,7 +18,6 @@ set(LIBRARY_SOURCES
   Test_Frustum.cpp
   Test_Identity.cpp
   Test_ProductMaps.cpp
-  Test_Protocols.cpp
   Test_Rotation.cpp
   Test_SpecialMobius.cpp
   Test_Tags.cpp

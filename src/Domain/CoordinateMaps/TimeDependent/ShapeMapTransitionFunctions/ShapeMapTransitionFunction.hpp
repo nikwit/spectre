@@ -44,6 +44,8 @@ class SphereTransition;
  * the templated shape map methods calling them. To avoid code duplication these
  * can be forwarded to templated implementation methods held by the derived
  * classes only.
+ *
+ * For an example, see SphereTransition.
  **/
 class ShapeMapTransitionFunction : public PUP::able {
  public:

@@ -1,6 +1,8 @@
 // Distributed under the MIT License.
 // See LICENSE.txt for details.
 
+#include "Domain/CoordinateMaps/TimeDependent/Shape.hpp"
+
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -13,10 +15,10 @@
 #include "ApparentHorizons/TagsTypeAliases.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/EagerMath/DeterminantAndInverse.hpp"
-#include "Domain/CoordinateMaps/TimeDependent/Shape.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "Utilities/ContainerHelpers.hpp"
 #include "Utilities/DereferenceWrapper.hpp"
+#include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/StdHelpers.hpp"
@@ -43,6 +45,8 @@ Shape::Shape(const std::array<double, 3>& center, size_t l_max, size_t m_max,
       transition_func_(std::move(transition_func)) {
   ASSERT(l_max >= 2, "The shape map requires l_max >= 2 but l_max = " << l_max);
   ASSERT(m_max >= 2, "The shape map requires m_max >= 2 but m_max = " << m_max);
+  ASSERT(l_max >= m_max, "The shape map requires l_max >= m_max but l_max = "
+                             << l_max << ", m_max = " << m_max);
 }
 
 template <typename T>
@@ -58,7 +62,7 @@ std::array<tt::remove_cvref_wrap_t<T>, 3> Shape::operator()(
   auto theta_phis = cartesian_to_spherical(centered_coords);
   const auto interpolation_info = ylm_.set_up_interpolation_info(theta_phis);
   const DataVector coefs = functions_of_time.at(f_of_t_name_)->func(time)[0];
-  check_coefficients_(coefs);
+  check_coefficients(coefs);
   // re-use allocation
   auto& distorted_radii = get<0>(theta_phis);
   // evaluate the spherical harmonic expansion at the angles of `source_coords`
@@ -96,7 +100,7 @@ std::optional<std::array<double, 3>> Shape::inverse(
   const auto centered_coords = center_coordinates_(target_coords);
   const auto theta_phis = cartesian_to_spherical(centered_coords);
   const DataVector coefs = functions_of_time.at(f_of_t_name_)->func(time)[0];
-  check_coefficients_(coefs);
+  check_coefficients(coefs);
   const auto distorted_radii = ylm_.interpolate_from_coefs(coefs, theta_phis);
   const auto original_radius_over_radius =
       transition_func_->original_radius_over_radius(centered_coords,
@@ -120,7 +124,7 @@ std::array<tt::remove_cvref_wrap_t<T>, 3> Shape::frame_velocity(
   const auto interpolation_info = ylm_.set_up_interpolation_info(theta_phis);
   const auto coef_derivs =
       functions_of_time.at(f_of_t_name_)->func_and_deriv(time)[1];
-  check_coefficients_(coef_derivs);
+  check_coefficients(coef_derivs);
   // re-use allocation
   auto& radii_velocities = get<0>(theta_phis);
   ylm_.interpolate_from_coefs(make_not_null(&radii_velocities), coef_derivs,
@@ -152,7 +156,7 @@ tnsr::Ij<tt::remove_cvref_wrap_t<T>, 3, Frame::NoFrame> Shape::jacobian(
       extended_ylm.set_up_interpolation_info(theta_phis);
 
   const DataVector coefs = functions_of_time.at(f_of_t_name_)->func(time)[0];
-  check_coefficients_(coefs);
+  check_coefficients(coefs);
   DataVector extended_coefs(extended_ylm.spectral_size(), 0.);
 
   // Copy over the coefficients. The additional coefficients of order `l_max_
@@ -280,7 +284,10 @@ tnsr::Ij<tt::remove_cvref_wrap_t<T>, 3, Frame::NoFrame> Shape::inv_jacobian(
       .second;
 }
 
-void Shape::check_coefficients_(const DataVector& coefs) const noexcept {
+// NOLINTNEXTLINE (unused-parameter)
+void Shape::check_coefficients(const DataVector& coefs) const noexcept {
+  (void) coefs; //silence compiler warning
+#ifdef SPECTRE_DEBUG
   // The expected format of the coefficients passed from the control system can
   // be changed depending on what turns out to be most convenient for the
   // control system
@@ -300,6 +307,18 @@ void Shape::check_coefficients_(const DataVector& coefs) const noexcept {
         "to be zero, but the coefficients for l = "
             << l << ", m = " << m << " have value " << coefs[iter()]);
   }
+#endif  // SPECTRE_DEBUG
+}
+
+bool operator==(const Shape& lhs, const Shape& rhs) noexcept {
+  return lhs.f_of_t_name_ == rhs.f_of_t_name_ and
+         lhs.center_ == rhs.center_ and lhs.l_max_ == rhs.l_max_ and
+         lhs.m_max_ == rhs.m_max_ and
+         *lhs.transition_func_ == *rhs.transition_func_;
+}
+
+bool operator!=(const Shape& lhs, const Shape& rhs) noexcept {
+  return not(lhs == rhs);
 }
 
 void Shape::pup(PUP::er& p) noexcept {

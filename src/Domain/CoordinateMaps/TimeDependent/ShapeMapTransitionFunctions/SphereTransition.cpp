@@ -9,23 +9,23 @@
 #include "Domain/CoordinateMaps/TimeDependent/ShapeMapTransitionFunctions/SphereTransition.hpp"
 #include "Utilities/ConstantExpressions.hpp"
 #include "Utilities/ContainerHelpers.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 
 namespace domain::CoordinateMaps {
 
 SphereTransition::SphereTransition(double r_min, double r_max)
-    : r_min_(r_min),
-      r_max_(r_max),
-      a_(-1. / (r_max - r_min)),
-      b_(r_max / (r_max - r_min)) {
+    : r_min_(r_min), r_max_(r_max) {
   if (r_min <= 0.) {
     ERROR("The minimum radius must be greater than 0 but is " << r_min);
   }
-  if (r_max <= r_min) {
+  if (r_max < r_min) {
     ERROR(
         "The maximum radius must be greater than the minimum radius but "
         "r_max =  "
         << r_max << ", and r_min = " << r_min);
   }
+  a_ = -1. / (r_max - r_min);
+  b_ = r_max / (r_max - r_min);
 }
 
 double SphereTransition::operator()(
@@ -130,7 +130,7 @@ void SphereTransition::pup(PUP::er& p) {
   p | r_max_;
   p | a_;
   p | b_;
-};
+}
 
 SphereTransition::SphereTransition(CkMigrateMessage* const msg)
     : ShapeMapTransitionFunction(msg) {}
