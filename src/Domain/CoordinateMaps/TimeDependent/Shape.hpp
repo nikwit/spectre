@@ -1,6 +1,8 @@
 // Distributed under the MIT License.
 // See LICENSE.txt for details.
 
+#pragma once
+
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -9,9 +11,8 @@
 #include "ApparentHorizons/TagsTypeAliases.hpp"
 #include "ApparentHorizons/YlmSpherepack.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
-#include "Domain/CoordinateMaps/TimeDependent/ShapeTransitionFunctions.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/ShapeMapTransitionFunctions/ShapeMapTransitionFunction.hpp"
 #include "Utilities/TypeTraits/RemoveReferenceWrapper.hpp"
-#pragma once
 
 /// \cond
 namespace domain::FunctionsOfTime {
@@ -83,16 +84,14 @@ namespace domain::CoordinateMaps::TimeDependent {
  * `jacobian` currently calculates the `interpolation_info` with an order
  * higher.
  */
-template <typename TransitionFunc>
 class Shape {
  public:
-  static_assert(
-      tt::assert_conforms_to<TransitionFunc, protocols::TransitionFunc>);
   using FunctionsOfTimeMap = std::unordered_map<
       std::string, std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>;
 
   explicit Shape(const std::array<double, 3>& center, size_t l_max,
-                 size_t m_max, TransitionFunc transition_func,
+                 size_t m_max,
+                 std::unique_ptr<ShapeMapTransitionFunction> transition_func,
                  std::string function_of_time_name) noexcept;
 
   Shape() = default;
@@ -132,7 +131,7 @@ class Shape {
   size_t l_max_ = 2;
   size_t m_max_ = 2;
   YlmSpherepack ylm_{2, 2};
-  TransitionFunc transition_func_{};
+  std::unique_ptr<ShapeMapTransitionFunction> transition_func_;
 
   template <typename T>
   inline std::array<tt::remove_cvref_wrap_t<T>, 3> center_coordinates_(
@@ -149,13 +148,11 @@ class Shape {
     return lhs.f_of_t_name_ == rhs.f_of_t_name_ and
            lhs.center_ == rhs.center_ and lhs.l_max_ == rhs.l_max_ and
            lhs.m_max_ == rhs.m_max_ and
-           lhs.transition_func_ == rhs.transition_func_;
+           *lhs.transition_func_ == *rhs.transition_func_;
   }
 };
 
-template <typename TransitionFunc>
-bool operator!=(const Shape<TransitionFunc>& lhs,
-                const Shape<TransitionFunc>& rhs) noexcept {
+bool operator!=(const Shape& lhs, const Shape& rhs) noexcept {
   return not(lhs == rhs);
 }
 

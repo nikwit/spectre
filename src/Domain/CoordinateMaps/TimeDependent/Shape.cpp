@@ -32,10 +32,9 @@ std::array<T, 2> cartesian_to_spherical(
   return {atan2(hypot(x, y), z), atan2(y, x)};
 }
 
-template <typename TransitionFunc>
-Shape<TransitionFunc>::Shape(const std::array<double, 3>& center, size_t l_max,
-                             size_t m_max, TransitionFunc transition_func,
-                             std::string function_of_time_name) noexcept
+Shape::Shape(const std::array<double, 3>& center, size_t l_max, size_t m_max,
+             std::unique_ptr<ShapeMapTransitionFunction> transition_func,
+             std::string function_of_time_name) noexcept
     : f_of_t_name_(std::move(function_of_time_name)),
       center_(center),
       l_max_(l_max),
@@ -46,9 +45,8 @@ Shape<TransitionFunc>::Shape(const std::array<double, 3>& center, size_t l_max,
   ASSERT(m_max >= 2, "The shape map requires m_max >= 2 but m_max = " << m_max);
 }
 
-template <typename TransitionFunc>
 template <typename T>
-std::array<tt::remove_cvref_wrap_t<T>, 3> Shape<TransitionFunc>::operator()(
+std::array<tt::remove_cvref_wrap_t<T>, 3> Shape::operator()(
     const std::array<T, 3>& source_coords, double time,
     const FunctionsOfTimeMap& functions_of_time) const noexcept {
   ASSERT(functions_of_time.find(f_of_t_name_) != functions_of_time.end(),
@@ -72,7 +70,7 @@ std::array<tt::remove_cvref_wrap_t<T>, 3> Shape<TransitionFunc>::operator()(
 #ifdef SPECTRE_DEBUG
   using ReturnType = tt::remove_cvref_wrap_t<T>;
   const ReturnType shift_radii =
-      distorted_radii * transition_func_(centered_coords);
+      distorted_radii * transition_func_->operator()(centered_coords);
   if constexpr (std::is_same_v<ReturnType, double>) {
     ASSERT(shift_radii < 1., "Coordinates mapped through the center!");
   } else {
@@ -82,13 +80,12 @@ std::array<tt::remove_cvref_wrap_t<T>, 3> Shape<TransitionFunc>::operator()(
   }
 #endif  // SPECTRE_DEBUG
 
-  return center_ +
-         centered_coords *
-             (1. - distorted_radii * transition_func_(centered_coords));
+  return center_ + centered_coords *
+                       (1. - distorted_radii *
+                                 transition_func_->operator()(centered_coords));
 }
 
-template <typename TransitionFunc>
-std::optional<std::array<double, 3>> Shape<TransitionFunc>::inverse(
+std::optional<std::array<double, 3>> Shape::inverse(
     const std::array<double, 3>& target_coords, double time,
     const FunctionsOfTimeMap& functions_of_time) const noexcept {
   ASSERT(functions_of_time.find(f_of_t_name_) != functions_of_time.end(),
@@ -102,17 +99,16 @@ std::optional<std::array<double, 3>> Shape<TransitionFunc>::inverse(
   check_coefficients_(coefs);
   const auto distorted_radii = ylm_.interpolate_from_coefs(coefs, theta_phis);
   const auto original_radius_over_radius =
-      transition_func_.original_radius_over_radius(centered_coords,
-                                                   distorted_radii);
+      transition_func_->original_radius_over_radius(centered_coords,
+                                                    distorted_radii);
   if (not original_radius_over_radius.has_value()) {
     return std::nullopt;
   }
   return center_ + centered_coords * original_radius_over_radius.value();
 }
 
-template <typename TransitionFunc>
 template <typename T>
-std::array<tt::remove_cvref_wrap_t<T>, 3> Shape<TransitionFunc>::frame_velocity(
+std::array<tt::remove_cvref_wrap_t<T>, 3> Shape::frame_velocity(
     const std::array<T, 3>& source_coords, double time,
     const FunctionsOfTimeMap& functions_of_time) const noexcept {
   ASSERT(functions_of_time.find(f_of_t_name_) != functions_of_time.end(),
@@ -130,13 +126,11 @@ std::array<tt::remove_cvref_wrap_t<T>, 3> Shape<TransitionFunc>::frame_velocity(
   ylm_.interpolate_from_coefs(make_not_null(&radii_velocities), coef_derivs,
                               interpolation_info);
   return -centered_coords * radii_velocities *
-         transition_func_(centered_coords);
+         transition_func_->operator()(centered_coords);
 }
 
-template <typename TransitionFunc>
 template <typename T>
-tnsr::Ij<tt::remove_cvref_wrap_t<T>, 3, Frame::NoFrame>
-Shape<TransitionFunc>::jacobian(
+tnsr::Ij<tt::remove_cvref_wrap_t<T>, 3, Frame::NoFrame> Shape::jacobian(
     const std::array<T, 3>& source_coords, double time,
     const FunctionsOfTimeMap& functions_of_time) const noexcept {
   ASSERT(functions_of_time.find(f_of_t_name_) != functions_of_time.end(),
@@ -234,13 +228,13 @@ Shape<TransitionFunc>::jacobian(
 
   // re-use allocation
   auto& transition_func = get<1>(theta_phis);
-  transition_func = transition_func_(centered_coords);
+  transition_func = transition_func_->operator()(centered_coords);
   const auto transition_func_gradient =
-      transition_func_.gradient(centered_coords);
+      transition_func_->gradient(centered_coords);
   // leave it to the domain specific transition function to divide by the radii
   // as it can safely do this
   const auto transition_func_over_radius =
-      transition_func_.map_over_radius(centered_coords);
+      transition_func_->map_over_radius(centered_coords);
 
   get<0, 0>(result) = -gsl::at(centered_coords, 0) *
                       (gsl::at(transition_func_gradient, 0) * distorted_radii +
@@ -277,10 +271,8 @@ Shape<TransitionFunc>::jacobian(
   return result;
 }
 
-template <typename TransitionFunc>
 template <typename T>
-tnsr::Ij<tt::remove_cvref_wrap_t<T>, 3, Frame::NoFrame>
-Shape<TransitionFunc>::inv_jacobian(
+tnsr::Ij<tt::remove_cvref_wrap_t<T>, 3, Frame::NoFrame> Shape::inv_jacobian(
     const std::array<T, 3>& source_coords, double time,
     const FunctionsOfTimeMap& functions_of_time) const noexcept {
   return determinant_and_inverse(
@@ -288,9 +280,7 @@ Shape<TransitionFunc>::inv_jacobian(
       .second;
 }
 
-template <typename TransitionFunc>
-void Shape<TransitionFunc>::check_coefficients_(
-    const DataVector& coefs) const noexcept {
+void Shape::check_coefficients_(const DataVector& coefs) const noexcept {
   // The expected format of the coefficients passed from the control system can
   // be changed depending on what turns out to be most convenient for the
   // control system
@@ -312,8 +302,7 @@ void Shape<TransitionFunc>::check_coefficients_(
   }
 }
 
-template <typename TransitionFunc>
-void Shape<TransitionFunc>::pup(PUP::er& p) noexcept {
+void Shape::pup(PUP::er& p) noexcept {
   p | l_max_;
   p | m_max_;
   p | center_;
@@ -325,29 +314,24 @@ void Shape<TransitionFunc>::pup(PUP::er& p) noexcept {
   }
 }
 
-// Explicit instantiations
-template class Shape<SphereTransition>;
-
 #define DTYPE(data) BOOST_PP_TUPLE_ELEM(0, data)
-#define TRANSITION(data) BOOST_PP_TUPLE_ELEM(1, data)
-
-#define INSTANTIATE(_, data)                                                 \
-  template std::array<tt::remove_cvref_wrap_t<DTYPE(data)>, 3>               \
-  Shape<TRANSITION(data)>::operator()(                                       \
-      const std::array<DTYPE(data), 3>& source_coords, double time,          \
-      const FunctionsOfTimeMap& functions_of_time) const;                    \
-  template std::array<tt::remove_cvref_wrap_t<DTYPE(data)>, 3>               \
-  Shape<TRANSITION(data)>::frame_velocity(                                   \
-      const std::array<DTYPE(data), 3>& source_coords, double time,          \
-      const FunctionsOfTimeMap& functions_of_time) const;                    \
-  template tnsr::Ij<tt::remove_cvref_wrap_t<DTYPE(data)>, 3, Frame::NoFrame> \
-  Shape<TRANSITION(data)>::jacobian(                                         \
-      const std::array<DTYPE(data), 3>& source_coords, double time,          \
-      const FunctionsOfTimeMap& functions_of_time) const;                    \
-  template tnsr::Ij<tt::remove_cvref_wrap_t<DTYPE(data)>, 3, Frame::NoFrame> \
-  Shape<TRANSITION(data)>::inv_jacobian(                                     \
-      const std::array<DTYPE(data), 3>& source_coords, double time,          \
-      const FunctionsOfTimeMap& functions_of_time) const;
+#define INSTANTIATE(_, data)                                                  \
+  template std::array<tt::remove_cvref_wrap_t<DTYPE(data)>, 3>                \
+  Shape::operator()(const std::array<DTYPE(data), 3>& source_coords,          \
+                    double time, const FunctionsOfTimeMap& functions_of_time) \
+      const;                                                                  \
+  template std::array<tt::remove_cvref_wrap_t<DTYPE(data)>, 3>                \
+  Shape::frame_velocity(const std::array<DTYPE(data), 3>& source_coords,      \
+                        double time,                                          \
+                        const FunctionsOfTimeMap& functions_of_time) const;   \
+  template tnsr::Ij<tt::remove_cvref_wrap_t<DTYPE(data)>, 3, Frame::NoFrame>  \
+  Shape::jacobian(const std::array<DTYPE(data), 3>& source_coords,            \
+                  double time, const FunctionsOfTimeMap& functions_of_time)   \
+      const;                                                                  \
+  template tnsr::Ij<tt::remove_cvref_wrap_t<DTYPE(data)>, 3, Frame::NoFrame>  \
+  Shape::inv_jacobian(const std::array<DTYPE(data), 3>& source_coords,        \
+                      double time,                                            \
+                      const FunctionsOfTimeMap& functions_of_time) const;
 
 GENERATE_INSTANTIATIONS(INSTANTIATE,
                         (double, DataVector,

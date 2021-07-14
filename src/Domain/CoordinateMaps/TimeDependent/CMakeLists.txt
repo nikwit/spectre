@@ -24,3 +24,5 @@ spectre_target_headers(
   SphericalCompression.hpp
   Translation.hpp
   )
+
+add_subdirectory(ShapeMapTransitionFunctions)

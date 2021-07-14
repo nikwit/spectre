@@ -59,7 +59,6 @@ spectre_target_headers(
   MapInstantiationMacros.hpp
   ProductMaps.hpp
   ProductMaps.tpp
-  Protocols.hpp
   Rotation.hpp
   SpecialMobius.hpp
   Tags.hpp
@@ -79,6 +78,7 @@ target_link_libraries(
   FunctionsOfTime
   GSL::gsl
   RootFinding
+  Parallel
   )
 
 add_subdirectory(TimeDependent)
