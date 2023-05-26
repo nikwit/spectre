@@ -53,7 +53,10 @@ struct UpdateFunctionsOfTime {
     const double current_fot_expiration_time =
         function_of_time->time_bounds()[1];
     const double new_fot_expiration_time = time + time_step.value() * 0.01;
-    const DataVector new_derivative(1, 0.01);
+    const double period = 20.;
+    const double amplitude = 0.1;
+    const double value = amplitude * sin(time / (2. * M_PI * period));
+    const DataVector new_derivative(1, value);
     Parallel::printf(MakeString{} << get_output(time) << ", step "
                                   << get_output(time_step.value()) << "\n");
 
