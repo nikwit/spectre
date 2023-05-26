@@ -19,6 +19,7 @@
 #include "Domain/FunctionsOfTime/ReadSpecPiecewisePolynomial.hpp"
 #include "Domain/FunctionsOfTime/Tags.hpp"
 #include "Options/Options.hpp"
+#include "Time/Tags.hpp"
 #include "Utilities/StdHelpers.hpp"
 #include "Utilities/TMPL.hpp"
 #include "Utilities/TypeTraits/CreateHasStaticMemberVariable.hpp"
@@ -41,7 +42,8 @@ struct OptionList {
 template <typename Metavariables>
 struct OptionList<Metavariables, false> {
   using type =
-      tmpl::list<domain::OptionTags::DomainCreator<Metavariables::volume_dim>>;
+      tmpl::list<domain::OptionTags::DomainCreator<Metavariables::volume_dim>,
+                 ::OptionTags::InitialTime, ::OptionTags::InitialTimeStep>;
 };
 }  // namespace detail
 
@@ -88,8 +90,12 @@ struct FunctionsOfTimeInitialize : FunctionsOfTime, db::SimpleTag {
   template <typename Metavariables>
   static type create_from_options(
       const std::unique_ptr<::DomainCreator<Metavariables::volume_dim>>&
-          domain_creator) {
-    return domain_creator->functions_of_time();
+          domain_creator,
+      const double initial_time, const double initial_time_step) {
+    std::unordered_map<std::string, double> initial_expiration_times{};
+    initial_expiration_times["Expansion"] =
+        initial_time + initial_time_step * 0.01;
+    return domain_creator->functions_of_time(initial_expiration_times);
   }
 };
 }  // namespace domain::Tags
