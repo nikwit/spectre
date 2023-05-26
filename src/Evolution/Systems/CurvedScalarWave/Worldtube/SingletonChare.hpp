@@ -5,9 +5,11 @@
 
 #include "DataStructures/DataBox/DataBox.hpp"
 #include "DataStructures/DataBox/Tag.hpp"
+#include "Domain/FunctionsOfTime/FunctionsOfTimeAreReady.hpp"
 #include "Evolution/Initialization/Evolution.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/ChangeSlabSize.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/CheckFunctionsOfTimeAreReady.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/InitializeElementFacesGridCoordinates.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/InitializeEvolvedVariables.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/InitializeSpacetimeTags.hpp"
@@ -15,6 +17,7 @@
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/ReceiveElementData.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/SendToElements.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/TimeDerivative.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/UpdateFunctionsOfTime.hpp"
 #include "IO/Observer/Actions/RegisterSingleton.hpp"
 #include "Options/Options.hpp"
 #include "Parallel/Algorithms/AlgorithmSingleton.hpp"
@@ -77,11 +80,12 @@ struct WorldtubeSingleton {
         ::Tags::Variables<tmpl::list<Tags::Psi0, Tags::dtPsi0>>;
   };
   using step_actions =
-      tmpl::list<Actions::ChangeSlabSize, Actions::ReceiveElementData,
-                 Actions::ComputeTimeDerivative,
+      tmpl::list<Actions::UpdateFunctionsOfTime, Actions::ChangeSlabSize,
+                 Actions::ReceiveElementData, Actions::ComputeTimeDerivative,
                  ::Actions::RecordTimeStepperData<worldtube_system>,
                  ::Actions::UpdateU<worldtube_system>,
-                 Actions::SendToElements<Metavariables>>;
+                 Actions::SendToElements<Metavariables>,
+                 Actions::CheckFunctionsOfTimeAreReady>;
   using phase_dependent_action_list = tmpl::list<
       Parallel::PhaseActions<Parallel::Phase::Initialization,
                              initialization_actions>,
