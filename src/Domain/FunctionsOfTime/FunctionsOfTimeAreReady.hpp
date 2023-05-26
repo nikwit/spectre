@@ -14,6 +14,8 @@
 
 #include "DataStructures/DataBox/DataBox.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
+#include "Domain/Structure/ElementId.hpp"
+#include "Domain/Tags.hpp"
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/Callback.hpp"
 #include "Parallel/GlobalCache.hpp"
@@ -103,6 +105,11 @@ struct CheckFunctionsOfTimeAreReady {
     const bool ready =
         functions_of_time_are_ready<domain::Tags::FunctionsOfTime>(
             cache, array_index, component, db::get<::Tags::Time>(box));
+    const auto& element_id = db::get<domain::Tags::Element<3>>(box).id();
+    if (is_zeroth_element(element_id)) {
+      Parallel::printf(MakeString{} << "Element FoT are "
+                                    << (ready ? "ready" : "NOT ready") << "\n");
+    }
     return {ready ? Parallel::AlgorithmExecution::Continue
                   : Parallel::AlgorithmExecution::Retry,
             std::nullopt};
