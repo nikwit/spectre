@@ -37,7 +37,7 @@ Evolution:
 DomainCreator:
   BinaryCompactObject:
     InitialRefinement: 0
-    InitialGridPoints: 12
+    InitialGridPoints: 4
     UseEquiangularMap: true
     ObjectB:
       InnerRadius: 1.9
@@ -86,35 +86,6 @@ SpatialDiscretization:
     Quadrature: GaussLobatto
 
 EventsAndTriggers:
-  - Trigger:
-      Slabs:
-        EvenlySpaced:
-          Interval: 5000
-          Offset: 0
-    Events:
-      - ObserveFields:
-          SubfileName: Volume
-          VariablesToObserve:
-            - Psi
-            - OneIndexConstraint
-          InterpolateToMesh: None
-          CoordinatesFloatingPointType: Double
-          FloatingPointTypes: [Double]
-          OverrideObservationValue: None
-  - Trigger:
-      Slabs:
-        EvenlySpaced:
-          Interval: 1000
-          Offset: 0
-    Events:
-      - PsiAlongAxis1
-      - PsiAlongAxis2
-  - Trigger:
-      TimeCompares:
-        Comparison: GreaterThan
-        Value: 2000.
-    Events:
-      - Completion
   - Trigger:
       Slabs:
         Specified:
