@@ -46,7 +46,7 @@ struct CheckFunctionsOfTimeAreReady {
       const ParallelComponent* const /*meta*/) {
     const auto& proxy = ::Parallel::get_parallel_component<ParallelComponent>(
         cache)[array_index];
-    const std::string function_of_time_name = "Expansion";
+    const std::string function_of_time_name = "Rotation";
     const auto& time = db::get<::Tags::Time>(box);
     bool is_ready =
         Parallel::mutable_cache_item_is_ready<::domain::Tags::FunctionsOfTime>(

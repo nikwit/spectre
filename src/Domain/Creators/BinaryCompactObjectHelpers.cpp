@@ -102,14 +102,13 @@ TimeDependentMapOptions::create_functions_of_time(
   // each initial angle from the input axis-angle representation, but
   // we don't need to.
   result[rotation_name] =
-      std::make_unique<FunctionsOfTime::QuaternionFunctionOfTime<3>>(
+      std::make_unique<FunctionsOfTime::QuaternionFunctionOfTime<2>>(
           initial_time_,
           std::array<DataVector, 1>{DataVector{1.0, 0.0, 0.0, 0.0}},
-          std::array<DataVector, 4>{{{3, 0.0},
+          std::array<DataVector, 3>{{{3, 0.0},
                                      {gsl::at(initial_angular_velocity_, 0),
                                       gsl::at(initial_angular_velocity_, 1),
                                       gsl::at(initial_angular_velocity_, 2)},
-                                     {3, 0.0},
                                      {3, 0.0}}},
           expiration_times.at(rotation_name));
 

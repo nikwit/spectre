@@ -48,17 +48,20 @@ struct UpdateFunctionsOfTime {
     const auto& time_step = db::get<::Tags::TimeStep>(box);
     const auto& functions_of_time =
         Parallel::get<::domain::Tags::FunctionsOfTime>(cache);
-    const std::string function_of_time_name = "Expansion";
+    const std::string function_of_time_name = "Rotation";
     const auto& function_of_time = functions_of_time.at(function_of_time_name);
     const double current_fot_expiration_time =
         function_of_time->time_bounds()[1];
-    const double new_fot_expiration_time = time + time_step.value() * 0.01;
-    const double period = 20.;
-    const double amplitude = 0.1;
-    const double value = amplitude * sin(time / (2. * M_PI * period));
-    const DataVector new_derivative(1, value);
-    Parallel::printf(MakeString{} << get_output(time) << ", step "
-                                  << get_output(time_step.value()) << "\n");
+    const double new_fot_expiration_time = time + time_step.value() * 0.5;
+    double value = 0.;
+    if (time > 200.) {
+      value = 0.0001;
+    }
+    if (time > 600.) {
+      value = -0.0001;
+    }
+    DataVector new_derivative(3, 0.);
+    new_derivative.at(2) = value;
 
     if (time > current_fot_expiration_time) {
       Parallel::printf(MakeString{} << "Mutating Time from "
