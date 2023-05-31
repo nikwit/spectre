@@ -12,6 +12,7 @@ set(LIBRARY_SOURCES
   Test_Shape.cpp
   Test_SphericalCompression.cpp
   Test_Translation.cpp
+  Test_WorldtubeExpansion.cpp
   )
 
 add_test_library(

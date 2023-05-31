@@ -10,6 +10,7 @@ spectre_target_sources(
   Shape.cpp
   SphericalCompression.cpp
   Translation.cpp
+  WorldtubeExpansion.cpp
   )
 
 spectre_target_headers(
@@ -24,6 +25,7 @@ spectre_target_headers(
   Shape.hpp
   SphericalCompression.hpp
   Translation.hpp
+  WorldtubeExpansion.hpp
   )
 
 add_subdirectory(ShapeMapTransitionFunctions)

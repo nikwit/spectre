@@ -31,7 +31,7 @@ namespace TimeDependent {
 
 class WorldtubeExpansion {
  public:
-  static constexpr size_t dim = 3;
+  static constexpr size_t Dim = 3;
 
   explicit WorldtubeExpansion(double inner_boundary, double outer_boundary,
                               std::string function_of_time_name);
@@ -87,10 +87,8 @@ class WorldtubeExpansion {
   static bool is_identity() { return false; }
 
  private:
-  template <size_t LocalDim>
-  // NOLINTNEXTLINE(readability-redundant-declaration)
-  friend bool operator==(const WorldtubeExpansion<LocalDim>& lhs,
-                         const WorldtubeExpansion<LocalDim>& rhs);
+  friend bool operator==(const WorldtubeExpansion& lhs,
+                         const WorldtubeExpansion& rhs);
 
   std::string f_of_t_name_{};
   double r_in_;
@@ -101,9 +99,7 @@ class WorldtubeExpansion {
   double d_;
 };
 
-template <size_t Dim>
-bool operator!=(const WorldtubeExpansion<Dim>& lhs,
-                const WorldtubeExpansion<Dim>& rhs) {
+bool operator!=(const WorldtubeExpansion& lhs, const WorldtubeExpansion& rhs) {
   return not(lhs == rhs);
 }
 
