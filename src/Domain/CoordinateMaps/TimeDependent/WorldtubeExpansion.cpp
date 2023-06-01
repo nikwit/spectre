@@ -92,11 +92,17 @@ std::optional<std::array<double, 3>> WorldtubeExpansion::inverse(
   for (size_t i = 0; i < Dim; ++i) {
     gsl::at(*result, i) = gsl::at(target_coords, i);
   }
-  if (r - f > r_out_) {
+  if (f == 0.) {
+    return result;
+  }
+  if (r > r_out_ + f) {
     for (size_t i = 0; i < Dim; ++i) {
       gsl::at(*result, i) -= f * gsl::at(target_coords, i) / r;
     }
   } else if (r > r_in_) {
+    if (f > 0.) {
+      return std::nullopt;
+    }
     const double inner_minus_outer_cubed = cube(r_in_ - r_out_);
     const double cbrt_3 = std::cbrt(3.);
     const double big_cbrt = std::cbrt(
@@ -180,13 +186,13 @@ WorldtubeExpansion::jacobian(
 
   for (size_t i = 0; i < 3; ++i) {
     jac.get(i, i) = 1.;
-    jac.get(i, i) += in_outer_region * (1 + f_of_t / rho);
+    jac.get(i, i) += in_outer_region * f_of_t / rho;
     jac.get(i, i) +=
         in_trans_region * f_of_t * (a_ * rho_sq + b_ * rho + c_ + d_ / rho);
     for (size_t j = 0; j < 3; ++j) {
       jac.get(i, j) -= in_outer_region * source_coords.at(i) *
                        source_coords.at(j) * f_of_t / (rho_sq * rho);
-      jac.get(i, j) -= in_trans_region * source_coords.at(i) *
+      jac.get(i, j) += in_trans_region * source_coords.at(i) *
                        source_coords.at(j) * f_of_t *
                        (2. * a_ + b_ / rho - d_ / (rho_sq * rho));
     }

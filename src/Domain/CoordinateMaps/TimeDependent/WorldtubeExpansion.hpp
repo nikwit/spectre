@@ -32,6 +32,7 @@ namespace TimeDependent {
 class WorldtubeExpansion {
  public:
   static constexpr size_t Dim = 3;
+  static constexpr size_t dim = Dim;
 
   explicit WorldtubeExpansion(double inner_boundary, double outer_boundary,
                               std::string function_of_time_name);
