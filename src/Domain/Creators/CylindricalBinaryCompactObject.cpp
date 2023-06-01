@@ -421,7 +421,7 @@ CylindricalBinaryCompactObject::CylindricalBinaryCompactObject(
                  std::optional<double>{radius_B_}},
       std::array{std::optional<double>{outer_radius_A_},
                  std::optional<double>{outer_radius_B_}},
-      outer_radius_);
+      radius_B_, magnitude(center_A_) - radius_A_);
 }
 
 Domain<3> CylindricalBinaryCompactObject::create_domain() const {

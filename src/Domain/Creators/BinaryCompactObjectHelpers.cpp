@@ -145,9 +145,9 @@ void TimeDependentMapOptions::build_maps(
     const std::array<std::array<double, 3>, 2>& centers,
     const std::array<std::optional<double>, 2>& object_inner_radii,
     const std::array<std::optional<double>, 2>& object_outer_radii,
-    const double domain_outer_radius) {
-  expansion_map_ = CubicScaleMap{domain_outer_radius, expansion_name,
-                                 expansion_outer_boundary_name};
+    const double expansion_inner_radius, const double expansion_outer_radius) {
+  expansion_map_ = CoordinateMaps::TimeDependent::WorldtubeExpansion{
+      expansion_inner_radius, expansion_outer_radius, expansion_name};
   rotation_map_ = RotationMap3D{rotation_name};
   for (size_t i = 0; i < 2; i++) {
     if (gsl::at(object_inner_radii, i).has_value() and

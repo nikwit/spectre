@@ -15,6 +15,7 @@
 #include "Domain/CoordinateMaps/TimeDependent/CubicScale.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/Rotation.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/Shape.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/WorldtubeExpansion.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "Domain/Structure/ObjectLabel.hpp"
 #include "Options/Options.hpp"
@@ -73,7 +74,8 @@ struct TimeDependentMapOptions {
 
   template <typename SourceFrame, typename TargetFrame>
   using CubicScaleAndRotationMapForComposition =
-      domain::CoordinateMap<SourceFrame, TargetFrame, CubicScaleMap,
+      domain::CoordinateMap<SourceFrame, TargetFrame,
+                            CoordinateMaps::TimeDependent::WorldtubeExpansion,
                             RotationMap3D>;
   using DistortedToInertialComposition =
       CubicScaleAndRotationMapForComposition<Frame::Distorted, Frame::Inertial>;
@@ -83,7 +85,8 @@ struct TimeDependentMapOptions {
   using GridToInertialComposition = tmpl::conditional_t<
       IncludeDistortedMap,
       domain::CoordinateMap<Frame::Grid, Frame::Inertial, ShapeMap,
-                            CubicScaleMap, RotationMap3D>,
+                            CoordinateMaps::TimeDependent::WorldtubeExpansion,
+                            RotationMap3D>,
       CubicScaleAndRotationMapForComposition<Frame::Grid, Frame::Inertial>>;
 
  public:
@@ -235,7 +238,7 @@ struct TimeDependentMapOptions {
       const std::array<std::array<double, 3>, 2>& centers,
       const std::array<std::optional<double>, 2>& object_inner_radii,
       const std::array<std::optional<double>, 2>& object_outer_radii,
-      double domain_outer_radius);
+      const double expansion_inner_radius, const double expansion_outer_radius);
 
   /*!
    * \brief This will construct the map from `Frame::Distorted` to
@@ -301,7 +304,7 @@ struct TimeDependentMapOptions {
                  std::numeric_limits<double>::signaling_NaN()}};
   std::array<size_t, 2> initial_l_max_{0, 0};
   // Maps
-  CubicScaleMap expansion_map_{};
+  CoordinateMaps::TimeDependent::WorldtubeExpansion expansion_map_{};
   RotationMap3D rotation_map_{};
   std::array<ShapeMap, 2> shape_maps_{};
 };

@@ -100,9 +100,10 @@ class WorldtubeExpansion {
   double d_;
 };
 
+/*
 bool operator!=(const WorldtubeExpansion& lhs, const WorldtubeExpansion& rhs) {
   return not(lhs == rhs);
-}
+}*/
 
 }  // namespace TimeDependent
 }  // namespace CoordinateMaps

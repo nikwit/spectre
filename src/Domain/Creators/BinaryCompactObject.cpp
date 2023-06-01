@@ -252,8 +252,8 @@ BinaryCompactObject::BinaryCompactObject(
     add_object_region("ObjectB", "Shell");  // 6 blocks
     add_object_region("ObjectB", "Cube");   // 6 blocks
   }
-  add_outer_region("Envelope");    // 10 blocks
-  add_outer_region("OuterShell");  // 10 blocks
+  add_outer_region("Envelope");             // 10 blocks
+  add_outer_region("OuterShell");           // 10 blocks
 
   if ((not use_single_block_a_) and (not is_excised_a_)) {
     add_object_interior("ObjectA");  // 1 block
@@ -325,7 +325,9 @@ BinaryCompactObject::BinaryCompactObject(
       std::array{std::array{x_coord_a_, 0.0, 0.0},
                  std::array{x_coord_b_, 0.0, 0.0}},
       std::array{inner_radius_A, inner_radius_B},
-      std::array{outer_radius_A, outer_radius_B}, outer_radius_);
+      std::array{outer_radius_A, outer_radius_B},
+      std::get<Object>(object_B_).inner_radius,
+      x_coord_a_ - std::get<Object>(object_A_).inner_radius);
 }
 
 Domain<3> BinaryCompactObject::create_domain() const {
