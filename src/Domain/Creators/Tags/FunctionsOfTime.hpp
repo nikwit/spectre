@@ -95,6 +95,10 @@ struct FunctionsOfTimeInitialize : FunctionsOfTime, db::SimpleTag {
     std::unordered_map<std::string, double> initial_expiration_times{};
     initial_expiration_times["Rotation"] =
         initial_time + initial_time_step * 0.5;
+    initial_expiration_times["Expansion"] =
+        initial_time + initial_time_step * 0.5;
+    initial_expiration_times["SizeA"] = initial_time + initial_time_step * 0.5;
+    initial_expiration_times["SizeB"] = initial_time + initial_time_step * 0.5;
     return domain_creator->functions_of_time(initial_expiration_times);
   }
 };

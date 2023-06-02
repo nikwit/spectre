@@ -48,20 +48,34 @@ struct UpdateFunctionsOfTime {
     const auto& time_step = db::get<::Tags::TimeStep>(box);
     const auto& functions_of_time =
         Parallel::get<::domain::Tags::FunctionsOfTime>(cache);
-    const std::string function_of_time_name = "Rotation";
-    const auto& function_of_time = functions_of_time.at(function_of_time_name);
+
+    const std::string rot_function_of_time_name = "Rotation";
+    const auto& rot_function_of_time =
+        functions_of_time.at(rot_function_of_time_name);
     const double current_fot_expiration_time =
-        function_of_time->time_bounds()[1];
-    const double new_fot_expiration_time = time + time_step.value() * 0.5;
-    double value = 0.;
+        rot_function_of_time->time_bounds()[1];
+    double z_angular_acc = 0.;
     if (time > 200.) {
-      value = 0.0001;
+      z_angular_acc = 0.0005;
     }
     if (time > 600.) {
-      value = -0.0001;
+      z_angular_acc = -0.0005;
     }
-    DataVector new_derivative(3, 0.);
-    new_derivative.at(2) = value;
+    DataVector new_angular_acc(3, 0.);
+    new_angular_acc.at(2) = z_angular_acc;
+
+    const double period = 20.;
+    const double amp = 2. / (period * period);
+    double expansion_acc = 1. + amp * sin(2. * M_PI * time / period);
+    DataVector new_expansion_acc(1, expansion_acc);
+
+    DataVector new_compression_acc = sqrt(4. * M_PI) * (new_expansion_acc - 1.);
+
+    const double new_fot_expiration_time = time + time_step.value() * 0.5;
+
+    const std::string expansion_fot_name = "Expansion";
+    const std::string size_a_fot_name = "SizeA";
+    const std::string size_b_fot_name = "SizeB";
 
     if (time > current_fot_expiration_time) {
       Parallel::printf(MakeString{} << "Mutating Time from "
@@ -69,8 +83,20 @@ struct UpdateFunctionsOfTime {
                                     << new_fot_expiration_time << "\n");
       Parallel::mutate<::domain::Tags::FunctionsOfTime,
                        control_system::UpdateFunctionOfTime>(
-          cache, function_of_time_name, current_fot_expiration_time,
-          new_derivative, new_fot_expiration_time);
+          cache, rot_function_of_time_name, current_fot_expiration_time,
+          new_angular_acc, new_fot_expiration_time);
+      Parallel::mutate<::domain::Tags::FunctionsOfTime,
+                       control_system::UpdateFunctionOfTime>(
+          cache, expansion_fot_name, current_fot_expiration_time,
+          new_expansion_acc, new_fot_expiration_time);
+      Parallel::mutate<::domain::Tags::FunctionsOfTime,
+                       control_system::UpdateFunctionOfTime>(
+          cache, size_a_fot_name, current_fot_expiration_time,
+          new_compression_acc, new_fot_expiration_time);
+      Parallel::mutate<::domain::Tags::FunctionsOfTime,
+                       control_system::UpdateFunctionOfTime>(
+          cache, size_b_fot_name, current_fot_expiration_time,
+          new_compression_acc, new_fot_expiration_time);
     }
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }

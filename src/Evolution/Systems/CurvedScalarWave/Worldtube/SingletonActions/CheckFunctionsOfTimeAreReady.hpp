@@ -46,21 +46,25 @@ struct CheckFunctionsOfTimeAreReady {
       const ParallelComponent* const /*meta*/) {
     const auto& proxy = ::Parallel::get_parallel_component<ParallelComponent>(
         cache)[array_index];
-    const std::string function_of_time_name = "Rotation";
+    const std::vector<std::string> function_of_time_names{
+        "Rotation", "Expansion", "SizeA", "SizeB"};
     const auto& time = db::get<::Tags::Time>(box);
     bool is_ready =
         Parallel::mutable_cache_item_is_ready<::domain::Tags::FunctionsOfTime>(
             cache,
-            [&proxy, &time, &function_of_time_name](
+            [&proxy, &time, &function_of_time_names](
                 const std::unordered_map<
                     std::string,
                     std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
                     functions_of_time) {
-              const auto& f_of_t = functions_of_time.at(function_of_time_name);
-              const double expiration_time = f_of_t->time_bounds()[1];
-              if (time > expiration_time) {
-                return std::unique_ptr<Parallel::Callback>(
-                    new Parallel::PerformAlgorithmCallback(proxy));
+              for (const auto& function_of_time_name : function_of_time_names) {
+                const auto& f_of_t =
+                    functions_of_time.at(function_of_time_name);
+                const double expiration_time = f_of_t->time_bounds()[1];
+                if (time > expiration_time) {
+                  return std::unique_ptr<Parallel::Callback>(
+                      new Parallel::PerformAlgorithmCallback(proxy));
+                }
               }
 
               return std::unique_ptr<Parallel::Callback>{};
