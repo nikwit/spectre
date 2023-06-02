@@ -22,9 +22,7 @@ struct domain_creators<3> {
   using type =
       tmpl::list<domain::creators::AlignedLattice<3>,
                  domain::creators::BinaryCompactObject, domain::creators::Brick,
-                 domain::creators::Cylinder,
-                 domain::creators::CylindricalBinaryCompactObject,
-                 domain::creators::FrustalCloak,
+                 domain::creators::Cylinder, domain::creators::FrustalCloak,
                  domain::creators::RotatedBricks, domain::creators::Sphere>;
 };
 }  // namespace DomainCreators_detail
