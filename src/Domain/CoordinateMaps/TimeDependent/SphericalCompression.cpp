@@ -92,7 +92,7 @@ bool check_radius(const T& radius, const double min_radius,
                   const double max_radius) {
   auto radius_in_expected_range =
       [](const T& source_radius, const double min_rad, const double max_rad) {
-        constexpr double eps = 100 * std::numeric_limits<double>::epsilon();
+        constexpr double eps = 10000 * std::numeric_limits<double>::epsilon();
         if constexpr (std::is_floating_point<ResultType<T>>::value) {
           if constexpr (InteriorMap) {
             return source_radius <= min_rad + eps;

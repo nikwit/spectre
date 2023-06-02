@@ -325,9 +325,8 @@ BinaryCompactObject::BinaryCompactObject(
       std::array{std::array{x_coord_a_, 0.0, 0.0},
                  std::array{x_coord_b_, 0.0, 0.0}},
       std::array{inner_radius_A, inner_radius_B},
-      std::array{outer_radius_A, outer_radius_B},
-      std::get<Object>(object_B_).inner_radius,
-      x_coord_a_ - std::get<Object>(object_A_).inner_radius);
+      std::array{outer_radius_A, outer_radius_B}, envelope_radius,
+      outer_radius);
 }
 
 Domain<3> BinaryCompactObject::create_domain() const {
@@ -577,7 +576,7 @@ Domain<3> BinaryCompactObject::create_domain() const {
     // time-dependent map instead.
     grid_to_inertial_block_maps[number_of_blocks_ - 1] =
         time_dependent_options_
-            ->grid_to_inertial_map<domain::ObjectLabel::None>(false);
+            ->grid_to_inertial_map<domain::ObjectLabel::None>(false, false);
 
     // Initialize the first block of the layer 1 blocks for each object
     // If excising interior A or B, the block maps for the corrsponding layer 1
@@ -588,17 +587,25 @@ Domain<3> BinaryCompactObject::create_domain() const {
     // (nullptr).
     grid_to_inertial_block_maps[0] =
         time_dependent_options_->grid_to_inertial_map<domain::ObjectLabel::A>(
-            is_excised_a_);
+            is_excised_a_, true);
     grid_to_distorted_block_maps[0] =
         time_dependent_options_->grid_to_distorted_map<domain::ObjectLabel::A>(
             is_excised_a_);
     distorted_to_inertial_block_maps[0] =
         time_dependent_options_->distorted_to_inertial_map(is_excised_a_);
 
+    // worldtube stuff: CubeA is the first block with no size map but is
+    // interior to expansion compression which is also needed by CubeB and
+    // Envelope
+    const size_t first_block_cube_a = 6;
+    grid_to_inertial_block_maps[first_block_cube_a] =
+        time_dependent_options_->grid_to_inertial_map<domain::ObjectLabel::A>(
+            false, true);
+
     const size_t first_block_object_B = use_single_block_a_ ? 1 : 12;
     grid_to_inertial_block_maps[first_block_object_B] =
         time_dependent_options_->grid_to_inertial_map<domain::ObjectLabel::B>(
-            is_excised_b_);
+            is_excised_b_, true);
     grid_to_distorted_block_maps[first_block_object_B] =
         time_dependent_options_->grid_to_distorted_map<domain::ObjectLabel::B>(
             is_excised_b_);
@@ -618,7 +625,7 @@ Domain<3> BinaryCompactObject::create_domain() const {
           distorted_to_inertial_block_maps[block] =
               distorted_to_inertial_block_maps[0]->get_clone();
         }
-      } else if (block == first_block_object_B) {
+      } else if (block == first_block_object_B or block == first_block_cube_a) {
         continue;  // already initialized
       } else if ((not use_single_block_b_) and block > first_block_object_B and
                  block < first_block_object_B + 6) {
@@ -634,8 +641,15 @@ Domain<3> BinaryCompactObject::create_domain() const {
                   ->get_clone();
         }
       } else {
-        grid_to_inertial_block_maps[block] =
-            grid_to_inertial_block_maps[number_of_blocks_ - 1]->get_clone();
+        // outer shell
+        if (block >= 34) {
+          grid_to_inertial_block_maps[block] =
+              grid_to_inertial_block_maps[number_of_blocks_ - 1]->get_clone();
+        } else {
+          // CubeA, CubeB and Envelope
+          grid_to_inertial_block_maps[block] =
+              grid_to_inertial_block_maps[first_block_cube_a]->get_clone();
+        }
       }
     }
     // Finally, inject the time dependent maps into the corresponding blocks
