@@ -84,26 +84,24 @@ TimeDependentMapOptions::create_functions_of_time(
   // each initial angle from the input axis-angle representation, but
   // we don't need to.
   result[rotation_name] =
-      std::make_unique<FunctionsOfTime::QuaternionFunctionOfTime<3>>(
+      std::make_unique<FunctionsOfTime::QuaternionFunctionOfTime<2>>(
           initial_time_,
           std::array<DataVector, 1>{DataVector{1.0, 0.0, 0.0, 0.0}},
-          std::array<DataVector, 4>{{{3, 0.0},
+          std::array<DataVector, 3>{{{3, 0.0},
                                      {gsl::at(initial_angular_velocity_, 0),
                                       gsl::at(initial_angular_velocity_, 1),
                                       gsl::at(initial_angular_velocity_, 2)},
-                                     {3, 0.0},
                                      {3, 0.0}}},
           expiration_times.at(rotation_name));
 
   // CompressionMap FunctionOfTime for objects A and B
   for (size_t i = 0; i < size_names.size(); i++) {
     result[gsl::at(size_names, i)] =
-        std::make_unique<FunctionsOfTime::PiecewisePolynomial<3>>(
+        std::make_unique<FunctionsOfTime::PiecewisePolynomial<2>>(
             initial_time_,
-            std::array<DataVector, 4>{
+            std::array<DataVector, 3>{
                 {{gsl::at(gsl::at(initial_size_values_, i), 0)},
                  {gsl::at(gsl::at(initial_size_values_, i), 1)},
-                 {gsl::at(gsl::at(initial_size_values_, i), 2)},
                  {0.0}}},
             expiration_times.at(gsl::at(size_names, i)));
   }
@@ -117,9 +115,9 @@ void TimeDependentMapOptions::build_maps(
     const std::array<std::optional<double>, 2>& object_outer_radii,
     const double envelope_radius, const double domain_outer_radius) {
   expansion_map_interior_ = ExpansionCompressionMap<true>{
-      expansion_name, envelope_radius, domain_outer_radius, centers.at(1)};
+      expansion_name, envelope_radius, domain_outer_radius, {{0., 0., 0.}}};
   expansion_map_exterior_ = ExpansionCompressionMap<false>{
-      expansion_name, envelope_radius, domain_outer_radius, centers.at(1)};
+      expansion_name, envelope_radius, domain_outer_radius, {{0., 0., 0.}}};
   rotation_map_ = RotationMap3D{rotation_name};
   for (size_t i = 0; i < 2; i++) {
     if (gsl::at(object_inner_radii, i).has_value() and

@@ -48,36 +48,53 @@ struct UpdateFunctionsOfTime {
     const auto& time_step = db::get<::Tags::TimeStep>(box);
     const auto& functions_of_time =
         Parallel::get<::domain::Tags::FunctionsOfTime>(cache);
-
     const std::string rot_function_of_time_name = "Rotation";
-    const auto& rot_function_of_time =
-        functions_of_time.at(rot_function_of_time_name);
-    const double current_fot_expiration_time =
-        rot_function_of_time->time_bounds()[1];
-    double z_angular_acc = 0.;
-    if (time > 200.) {
-      z_angular_acc = 0.0005;
-    }
-    if (time > 600.) {
-      z_angular_acc = -0.0005;
-    }
-    DataVector new_angular_acc(3, 0.);
-    new_angular_acc.at(2) = z_angular_acc;
-
-    const double period = 20.;
-    const double amp = 2. / (period * period);
-    double expansion_acc = 1. + amp * sin(2. * M_PI * time / period);
-    DataVector new_expansion_acc(1, expansion_acc);
-
-    DataVector new_compression_acc = sqrt(4. * M_PI) * (new_expansion_acc - 1.);
-
-    const double new_fot_expiration_time = time + time_step.value() * 0.5;
-
     const std::string expansion_fot_name = "Expansion";
     const std::string size_a_fot_name = "SizeA";
     const std::string size_b_fot_name = "SizeB";
 
+    const auto& rot_function_of_time =
+        functions_of_time.at(rot_function_of_time_name);
+    const double current_fot_expiration_time =
+        rot_function_of_time->time_bounds()[1];
     if (time > current_fot_expiration_time) {
+      double z_angular_acc = 0.;
+      if (time > 500.) {
+        z_angular_acc = 0.00006;
+      }
+      if (time > 1500.) {
+        z_angular_acc = -0.00006;
+      }
+      DataVector new_angular_acc(3, 0.);
+      new_angular_acc.at(2) = z_angular_acc;
+      const double envelope_radius = 50.;
+
+      const double period = 100.;
+      const double omega = 2. * M_PI / period;
+      const double amp = 0.25;
+      const double expansion_acc = amp * omega * omega * cos(omega * time) *
+                                   sqrt(4. * M_PI) * envelope_radius;
+
+      const auto& expansion_fot = functions_of_time.at(expansion_fot_name);
+      const double object_radius = 1.;
+
+      const auto expansion_vals =
+          expansion_fot->func_and_deriv(db::get<Tags::PreviousTime>(box));
+      const double sqrt_4_pi = sqrt(4. * M_PI);
+      const double fac_1 =
+          1. / (1. - expansion_vals.at(0)[0] / (sqrt_4_pi * envelope_radius));
+
+      double compression_acc =
+          -object_radius / envelope_radius * square(fac_1) *
+          (expansion_acc + 2. * square(expansion_vals.at(1)[0]) * fac_1 /
+                               sqrt_4_pi / envelope_radius);
+
+      DataVector new_expansion_acc(1, expansion_acc);
+      DataVector new_compression_acc_b(1, compression_acc);
+      DataVector new_compression_acc_a(1, compression_acc);
+
+      const double new_fot_expiration_time = time + time_step.value() * 0.5;
+
       Parallel::printf(MakeString{} << "Mutating Time from "
                                     << current_fot_expiration_time << " to "
                                     << new_fot_expiration_time << "\n");
@@ -92,11 +109,11 @@ struct UpdateFunctionsOfTime {
       Parallel::mutate<::domain::Tags::FunctionsOfTime,
                        control_system::UpdateFunctionOfTime>(
           cache, size_a_fot_name, current_fot_expiration_time,
-          new_compression_acc, new_fot_expiration_time);
+          new_compression_acc_a, new_fot_expiration_time);
       Parallel::mutate<::domain::Tags::FunctionsOfTime,
                        control_system::UpdateFunctionOfTime>(
           cache, size_b_fot_name, current_fot_expiration_time,
-          new_compression_acc, new_fot_expiration_time);
+          new_compression_acc_b, new_fot_expiration_time);
     }
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }

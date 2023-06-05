@@ -14,6 +14,7 @@
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/Tags.hpp"
+#include "ParallelAlgorithms/Initialization/MutateAssign.hpp"
 #include "Time/Actions/ChangeSlabSize.hpp"
 #include "Time/Tags.hpp"
 #include "Time/TimeStepId.hpp"
@@ -34,7 +35,7 @@ namespace CurvedScalarWave::Worldtube::Actions {
 struct CheckFunctionsOfTimeAreReady {
   static constexpr size_t Dim = 3;
   using inbox_tags = tmpl::list<>;
-
+  using simple_tags = tmpl::list<Tags::PreviousTime>;
   template <typename DbTagsList, typename... InboxTags, typename Metavariables,
             typename ArrayIndex, typename ActionList,
             typename ParallelComponent>
@@ -74,6 +75,10 @@ struct CheckFunctionsOfTimeAreReady {
                      << (is_ready ? " functions of time are ready"
                                   : " functions of time are NOT ready")
                      << "\n");
+    if (is_ready) {
+      ::Initialization::mutate_assign<simple_tags>(make_not_null(&box),
+                                                   db::get<::Tags::Time>(box));
+    }
 
     return {is_ready ? Parallel::AlgorithmExecution::Continue
                      : Parallel::AlgorithmExecution::Retry,

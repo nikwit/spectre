@@ -279,6 +279,10 @@ struct PunctureField : db::SimpleTag {
                     Frame::Inertial>>>>;
 };
 
+struct PreviousTime : db::SimpleTag {
+  using type = double;
+};
+
 template <size_t Dim>
 struct PunctureFieldCompute : PunctureField<Dim>, db::ComputeTag {
   using base = PunctureField<Dim>;
