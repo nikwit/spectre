@@ -17,6 +17,7 @@
 #include "Domain/Creators/OptionTags.hpp"
 #include "Domain/Domain.hpp"
 #include "Domain/FunctionsOfTime/QuaternionFunctionOfTime.hpp"
+#include "Domain/FunctionsOfTime/Tags.hpp"
 #include "Domain/Structure/Element.hpp"
 #include "Domain/Structure/ElementId.hpp"
 #include "Domain/Structure/ExcisionSphere.hpp"
@@ -169,6 +170,20 @@ struct ExcisionSphere : db::SimpleTag {
   }
 };
 
+struct WorldtubeCoordinateMaps : db::SimpleTag {
+  using type = std::unique_ptr<
+      domain::CoordinateMapBase<Frame::Grid, Frame::Inertial, 3>>;
+  using option_tags = tmpl::list<domain::OptionTags::DomainCreator<3>>;
+  static constexpr bool pass_metavariables = false;
+  static type create_from_options(
+      const std::unique_ptr<::DomainCreator<3>>& domain_creator) {
+    const auto domain = domain_creator->create_domain();
+    const auto& cube_block = domain.blocks()[7];
+    const auto& maps = cube_block.moving_mesh_grid_to_inertial_map();
+    return maps.get_clone();
+  }
+};
+
 /*!
  * \brief Triggers at which to write the coefficients of the worldtube's
  * internal Taylor series to file.
@@ -204,10 +219,18 @@ struct InertialParticlePositionCompute : InertialParticlePosition<Dim>,
                                          db::ComputeTag {
   using base = InertialParticlePosition<Dim>;
   using return_type = tnsr::I<double, Dim, Frame::Inertial>;
-  using argument_tags = tmpl::list<ExcisionSphere<Dim>, ::Tags::Time>;
+  using argument_tags = tmpl::list<ExcisionSphere<Dim>, WorldtubeCoordinateMaps,
+                                   ::Tags::Time, domain::Tags::FunctionsOfTime>;
   static void function(
       gsl::not_null<tnsr::I<double, Dim, Frame::Inertial>*> position,
-      const ::ExcisionSphere<Dim>& excision_sphere, const double time);
+      const ::ExcisionSphere<Dim>& excision_sphere,
+      const std::unique_ptr<
+          domain::CoordinateMapBase<Frame::Grid, Frame::Inertial, 3>>& maps,
+      const double time,
+      const std::unordered_map<
+          std::string,
+          std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
+          functions_of_time);
 };
 /// @}
 
