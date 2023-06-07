@@ -13,6 +13,11 @@
 #include "NumericalAlgorithms/SphericalHarmonics/Tags.hpp"
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/GlobalCache.hpp"
+#include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/KerrSchild.hpp"
+#include "PointwiseFunctions/GeneralRelativity/Christoffel.hpp"
+#include "PointwiseFunctions/GeneralRelativity/DerivativesOfSpacetimeMetric.hpp"
+#include "PointwiseFunctions/GeneralRelativity/InverseSpacetimeMetric.hpp"
+#include "PointwiseFunctions/GeneralRelativity/SpacetimeMetric.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
@@ -45,7 +50,8 @@ namespace CurvedScalarWave::Worldtube {
 struct TimeDerivativeMutator {
   static constexpr size_t Dim = 3;
 
-  using variables_tag = ::Tags::Variables<tmpl::list<Tags::Psi0, Tags::dtPsi0>>;
+  using variables_tag = ::Tags::Variables<
+      tmpl::list<Tags::Psi0, Tags::dtPsi0, Tags::Position, Tags::Velocity>>;
   using dt_variables_tag = db::add_tag_prefix<::Tags::dt, variables_tag>;
   using return_tags = tmpl::list<dt_variables_tag>;
   using argument_tags = tmpl::list<
@@ -56,26 +62,31 @@ struct TimeDerivativeMutator {
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim, Frame::Grid>,
       gr::Tags::InverseSpacetimeMetric<double, Dim, Frame::Grid>,
       gr::Tags::TraceSpacetimeChristoffelSecondKind<double, Dim, Frame::Grid>,
-      Tags::ExcisionSphere<Dim>>;
+      Tags::ExcisionSphere<Dim>, ::Tags::Time,
+      CurvedScalarWave::Tags::BackgroundSpacetime<gr::Solutions::KerrSchild>>;
 
   static void apply(
       const gsl::not_null<Variables<
-          tmpl::list<::Tags::dt<Tags::Psi0>, ::Tags::dt<Tags::dtPsi0>>>*>
+          tmpl::list<::Tags::dt<Tags::Psi0>, ::Tags::dt<Tags::dtPsi0>,
+                     ::Tags::dt<Tags::Position>, ::Tags::dt<Tags::Velocity>>>*>
           dt_evolved_vars,
-      const Variables<tmpl::list<Tags::Psi0, Tags::dtPsi0>>& evolved_vars,
+      const Variables<tmpl::list<Tags::Psi0, Tags::dtPsi0, Tags::Position,
+                                 Tags::Velocity>>& evolved_vars,
       const Scalar<double>& psi_monopole,
       const tnsr::i<double, Dim, Frame::Grid>& psi_dipole,
       const tnsr::ii<double, Dim, Frame::Grid>& psi_quadrupole,
       const tnsr::i<double, Dim, Frame::Grid>& dt_psi_dipole,
       const tnsr::AA<double, Dim, Frame::Grid>& inverse_spacetime_metric,
       const tnsr::A<double, Dim, Frame::Grid>& trace_spacetime_christoffel,
-      const ExcisionSphere<Dim>& excision_sphere);
+      const ExcisionSphere<Dim>& excision_sphere, const double time,
+      const gr::Solutions::KerrSchild& kerr_schild);
 };
 
 namespace Actions {
 struct ComputeTimeDerivative {
   static constexpr size_t Dim = 3;
-  using variables_tag = ::Tags::Variables<tmpl::list<Tags::Psi0, Tags::dtPsi0>>;
+  using variables_tag = ::Tags::Variables<
+      tmpl::list<Tags::Psi0, Tags::dtPsi0, Tags::Position, Tags::Velocity>>;
   using dt_variables_tag = db::add_tag_prefix<::Tags::dt, variables_tag>;
   using simple_tags = tmpl::list<
       dt_variables_tag, variables_tag,

@@ -23,7 +23,8 @@ namespace CurvedScalarWave::Worldtube::Initialization {
  * which use the same time stepper.
  */
 struct InitializeEvolvedVariables {
-  using variables_tag = ::Tags::Variables<tmpl::list<Tags::Psi0, Tags::dtPsi0>>;
+  using variables_tag = ::Tags::Variables<
+      tmpl::list<Tags::Psi0, Tags::dtPsi0, Tags::Position, Tags::Velocity>>;
   using dt_variables_tag = db::add_tag_prefix<::Tags::dt, variables_tag>;
 
   using simple_tags =
@@ -37,10 +38,12 @@ struct InitializeEvolvedVariables {
   using mutable_global_cache_tags = tmpl::list<>;
   using argument_tags = tmpl::list<::Tags::TimeStepper<>>;
   static void apply(
-      const gsl::not_null<Variables<tmpl::list<Tags::Psi0, Tags::dtPsi0>>*>
+      const gsl::not_null<Variables<tmpl::list<
+          Tags::Psi0, Tags::dtPsi0, Tags::Position, Tags::Velocity>>*>
           evolved_vars,
       const gsl::not_null<Variables<
-          tmpl::list<::Tags::dt<Tags::Psi0>, ::Tags::dt<Tags::dtPsi0>>>*>
+          tmpl::list<::Tags::dt<Tags::Psi0>, ::Tags::dt<Tags::dtPsi0>,
+                     ::Tags::dt<Tags::Position>, ::Tags::dt<Tags::Velocity>>>*>
           dt_evolved_vars,
       const gsl::not_null<::Tags::HistoryEvolvedVariables<variables_tag>::type*>
           time_stepper_history,
@@ -52,6 +55,11 @@ struct InitializeEvolvedVariables {
             starting_order};
     evolved_vars->initialize(size_t(1), 0.);
     dt_evolved_vars->initialize(size_t(1), 0.);
+
+    get<Tags::Position>(*evolved_vars).get(0)[0] = 10.;
+    get<Tags::Velocity>(*evolved_vars).get(0)[0] = 0.0;
+    get<Tags::Velocity>(*evolved_vars).get(1)[0] =
+        0.3162277660168379331998893544;
   }
 };
 }  // namespace CurvedScalarWave::Worldtube::Initialization

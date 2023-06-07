@@ -12,6 +12,11 @@
 #include "NumericalAlgorithms/SphericalHarmonics/Tags.hpp"
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/GlobalCache.hpp"
+#include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/KerrSchild.hpp"
+#include "PointwiseFunctions/GeneralRelativity/Christoffel.hpp"
+#include "PointwiseFunctions/GeneralRelativity/DerivativesOfSpacetimeMetric.hpp"
+#include "PointwiseFunctions/GeneralRelativity/InverseSpacetimeMetric.hpp"
+#include "PointwiseFunctions/GeneralRelativity/SpacetimeMetric.hpp"
 #include "Time/Tags.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
@@ -20,16 +25,19 @@ namespace CurvedScalarWave::Worldtube {
 
 void TimeDerivativeMutator::apply(
     const gsl::not_null<Variables<
-        tmpl::list<::Tags::dt<Tags::Psi0>, ::Tags::dt<Tags::dtPsi0>>>*>
+        tmpl::list<::Tags::dt<Tags::Psi0>, ::Tags::dt<Tags::dtPsi0>,
+                   ::Tags::dt<Tags::Position>, ::Tags::dt<Tags::Velocity>>>*>
         dt_evolved_vars,
-    const Variables<tmpl::list<Tags::Psi0, Tags::dtPsi0>>& evolved_vars,
+    const Variables<tmpl::list<Tags::Psi0, Tags::dtPsi0, Tags::Position,
+                               Tags::Velocity>>& evolved_vars,
     const Scalar<double>& psi_monopole,
     const tnsr::i<double, Dim, Frame::Grid>& psi_dipole,
     const tnsr::ii<double, Dim, Frame::Grid>& psi_quadrupole,
     const tnsr::i<double, Dim, Frame::Grid>& dt_psi_dipole,
     const tnsr::AA<double, Dim, Frame::Grid>& inverse_spacetime_metric,
     const tnsr::A<double, Dim, Frame::Grid>& trace_spacetime_christoffel,
-    const ExcisionSphere<Dim>& excision_sphere) {
+    const ExcisionSphere<Dim>& excision_sphere, const double time,
+    const gr::Solutions::KerrSchild& kerr_schild) {
   const double wt_radius = excision_sphere.radius();
   const auto& psi0 = get(get<Tags::Psi0>(evolved_vars));
   const auto& dt_psi0 = get(get<Tags::dtPsi0>(evolved_vars));
@@ -50,6 +58,81 @@ void TimeDerivativeMutator::apply(
   dt2_psi0 -= 2. * trace_inverse_spatial_metric * (get(psi_monopole) - psi0) /
               (wt_radius * wt_radius);
   dt2_psi0 /= inverse_spacetime_metric.get(0, 0);
+  tnsr::I<double, 3> inertial_particle_position{};
+  tnsr::I<double, 3> particle_velocity{};
+  for (size_t i = 0; i < 3; ++i) {
+    inertial_particle_position.get(i) =
+        get<Tags::Position>(evolved_vars).get(i)[0];
+    particle_velocity.get(i) = get<Tags::Velocity>(evolved_vars).get(i)[0];
+  }
+
+  const auto spacetime_vars = kerr_schild.variables(
+
+      inertial_particle_position, time,
+      tmpl::list<
+          gr::Tags::Lapse<double>,
+          gr::Tags::Shift<double, Dim, Frame::Inertial>,
+          gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>,
+          gr::Tags::InverseSpatialMetric<double, Dim, Frame::Inertial>,
+          ::Tags::dt<gr::Tags::Lapse<double>>,
+          ::Tags::deriv<gr::Tags::Lapse<double>, tmpl::size_t<Dim>,
+                        Frame::Inertial>,
+          ::Tags::dt<gr::Tags::Shift<double, Dim, Frame::Inertial>>,
+          ::Tags::deriv<gr::Tags::Shift<double, Dim, Frame::Inertial>,
+                        tmpl::size_t<Dim>, Frame::Inertial>,
+          ::Tags::dt<gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>>,
+          ::Tags::deriv<gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>,
+                        tmpl::size_t<Dim>, Frame::Inertial>>{});
+  const auto inverse_spacetime_metric_inertial = gr::inverse_spacetime_metric(
+      get<gr::Tags::Lapse<double>>(spacetime_vars),
+      get<gr::Tags::Shift<double, Dim, Frame::Inertial>>(spacetime_vars),
+      get<gr::Tags::InverseSpatialMetric<double, Dim, Frame::Inertial>>(
+          spacetime_vars));
+  const auto d_spacetime_metric = gr::derivatives_of_spacetime_metric(
+      get<gr::Tags::Lapse<double>>(spacetime_vars),
+      get<::Tags::dt<gr::Tags::Lapse<double>>>(spacetime_vars),
+      get<::Tags::deriv<gr::Tags::Lapse<double>, tmpl::size_t<Dim>,
+                        Frame::Inertial>>(spacetime_vars),
+      get<gr::Tags::Shift<double, Dim, Frame::Inertial>>(spacetime_vars),
+      get<::Tags::dt<gr::Tags::Shift<double, Dim, Frame::Inertial>>>(
+          spacetime_vars),
+      get<::Tags::deriv<gr::Tags::Shift<double, Dim, Frame::Inertial>,
+                        tmpl::size_t<Dim>, Frame::Inertial>>(spacetime_vars),
+      get<gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>>(
+          spacetime_vars),
+      get<::Tags::dt<gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>>>(
+          spacetime_vars),
+      get<::Tags::deriv<gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>,
+                        tmpl::size_t<Dim>, Frame::Inertial>>(spacetime_vars));
+
+  const auto christoffel = gr::christoffel_second_kind(
+      d_spacetime_metric, inverse_spacetime_metric_inertial);
+
+  tnsr::I<double, Dim> particle_acceleration{};
+  for (size_t i = 0; i < Dim; ++i) {
+    particle_acceleration.get(i) =
+        particle_velocity.get(i) * christoffel.get(0, 0, 0) -
+        christoffel.get(i + 1, 0, 0);
+    for (size_t j = 0; j < Dim; ++j) {
+      particle_acceleration.get(i) +=
+          2. * particle_velocity.get(j) *
+          (particle_velocity.get(i) * christoffel.get(0, j + 1, 0) -
+           christoffel.get(i + 1, j + 1, 0));
+      for (size_t k = 0; k < Dim; ++k) {
+        particle_acceleration.get(i) +=
+            particle_velocity.get(j) * particle_velocity.get(k) *
+            (particle_velocity.get(i) * christoffel.get(0, j + 1, k + 1) -
+             christoffel.get(i + 1, j + 1, k + 1));
+      }
+    }
+  }
+
+  for (size_t i = 0; i < Dim; ++i) {
+    get<::Tags::dt<Tags::Position>>(*dt_evolved_vars).get(i)[0] =
+        get<Tags::Velocity>(evolved_vars).get(i)[0];
+    get<::Tags::dt<Tags::Velocity>>(*dt_evolved_vars).get(i)[0] =
+        particle_acceleration.get(i);
+  }
 }
 
 }  // namespace CurvedScalarWave::Worldtube

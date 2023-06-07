@@ -57,7 +57,6 @@ struct UpdateFunctionsOfTime {
     const auto& functions_of_time =
         Parallel::get<::domain::Tags::FunctionsOfTime>(cache);
     const auto& excision_sphere = db::get<Tags::ExcisionSphere<Dim>>(box);
-    const auto& maps = Parallel::get<Tags::WorldtubeCoordinateMaps>(cache);
     const std::string rot_function_of_time_name = "Rotation";
     const std::string expansion_fot_name = "Expansion";
     const std::string size_a_fot_name = "SizeA";
@@ -68,18 +67,18 @@ struct UpdateFunctionsOfTime {
     const double current_fot_expiration_time =
         rot_function_of_time->time_bounds()[1];
     if (time > current_fot_expiration_time) {
-      const auto& inertial_particle_position =
-          maps(excision_sphere.center(), db::get<Tags::PreviousTime>(box),
-               functions_of_time);
-      const auto& particle_velocity =
-          std::get<3>(maps.coords_frame_velocity_jacobians(
-              excision_sphere.center(), db::get<Tags::PreviousTime>(box),
-              functions_of_time));
-      const auto& kerr_schild =
+      const auto& inertial_particle_position = db::get<Tags::Position>(box);
+      tnsr::I<double, Dim> particle_pos_double{};
+      particle_pos_double.get(0) = inertial_particle_position.get(0)[0];
+      particle_pos_double.get(1) = inertial_particle_position.get(1)[0];
+      particle_pos_double.get(2) = inertial_particle_position.get(2)[0];
+
+      const auto& particle_velocity = db::get<Tags::Velocity>(box);
+      const gr::Solutions::KerrSchild& kerr_schild =
           db::get<CurvedScalarWave::Tags::BackgroundSpacetime<
               gr::Solutions::KerrSchild>>(box);
       const auto spacetime_vars = kerr_schild.variables(
-          inertial_particle_position, time,
+          particle_pos_double, time,
           tmpl::list<
               gr::Tags::Lapse<double>,
               gr::Tags::Shift<double, Dim, Frame::Inertial>,
@@ -95,72 +94,27 @@ struct UpdateFunctionsOfTime {
               ::Tags::deriv<
                   gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>,
                   tmpl::size_t<Dim>, Frame::Inertial>>{});
-      const auto inverse_spacetime_metric = gr::inverse_spacetime_metric(
-          get<gr::Tags::Lapse<double>>(spacetime_vars),
-          get<gr::Tags::Shift<double, Dim, Frame::Inertial>>(spacetime_vars),
-          get<gr::Tags::InverseSpatialMetric<double, Dim, Frame::Inertial>>(
-              spacetime_vars));
-      const auto d_spacetime_metric = gr::derivatives_of_spacetime_metric(
-          get<gr::Tags::Lapse<double>>(spacetime_vars),
-          get<::Tags::dt<gr::Tags::Lapse<double>>>(spacetime_vars),
-          get<::Tags::deriv<gr::Tags::Lapse<double>, tmpl::size_t<Dim>,
-                            Frame::Inertial>>(spacetime_vars),
-          get<gr::Tags::Shift<double, Dim, Frame::Inertial>>(spacetime_vars),
-          get<::Tags::dt<gr::Tags::Shift<double, Dim, Frame::Inertial>>>(
-              spacetime_vars),
-          get<::Tags::deriv<gr::Tags::Shift<double, Dim, Frame::Inertial>,
-                            tmpl::size_t<Dim>, Frame::Inertial>>(
-              spacetime_vars),
-          get<gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>>(
-              spacetime_vars),
-          get<::Tags::dt<
-              gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>>>(
-              spacetime_vars),
-          get<::Tags::deriv<
-              gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>,
-              tmpl::size_t<Dim>, Frame::Inertial>>(spacetime_vars));
 
-      const auto christoffel = gr::christoffel_second_kind(
-          d_spacetime_metric, inverse_spacetime_metric);
-
-      tnsr::I<double, Dim> particle_acceleration{};
-      for (size_t i = 0; i < Dim; ++i) {
-        particle_acceleration.get(i) =
-            particle_velocity.get(i) * christoffel.get(0, 0, 0) -
-            christoffel.get(i + 1, 0, 0);
-        for (size_t j = 0; j < Dim; ++j) {
-          particle_acceleration.get(i) +=
-              2. * particle_velocity.get(j) *
-              (particle_velocity.get(i) * christoffel.get(0, j + 1, 0) -
-               christoffel.get(i + 1, j + 1, 0));
-          for (size_t k = 0; k < Dim; ++k) {
-            particle_acceleration.get(i) +=
-                particle_velocity.get(j) * particle_velocity.get(k) *
-                (particle_velocity.get(i) * christoffel.get(0, j + 1, k + 1) -
-                 christoffel.get(i + 1, j + 1, k + 1));
-          }
-        }
-      }
-      const double& x = get<0>(inertial_particle_position);
-      const double& y = get<1>(inertial_particle_position);
-      const double& xdot = get<0>(particle_velocity);
-      const double& ydot = get<1>(particle_velocity);
-      const double& xddot = get<0>(particle_acceleration);
-      const double& yddot = get<1>(particle_acceleration);
+      const double& x = get<0>(inertial_particle_position)[0];
+      const double& y = get<1>(inertial_particle_position)[0];
+      const double& xdot = get<0>(particle_velocity)[0];
+      const double& ydot = get<1>(particle_velocity)[0];
       const double r = hypot(x, y);
-      const double radial_acc =
-          (xddot * x + yddot * y + xdot * xdot + ydot * ydot) / r -
-          square(xdot * x + ydot * y) / cube(r);
-      const double angular_acc = (x * yddot - y * xddot) / square(r) -
-                                 2. * (x * xdot + y * ydot) *
-                                     (x * ydot - y * xdot) / square(square(r));
-      DataVector new_angular_acc(3, 0.);
-      new_angular_acc.at(2) = angular_acc;
+      const double angle = atan2(y, x);
+      const double radial_vel = (xdot * x + ydot * y) / r;
+      const double angular_vel = (x * ydot - y * xdot) / square(r);
+      const double radial_acc = 0.;
+      const double angular_acc = 0.;
 
       const double envelope_radius = 50.;
-      const double expansion_acc =
-          -10. * radial_acc * sqrt(4. * M_PI) * envelope_radius;
-
+      const double grid_radius_particle = 10.;
+      const double expansion_acc = -radial_acc * sqrt(4. * M_PI) *
+                                   envelope_radius / grid_radius_particle;
+      Parallel::printf(MakeString{}
+                       << "Position: " << get_output(inertial_particle_position)
+                       << "\n");
+      Parallel::printf(MakeString{} << "Acceleration " << radial_vel << ",   "
+                                    << angular_vel << "\n");
       const auto& expansion_fot = functions_of_time.at(expansion_fot_name);
       const double object_radius = 1.;
 
@@ -175,9 +129,48 @@ struct UpdateFunctionsOfTime {
           (expansion_acc + 2. * square(expansion_vals.at(1)[0]) * fac_1 /
                                sqrt_4_pi / envelope_radius);
 
-      DataVector new_expansion_acc(1, expansion_acc);
-      DataVector new_compression_acc_b(1, compression_acc);
-      DataVector new_compression_acc_a(1, compression_acc);
+      const auto spacetime_metric = gr::spacetime_metric(
+          get<gr::Tags::Lapse<double>>(spacetime_vars),
+          get<gr::Tags::Shift<double, Dim, Frame::Inertial>>(spacetime_vars),
+          get<gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>>(
+              spacetime_vars));
+      double u0 = spacetime_metric.get(0, 0);
+      for (size_t i = 0; i < Dim; ++i) {
+        u0 += 2. * spacetime_metric.get(0, i + 1) * particle_velocity.get(i)[0];
+        for (size_t j = 0; j < Dim; ++j) {
+          u0 += spacetime_metric.get(j + 1, i + 1) *
+                particle_velocity.get(i)[0] * particle_velocity.get(j)[0];
+        }
+      }
+      u0 = sqrt(-1. / u0);
+
+      const double energy = (1. - 2. / r) * u0;
+      const double ang_mom = r * r * angular_vel * u0;
+
+      Parallel::printf(MakeString{} << "Energy: " << energy
+                                    << ", ang mom: " << ang_mom << "\n");
+
+      DataVector new_expansion_acc(3, 0.);
+      DataVector new_compression_acc_b(3, 0.);
+      DataVector new_compression_acc_a(3, 0.);
+      DataVector new_angular_acc(3, 0.);
+
+      new_angular_acc.at(0) = angle;
+      new_angular_acc.at(1) = angular_vel;
+      new_expansion_acc.at(0) =
+          (1 - r / grid_radius_particle) * sqrt_4_pi * envelope_radius;
+      new_expansion_acc.at(1) =
+          -radial_vel / grid_radius_particle * sqrt_4_pi * envelope_radius;
+
+      new_compression_acc_a.at(0) =
+          (1. - 1. / (1. - new_expansion_acc.at(0) /
+                               (sqrt_4_pi * envelope_radius))) *
+          sqrt_4_pi * object_radius;
+      new_compression_acc_a.at(1) =
+          object_radius / envelope_radius * new_expansion_acc.at(1) /
+          square(1. - new_expansion_acc.at(0) / (sqrt_4_pi * envelope_radius));
+      new_compression_acc_b.at(0) = new_compression_acc_a.at(0);
+      new_compression_acc_b.at(1) = new_compression_acc_a.at(1);
 
       const double new_fot_expiration_time = time + time_step.value() * 0.5;
 

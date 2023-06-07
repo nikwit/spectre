@@ -387,5 +387,13 @@ struct dtPsi0 : db::SimpleTag {
   using type = Scalar<DataVector>;
 };
 
+struct Position : db::SimpleTag {
+  using type = tnsr::I<DataVector, 3>;
+};
+
+struct Velocity : db::SimpleTag {
+  using type = tnsr::I<DataVector, 3>;
+};
+
 }  // namespace Tags
 }  // namespace CurvedScalarWave::Worldtube
