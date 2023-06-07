@@ -16,6 +16,7 @@
 #include "Domain/CoordinateMaps/CoordinateMap.hpp"
 #include "Domain/CoordinateMaps/Identity.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/CubicScale.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/ProductMaps.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/Rotation.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/SphericalCompression.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
@@ -74,7 +75,11 @@ struct TimeDependentMapOptions {
   using ExpansionCompressionMap =
       domain::CoordinateMaps::TimeDependent::SphericalCompression<
           ExpansionInterior>;
-  using RotationMap3D = domain::CoordinateMaps::TimeDependent::Rotation<3>;
+  using RotationMap2D = CoordinateMaps::TimeDependent::Rotation<2>;
+  using IdentityMap1D = CoordinateMaps::Identity<1>;
+  using RotationMap3D =
+      CoordinateMaps::TimeDependent::ProductOf2Maps<RotationMap2D,
+                                                    IdentityMap1D>;
   using CompressionMap =
       domain::CoordinateMaps::TimeDependent::SphericalCompression<false>;
 
