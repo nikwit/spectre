@@ -184,6 +184,27 @@ struct WorldtubeCoordinateMaps : db::SimpleTag {
   }
 };
 
+struct InitialPositionAndVelocity : db::SimpleTag {
+  using type = std::array<tnsr::I<double, 3, Frame::Inertial>, 2>;
+  using option_tags =
+      tmpl::list<domain::OptionTags::DomainCreator<3>,
+                 OptionTags::ExcisionSphere, ::OptionTags::InitialTime>;
+  static constexpr bool pass_metavariables = false;
+  static type create_from_options(
+      const std::unique_ptr<::DomainCreator<3>>& domain_creator,
+      const std::string& excision_sphere_name, const double initial_time) {
+    const auto domain = domain_creator->create_domain();
+    const auto& cube_block = domain.blocks()[7];
+    const auto& maps = cube_block.moving_mesh_grid_to_inertial_map();
+    const auto initial_fot = domain_creator->functions_of_time();
+    const auto& excision_sphere =
+        domain.excision_spheres().at(excision_sphere_name);
+    const auto mapped_tuple = maps.coords_frame_velocity_jacobians(
+        excision_sphere.center(), initial_time, initial_fot);
+    return {std::get<0>(mapped_tuple), std::get<3>(mapped_tuple)};
+  }
+};
+
 /*!
  * \brief Triggers at which to write the coefficients of the worldtube's
  * internal Taylor series to file.
