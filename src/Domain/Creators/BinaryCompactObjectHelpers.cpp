@@ -13,12 +13,12 @@
 #include "DataStructures/DataVector.hpp"
 #include "Domain/CoordinateMaps/CoordinateMap.hpp"
 #include "Domain/CoordinateMaps/CoordinateMap.tpp"
+#include "Domain/CoordinateMaps/TimeDependent/ProductMaps.tpp"
 #include "Domain/FunctionsOfTime/FixedSpeedCubic.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "Domain/FunctionsOfTime/IntegratedFoT.hpp"
 #include "Domain/FunctionsOfTime/PiecewisePolynomial.hpp"
 #include "Domain/FunctionsOfTime/QuaternionFunctionOfTime.hpp"
-
 #include "NumericalAlgorithms/SphericalHarmonics/YlmSpherepack.hpp"
 #include "Options/Options.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
@@ -86,11 +86,9 @@ TimeDependentMapOptions::create_functions_of_time(
   // we don't need to.
   result[rotation_name] = std::make_unique<FunctionsOfTime::IntegratedFoT>(
       initial_time_,
-      std::array<DataVector, 3>{{{3, 0.0},
-                                 {gsl::at(initial_angular_velocity_, 0),
-                                  gsl::at(initial_angular_velocity_, 1),
-                                  gsl::at(initial_angular_velocity_, 2)},
-                                 {3, 0.0}}},
+      std::array<DataVector, 3>{{{1, 0.0},
+                                 {gsl::at(initial_angular_velocity_, 2)},
+                                 {1, 0.0}}},
       expiration_times.at(rotation_name));
 
   // CompressionMap FunctionOfTime for objects A and B
