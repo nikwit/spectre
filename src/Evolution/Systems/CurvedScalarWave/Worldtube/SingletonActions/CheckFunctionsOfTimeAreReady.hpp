@@ -70,11 +70,11 @@ struct CheckFunctionsOfTimeAreReady {
 
               return std::unique_ptr<Parallel::Callback>{};
             });
-    Parallel::printf(MakeString{}
+    /*Parallel::printf(MakeString{}
                      << "Worldtube "
                      << (is_ready ? " functions of time are ready"
                                   : " functions of time are NOT ready")
-                     << "\n");
+                     << "\n");*/
     if (is_ready) {
       ::Initialization::mutate_assign<simple_tags>(make_not_null(&box),
                                                    db::get<::Tags::Time>(box));

@@ -66,9 +66,9 @@ struct ObserveWorldtubeSolution {
                      gr::Tags::Shift<double, Dim, Frame::Inertial>,
                      gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>>{});
 
-      Parallel::printf(MakeString{}
-                       << "Position: " << get_output(inertial_particle_position)
-                       << "\n");
+      Parallel::printf(
+          MakeString{} << "Time: " << db::get<::Tags::Time>(box) <<
+          ", position: " << get_output(inertial_particle_position) << "\n");
 
       const auto spacetime_metric = gr::spacetime_metric(
           get<gr::Tags::Lapse<double>>(spacetime_vars),
@@ -104,7 +104,8 @@ struct ObserveWorldtubeSolution {
         }
       }
 
-      Parallel::printf(MakeString{} << "Energy: " << energy
+      Parallel::printf(MakeString{} << std::setprecision(16)
+                                    << "Energy: " << energy
                                     << ", ang mom: " << ang_mom << "\n");
 
       const size_t expansion_order = db::get<Tags::ExpansionOrder>(box);

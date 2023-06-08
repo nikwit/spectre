@@ -113,9 +113,9 @@ struct UpdateFunctionsOfTime {
 
       const double new_fot_expiration_time = time + time_step.value() * 0.5;
 
-      Parallel::printf(MakeString{} << "Mutating Time from "
+      /*Parallel::printf(MakeString{} << "Mutating Time from "
                                     << current_fot_expiration_time << " to "
-                                    << new_fot_expiration_time << "\n");
+                                    << new_fot_expiration_time << "\n");*/
       Parallel::mutate<::domain::Tags::FunctionsOfTime,
                        control_system::UpdateFunctionOfTime>(
           cache, rot_function_of_time_name, current_fot_expiration_time,
