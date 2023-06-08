@@ -20,6 +20,8 @@
 #include "NumericalAlgorithms/SphericalHarmonics/Tags.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "Parallel/Reduction.hpp"
+#include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/KerrSchild.hpp"
+#include "PointwiseFunctions/GeneralRelativity/SpacetimeMetric.hpp"
 #include "Utilities/ConstantExpressions.hpp"
 #include "Utilities/TMPL.hpp"
 #include "Utilities/TaggedTuple.hpp"
@@ -48,6 +50,63 @@ struct ObserveWorldtubeSolution {
       const ArrayIndex& /*array_index*/, const ActionList /*meta*/,
       const ParallelComponent* const /*meta*/) {
     if (db::get<Tags::ObserveCoefficientsTrigger>(box).is_triggered(box)) {
+      const auto& inertial_particle_position = db::get<Tags::Position>(box);
+      tnsr::I<double, Dim> particle_pos_double{};
+      particle_pos_double.get(0) = inertial_particle_position.get(0)[0];
+      particle_pos_double.get(1) = inertial_particle_position.get(1)[0];
+      particle_pos_double.get(2) = inertial_particle_position.get(2)[0];
+
+      const auto& particle_velocity = db::get<Tags::Velocity>(box);
+      const gr::Solutions::KerrSchild& kerr_schild =
+          db::get<CurvedScalarWave::Tags::BackgroundSpacetime<
+              gr::Solutions::KerrSchild>>(box);
+      const auto spacetime_vars = kerr_schild.variables(
+          particle_pos_double, db::get<::Tags::Time>(box),
+          tmpl::list<gr::Tags::Lapse<double>,
+                     gr::Tags::Shift<double, Dim, Frame::Inertial>,
+                     gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>>{});
+
+      Parallel::printf(MakeString{}
+                       << "Position: " << get_output(inertial_particle_position)
+                       << "\n");
+
+      const auto spacetime_metric = gr::spacetime_metric(
+          get<gr::Tags::Lapse<double>>(spacetime_vars),
+          get<gr::Tags::Shift<double, Dim, Frame::Inertial>>(spacetime_vars),
+          get<gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>>(
+              spacetime_vars));
+      double u0 = spacetime_metric.get(0, 0);
+      for (size_t i = 0; i < Dim; ++i) {
+        u0 += 2. * spacetime_metric.get(0, i + 1) * particle_velocity.get(i)[0];
+        for (size_t j = 0; j < Dim; ++j) {
+          u0 += spacetime_metric.get(j + 1, i + 1) *
+                particle_velocity.get(i)[0] * particle_velocity.get(j)[0];
+        }
+      }
+      u0 = sqrt(-1. / u0);
+
+      const std::array<double, 4> time_killing{1., 0., 0., 0.};
+      const std::array<double, 4> rot_killing{0., -particle_pos_double.get(1),
+                                              particle_pos_double.get(0), 0.};
+      const std::array<double, 4> four_velocity{
+          u0, particle_velocity.get(0)[0] * u0,
+          particle_velocity.get(1)[0] * u0, particle_velocity.get(2)[0] * u0};
+
+      double ang_mom = 0.;
+      double energy = 0.;
+
+      for (size_t i = 0; i < Dim; ++i) {
+        for (size_t j = 0; j < Dim; ++j) {
+          energy += spacetime_metric.get(i, j) * four_velocity.at(i) *
+                    time_killing.at(j);
+          ang_mom += spacetime_metric.get(i, j) * four_velocity.at(i) *
+                     rot_killing.at(j);
+        }
+      }
+
+      Parallel::printf(MakeString{} << "Energy: " << energy
+                                    << ", ang mom: " << ang_mom << "\n");
+
       const size_t expansion_order = db::get<Tags::ExpansionOrder>(box);
       const auto& psi_monopole = db::get<
           Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Grid>>(box);
