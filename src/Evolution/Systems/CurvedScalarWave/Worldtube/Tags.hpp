@@ -13,6 +13,7 @@
 #include "DataStructures/DataBox/Tag.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Variables.hpp"
+#include "Domain/Creators/BinaryCompactObject.hpp"
 #include "Domain/Creators/DomainCreator.hpp"
 #include "Domain/Creators/OptionTags.hpp"
 #include "Domain/Domain.hpp"
@@ -202,6 +203,19 @@ struct InitialPositionAndVelocity : db::SimpleTag {
     const auto mapped_tuple = maps.coords_frame_velocity_jacobians(
         excision_sphere.center(), initial_time, initial_fot);
     return {std::get<0>(mapped_tuple), std::get<3>(mapped_tuple)};
+  }
+};
+
+struct EnvelopeAndObjectRadii : db::SimpleTag {
+  using type = std::array<double, 3>;
+  using option_tags = tmpl::list<domain::OptionTags::DomainCreator<3>>;
+  static constexpr bool pass_metavariables = false;
+  static type create_from_options(
+      const std::unique_ptr<::DomainCreator<3>>& domain_creator) {
+    const auto* bco_domain_creator =
+        dynamic_cast<domain::creators::BinaryCompactObject*>(&*domain_creator);
+    ASSERT(bco_domain_creator, "null cast!");
+    return bco_domain_creator->get_envelope_and_object_radii();
   }
 };
 

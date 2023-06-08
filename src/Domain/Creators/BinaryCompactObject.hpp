@@ -503,6 +503,11 @@ class BinaryCompactObject : public DomainCreator<3> {
           std::string,
           std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>> override;
 
+  std::array<double, 3> get_envelope_and_object_radii() const {
+    return {envelope_radius_, std::get<Object>(object_A_).inner_radius,
+            std::get<Object>(object_B_).inner_radius};
+  }
+
  private:
   typename ObjectA::type object_A_{};
   typename ObjectB::type object_B_{};
