@@ -33,10 +33,12 @@ struct InitializeEvolvedVariables {
   using return_tags = simple_tags;
 
   using compute_tags = tmpl::list<>;
-  using simple_tags_from_options = tmpl::list<>;
+  using simple_tags_from_options = tmpl::list<Tags::InitialPositionAndVelocity,
+                                              Tags::EnvelopeAndObjectRadii>;
   using const_global_cache_tags = tmpl::list<>;
   using mutable_global_cache_tags = tmpl::list<>;
-  using argument_tags = tmpl::list<::Tags::TimeStepper<>>;
+  using argument_tags =
+      tmpl::list<::Tags::TimeStepper<>, Tags::InitialPositionAndVelocity>;
   static void apply(
       const gsl::not_null<Variables<tmpl::list<
           Tags::Psi0, Tags::dtPsi0, Tags::Position, Tags::Velocity>>*>
@@ -47,7 +49,8 @@ struct InitializeEvolvedVariables {
           dt_evolved_vars,
       const gsl::not_null<::Tags::HistoryEvolvedVariables<variables_tag>::type*>
           time_stepper_history,
-      const TimeStepper& time_stepper) {
+      const TimeStepper& time_stepper,
+      const std::array<tnsr::I<double, 3>, 2>& initial_pos_and_vel) {
     const size_t starting_order =
         time_stepper.number_of_past_steps() == 0 ? time_stepper.order() : 1;
     *time_stepper_history =
@@ -55,11 +58,12 @@ struct InitializeEvolvedVariables {
             starting_order};
     evolved_vars->initialize(size_t(1), 0.);
     dt_evolved_vars->initialize(size_t(1), 0.);
-
-    get<Tags::Position>(*evolved_vars).get(0)[0] = 10.;
-    get<Tags::Velocity>(*evolved_vars).get(0)[0] = 0.0;
-    get<Tags::Velocity>(*evolved_vars).get(1)[0] =
-        0.3162277660168379331998893544;
+    for (size_t i = 0; i < 3; ++i) {
+      get<Tags::Position>(*evolved_vars).get(i)[0] =
+          initial_pos_and_vel.at(0).get(i);
+      get<Tags::Velocity>(*evolved_vars).get(i)[0] =
+          initial_pos_and_vel.at(1).get(i);
+    }
   }
 };
 }  // namespace CurvedScalarWave::Worldtube::Initialization
