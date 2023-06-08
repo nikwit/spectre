@@ -86,12 +86,8 @@ class IntegratedFoT : public FunctionOfTime {
   // There exists a DataVector for each deriv order that contains
   // the values of that deriv order for all components.
   using value_type = std::array<DataVector, 3>;
-
-  std::vector<double> times_{};
-  std::array<DataVector, 3> values_{};
+  std::vector<FunctionOfTimeHelpers::StoredInfo<3>> deriv_info_at_update_times_;
   double expiration_time_{std::numeric_limits<double>::lowest()};
-  std::vector<FunctionOfTimeHelpers::StoredInfo<3>>
-      deriv_info_at_update_times_;
 };
 
 bool operator!=(const IntegratedFoT& lhs, const IntegratedFoT& rhs);
