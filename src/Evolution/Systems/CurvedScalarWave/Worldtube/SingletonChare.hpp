@@ -97,10 +97,9 @@ struct WorldtubeSingleton {
           tmpl::list<observers::Actions::RegisterSingletonWithObserverWriter<
                          Registration>,
                      Parallel::Actions::TerminatePhase>>,
-      Parallel::PhaseActions<
-          Parallel::Phase::Evolve,
-          tmpl::list<step_actions, Actions::ObserveWorldtubeSolution,
-                     ::Actions::AdvanceTime>>>;
+      Parallel::PhaseActions<Parallel::Phase::Evolve,
+                             tmpl::list<Actions::ObserveWorldtubeSolution,
+                                        step_actions, ::Actions::AdvanceTime>>>;
 
   using simple_tags_from_options = Parallel::get_simple_tags_from_options<
       Parallel::get_initialization_actions_list<phase_dependent_action_list>>;
