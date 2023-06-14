@@ -19,6 +19,7 @@
 #include "IO/Observer/TypeOfObservation.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/Tags.hpp"
 #include "Parallel/GlobalCache.hpp"
+#include "Parallel/Printf.hpp"
 #include "Parallel/Reduction.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/KerrSchild.hpp"
 #include "PointwiseFunctions/GeneralRelativity/SpacetimeMetric.hpp"
@@ -65,10 +66,6 @@ struct ObserveWorldtubeSolution {
           tmpl::list<gr::Tags::Lapse<double>,
                      gr::Tags::Shift<double, Dim, Frame::Inertial>,
                      gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>>{});
-
-      Parallel::printf(
-          MakeString{} << "Time: " << db::get<::Tags::Time>(box) <<
-          ", position: " << get_output(inertial_particle_position) << "\n");
 
       const auto spacetime_metric = gr::spacetime_metric(
           get<gr::Tags::Lapse<double>>(spacetime_vars),
@@ -125,7 +122,10 @@ struct ObserveWorldtubeSolution {
       psi_coefs[0] = expansion_order < 2 ? get(psi_monopole) : get(psi_0)[0];
       psi_coefs[num_coefs] =
           expansion_order < 2 ? get(dt_psi_monopole) : get(dt_psi_0)[0];
-
+      Parallel::printf(MakeString{}
+                       << "Time: " << db::get<::Tags::Time>(box)
+                       << ", field value: " << psi_coefs[0] << ", position: "
+                       << get_output(inertial_particle_position) << "\n");
       if (expansion_order > 0) {
         const auto& psi_dipole = db::get<
             Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>>(box);
