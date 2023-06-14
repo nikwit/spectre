@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <deque>
 #include <limits>
 #include <memory>
 #include <ostream>
@@ -86,7 +87,7 @@ class IntegratedFoT : public FunctionOfTime {
   // There exists a DataVector for each deriv order that contains
   // the values of that deriv order for all components.
   using value_type = std::array<DataVector, 3>;
-  std::vector<FunctionOfTimeHelpers::StoredInfo<3>> deriv_info_at_update_times_;
+  std::deque<FunctionOfTimeHelpers::StoredInfo<3>> deriv_info_at_update_times_;
   double expiration_time_{std::numeric_limits<double>::lowest()};
 };
 

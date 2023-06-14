@@ -98,6 +98,9 @@ void IntegratedFoT::update(
     func[i][0] = updated_max_deriv[i];
   }
   deriv_info_at_update_times_.emplace_back(time_of_update, std::move(func));
+  if (deriv_info_at_update_times_.size() > 100) {
+    deriv_info_at_update_times_.pop_front();
+  }
 }
 
 void IntegratedFoT::reset_expiration_time(const double next_expiration_time) {

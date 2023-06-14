@@ -3,6 +3,7 @@
 
 #include "Domain/FunctionsOfTime/FunctionOfTimeHelpers.hpp"
 
+#include <deque>
 #include <pup.h>
 #include <pup_stl.h>
 
@@ -66,11 +67,43 @@ const StoredInfo<MaxDerivPlusOne, StoreCoefs>& stored_info_from_upper_bound(
          "Vector of StoredInfos you are trying to access is empty. Was it "
          "constructed properly?");
 
-  const auto upper_bound_stored_info = std::lower_bound(
-      all_stored_infos.begin(), all_stored_infos.end(), t,
-      [](const StoredInfo<MaxDerivPlusOne, StoreCoefs>& d, double t0) {
-        return d.time < t0;
-      });
+  const auto upper_bound_stored_info =
+      std::lower_bound(all_stored_infos.begin(), all_stored_infos.end(), t,
+                       [](const StoredInfo<MaxDerivPlusOne, StoreCoefs>& d,
+                          double t0) { return d.time < t0; });
+
+  if (upper_bound_stored_info == all_stored_infos.begin()) {
+    // all elements of times are greater than t
+    // check if t is just less than the min element by roundoff
+    if (not equal_within_roundoff(upper_bound_stored_info->time, t)) {
+      ERROR("requested time " << t << " precedes earliest time "
+                              << all_stored_infos.begin()->time
+                              << " of times.");
+    }
+    return *upper_bound_stored_info;
+  }
+  // t is either greater than all elements of times
+  // or t is within the range of times.
+  // In both cases, 'upper_bound_deriv_info' currently points to one index past
+  // the desired index.
+  return *std::prev(upper_bound_stored_info, 1);
+}
+
+template <size_t MaxDerivPlusOne, bool StoreCoefs>
+const StoredInfo<MaxDerivPlusOne, StoreCoefs>& stored_info_from_upper_bound(
+    const double t, const std::deque<StoredInfo<MaxDerivPlusOne, StoreCoefs>>&
+                        all_stored_infos) {
+  // this function assumes that the times in stored_info_at_update_times is
+  // sorted, which is enforced by the update function of a piecewise polynomial.
+
+  ASSERT(not all_stored_infos.empty(),
+         "Vector of StoredInfos you are trying to access is empty. Was it "
+         "constructed properly?");
+
+  const auto upper_bound_stored_info =
+      std::lower_bound(all_stored_infos.begin(), all_stored_infos.end(), t,
+                       [](const StoredInfo<MaxDerivPlusOne, StoreCoefs>& d,
+                          double t0) { return d.time < t0; });
 
   if (upper_bound_stored_info == all_stored_infos.begin()) {
     // all elements of times are greater than t
@@ -115,7 +148,7 @@ std::ostream& operator<<(std::ostream& os,
   for (size_t i = 0; i < MaxDerivPlusOne - 1; ++i) {
     os << gsl::at(info.stored_quantities, i) << " ";
   }
-  os << info.stored_quantities[MaxDerivPlusOne -1 ];
+  os << info.stored_quantities[MaxDerivPlusOne - 1];
   return os;
 }
 
@@ -139,11 +172,15 @@ GENERATE_INSTANTIATIONS(INSTANTIATE, (1, 2, 3, 4, 5), (true, false))
 
 #undef INSTANTIATE
 
-#define INSTANTIATE(_, data)                             \
-  template const StoredInfo<DIM(data), STORECOEF(data)>& \
-  stored_info_from_upper_bound(                          \
-      const double,                                      \
-      const std::vector<StoredInfo<DIM(data), STORECOEF(data)>>&);
+#define INSTANTIATE(_, data)                                       \
+  template const StoredInfo<DIM(data), STORECOEF(data)>&           \
+  stored_info_from_upper_bound(                                    \
+      const double,                                                \
+      const std::vector<StoredInfo<DIM(data), STORECOEF(data)>>&); \
+  template const StoredInfo<DIM(data), STORECOEF(data)>&           \
+  stored_info_from_upper_bound(                                    \
+      const double,                                                \
+      const std::deque<StoredInfo<DIM(data), STORECOEF(data)>>&);
 
 GENERATE_INSTANTIATIONS(INSTANTIATE, (1, 2, 3, 4, 5), (true, false))
 

@@ -69,6 +69,11 @@ const StoredInfo<MaxDerivPlusOne, StoreCoefs>& stored_info_from_upper_bound(
                         all_stored_infos);
 
 template <size_t MaxDerivPlusOne, bool StoreCoefs>
+const StoredInfo<MaxDerivPlusOne, StoreCoefs>& stored_info_from_upper_bound(
+    const double t, const std::deque<StoredInfo<MaxDerivPlusOne, StoreCoefs>>&
+                        all_stored_infos);
+
+template <size_t MaxDerivPlusOne, bool StoreCoefs>
 bool operator==(
     const domain::FunctionsOfTime::FunctionOfTimeHelpers::StoredInfo<
         MaxDerivPlusOne, StoreCoefs>& lhs,
