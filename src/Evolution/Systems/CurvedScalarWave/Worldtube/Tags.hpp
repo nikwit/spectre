@@ -337,7 +337,7 @@ struct PunctureField : db::SimpleTag {
                     Frame::Inertial>>>>;
 };
 
-struct PreviousTime : db::SimpleTag {
+struct ExpirationTime : db::SimpleTag {
   using type = double;
 };
 

@@ -36,13 +36,15 @@ struct InitializeSpacetimeTags {
   using argument_tags = tmpl::list<Tags::ExcisionSphere<Dim>>;
   using simple_tags = tmpl::list<
       gr::Tags::InverseSpacetimeMetric<double, Dim, Frame::Grid>,
-      gr::Tags::TraceSpacetimeChristoffelSecondKind<double, Dim, Frame::Grid>>;
+      gr::Tags::TraceSpacetimeChristoffelSecondKind<double, Dim, Frame::Grid>,
+      Tags::ExpirationTime>;
   using return_tags = simple_tags;
 
   static void apply(const gsl::not_null<tnsr::AA<double, Dim, Frame::Grid>*>
                         inverse_spacetime_metric,
                     const gsl::not_null<tnsr::A<double, Dim, Frame::Grid>*>
                         trace_spacetime_christoffel,
+                    const gsl::not_null<double*> expiration_time,
                     const ExcisionSphere<Dim>& excision_sphere);
 };
 }  // namespace CurvedScalarWave::Worldtube::Initialization

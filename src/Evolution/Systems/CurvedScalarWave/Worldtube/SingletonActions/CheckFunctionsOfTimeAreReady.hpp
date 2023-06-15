@@ -35,7 +35,6 @@ namespace CurvedScalarWave::Worldtube::Actions {
 struct CheckFunctionsOfTimeAreReady {
   static constexpr size_t Dim = 3;
   using inbox_tags = tmpl::list<>;
-  using simple_tags = tmpl::list<Tags::PreviousTime>;
   template <typename DbTagsList, typename... InboxTags, typename Metavariables,
             typename ArrayIndex, typename ActionList,
             typename ParallelComponent>
@@ -49,25 +48,33 @@ struct CheckFunctionsOfTimeAreReady {
         cache)[array_index];
     const std::vector<std::string> function_of_time_names{
         "Rotation", "Expansion", "SizeA", "SizeB"};
+    const auto& current_expiration_time = db::get<Tags::ExpirationTime>(box);
     const auto& time = db::get<::Tags::Time>(box);
+
     bool is_ready =
         Parallel::mutable_cache_item_is_ready<::domain::Tags::FunctionsOfTime>(
             cache,
-            [&proxy, &time, &function_of_time_names](
-                const std::unordered_map<
+            [&proxy, &current_expiration_time, &function_of_time_names,
+             &time](const std::unordered_map<
                     std::string,
                     std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
-                    functions_of_time) {
+                        functions_of_time) {
               for (const auto& function_of_time_name : function_of_time_names) {
                 const auto& f_of_t =
                     functions_of_time.at(function_of_time_name);
                 const double expiration_time = f_of_t->time_bounds()[1];
+
                 if (time > expiration_time) {
                   return std::unique_ptr<Parallel::Callback>(
                       new Parallel::PerformAlgorithmCallback(proxy));
+                } else {
+                  if (expiration_time != current_expiration_time)
+                    ERROR("Not equal: " << function_of_time_name
+                                        << std::setprecision(16)
+                                        << expiration_time << " and "
+                                        << current_expiration_time << "\n");
                 }
               }
-
               return std::unique_ptr<Parallel::Callback>{};
             });
     /*Parallel::printf(MakeString{}
@@ -75,10 +82,6 @@ struct CheckFunctionsOfTimeAreReady {
                      << (is_ready ? " functions of time are ready"
                                   : " functions of time are NOT ready")
                      << "\n");*/
-    if (is_ready) {
-      ::Initialization::mutate_assign<simple_tags>(make_not_null(&box),
-                                                   db::get<::Tags::Time>(box));
-    }
 
     return {is_ready ? Parallel::AlgorithmExecution::Continue
                      : Parallel::AlgorithmExecution::Retry,

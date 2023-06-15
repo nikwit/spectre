@@ -18,6 +18,7 @@ void InitializeSpacetimeTags::apply(
         inverse_spacetime_metric,
     const gsl::not_null<tnsr::A<double, Dim, Frame::Grid>*>
         trace_spacetime_christoffel,
+    const gsl::not_null<double*> expiration_time,
     const ExcisionSphere<Dim>& excision_sphere) {
   const double M = 1.;
   const double orbit_radius = get(magnitude(excision_sphere.center()));
@@ -39,5 +40,7 @@ void InitializeSpacetimeTags::apply(
   get<2>(*trace_spacetime_christoffel) =
       6. * M / (square(orbit_radius) * sqrt(orbit_radius));
   get<3>(*trace_spacetime_christoffel) = 0.;
+
+  *expiration_time = 1e-8;
 }
 }  // namespace CurvedScalarWave::Worldtube::Initialization

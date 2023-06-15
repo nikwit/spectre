@@ -14,6 +14,7 @@
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/Tags.hpp"
+#include "ParallelAlgorithms/Initialization/MutateAssign.hpp"
 #include "Time/Actions/ChangeSlabSize.hpp"
 #include "Time/Tags.hpp"
 #include "Time/TimeStepId.hpp"
@@ -36,6 +37,7 @@ struct UpdateFunctionsOfTime {
   // using compute_tags =
   // tmpl::list<Tags::InertialParticlePositionCompute<Dim>>;
   using inbox_tags = tmpl::list<>;
+  using simple_tags = tmpl::list<Tags::ExpirationTime>;
 
   template <typename DbTagsList, typename... InboxTags, typename Metavariables,
             typename ArrayIndex, typename ActionList,
@@ -58,7 +60,7 @@ struct UpdateFunctionsOfTime {
     const auto& rot_function_of_time =
         functions_of_time.at(rot_function_of_time_name);
     const double current_fot_expiration_time =
-        rot_function_of_time->time_bounds()[1];
+        db::get<Tags::ExpirationTime>(box);
     if (time > current_fot_expiration_time) {
       const auto& inertial_particle_position = db::get<Tags::Position>(box);
       tnsr::I<double, Dim> particle_pos_double{};
@@ -88,9 +90,9 @@ struct UpdateFunctionsOfTime {
       DataVector compression_update_b(3, 0.);
 
       const double sqrt_4_pi = sqrt(4. * M_PI);
-      angular_update.at(0) = angle;
-      angular_update.at(1) = angular_vel;
-      expansion_update.at(0) =
+      angular_update.at(0) = 0.053994924715603889602073790890597151545 * time;
+      angular_update.at(1) = 0.053994924715603889602073790890597151545;
+      /*expansion_update.at(0) =
           (1 - r / grid_radius_particle) * sqrt_4_pi * envelope_radius;
       expansion_update.at(1) =
           -radial_vel / grid_radius_particle * sqrt_4_pi * envelope_radius;
@@ -109,13 +111,18 @@ struct UpdateFunctionsOfTime {
           sqrt_4_pi * object_b_radius;
       compression_update_b.at(1) =
           object_b_radius / envelope_radius * expansion_update.at(1) /
-          square(1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));
+          square(1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));*/
 
-      const double new_fot_expiration_time = time + time_step.value() * 0.5;
+      const double new_fot_expiration_time =
+          time +
+          0.5 * (db::get<::Tags::Next<::Tags::TimeStepId>>(box).substep_time() -
+                 time);
+      ::Initialization::mutate_assign<simple_tags>(make_not_null(&box),
+                                                   new_fot_expiration_time);
 
-      /*Parallel::printf(MakeString{} << "Mutating Time from "
+      Parallel::printf(MakeString{} << "Mutating Time from "
                                     << current_fot_expiration_time << " to "
-                                    << new_fot_expiration_time << "\n");*/
+                                    << new_fot_expiration_time << "\n");
       Parallel::mutate<::domain::Tags::FunctionsOfTime,
                        control_system::UpdateFunctionOfTime>(
           cache, rot_function_of_time_name, current_fot_expiration_time,
@@ -132,6 +139,10 @@ struct UpdateFunctionsOfTime {
                        control_system::UpdateFunctionOfTime>(
           cache, size_b_fot_name, current_fot_expiration_time,
           compression_update_b, new_fot_expiration_time);
+    } else {
+      Parallel::printf(MakeString{} << "Not mutating Time at " << time
+                                    << " with expiration time "
+                                    << current_fot_expiration_time << "\n");
     }
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }
