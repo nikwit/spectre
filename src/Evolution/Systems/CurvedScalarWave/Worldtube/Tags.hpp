@@ -430,5 +430,9 @@ struct Velocity : db::SimpleTag {
   using type = tnsr::I<DataVector, 3>;
 };
 
+struct WorldtubeRadiusAndVelocity : db::SimpleTag {
+  using type = std::array<double, 2>;
+};
+
 }  // namespace Tags
 }  // namespace CurvedScalarWave::Worldtube

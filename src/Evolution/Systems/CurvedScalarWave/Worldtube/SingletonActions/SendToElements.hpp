@@ -72,7 +72,9 @@ struct SendToElements {
         get<Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 2, Dim,
                                  Frame::Grid>>(box);
     const auto& psi_0 = get<Tags::Psi0>(box);
-    const double wt_radius = db::get<Tags::ExcisionSphere<Dim>>(box).radius();
+    double wt_radius = db::get<Tags::ExcisionSphere<Dim>>(box).radius();
+    wt_radius = db::get<Tags::WorldtubeRadiusAndVelocity>(box).at(0);
+
     const double trace_psi_2_over_3 =
         (get(psi_l0) - get(psi_0).at(0)) / wt_radius / wt_radius;
     for (const auto& [element_id, grid_coords] : faces_grid_coords) {

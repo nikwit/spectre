@@ -37,7 +37,8 @@ struct UpdateFunctionsOfTime {
   // using compute_tags =
   // tmpl::list<Tags::InertialParticlePositionCompute<Dim>>;
   using inbox_tags = tmpl::list<>;
-  using simple_tags = tmpl::list<Tags::ExpirationTime>;
+  using simple_tags =
+      tmpl::list<Tags::ExpirationTime, Tags::WorldtubeRadiusAndVelocity>;
 
   template <typename DbTagsList, typename... InboxTags, typename Metavariables,
             typename ArrayIndex, typename ActionList,
@@ -97,28 +98,46 @@ struct UpdateFunctionsOfTime {
       expansion_update.at(1) =
           -radial_vel / grid_radius_particle * sqrt_4_pi * envelope_radius;
 
+      const double worldtube_radius_factor =
+          0.25 * cos(2. * M_PI * time / 200.) + 0.75;
+      const double worldtube_radius_factor_derivative =
+          -0.25 * sin(2. * M_PI * time / 200.) * 2. * M_PI / 200.;
+
+      const double factor =
+          1. / (1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));
+
       compression_update_a.at(0) =
+          sqrt_4_pi * object_a_radius * (1. - worldtube_radius_factor * factor);
+      compression_update_a.at(1) =
+          -object_a_radius * factor *
+          (sqrt_4_pi * worldtube_radius_factor_derivative +
+           worldtube_radius_factor * expansion_update.at(1) * factor /
+               envelope_radius);
+      /*compression_update_a.at(0) =
           (1. -
            1. / (1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius))) *
           sqrt_4_pi * object_a_radius;
       compression_update_a.at(1) =
-          object_a_radius / envelope_radius * expansion_update.at(1) /
-          square(1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));
+          - object_a_radius / envelope_radius * expansion_update.at(1) /
+          square(1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));*/
 
       compression_update_b.at(0) =
           (1. -
            1. / (1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius))) *
           sqrt_4_pi * object_b_radius;
       compression_update_b.at(1) =
-          object_b_radius / envelope_radius * expansion_update.at(1) /
+          -object_b_radius / envelope_radius * expansion_update.at(1) /
           square(1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));
 
       const double new_fot_expiration_time =
           time +
           0.5 * (db::get<::Tags::Next<::Tags::TimeStepId>>(box).substep_time() -
                  time);
-      ::Initialization::mutate_assign<simple_tags>(make_not_null(&box),
-                                                   new_fot_expiration_time);
+      ::Initialization::mutate_assign<simple_tags>(
+          make_not_null(&box), new_fot_expiration_time,
+          std::array<double, 2>{
+              {object_a_radius * worldtube_radius_factor,
+               object_a_radius * worldtube_radius_factor_derivative}});
 
       /*Parallel::printf(MakeString{} << "Mutating Time from "
                                     << current_fot_expiration_time << " to "
