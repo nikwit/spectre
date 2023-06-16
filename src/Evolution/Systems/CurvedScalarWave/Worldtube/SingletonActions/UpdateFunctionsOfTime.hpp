@@ -90,9 +90,9 @@ struct UpdateFunctionsOfTime {
       DataVector compression_update_b(3, 0.);
 
       const double sqrt_4_pi = sqrt(4. * M_PI);
-      angular_update.at(0) = 0.053994924715603889602073790890597151545 * time;
-      angular_update.at(1) = 0.053994924715603889602073790890597151545;
-      /*expansion_update.at(0) =
+      angular_update.at(0) = angle;
+      angular_update.at(1) = angular_vel;
+      expansion_update.at(0) =
           (1 - r / grid_radius_particle) * sqrt_4_pi * envelope_radius;
       expansion_update.at(1) =
           -radial_vel / grid_radius_particle * sqrt_4_pi * envelope_radius;
@@ -111,7 +111,7 @@ struct UpdateFunctionsOfTime {
           sqrt_4_pi * object_b_radius;
       compression_update_b.at(1) =
           object_b_radius / envelope_radius * expansion_update.at(1) /
-          square(1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));*/
+          square(1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));
 
       const double new_fot_expiration_time =
           time +
@@ -120,9 +120,9 @@ struct UpdateFunctionsOfTime {
       ::Initialization::mutate_assign<simple_tags>(make_not_null(&box),
                                                    new_fot_expiration_time);
 
-      Parallel::printf(MakeString{} << "Mutating Time from "
+      /*Parallel::printf(MakeString{} << "Mutating Time from "
                                     << current_fot_expiration_time << " to "
-                                    << new_fot_expiration_time << "\n");
+                                    << new_fot_expiration_time << "\n");*/
       Parallel::mutate<::domain::Tags::FunctionsOfTime,
                        control_system::UpdateFunctionOfTime>(
           cache, rot_function_of_time_name, current_fot_expiration_time,
@@ -140,9 +140,9 @@ struct UpdateFunctionsOfTime {
           cache, size_b_fot_name, current_fot_expiration_time,
           compression_update_b, new_fot_expiration_time);
     } else {
-      Parallel::printf(MakeString{} << "Not mutating Time at " << time
+      /*Parallel::printf(MakeString{} << "Not mutating Time at " << time
                                     << " with expiration time "
-                                    << current_fot_expiration_time << "\n");
+                                    << current_fot_expiration_time << "\n");*/
     }
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }

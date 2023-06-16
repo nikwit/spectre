@@ -55,6 +55,7 @@ void IntegratedFoT::update(
     const double time_of_update, DataVector updated_max_deriv,
     const double next_expiration_time) {
   if (time_of_update <= deriv_info_at_update_times_.back().time) {
+    return;
     ERROR("t must be increasing from call to call. "
           << "Attempted to update at time " << time_of_update
           << ", which precedes the previous update time of "

@@ -123,7 +123,8 @@ struct ObserveWorldtubeSolution {
       psi_coefs[num_coefs] =
           expansion_order < 2 ? get(dt_psi_monopole) : get(dt_psi_0)[0];
       Parallel::printf(MakeString{}
-                       << "Time: " << db::get<::Tags::Time>(box)
+                       << "Time: " << std::setprecision(16)
+                       << db::get<::Tags::Time>(box)
                        << ", field value: " << psi_coefs[0] << ", position: "
                        << get_output(inertial_particle_position) << "\n");
       if (expansion_order > 0) {
