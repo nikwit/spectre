@@ -19,7 +19,9 @@ void InitializeSpacetimeTags::apply(
     const gsl::not_null<tnsr::A<double, Dim, Frame::Grid>*>
         trace_spacetime_christoffel,
     const gsl::not_null<double*> expiration_time,
-    const ExcisionSphere<Dim>& excision_sphere) {
+    const gsl::not_null<std::array<double, 2>*> worldtube_radius_and_velocity,
+    const ExcisionSphere<Dim>& excision_sphere,
+    const std::array<double, 3>& envelope_and_object_radii) {
   const double M = 1.;
   const double orbit_radius = get(magnitude(excision_sphere.center()));
   *inverse_spacetime_metric = tnsr::AA<double, Dim, Frame::Grid>(0.);
@@ -40,6 +42,8 @@ void InitializeSpacetimeTags::apply(
   get<2>(*trace_spacetime_christoffel) =
       6. * M / (square(orbit_radius) * sqrt(orbit_radius));
   get<3>(*trace_spacetime_christoffel) = 0.;
+  worldtube_radius_and_velocity->at(0) = envelope_and_object_radii.at(1);
+  worldtube_radius_and_velocity->at(1) = 0.;
 
   *expiration_time = 1e-8;
 }

@@ -33,18 +33,22 @@ struct InitializeSpacetimeTags {
   using simple_tags_from_options = tmpl::list<>;
   using const_global_cache_tags = tmpl::list<>;
   using mutable_global_cache_tags = tmpl::list<>;
-  using argument_tags = tmpl::list<Tags::ExcisionSphere<Dim>>;
+  using argument_tags =
+      tmpl::list<Tags::ExcisionSphere<Dim>, Tags::EnvelopeAndObjectRadii>;
   using simple_tags = tmpl::list<
       gr::Tags::InverseSpacetimeMetric<double, Dim, Frame::Grid>,
       gr::Tags::TraceSpacetimeChristoffelSecondKind<double, Dim, Frame::Grid>,
-      Tags::ExpirationTime>;
+      Tags::ExpirationTime, Tags::WorldtubeRadiusAndVelocity>;
   using return_tags = simple_tags;
 
-  static void apply(const gsl::not_null<tnsr::AA<double, Dim, Frame::Grid>*>
-                        inverse_spacetime_metric,
-                    const gsl::not_null<tnsr::A<double, Dim, Frame::Grid>*>
-                        trace_spacetime_christoffel,
-                    const gsl::not_null<double*> expiration_time,
-                    const ExcisionSphere<Dim>& excision_sphere);
+  static void apply(
+      const gsl::not_null<tnsr::AA<double, Dim, Frame::Grid>*>
+          inverse_spacetime_metric,
+      const gsl::not_null<tnsr::A<double, Dim, Frame::Grid>*>
+          trace_spacetime_christoffel,
+      const gsl::not_null<double*> expiration_time,
+      const gsl::not_null<std::array<double, 2>*> worldtube_radius_and_velocity,
+      const ExcisionSphere<Dim>& excision_sphere,
+      const std::array<double, 3>& envelope_and_object_radii);
 };
 }  // namespace CurvedScalarWave::Worldtube::Initialization
