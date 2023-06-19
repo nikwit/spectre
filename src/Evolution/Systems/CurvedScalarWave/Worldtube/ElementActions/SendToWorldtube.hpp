@@ -67,7 +67,8 @@ struct SendToWorldtube {
       CurvedScalarWave::Tags::Psi, CurvedScalarWave::Tags::Pi,
       CurvedScalarWave::Tags::Phi<Dim>, gr::Tags::Shift<DataVector, Dim>,
       gr::Tags::Lapse<DataVector>,
-      domain::Tags::InverseJacobian<Dim, Frame::ElementLogical, Frame::Grid>>;
+      domain::Tags::InverseJacobian<Dim, Frame::ElementLogical,
+      Frame::Inertial>>;
 
   using inbox_tags = tmpl::list<Worldtube::Tags::SphericalHarmonicsInbox<Dim>>;
   using simple_tags = tmpl::list<Tags::RegularFieldAdvectiveTerm<Dim>>;
@@ -108,7 +109,7 @@ struct SendToWorldtube {
           get<gr::Tags::Shift<DataVector, Dim>>(vars_on_face);
       auto& face_inv_jacobian =
           get<domain::Tags::InverseJacobian<Dim, Frame::ElementLogical,
-                                            Frame::Grid>>(vars_on_face);
+                                            Frame::Inertial>>(vars_on_face);
       const auto& face_psi = get<CurvedScalarWave::Tags::Psi>(vars_on_face);
       const auto& face_pi = get<CurvedScalarWave::Tags::Pi>(vars_on_face);
       const auto& face_phi =
