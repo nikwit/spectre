@@ -62,7 +62,7 @@ struct TimeDerivativeMutator {
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim, Frame::Grid>,
       gr::Tags::InverseSpacetimeMetric<double, Dim, Frame::Grid>,
       gr::Tags::TraceSpacetimeChristoffelSecondKind<double, Dim, Frame::Grid>,
-      Tags::ExcisionSphere<Dim>, ::Tags::Time,
+      Tags::ExcisionSphere<Dim>, ::Tags::Time, Tags::WorldtubeRadiusAndVelocity,
       CurvedScalarWave::Tags::BackgroundSpacetime<gr::Solutions::KerrSchild>>;
 
   static void apply(
@@ -79,6 +79,7 @@ struct TimeDerivativeMutator {
       const tnsr::AA<double, Dim, Frame::Grid>& inverse_spacetime_metric,
       const tnsr::A<double, Dim, Frame::Grid>& trace_spacetime_christoffel,
       const ExcisionSphere<Dim>& excision_sphere, const double time,
+      const std::array<double, 2>& worldtube_radius_and_velocity,
       const gr::Solutions::KerrSchild& kerr_schild);
 };
 
@@ -106,7 +107,7 @@ struct ComputeTimeDerivative {
       Parallel::GlobalCache<Metavariables>& /*cache*/,
       const ArrayIndex& /*array_index*/, ActionList /*meta*/,
       const ParallelComponent* /*meta*/) {
-    if (db::get<Tags::ExpansionOrder>(box) >= 2) {
+    if (db::get<Tags::ExpansionOrder>(box) >= 0) {
       db::mutate_apply<TimeDerivativeMutator>(make_not_null(&box));
     }
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};

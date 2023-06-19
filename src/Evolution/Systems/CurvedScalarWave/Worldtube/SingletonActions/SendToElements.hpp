@@ -72,11 +72,12 @@ struct SendToElements {
         get<Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 2, Dim,
                                  Frame::Grid>>(box);
     const auto& psi_0 = get<Tags::Psi0>(box);
-    double wt_radius = db::get<Tags::ExcisionSphere<Dim>>(box).radius();
-    wt_radius = db::get<Tags::WorldtubeRadiusAndVelocity>(box).at(0);
-
-    const double trace_psi_2_over_3 =
-        (get(psi_l0) - get(psi_0).at(0)) / wt_radius / wt_radius;
+    double wt_radius_grid = db::get<Tags::ExcisionSphere<Dim>>(box).radius();
+    double wt_radius_inertial =
+        db::get<Tags::WorldtubeRadiusAndVelocity>(box).at(0);
+    const double stretch_factor = wt_radius_inertial / wt_radius_grid;
+    const double trace_psi_2_over_3 = (get(psi_l0) - get(psi_0).at(0)) /
+                                      wt_radius_inertial / wt_radius_inertial;
     for (const auto& [element_id, grid_coords] : faces_grid_coords) {
       const size_t grid_size = get<0>(grid_coords).size();
       Variables<tags_to_send> vars_to_send(grid_size);
@@ -84,22 +85,25 @@ struct SendToElements {
       get(get<dt_psi_tag>(vars_to_send)) = get(dt_psi_l0);
       if (order > 0) {
         for (size_t i = 0; i < Dim; ++i) {
-          get(get<psi_tag>(vars_to_send)) += psi_l1.get(i) * grid_coords.get(i);
+          get(get<psi_tag>(vars_to_send)) +=
+              psi_l1.get(i) * grid_coords.get(i) * stretch_factor;
           get(get<dt_psi_tag>(vars_to_send)) +=
-              dt_psi_l1.get(i) * grid_coords.get(i);
-          get<di_psi_tag>(vars_to_send).get(i) = psi_l1.get(i);
+              dt_psi_l1.get(i) * grid_coords.get(i) * stretch_factor;
+          get<di_psi_tag>(vars_to_send).get(i) = psi_l1.get(i) / stretch_factor;
         }
         if (order > 1) {
           for (size_t i = 0; i < Dim; ++i) {
             get<di_psi_tag>(vars_to_send).get(i) +=
-                2. * trace_psi_2_over_3 * grid_coords.get(i);
+                2. * trace_psi_2_over_3 * grid_coords.get(i) * stretch_factor;
             for (size_t j = 0; j < 3; ++j) {
               get<psi_tag>(vars_to_send).get() +=
-                  psi_l2.get(i, j) * grid_coords.get(i) * grid_coords.get(j);
+                  psi_l2.get(i, j) * grid_coords.get(i) * stretch_factor *
+                  grid_coords.get(j) * stretch_factor;
               get<dt_psi_tag>(vars_to_send).get() +=
-                  dt_psi_l2.get(i, j) * grid_coords.get(i) * grid_coords.get(j);
+                  dt_psi_l2.get(i, j) * grid_coords.get(i) * stretch_factor *
+                  grid_coords.get(j) * stretch_factor;
               get<di_psi_tag>(vars_to_send).get(i) +=
-                  2. * psi_l2.get(i, j) * grid_coords.get(j);
+                  2. * psi_l2.get(i, j) * grid_coords.get(j) * stretch_factor;
             }
           }
         }

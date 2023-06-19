@@ -37,8 +37,9 @@ void TimeDerivativeMutator::apply(
     const tnsr::AA<double, Dim, Frame::Grid>& inverse_spacetime_metric,
     const tnsr::A<double, Dim, Frame::Grid>& trace_spacetime_christoffel,
     const ExcisionSphere<Dim>& excision_sphere, const double time,
+          const std::array<double, 2>& worldtube_radius_and_velocity,
     const gr::Solutions::KerrSchild& kerr_schild) {
-  const double wt_radius = excision_sphere.radius();
+  const double wt_radius = worldtube_radius_and_velocity.at(0);
   const auto& psi0 = get(get<Tags::Psi0>(evolved_vars));
   const auto& dt_psi0 = get(get<Tags::dtPsi0>(evolved_vars));
   get(get<::Tags::dt<Tags::Psi0>>(*dt_evolved_vars)) = dt_psi0;
