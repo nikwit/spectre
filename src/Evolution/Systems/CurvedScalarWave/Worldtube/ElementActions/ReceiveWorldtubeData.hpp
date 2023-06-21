@@ -94,7 +94,6 @@ struct ReceiveWorldtubeData {
                           direction.value().dimension(),
                           index_to_slice_at(mesh.extents(), direction.value()));
           });
-
       auto& received_data = inbox.at(time_step_id);
       get(get<psi_tag>(received_data)) +=
           get(get<psi_tag>(puncture_field.value()));
@@ -102,18 +101,29 @@ struct ReceiveWorldtubeData {
       // the advective term transforms the time derivative back into the
       // inertial frame
       get(get<dt_psi_tag>(received_data)) +=
-          get(get<dt_psi_tag>(puncture_field.value())) -
-          get(get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));
+          get(get<dt_psi_tag>(puncture_field.value()));
+      //-get(get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));
+      ::InverseJacobian<DataVector, Dim, Frame::Grid, Frame::Inertial>
+          inv_jacobian(get(get<psi_tag>(received_data)).size(), 0.);
+      const double angle =
+          db::get<::domain::Tags::FunctionsOfTime>(box)
+              .at("Rotation")
+              ->func_and_deriv(db::get<::Tags::Time>(box))[0][0];
+      inv_jacobian.get(0, 0) = cos(angle);
+      inv_jacobian.get(0, 1) = sin(angle);
+      inv_jacobian.get(1, 0) = -sin(angle);
+      inv_jacobian.get(1, 1) = cos(angle);
+      inv_jacobian.get(2, 2) = 1.;
 
       db::mutate<Tags::WorldtubeSolution<Dim>>(
           make_not_null(&box),
-          [&received_data, &puncture_field,
-           &vars_on_face](const gsl::not_null<Variables<evolved_tags_list>*>
+          [&received_data, &puncture_field, &vars_on_face,
+           &inv_jacobian](const gsl::not_null<Variables<evolved_tags_list>*>
                               worldtube_solution) {
             worldtube_solution->initialize(
                 puncture_field.value().number_of_grid_points());
-            const auto& inv_jacobian = get<domain::Tags::InverseJacobian<
-                Dim, Frame::Grid, Frame::Inertial>>(vars_on_face);
+            /*auto& inv_jacobian = get<domain::Tags::InverseJacobian<
+                Dim, Frame::Grid, Frame::Inertial>>(vars_on_face);*/
             auto& phi_inertial =
                 get<CurvedScalarWave::Tags::Phi<Dim>>(*worldtube_solution);
             for (size_t i = 0; i < Dim; ++i) {

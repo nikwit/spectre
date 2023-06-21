@@ -101,8 +101,9 @@ struct ReceiveElementData {
     }
     double wt_radius = db::get<Tags::ExcisionSphere<Dim>>(box).radius();
 
-    wt_radius = db::get<Tags::WorldtubeRadiusAndVelocity>(box).at(0);
-    external_ylm_coefs /= wt_radius * wt_radius;
+    double wt_radius_inertial =
+        db::get<Tags::WorldtubeRadiusAndVelocity>(box).at(0);
+    external_ylm_coefs /= wt_radius_inertial * wt_radius_inertial;
 
     DataVector& psi_ylm_coefs =
         get(get<CurvedScalarWave::Tags::Psi>(external_ylm_coefs));
@@ -118,8 +119,8 @@ struct ReceiveElementData {
     if (order > 0) {
       ModalVector psi_ylm_l1(&psi_ylm_coefs[1], 3);
       ModalVector dt_psi_ylm_l1(&dt_psi_ylm_coefs[1], 3);
-      psi_ylm_l1 /= wt_radius;
-      dt_psi_ylm_l1 /= wt_radius;
+      psi_ylm_l1 /= wt_radius_inertial;
+      dt_psi_ylm_l1 /= wt_radius_inertial;
       psi_stf_l1 = ylm_to_stf_1<Frame::Grid>(psi_ylm_l1);
       dt_psi_stf_l1 = ylm_to_stf_1<Frame::Grid>(dt_psi_ylm_l1);
       if (order > 1) {

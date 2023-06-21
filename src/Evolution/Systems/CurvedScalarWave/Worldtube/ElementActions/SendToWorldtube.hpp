@@ -160,9 +160,8 @@ struct SendToWorldtube {
       // save memory.
       auto& mesh_velocity_on_face =
           get<gr::Tags::Shift<DataVector, Dim>>(vars_on_face);
-      data_on_slice(make_not_null(&mesh_velocity_on_face),
-                    mesh_velocity, mesh.extents(),
-                    direction.value().dimension(),
+      data_on_slice(make_not_null(&mesh_velocity_on_face), mesh_velocity,
+                    mesh.extents(), direction.value().dimension(),
                     index_to_slice_at(mesh.extents(), direction.value()));
       db::mutate<Tags::RegularFieldAdvectiveTerm<Dim>>(
           make_not_null(&box),
@@ -178,8 +177,8 @@ struct SendToWorldtube {
       // The time derivative is transformed into the grid frame using the
       // advective term which comes from the transformation of the time
       // derivative due to the moving mesh.
-      dt_psi_regular_times_det +=
-          get(get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));
+      /*dt_psi_regular_times_det +=
+          get(get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));*/
 
       psi_regular_times_det *= get(area_element);
       dt_psi_regular_times_det *= get(area_element);
