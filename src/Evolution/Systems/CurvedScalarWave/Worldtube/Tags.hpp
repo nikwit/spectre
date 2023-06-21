@@ -259,8 +259,7 @@ struct InertialParticlePositionCompute : InertialParticlePosition<Dim>,
   static void function(
       gsl::not_null<tnsr::I<double, Dim, Frame::Inertial>*> position,
       const ::ExcisionSphere<Dim>& excision_sphere,
-      const std::unique_ptr<
-          domain::CoordinateMapBase<Frame::Grid, Frame::Inertial, 3>>& maps,
+      const domain::CoordinateMapBase<Frame::Grid, Frame::Inertial, 3>& maps,
       const double time,
       const std::unordered_map<
           std::string,

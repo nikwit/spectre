@@ -123,17 +123,16 @@ void PunctureFieldCompute<Dim>::function(
 }
 
 template <size_t Dim>
-static void function(
+void InertialParticlePositionCompute<Dim>::function(
     gsl::not_null<tnsr::I<double, Dim, Frame::Inertial>*> position,
     const ::ExcisionSphere<Dim>& excision_sphere,
-    const std::unique_ptr<
-        domain::CoordinateMapBase<Frame::Grid, Frame::Inertial, 3>>& maps,
+    const domain::CoordinateMapBase<Frame::Grid, Frame::Inertial, 3>& maps,
     const double time,
     const std::unordered_map<
         std::string, std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
         functions_of_time) {
   *position =
-      maps->operator()(excision_sphere.center(), time, functions_of_time);
+      maps(excision_sphere.center(), time, functions_of_time);
 }
 
 template struct InertialParticlePositionCompute<3>;
