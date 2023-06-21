@@ -94,7 +94,8 @@ struct SendToElements {
         if (order > 1) {
           for (size_t i = 0; i < Dim; ++i) {
             get<di_psi_tag>(vars_to_send).get(i) +=
-                2. * trace_psi_2_over_3 * grid_coords.get(i) * stretch_factor;
+                2. * trace_psi_2_over_3 * grid_coords.get(i) * stretch_factor *
+                stretch_factor;
             for (size_t j = 0; j < 3; ++j) {
               get<psi_tag>(vars_to_send).get() +=
                   psi_l2.get(i, j) * grid_coords.get(i) * stretch_factor *
@@ -103,7 +104,8 @@ struct SendToElements {
                   dt_psi_l2.get(i, j) * grid_coords.get(i) * stretch_factor *
                   grid_coords.get(j) * stretch_factor;
               get<di_psi_tag>(vars_to_send).get(i) +=
-                  2. * psi_l2.get(i, j) * grid_coords.get(j) * stretch_factor;
+                  2. * psi_l2.get(i, j) * grid_coords.get(j) * stretch_factor *
+                  stretch_factor;
             }
           }
         }
