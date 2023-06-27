@@ -125,7 +125,9 @@ struct ObserveWorldtubeSolution {
       Parallel::printf(MakeString{}
                        << "Time: " << std::setprecision(16)
                        << db::get<::Tags::Time>(box)
-                       << ", field value: " << psi_coefs[0] << ", position: "
+                       << ", field value: " << psi_coefs[0] << ", wt radius "
+                       << db::get<Tags::WorldtubeRadiusAndVelocity>(box)[0]
+                       << ", position: "
                        << get_output(inertial_particle_position) << "\n");
       if (expansion_order > 0) {
         const auto& psi_dipole = db::get<

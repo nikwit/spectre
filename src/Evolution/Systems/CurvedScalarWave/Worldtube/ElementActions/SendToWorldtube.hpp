@@ -68,7 +68,7 @@ struct SendToWorldtube {
                  CurvedScalarWave::Tags::Phi<Dim>,
                  gr::Tags::Shift<DataVector, Dim>, gr::Tags::Lapse<DataVector>,
                  domain::Tags::InverseJacobian<Dim, Frame::ElementLogical,
-                                               Frame::Inertial>>;
+                                               Frame::Grid>>;
 
   using inbox_tags = tmpl::list<Worldtube::Tags::SphericalHarmonicsInbox<Dim>>;
   using simple_tags = tmpl::list<Tags::RegularFieldAdvectiveTerm<Dim>>;
@@ -109,7 +109,7 @@ struct SendToWorldtube {
           get<gr::Tags::Shift<DataVector, Dim>>(vars_on_face);
       auto& face_inv_jacobian =
           get<domain::Tags::InverseJacobian<Dim, Frame::ElementLogical,
-                                            Frame::Inertial>>(vars_on_face);
+                                            Frame::Grid>>(vars_on_face);
       const auto& face_psi = get<CurvedScalarWave::Tags::Psi>(vars_on_face);
       const auto& face_pi = get<CurvedScalarWave::Tags::Pi>(vars_on_face);
       const auto& face_phi =
@@ -177,8 +177,8 @@ struct SendToWorldtube {
       // The time derivative is transformed into the grid frame using the
       // advective term which comes from the transformation of the time
       // derivative due to the moving mesh.
-      /*dt_psi_regular_times_det +=
-          get(get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));*/
+      dt_psi_regular_times_det +=
+          get(get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));
 
       psi_regular_times_det *= get(area_element);
       dt_psi_regular_times_det *= get(area_element);

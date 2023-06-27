@@ -103,7 +103,7 @@ struct ReceiveElementData {
 
     double wt_radius_inertial =
         db::get<Tags::WorldtubeRadiusAndVelocity>(box).at(0);
-    external_ylm_coefs /= wt_radius_inertial * wt_radius_inertial;
+    external_ylm_coefs /= wt_radius * wt_radius;
 
     DataVector& psi_ylm_coefs =
         get(get<CurvedScalarWave::Tags::Psi>(external_ylm_coefs));
@@ -126,8 +126,8 @@ struct ReceiveElementData {
       if (order > 1) {
         ModalVector psi_ylm_l2(&psi_ylm_coefs[4], 5);
         ModalVector dt_psi_ylm_l2(&dt_psi_ylm_coefs[4], 5);
-        psi_ylm_l2 /= wt_radius * wt_radius;
-        dt_psi_ylm_l2 /= wt_radius * wt_radius;
+        psi_ylm_l2 /= wt_radius_inertial * wt_radius_inertial;
+        dt_psi_ylm_l2 /= wt_radius_inertial * wt_radius_inertial;
         psi_stf_l2 = ylm_to_stf_2<Frame::Grid>(psi_ylm_l2);
         dt_psi_stf_l2 = ylm_to_stf_2<Frame::Grid>(dt_psi_ylm_l2);
       }

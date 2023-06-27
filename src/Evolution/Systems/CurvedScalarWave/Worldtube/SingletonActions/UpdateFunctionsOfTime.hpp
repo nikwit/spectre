@@ -98,10 +98,10 @@ struct UpdateFunctionsOfTime {
       expansion_update.at(1) =
           -radial_vel / grid_radius_particle * sqrt_4_pi * envelope_radius;
 
-      const double worldtube_radius_factor =
-          0.25 * cos(2. * M_PI * time / 200.) + 0.75;
-      const double worldtube_radius_factor_derivative =
-          -0.25 * sin(2. * M_PI * time / 200.) * 2. * M_PI / 200.;
+      const double worldtube_radius_factor = 1.;
+          //0.25 * cos(2. * M_PI * time / 300.) + 0.75;
+      const double worldtube_radius_factor_derivative = 0.;
+          //-0.25 * sin(2. * M_PI * time / 300.) * 2. * M_PI / 300.;
 
       const double factor =
           1. / (1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));
