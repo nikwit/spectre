@@ -1,4 +1,3 @@
-
 // Distributed under the MIT License.
 // See LICENSE.txt for details.
 
@@ -33,11 +32,12 @@ void TimeDerivativeMutator::apply(
     const Scalar<double>& psi_monopole,
     const tnsr::i<double, Dim, Frame::Grid>& psi_dipole,
     const tnsr::ii<double, Dim, Frame::Grid>& psi_quadrupole,
+    const Scalar<double>& dt_psi_monopole,
     const tnsr::i<double, Dim, Frame::Grid>& dt_psi_dipole,
     const tnsr::AA<double, Dim, Frame::Grid>& inverse_spacetime_metric,
     const tnsr::A<double, Dim, Frame::Grid>& trace_spacetime_christoffel,
     const ExcisionSphere<Dim>& excision_sphere, const double time,
-          const std::array<double, 2>& worldtube_radius_and_velocity,
+    const std::array<double, 2>& worldtube_radius_and_velocity,
     const gr::Solutions::KerrSchild& kerr_schild) {
   const double wt_radius = worldtube_radius_and_velocity.at(0);
   const auto& psi0 = get(get<Tags::Psi0>(evolved_vars));
@@ -89,6 +89,11 @@ void TimeDerivativeMutator::apply(
       get<gr::Tags::Shift<double, Dim, Frame::Inertial>>(spacetime_vars),
       get<gr::Tags::InverseSpatialMetric<double, Dim, Frame::Inertial>>(
           spacetime_vars));
+  const auto spacetime_metric_inertial = gr::spacetime_metric(
+      get<gr::Tags::Lapse<double>>(spacetime_vars),
+      get<gr::Tags::Shift<double, Dim, Frame::Inertial>>(spacetime_vars),
+      get<gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>>(
+          spacetime_vars));
   const auto d_spacetime_metric = gr::derivatives_of_spacetime_metric(
       get<gr::Tags::Lapse<double>>(spacetime_vars),
       get<::Tags::dt<gr::Tags::Lapse<double>>>(spacetime_vars),
@@ -110,11 +115,19 @@ void TimeDerivativeMutator::apply(
       d_spacetime_metric, inverse_spacetime_metric_inertial);
 
   tnsr::I<double, Dim> particle_acceleration{};
+  double u0_squared = spacetime_metric_inertial.get(0, 0);
+  const double charge = 1.;
+  const double mass = 1.;
   for (size_t i = 0; i < Dim; ++i) {
     particle_acceleration.get(i) =
         particle_velocity.get(i) * christoffel.get(0, 0, 0) -
         christoffel.get(i + 1, 0, 0);
+    u0_squared +=
+        2. * spacetime_metric_inertial.get(i + 1, 0) * particle_velocity.get(i);
+
     for (size_t j = 0; j < Dim; ++j) {
+      u0_squared += spacetime_metric_inertial.get(i + 1, j + 1) *
+                    particle_velocity.get(i) * particle_velocity.get(j);
       particle_acceleration.get(i) +=
           2. * particle_velocity.get(j) *
           (particle_velocity.get(i) * christoffel.get(0, j + 1, 0) -
@@ -128,6 +141,16 @@ void TimeDerivativeMutator::apply(
     }
   }
 
+  if (time > 400.) {
+    u0_squared = -1. / u0_squared;
+    for (size_t i = 0; i < Dim; ++i) {
+      particle_acceleration.get(i) +=
+          inverse_spacetime_metric_inertial.get(i, 0) -
+          particle_velocity.get(i) *
+              inverse_spacetime_metric_inertial.get(0, 0) *
+              get(dt_psi_monopole) * charge / mass / u0_squared;
+    }
+  }
   for (size_t i = 0; i < Dim; ++i) {
     get<::Tags::dt<Tags::Position>>(*dt_evolved_vars).get(i)[0] =
         get<Tags::Velocity>(evolved_vars).get(i)[0];

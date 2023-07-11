@@ -101,8 +101,8 @@ struct ReceiveWorldtubeData {
       // the advective term transforms the time derivative back into the
       // inertial frame
       get(get<dt_psi_tag>(received_data)) +=
-          get(get<dt_psi_tag>(puncture_field.value())) -
-          get(get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));
+          get(get<dt_psi_tag>(puncture_field.value()));
+           //-get(get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));
       ::InverseJacobian<DataVector, Dim, Frame::Grid, Frame::Inertial>
           inv_jacobian(get(get<psi_tag>(received_data)).size(), 0.);
       const double angle =

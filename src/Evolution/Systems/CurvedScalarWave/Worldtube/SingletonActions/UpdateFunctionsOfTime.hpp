@@ -50,16 +50,11 @@ struct UpdateFunctionsOfTime {
       const ArrayIndex& /*array_index*/, ActionList /*meta*/,
       const ParallelComponent* const /*meta*/) {
     const auto& time = db::get<::Tags::Time>(box);
-    const auto& time_step = db::get<::Tags::TimeStep>(box);
-    const auto& functions_of_time =
-        Parallel::get<::domain::Tags::FunctionsOfTime>(cache);
     const std::string rot_function_of_time_name = "Rotation";
     const std::string expansion_fot_name = "Expansion";
     const std::string size_a_fot_name = "SizeA";
     const std::string size_b_fot_name = "SizeB";
 
-    const auto& rot_function_of_time =
-        functions_of_time.at(rot_function_of_time_name);
     const double current_fot_expiration_time =
         db::get<Tags::ExpirationTime>(box);
     if (time > current_fot_expiration_time) {

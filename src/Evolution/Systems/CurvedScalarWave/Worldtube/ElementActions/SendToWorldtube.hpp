@@ -177,8 +177,8 @@ struct SendToWorldtube {
       // The time derivative is transformed into the grid frame using the
       // advective term which comes from the transformation of the time
       // derivative due to the moving mesh.
-      dt_psi_regular_times_det +=
-          get(get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));
+      /*dt_psi_regular_times_det +=
+          get(get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));*/
 
       psi_regular_times_det *= get(area_element);
       dt_psi_regular_times_det *= get(area_element);

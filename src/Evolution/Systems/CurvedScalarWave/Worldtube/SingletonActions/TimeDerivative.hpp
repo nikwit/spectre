@@ -59,6 +59,7 @@ struct TimeDerivativeMutator {
       Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim, Frame::Grid>,
+      Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim, Frame::Grid>,
       gr::Tags::InverseSpacetimeMetric<double, Dim, Frame::Grid>,
       gr::Tags::TraceSpacetimeChristoffelSecondKind<double, Dim, Frame::Grid>,
@@ -75,6 +76,7 @@ struct TimeDerivativeMutator {
       const Scalar<double>& psi_monopole,
       const tnsr::i<double, Dim, Frame::Grid>& psi_dipole,
       const tnsr::ii<double, Dim, Frame::Grid>& psi_quadrupole,
+      const Scalar<double>& dt_psi_monopole,
       const tnsr::i<double, Dim, Frame::Grid>& dt_psi_dipole,
       const tnsr::AA<double, Dim, Frame::Grid>& inverse_spacetime_metric,
       const tnsr::A<double, Dim, Frame::Grid>& trace_spacetime_christoffel,
@@ -94,6 +96,7 @@ struct ComputeTimeDerivative {
       Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim, Frame::Grid>,
+      Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim, Frame::Grid>,
       gr::Tags::InverseSpacetimeMetric<double, Dim, Frame::Grid>,
       gr::Tags::TraceSpacetimeChristoffelSecondKind<double, Dim, Frame::Grid>>;
