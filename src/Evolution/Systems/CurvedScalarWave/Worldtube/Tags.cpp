@@ -109,14 +109,20 @@ void PunctureFieldCompute<Dim>::function(
     const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
         inertial_face_coords,
     const ::ExcisionSphere<Dim>& excision_sphere, const double time,
-    const size_t expansion_order) {
+    const size_t expansion_order,
+    const tnsr::I<double, Dim, ::Frame::Inertial>& particle_position,
+    const std::unordered_map<
+        std::string, std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
+        functions_of_time) {
   if (inertial_face_coords.has_value()) {
     if (not result->has_value()) {
       result->emplace(get<0>(inertial_face_coords.value()).size());
     }
-    puncture_field(
-        make_not_null(&(result->value())), inertial_face_coords.value(), time,
-        get(magnitude(excision_sphere.center())), 1., expansion_order);
+    const double omega =
+        functions_of_time.at("Rotation")->func_and_deriv(time)[1][0];
+    puncture_field(make_not_null(&(result->value())),
+                   inertial_face_coords.value(), time, omega, particle_position,
+                   1., expansion_order);
   } else {
     result->reset();
   }
@@ -131,8 +137,7 @@ void InertialParticlePositionCompute<Dim>::function(
     const std::unordered_map<
         std::string, std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
         functions_of_time) {
-  *position =
-      maps(excision_sphere.center(), time, functions_of_time);
+  *position = maps(excision_sphere.center(), time, functions_of_time);
 }
 
 template struct InertialParticlePositionCompute<3>;

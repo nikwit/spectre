@@ -345,7 +345,8 @@ struct PunctureFieldCompute : PunctureField<Dim>, db::ComputeTag {
   using base = PunctureField<Dim>;
   using argument_tags =
       tmpl::list<FaceCoordinates<Dim, Frame::Inertial, false>,
-                 ExcisionSphere<Dim>, ::Tags::Time, ExpansionOrder>;
+                 ExcisionSphere<Dim>, ::Tags::Time, ExpansionOrder,
+                 InertialParticlePosition<Dim>, domain::Tags::FunctionsOfTime>;
   using return_type = std::optional<Variables<tmpl::list<
       CurvedScalarWave::Tags::Psi, ::Tags::dt<CurvedScalarWave::Tags::Psi>,
       ::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<3>,
@@ -355,7 +356,12 @@ struct PunctureFieldCompute : PunctureField<Dim>, db::ComputeTag {
       const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
           inertial_face_coords,
       const ::ExcisionSphere<Dim>& excision_sphere, const double time,
-      const size_t expansion_order);
+      const size_t expansion_order,
+      const tnsr::I<double, Dim, ::Frame::Inertial>& particle_position,
+      const std::unordered_map<
+          std::string,
+          std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
+          functions_of_time);
 };
 /// @}
 

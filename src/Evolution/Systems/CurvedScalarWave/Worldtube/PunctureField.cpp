@@ -22,13 +22,15 @@ void puncture_field(
                       Frame::Inertial>>>*>
         result,
     const tnsr::I<DataVector, 3, Frame::Inertial>& coords, const double time,
-    const double orbital_radius, const double bh_mass, const size_t order) {
+    const double omega,
+    const tnsr::I<double, 3, Frame::Inertial>& particle_position,
+    const double bh_mass, const size_t order) {
   if (order == 0) {
-    puncture_field_0(result, coords, time, orbital_radius, bh_mass);
+    puncture_field_0(result, coords, time, omega, particle_position, bh_mass);
   } else if (order == 1) {
-    puncture_field_1(result, coords, time, orbital_radius, bh_mass);
+    puncture_field_1(result, coords, time, omega, particle_position, bh_mass);
   } else if (order == 2) {
-    puncture_field_2(result, coords, time, orbital_radius, bh_mass);
+    puncture_field_2(result, coords, time, omega, particle_position, bh_mass);
   } else {
     ERROR(
         "The puncture field is only implemented up to expansion order 2 but "
