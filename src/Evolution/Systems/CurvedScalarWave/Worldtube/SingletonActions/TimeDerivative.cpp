@@ -68,7 +68,6 @@ void TimeDerivativeMutator::apply(
   }
 
   const auto spacetime_vars = kerr_schild.variables(
-
       inertial_particle_position, time,
       tmpl::list<
           gr::Tags::Lapse<double>,

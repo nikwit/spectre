@@ -245,19 +245,20 @@ struct ObserveCoefficientsTrigger : db::SimpleTag {
  * into the ExcisionSpheres as well.
  */
 template <size_t Dim>
-struct InertialParticlePosition : db::SimpleTag {
-  using type = tnsr::I<double, Dim, Frame::Inertial>;
+struct ParticlePositionVelocity : db::SimpleTag {
+  using type = std::array<tnsr::I<double, Dim, Frame::Inertial>, 2>;
 };
 
 template <size_t Dim>
-struct InertialParticlePositionCompute : InertialParticlePosition<Dim>,
+struct ParticlePositionVelocityCompute : ParticlePositionVelocity<Dim>,
                                          db::ComputeTag {
-  using base = InertialParticlePosition<Dim>;
-  using return_type = tnsr::I<double, Dim, Frame::Inertial>;
+  using base = ParticlePositionVelocity<Dim>;
+  using return_type = std::array<tnsr::I<double, Dim, Frame::Inertial>, 2>;
   using argument_tags = tmpl::list<ExcisionSphere<Dim>, WorldtubeCoordinateMaps,
                                    ::Tags::Time, domain::Tags::FunctionsOfTime>;
   static void function(
-      gsl::not_null<tnsr::I<double, Dim, Frame::Inertial>*> position,
+      gsl::not_null<std::array<tnsr::I<double, Dim, Frame::Inertial>, 2>*>
+          position,
       const ::ExcisionSphere<Dim>& excision_sphere,
       const domain::CoordinateMapBase<Frame::Grid, Frame::Inertial, 3>& maps,
       const double time,
@@ -265,6 +266,25 @@ struct InertialParticlePositionCompute : InertialParticlePosition<Dim>,
           std::string,
           std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
           functions_of_time);
+};
+
+template <size_t Dim>
+struct ParticleAcceleration : db::SimpleTag {
+  using type = tnsr::I<double, Dim, Frame::Inertial>;
+};
+
+template <size_t Dim>
+struct ParticleAccelerationCompute : ParticleAcceleration<Dim>, db::ComputeTag {
+  using base = ParticleAcceleration<Dim>;
+  using return_type = tnsr::I<double, Dim, Frame::Inertial>;
+  using argument_tags = tmpl::list<
+      ParticlePositionVelocity<Dim>,
+      CurvedScalarWave::Tags::BackgroundSpacetime<gr::Solutions::KerrSchild>>;
+  static void function(
+      gsl::not_null<tnsr::I<double, Dim, Frame::Inertial>*> acceleration,
+      const std::array<tnsr::I<double, Dim, Frame::Inertial>, 2>&
+          position_velocity,
+      const gr::Solutions::KerrSchild& background_spacetime);
 };
 /// @}
 
@@ -292,7 +312,7 @@ struct FaceCoordinatesCompute : FaceCoordinates<Dim, Frame, Centered>,
       tmpl::list<ExcisionSphere<Dim>, domain::Tags::Element<Dim>,
                  domain::Tags::Coordinates<Dim, Frame>, domain::Tags::Mesh<Dim>,
                  tmpl::conditional_t<needs_inertial_wt_coords,
-                                     tmpl::list<InertialParticlePosition<Dim>>,
+                                     tmpl::list<ParticlePositionVelocity<Dim>>,
                                      tmpl::list<>>>>;
 
   using return_type = std::optional<tnsr::I<DataVector, Dim, Frame>>;
@@ -309,7 +329,8 @@ struct FaceCoordinatesCompute : FaceCoordinates<Dim, Frame, Centered>,
       const ::ExcisionSphere<Dim>& excision_sphere, const Element<Dim>& element,
       const tnsr::I<DataVector, Dim, ::Frame::Inertial>& coords,
       const Mesh<Dim>& mesh,
-      const tnsr::I<double, Dim, ::Frame::Inertial>& particle_position);
+      const std::array<tnsr::I<double, Dim, ::Frame::Inertial>, 2>&
+          particle_position);
 };
 /// @}
 
@@ -344,9 +365,10 @@ template <size_t Dim>
 struct PunctureFieldCompute : PunctureField<Dim>, db::ComputeTag {
   using base = PunctureField<Dim>;
   using argument_tags =
-      tmpl::list<FaceCoordinates<Dim, Frame::Inertial, false>,
+      tmpl::list<FaceCoordinates<Dim, Frame::Inertial, true>,
                  ExcisionSphere<Dim>, ::Tags::Time, ExpansionOrder,
-                 InertialParticlePosition<Dim>, domain::Tags::FunctionsOfTime>;
+                 ParticlePositionVelocity<Dim>, ParticleAcceleration<Dim>,
+                 domain::Tags::FunctionsOfTime>;
   using return_type = std::optional<Variables<tmpl::list<
       CurvedScalarWave::Tags::Psi, ::Tags::dt<CurvedScalarWave::Tags::Psi>,
       ::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<3>,
@@ -357,7 +379,9 @@ struct PunctureFieldCompute : PunctureField<Dim>, db::ComputeTag {
           inertial_face_coords,
       const ::ExcisionSphere<Dim>& excision_sphere, const double time,
       const size_t expansion_order,
-      const tnsr::I<double, Dim, ::Frame::Inertial>& particle_position,
+      const std::array<tnsr::I<double, Dim, ::Frame::Inertial>, 2>&
+          particle_position_velocity,
+      const tnsr::I<double, Dim>& particle_acceleration,
       const std::unordered_map<
           std::string,
           std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
