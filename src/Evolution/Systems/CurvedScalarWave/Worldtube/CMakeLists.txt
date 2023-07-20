@@ -13,6 +13,7 @@ spectre_target_sources(
   PunctureFieldOrder0.cpp
   PunctureFieldOrder1.cpp
   PunctureFieldOrder2.cpp
+  PunctureFieldGenericOrder0.cpp
   )
 
 spectre_target_headers(

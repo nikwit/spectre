@@ -100,4 +100,15 @@ void puncture_field_2(
     const double omega,
     const tnsr::I<double, 3, Frame::Inertial>& particle_position,
     const double bh_mass);
+
+void puncture_field_generic_0(
+    gsl::not_null<Variables<tmpl::list<
+        CurvedScalarWave::Tags::Psi, ::Tags::dt<CurvedScalarWave::Tags::Psi>,
+        ::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<3>,
+                      Frame::Inertial>>>*>
+        result,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& centered_coords,
+    const tnsr::I<double, 3>& particle_position,
+    const tnsr::I<double, 3>& particle_velocity,
+    const tnsr::I<double, 3>& particle_acceleration, const double BH_mass);
 }  // namespace CurvedScalarWave::Worldtube

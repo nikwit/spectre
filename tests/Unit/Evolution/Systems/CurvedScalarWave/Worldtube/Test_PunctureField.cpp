@@ -34,7 +34,6 @@ void test_circular_orbit() {
   const double orbit_radius = 7.;
   const double orbit_speed = pow(orbit_radius, -1.5);
   const size_t num_points = 100;
-  const tnsr::I<double, 3, Frame::Inertial> wt_coords{{orbit_radius, 0., 0.}};
   std::uniform_real_distribution dist_around_wt(-3., 3.);
   auto sample_points =
       make_with_random_values<tnsr::I<DataVector, 3, Frame::Inertial>>(
@@ -132,10 +131,79 @@ void test_derivative() {
   }
 }
 
+std::array<tnsr::I<double, 3>, 3> get_circular_orbit_pos_vel_acc(
+    const double orbit_radius, const double time) {
+  const double angular_velocity = 1. / (sqrt(orbit_radius) * orbit_radius);
+  tnsr::I<double, 3> position{{orbit_radius * cos(angular_velocity * time),
+                               orbit_radius * sin(angular_velocity * time),
+                               0.}};
+  tnsr::I<double, 3> velocity{
+      {-angular_velocity * orbit_radius * sin(angular_velocity * time),
+       angular_velocity * orbit_radius * cos(angular_velocity * time), 0.}};
+  tnsr::I<double, 3> acceleration{
+      {-square(angular_velocity) * orbit_radius * cos(angular_velocity * time),
+       -square(angular_velocity) * orbit_radius * sin(angular_velocity * time),
+       0.}};
+  return std::array<tnsr::I<double, 3>, 3>{
+      {std::move(position), std::move(velocity), std::move(acceleration)}};
+}
+
+void test_generic_orbit_against_circular() {
+  MAKE_GENERATOR(gen)
+  // sample 100 random points around the worldtube
+  const size_t num_points = 2;
+
+  std::uniform_real_distribution dist_around_wt(-3., 3.);
+  auto sample_points =
+      make_with_random_values<tnsr::I<DataVector, 3, Frame::Inertial>>(
+          make_not_null(&gen), make_not_null(&dist_around_wt),
+          DataVector(num_points));
+
+  sample_points.get(0) = 0.5;
+  sample_points.get(1) = 0.6;
+  sample_points.get(2) = 0.;
+
+  std::uniform_real_distribution time_dist(0., 10000.);
+  std::uniform_real_distribution orbit_radius_dist(3., 20.);
+  Approx local_approx = Approx::custom().epsilon(1.e-12).scale(1.);
+
+  for (size_t order = 0; order <= 0; ++order) {
+    CAPTURE(order);
+    for (size_t i = 0; i < 1; ++i) {
+      const double time = 10.;
+      const double orbit_radius = 5.;
+      CAPTURE(orbit_radius);
+      CAPTURE(time);
+      const auto [position, velocity, acceleration] =
+          get_circular_orbit_pos_vel_acc(orbit_radius, time);
+      puncture_vars puncture_generic{num_points};
+      Worldtube::puncture_field_generic_0(make_not_null(&puncture_generic),
+                                          sample_points, position, velocity,
+                                          acceleration, 1.);
+      for (size_t d = 0; d < 3; ++d) {
+        sample_points.get(d) += position.get(d);
+      }
+      puncture_vars puncture_circular{num_points};
+      Worldtube::puncture_field(make_not_null(&puncture_circular),
+                                sample_points, time, orbit_radius, 1., 0);
+      CHECK_ITERABLE_CUSTOM_APPROX(get<Tags::Psi>(puncture_generic).get(),
+                                   get<Tags::Psi>(puncture_circular).get(),
+                                   local_approx);
+      CHECK_ITERABLE_CUSTOM_APPROX(get<deriv_psi_tag>(puncture_generic),
+                                   get<deriv_psi_tag>(puncture_circular),
+                                   local_approx);
+      CHECK_ITERABLE_CUSTOM_APPROX(
+          get<::Tags::dt<Tags::Psi>>(puncture_generic).get(),
+          get<::Tags::dt<Tags::Psi>>(puncture_circular).get(), local_approx);
+    }
+  }
+}
+
 SPECTRE_TEST_CASE("Unit.Evolution.Systems.CurvedScalarWave.PunctureField",
                   "[Unit][Evolution]") {
   test_circular_orbit();
   test_derivative();
+  test_generic_orbit_against_circular();
 }
 }  // namespace
 }  // namespace CurvedScalarWave
