@@ -7,7 +7,6 @@
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/DynamicBuffer.hpp"
 #include "DataStructures/Tags/TempTensor.hpp"
-#include "DataStructures/Tensor/EagerMath/Magnitude.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Variables.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
@@ -24,23 +23,25 @@ void puncture_field_2(
                       Frame::Inertial>>>*>
         result,
     const tnsr::I<DataVector, 3, Frame::Inertial>& coords, const double time,
-    const double omega,
-    const tnsr::I<double, 3, Frame::Inertial>& particle_position,
-    const double BH_mass) {
+    const double orbital_radius, const double BH_mass) {
   const size_t grid_size = get<0>(coords).size();
   result->initialize(grid_size);
-  const double r0 = get(magnitude(particle_position));
+  const double r0 = orbital_radius;
   const double M = BH_mass;
-  const double w = omega;
+  const double w = 1. / (r0 * sqrt(r0));
   const double t = time;
+
+  const double charge_pos_x = r0 * cos(w * time);
+  const double charge_pos_y = r0 * sin(w * time);
+  const double charge_pos_z = 0.;
 
   const DataVector& x = get<0>(coords);
   const DataVector& y = get<1>(coords);
   const DataVector& z = get<2>(coords);
 
-  const DataVector Dx = x - particle_position.get(0);
-  const DataVector Dy = y - particle_position.get(1);
-  const DataVector Dz = z - particle_position.get(2);
+  const DataVector Dx = x - charge_pos_x;
+  const DataVector Dy = y - charge_pos_y;
+  const DataVector Dz = z - charge_pos_z;
 
   // we use a dynamic buffer even though the size is known at compile
   // time because TempBuffer only accepts 256 arguments and takes much

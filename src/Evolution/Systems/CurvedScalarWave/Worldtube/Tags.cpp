@@ -129,7 +129,7 @@ void PunctureFieldCompute<Dim>::function(
     }
     const double omega =
         functions_of_time.at("Rotation")->func_and_deriv(time)[1][0];
-    puncture_field_generic_0(
+    puncture_field_generic_1(
         make_not_null(&(result->value())),
         inertial_face_coords_centered.value(), particle_position_velocity[0],
         particle_position_velocity[1], particle_acceleration, 1.);

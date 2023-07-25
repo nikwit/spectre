@@ -49,9 +49,7 @@ void puncture_field(
                       Frame::Inertial>>>*>
         result,
     const tnsr::I<DataVector, 3, Frame::Inertial>& coords, const double time,
-    const double omega,
-    const tnsr::I<double, 3, Frame::Inertial>& particle_position,
-    const double bh_mass, size_t order);
+    const double orbital_radius, const double bh_mass, size_t order);
 
 /*!
  * \brief Computes the puncture/singular field \f$\Psi^\mathcal{P}\f$ of a
@@ -65,9 +63,7 @@ void puncture_field_0(
                       Frame::Inertial>>>*>
         result,
     const tnsr::I<DataVector, 3, Frame::Inertial>& coords, const double time,
-    const double omega,
-    const tnsr::I<double, 3, Frame::Inertial>& particle_position,
-    const double bh_mass);
+    const double orbital_radius, const double bh_mass);
 
 /*!
  * \brief Computes the puncture/singular field \f$\Psi^\mathcal{P}\f$ of a
@@ -81,9 +77,7 @@ void puncture_field_1(
                       Frame::Inertial>>>*>
         result,
     const tnsr::I<DataVector, 3, Frame::Inertial>& coords, const double time,
-    const double omega,
-    const tnsr::I<double, 3, Frame::Inertial>& particle_position,
-    const double bh_mass);
+    const double orbital_radius, const double bh_mass);
 
 /*!
  * \brief Computes the puncture/singular field \f$\Psi^\mathcal{P}\f$ of a
@@ -97,11 +91,20 @@ void puncture_field_2(
                       Frame::Inertial>>>*>
         result,
     const tnsr::I<DataVector, 3, Frame::Inertial>& coords, const double time,
-    const double omega,
-    const tnsr::I<double, 3, Frame::Inertial>& particle_position,
-    const double bh_mass);
+    const double orbital_radius, const double bh_mass);
 
 void puncture_field_generic_0(
+    gsl::not_null<Variables<tmpl::list<
+        CurvedScalarWave::Tags::Psi, ::Tags::dt<CurvedScalarWave::Tags::Psi>,
+        ::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<3>,
+                      Frame::Inertial>>>*>
+        result,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& centered_coords,
+    const tnsr::I<double, 3>& particle_position,
+    const tnsr::I<double, 3>& particle_velocity,
+    const tnsr::I<double, 3>& particle_acceleration, const double BH_mass);
+
+void puncture_field_generic_1(
     gsl::not_null<Variables<tmpl::list<
         CurvedScalarWave::Tags::Psi, ::Tags::dt<CurvedScalarWave::Tags::Psi>,
         ::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<3>,
