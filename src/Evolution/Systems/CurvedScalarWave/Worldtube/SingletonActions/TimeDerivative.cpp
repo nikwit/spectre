@@ -115,7 +115,7 @@ void TimeDerivativeMutator::apply(
 
   tnsr::I<double, Dim> particle_acceleration{};
   double u0_squared = spacetime_metric_inertial.get(0, 0);
-  const double charge = 1.;
+  const double charge = 0.1;
   const double mass = 1.;
   for (size_t i = 0; i < Dim; ++i) {
     particle_acceleration.get(i) =
@@ -140,14 +140,40 @@ void TimeDerivativeMutator::apply(
     }
   }
 
-  if (time > 400.) {
+  if (time > 500.) {
+    ::InverseJacobian<double, Dim, Frame::Grid, Frame::Inertial> inv_jacobian{};
+    const double angle = atan2(inertial_particle_position.get(1),
+                               inertial_particle_position.get(0));
+    inv_jacobian.get(0, 0) = cos(angle);
+    inv_jacobian.get(0, 1) = sin(angle);
+    inv_jacobian.get(1, 0) = -sin(angle);
+    inv_jacobian.get(1, 1) = cos(angle);
+    inv_jacobian.get(2, 2) = 1.;
+
+    tnsr::I<double, Dim> di_psi_inertial{};
+    for (size_t i = 0; i < Dim; ++i) {
+      di_psi_inertial.get(i) = get<0>(psi_dipole) * inv_jacobian.get(0, i) +
+                               get<1>(psi_dipole) * inv_jacobian.get(1, i) +
+                               get<2>(psi_dipole) * inv_jacobian.get(2, i);
+    }
+    double v_dot_di_psi = 0.;
+    for (size_t i = 0; i < Dim; ++i) {
+      v_dot_di_psi += particle_velocity.get(i) * di_psi_inertial.get(i);
+    }
     u0_squared = -1. / u0_squared;
     for (size_t i = 0; i < Dim; ++i) {
       particle_acceleration.get(i) +=
-          inverse_spacetime_metric_inertial.get(i, 0) -
-          particle_velocity.get(i) *
-              inverse_spacetime_metric_inertial.get(0, 0) *
-              get(dt_psi_monopole) * charge / mass / u0_squared;
+          (inverse_spacetime_metric_inertial.get(i+1, 0) -
+           particle_velocity.get(i) *
+               inverse_spacetime_metric_inertial.get(0, 0)) *
+          (get(dt_psi_monopole) - v_dot_di_psi) * charge / mass / u0_squared;
+      for (size_t j = 0; j < Dim; ++j) {
+        particle_acceleration.get(i) +=
+            (inverse_spacetime_metric_inertial.get(i+1, j+1) -
+             particle_velocity.get(i) *
+                 inverse_spacetime_metric_inertial.get(0, j+1)) *
+            di_psi_inertial.get(j) * charge / mass / u0_squared;
+      }
     }
   }
   for (size_t i = 0; i < Dim; ++i) {
