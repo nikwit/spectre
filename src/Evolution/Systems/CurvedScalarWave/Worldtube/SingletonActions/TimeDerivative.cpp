@@ -116,7 +116,7 @@ void TimeDerivativeMutator::apply(
   tnsr::I<double, Dim> particle_acceleration{};
   double u0_squared = spacetime_metric_inertial.get(0, 0);
   const double charge = 0.1;
-  const double mass = 1.;
+  const double mass = 0.1;
   for (size_t i = 0; i < Dim; ++i) {
     particle_acceleration.get(i) =
         particle_velocity.get(i) * christoffel.get(0, 0, 0) -
