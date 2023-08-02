@@ -269,6 +269,8 @@ struct EvolutionMetavars {
       CurvedScalarWave::Tags::BackgroundSpacetime<BackgroundSpacetime>,
       Tags::AnalyticData<InitialData>,
       CurvedScalarWave::Worldtube::Tags::ExcisionSphere<volume_dim>,
+      CurvedScalarWave::Worldtube::Tags::ParticleMass,
+      CurvedScalarWave::Worldtube::Tags::ParticleCharge,
       CurvedScalarWave::Worldtube::Tags::WorldtubeCoordinateMaps,
       CurvedScalarWave::Worldtube::Tags::ExpansionOrder,
       CurvedScalarWave::Worldtube::Tags::ObserveCoefficientsTrigger>;

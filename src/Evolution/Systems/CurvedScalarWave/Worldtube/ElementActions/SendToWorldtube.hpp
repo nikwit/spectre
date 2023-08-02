@@ -125,7 +125,7 @@ struct SendToWorldtube {
       // the regular field is the full numerical field minus the puncture field
       psi_regular_times_det =
           get(face_psi) -
-          0.1 * get(get<CurvedScalarWave::Tags::Psi>(puncture_field.value()));
+          get(get<CurvedScalarWave::Tags::Psi>(puncture_field.value()));
 
       // transform Pi to dt Psi. This is equivalent to the evolution equation
       // for dt Psi but we need to calculate it again because boundary
@@ -133,7 +133,7 @@ struct SendToWorldtube {
       dt_psi_regular_times_det =
           -get(face_lapse) * get(face_pi) +
           get(dot_product(face_shift, face_phi)) -
-          0.1 * get(get<::Tags::dt<CurvedScalarWave::Tags::Psi>>(
+          get(get<::Tags::dt<CurvedScalarWave::Tags::Psi>>(
               puncture_field.value()));
 
       // const auto& mesh_velocity =
@@ -171,7 +171,7 @@ struct SendToWorldtube {
                                  Frame::Inertial>>(puncture_field.value())](
               const gsl::not_null<Scalar<DataVector>*> regular_advective_term) {
             tenex::evaluate<>(regular_advective_term,
-                              (face_phi(ti::i) - 0.1 * di_psi_puncture(ti::i)) *
+                              (face_phi(ti::i) - di_psi_puncture(ti::i)) *
                                   mesh_velocity_on_face(ti::I));
           });
       // The time derivative is transformed into the grid frame using the

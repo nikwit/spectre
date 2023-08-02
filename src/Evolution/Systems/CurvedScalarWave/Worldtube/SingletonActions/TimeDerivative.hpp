@@ -64,6 +64,7 @@ struct TimeDerivativeMutator {
       gr::Tags::InverseSpacetimeMetric<double, Dim, Frame::Grid>,
       gr::Tags::TraceSpacetimeChristoffelSecondKind<double, Dim, Frame::Grid>,
       Tags::ExcisionSphere<Dim>, ::Tags::Time, Tags::WorldtubeRadiusAndVelocity,
+      Tags::ParticleMass, Tags::ParticleCharge,
       CurvedScalarWave::Tags::BackgroundSpacetime<gr::Solutions::KerrSchild>>;
 
   static void apply(
@@ -82,6 +83,7 @@ struct TimeDerivativeMutator {
       const tnsr::A<double, Dim, Frame::Grid>& trace_spacetime_christoffel,
       const ExcisionSphere<Dim>& excision_sphere, const double time,
       const std::array<double, 2>& worldtube_radius_and_velocity,
+      const double mass, const double charge,
       const gr::Solutions::KerrSchild& kerr_schild);
 };
 

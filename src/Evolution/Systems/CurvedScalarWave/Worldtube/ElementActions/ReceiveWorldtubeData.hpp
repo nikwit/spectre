@@ -96,12 +96,12 @@ struct ReceiveWorldtubeData {
           });
       auto& received_data = inbox.at(time_step_id);
       get(get<psi_tag>(received_data)) +=
-          0.1 * get(get<psi_tag>(puncture_field.value()));
+          get(get<psi_tag>(puncture_field.value()));
 
       // the advective term transforms the time derivative back into the
       // inertial frame
       get(get<dt_psi_tag>(received_data)) +=
-          0.1 * get(get<dt_psi_tag>(puncture_field.value())) -
+          get(get<dt_psi_tag>(puncture_field.value())) -
           get(get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));
       ::InverseJacobian<DataVector, Dim, Frame::Grid, Frame::Inertial>
           inv_jacobian(get(get<psi_tag>(received_data)).size(), 0.);
@@ -135,7 +135,7 @@ struct ReceiveWorldtubeData {
                   get<2>(get<di_psi_tag<Frame::Grid>>(received_data)) *
                       inv_jacobian.get(2, i);
               phi_inertial.get(i) +=
-                  0.1 * get<di_psi_tag<Frame::Inertial>>(puncture_field.value())
+                  get<di_psi_tag<Frame::Inertial>>(puncture_field.value())
                       .get(i);
             }
 

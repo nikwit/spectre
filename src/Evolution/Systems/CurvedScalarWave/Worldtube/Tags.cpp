@@ -119,7 +119,7 @@ void PunctureFieldCompute<Dim>::function(
     const size_t expansion_order,
     const std::array<tnsr::I<double, Dim, ::Frame::Inertial>, 2>&
         particle_position_velocity,
-    const tnsr::I<double, Dim>& particle_acceleration,
+    const tnsr::I<double, Dim>& particle_acceleration, const double charge,
     const std::unordered_map<
         std::string, std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
         functions_of_time) {
@@ -127,12 +127,7 @@ void PunctureFieldCompute<Dim>::function(
     if (not result->has_value()) {
       result->emplace(get<0>(inertial_face_coords_centered.value()).size());
     }
-    const double omega =
-        functions_of_time.at("Rotation")->func_and_deriv(time)[1][0];
-    puncture_field_generic_1(
-        make_not_null(&(result->value())),
-        inertial_face_coords_centered.value(), particle_position_velocity[0],
-        particle_position_velocity[1], particle_acceleration, 1.);
+    result->value() *= charge;
   } else {
     result->reset();
   }

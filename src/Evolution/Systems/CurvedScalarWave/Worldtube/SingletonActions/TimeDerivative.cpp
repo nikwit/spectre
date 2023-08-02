@@ -38,6 +38,7 @@ void TimeDerivativeMutator::apply(
     const tnsr::A<double, Dim, Frame::Grid>& trace_spacetime_christoffel,
     const ExcisionSphere<Dim>& excision_sphere, const double time,
     const std::array<double, 2>& worldtube_radius_and_velocity,
+    const double mass, const double charge,
     const gr::Solutions::KerrSchild& kerr_schild) {
   const double wt_radius = worldtube_radius_and_velocity.at(0);
   const auto& psi0 = get(get<Tags::Psi0>(evolved_vars));
@@ -115,8 +116,6 @@ void TimeDerivativeMutator::apply(
 
   tnsr::I<double, Dim> particle_acceleration{};
   double u0_squared = spacetime_metric_inertial.get(0, 0);
-  const double charge = 0.1;
-  const double mass = 0.1;
   for (size_t i = 0; i < Dim; ++i) {
     particle_acceleration.get(i) =
         particle_velocity.get(i) * christoffel.get(0, 0, 0) -
@@ -140,7 +139,7 @@ void TimeDerivativeMutator::apply(
     }
   }
 
-  if (time > 500.) {
+  if (time > 20000.) {
     ::InverseJacobian<double, Dim, Frame::Grid, Frame::Inertial> inv_jacobian{};
     const double angle = atan2(inertial_particle_position.get(1),
                                inertial_particle_position.get(0));
@@ -163,15 +162,15 @@ void TimeDerivativeMutator::apply(
     u0_squared = -1. / u0_squared;
     for (size_t i = 0; i < Dim; ++i) {
       particle_acceleration.get(i) +=
-          (inverse_spacetime_metric_inertial.get(i+1, 0) -
+          (inverse_spacetime_metric_inertial.get(i + 1, 0) -
            particle_velocity.get(i) *
                inverse_spacetime_metric_inertial.get(0, 0)) *
           (get(dt_psi_monopole) - v_dot_di_psi) * charge / mass / u0_squared;
       for (size_t j = 0; j < Dim; ++j) {
         particle_acceleration.get(i) +=
-            (inverse_spacetime_metric_inertial.get(i+1, j+1) -
+            (inverse_spacetime_metric_inertial.get(i + 1, j + 1) -
              particle_velocity.get(i) *
-                 inverse_spacetime_metric_inertial.get(0, j+1)) *
+                 inverse_spacetime_metric_inertial.get(0, j + 1)) *
             di_psi_inertial.get(j) * charge / mass / u0_squared;
       }
     }

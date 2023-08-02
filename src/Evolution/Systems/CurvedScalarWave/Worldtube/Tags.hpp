@@ -79,6 +79,18 @@ struct ExpansionOrder {
   static size_t upper_bound() { return 2; }
   using group = Worldtube;
 };
+
+struct ParticleCharge {
+  using type = double;
+  static constexpr Options::String help{"charge of particle"};
+  using group = Worldtube;
+};
+
+struct ParticleMass {
+  using type = double;
+  static constexpr Options::String help{"mass of particle"};
+  using group = Worldtube;
+};
 }  // namespace OptionTags
 
 /*!
@@ -145,6 +157,20 @@ struct CheckInputFile : db::SimpleTag {
     }
     return true;
   }
+};
+
+struct ParticleMass : db::SimpleTag {
+  using type = double;
+  using option_tags = tmpl::list<OptionTags::ParticleMass>;
+  static constexpr bool pass_metavariables = false;
+  static double create_from_options(const double mass) { return mass; }
+};
+
+struct ParticleCharge : db::SimpleTag {
+  using type = double;
+  using option_tags = tmpl::list<OptionTags::ParticleCharge>;
+  static constexpr bool pass_metavariables = false;
+  static double create_from_options(const double charge) { return charge; }
 };
 
 /*!
@@ -368,7 +394,7 @@ struct PunctureFieldCompute : PunctureField<Dim>, db::ComputeTag {
       tmpl::list<FaceCoordinates<Dim, Frame::Inertial, true>,
                  ExcisionSphere<Dim>, ::Tags::Time, ExpansionOrder,
                  ParticlePositionVelocity<Dim>, ParticleAcceleration<Dim>,
-                 domain::Tags::FunctionsOfTime>;
+                 ParticleCharge, domain::Tags::FunctionsOfTime>;
   using return_type = std::optional<Variables<tmpl::list<
       CurvedScalarWave::Tags::Psi, ::Tags::dt<CurvedScalarWave::Tags::Psi>,
       ::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<3>,
@@ -381,7 +407,7 @@ struct PunctureFieldCompute : PunctureField<Dim>, db::ComputeTag {
       const size_t expansion_order,
       const std::array<tnsr::I<double, Dim, ::Frame::Inertial>, 2>&
           particle_position_velocity,
-      const tnsr::I<double, Dim>& particle_acceleration,
+      const tnsr::I<double, Dim>& particle_acceleration, const double charge,
       const std::unordered_map<
           std::string,
           std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
