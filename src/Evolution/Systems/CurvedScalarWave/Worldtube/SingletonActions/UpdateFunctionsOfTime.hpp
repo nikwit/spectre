@@ -94,9 +94,13 @@ struct UpdateFunctionsOfTime {
           -radial_vel / grid_radius_particle * sqrt_4_pi * envelope_radius;
 
       const double worldtube_radius_factor = 1.;
-          //0.25 * cos(2. * M_PI * time / 300.) + 0.75;
+      // 0.25 * cos(2. * M_PI * time / 300.) + 0.75;
       const double worldtube_radius_factor_derivative = 0.;
-          //-0.25 * sin(2. * M_PI * time / 300.) * 2. * M_PI / 300.;
+      //-0.25 * sin(2. * M_PI * time / 300.) * 2. * M_PI / 300.;
+
+      const double bh_radius_factor = r / grid_radius_particle;
+      const double bh_radius_factor_derivative =
+          radial_vel / grid_radius_particle;
 
       const double factor =
           1. / (1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));
@@ -108,21 +112,13 @@ struct UpdateFunctionsOfTime {
           (sqrt_4_pi * worldtube_radius_factor_derivative +
            worldtube_radius_factor * expansion_update.at(1) * factor /
                envelope_radius);
-      /*compression_update_a.at(0) =
-          (1. -
-           1. / (1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius))) *
-          sqrt_4_pi * object_a_radius;
-      compression_update_a.at(1) =
-          - object_a_radius / envelope_radius * expansion_update.at(1) /
-          square(1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));*/
 
       compression_update_b.at(0) =
-          (1. -
-           1. / (1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius))) *
-          sqrt_4_pi * object_b_radius;
-      compression_update_b.at(1) =
-          -object_b_radius / envelope_radius * expansion_update.at(1) /
-          square(1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));
+          sqrt_4_pi * object_b_radius * (1. - bh_radius_factor * factor);
+      compression_update_b.at(1) = -object_b_radius * factor *
+                                   (sqrt_4_pi * bh_radius_factor_derivative +
+                                    bh_radius_factor * expansion_update.at(1) *
+                                        factor / envelope_radius);
 
       const double new_fot_expiration_time =
           time +
