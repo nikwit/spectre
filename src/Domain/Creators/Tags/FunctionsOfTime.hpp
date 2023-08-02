@@ -42,8 +42,7 @@ struct OptionList {
 template <typename Metavariables>
 struct OptionList<Metavariables, false> {
   using type =
-      tmpl::list<domain::OptionTags::DomainCreator<Metavariables::volume_dim>,
-                 ::OptionTags::InitialTime, ::OptionTags::InitialTimeStep>;
+      tmpl::list<domain::OptionTags::DomainCreator<Metavariables::volume_dim>>;
 };
 }  // namespace detail
 
@@ -90,8 +89,7 @@ struct FunctionsOfTimeInitialize : FunctionsOfTime, db::SimpleTag {
   template <typename Metavariables>
   static type create_from_options(
       const std::unique_ptr<::DomainCreator<Metavariables::volume_dim>>&
-          domain_creator,
-      const double initial_time, const double initial_time_step) {
+          domain_creator) {
     std::unordered_map<std::string, double> initial_expiration_times{};
     const double initial_expiration_time = 1e-8;
     initial_expiration_times["Rotation"] = initial_expiration_time;
