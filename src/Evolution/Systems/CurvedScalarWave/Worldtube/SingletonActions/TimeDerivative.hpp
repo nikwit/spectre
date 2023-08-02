@@ -99,7 +99,8 @@ struct ComputeTimeDerivative {
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim, Frame::Grid>,
       gr::Tags::InverseSpacetimeMetric<double, Dim, Frame::Grid>,
-      gr::Tags::TraceSpacetimeChristoffelSecondKind<double, Dim, Frame::Grid>>;
+      gr::Tags::TraceSpacetimeChristoffelSecondKind<double, Dim, Frame::Grid>,
+      Tags::ParticlePositionVelocity<3>>;
 
   template <typename DbTagsList, typename... InboxTags, typename Metavariables,
             typename ArrayIndex, typename ActionList,

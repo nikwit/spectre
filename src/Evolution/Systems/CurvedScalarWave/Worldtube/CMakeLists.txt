@@ -9,6 +9,7 @@ spectre_target_sources(
   ${LIBRARY}
   PRIVATE
   Tags.cpp
+  OrbitRadiusTrigger.cpp
   PunctureField.cpp
   PunctureFieldOrder0.cpp
   PunctureFieldOrder1.cpp
@@ -22,6 +23,7 @@ spectre_target_headers(
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
   Inboxes.hpp
+  OrbitRadiusTrigger.hpp
   SingletonChare.hpp
   Tags.hpp
   PunctureField.hpp
