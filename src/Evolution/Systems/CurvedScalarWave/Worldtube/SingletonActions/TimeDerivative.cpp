@@ -139,7 +139,7 @@ void TimeDerivativeMutator::apply(
     }
   }
 
-  if (time > 20000.) {
+  if (time > 1200.) {
     ::InverseJacobian<double, Dim, Frame::Grid, Frame::Inertial> inv_jacobian{};
     const double angle = atan2(inertial_particle_position.get(1),
                                inertial_particle_position.get(0));

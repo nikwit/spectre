@@ -127,6 +127,10 @@ void PunctureFieldCompute<Dim>::function(
     if (not result->has_value()) {
       result->emplace(get<0>(inertial_face_coords_centered.value()).size());
     }
+    puncture_field_generic_1(
+        make_not_null(&(result->value())),
+        inertial_face_coords_centered.value(), particle_position_velocity[0],
+        particle_position_velocity[1], particle_acceleration, 1.);
     result->value() *= charge;
   } else {
     result->reset();

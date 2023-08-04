@@ -63,12 +63,11 @@ struct SendToWorldtube {
   static constexpr size_t Dim = 3;
   using tags_to_send = tmpl::list<CurvedScalarWave::Tags::Psi,
                                   ::Tags::dt<CurvedScalarWave::Tags::Psi>>;
-  using tags_to_slice_to_face =
-      tmpl::list<CurvedScalarWave::Tags::Psi, CurvedScalarWave::Tags::Pi,
-                 CurvedScalarWave::Tags::Phi<Dim>,
-                 gr::Tags::Shift<DataVector, Dim>, gr::Tags::Lapse<DataVector>,
-                 domain::Tags::InverseJacobian<Dim, Frame::ElementLogical,
-                                               Frame::Grid>>;
+  using tags_to_slice_to_face = tmpl::list<
+      CurvedScalarWave::Tags::Psi, CurvedScalarWave::Tags::Pi,
+      CurvedScalarWave::Tags::Phi<Dim>, gr::Tags::Shift<DataVector, Dim>,
+      gr::Tags::Lapse<DataVector>,
+      domain::Tags::InverseJacobian<Dim, Frame::ElementLogical, Frame::Grid>>;
 
   using inbox_tags = tmpl::list<Worldtube::Tags::SphericalHarmonicsInbox<Dim>>;
   using simple_tags = tmpl::list<Tags::RegularFieldAdvectiveTerm<Dim>>;
@@ -136,33 +135,92 @@ struct SendToWorldtube {
           get(get<::Tags::dt<CurvedScalarWave::Tags::Psi>>(
               puncture_field.value()));
 
-      // const auto& mesh_velocity =
-      // db::get<domain::Tags::MeshVelocity<Dim>>(box);
-      const auto time = db::get<::Tags::Time>(box);
-      const auto& angular_vel = db::get<::domain::Tags::FunctionsOfTime>(box)
-                                    .at("Rotation")
-                                    ->func_and_deriv(time)[1][0];
-      const auto& inertial_coords =
-          db::get<::domain::Tags::Coordinates<Dim, Frame::Inertial>>(box);
-      const auto radii = magnitude(inertial_coords);
-      tnsr::I<DataVector, Dim, Frame::Inertial> mesh_velocity(
-          get(radii).size());
-      mesh_velocity.get(0) =
-          -radii.get() * angular_vel * sin(angular_vel * time);
-      mesh_velocity.get(1) =
-          radii.get() * angular_vel * cos(angular_vel * time);
-      mesh_velocity.get(2) = 0.;
+      const auto& fots = get<domain::Tags::FunctionsOfTime>(cache);
+      const double time = db::get<::Tags::Time>(box);
+      const double angle = fots.at("Rotation")->func_and_deriv(time)[0][0];
+      const double angular_vel =
+          fots.at("Rotation")->func_and_deriv(time)[1][0];
+      const auto& inertial_face_coords =
+          db::get<Tags::FaceCoordinates<Dim, Frame::Inertial, false>>(box)
+              .value();
 
-      /*ASSERT(mesh_velocity.has_value(),
-             "Expected a moving grid for worldrube evolution.");*/
+      const auto& particle_position_velocity =
+          db::get<Tags::ParticlePositionVelocity<Dim>>(box);
+      const auto& particle_position = particle_position_velocity[0];
+      const auto& particle_velocity = particle_position_velocity[1];
+      const double particle_radius = get(magnitude(particle_position));
+
+      const double radial_vel =
+          (get<0>(particle_position) * get<0>(particle_velocity) +
+           get<1>(particle_position) * get<1>(particle_velocity)) /
+          particle_radius;
+      const auto grid_radii = get(magnitude(inertial_face_coords));
+      const auto& x_face = get<0>(inertial_face_coords);
+      const auto& y_face = get<1>(inertial_face_coords);
+      const auto& z_face = get<2>(inertial_face_coords);
+
+      const DataVector thetas = atan2(hypot(x_face, y_face), z_face);
+      const DataVector phis = atan2(y_face, x_face);
+
+      auto& mesh_velocity_on_face =
+          get<gr::Tags::Shift<DataVector, Dim>>(vars_on_face);
+      get<0>(mesh_velocity_on_face) =
+          sin(thetas) *
+          (radial_vel * cos(phis) - grid_radii * sin(phis) * angular_vel);
+      get<1>(mesh_velocity_on_face) =
+          sin(thetas) *
+          (radial_vel * sin(phis) + grid_radii * cos(phis) * angular_vel);
+      get<2>(mesh_velocity_on_face) = radial_vel * cos(thetas);
+
+      /*std::unordered_map<
+          std::string, std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>
+          fots_no_compression{};
+      fots_no_compression["Rotation"] = fots.at("Rotation")->get_clone();
+      fots_no_compression["Expansion"] = fots.at("Expansion")->get_clone();
+      fots_no_compression["SizeA"] = fots.at("SizeA")->get_clone();
+      fots_no_compression["SizeB"] = fots.at("SizeB")->get_clone();
+      const auto [envelope_radius, object_a_radius, object_b_radius] =
+          db::get<Tags::EnvelopeAndObjectRadii>(box);
+      const double sqrt_4_pi = sqrt(4. * M_PI);
+      DataVector compression_update_a(3, 0.);
+
+      const auto expansion_and_deriv =
+          fots_no_compression["Expansion"]->func_and_deriv(time);
+      const auto compression_and_deriv =
+          fots_no_compression["SizeA"]->func_and_deriv(time);
+      const double factor = 1. / (1. - expansion_and_deriv.at(0)[0] /
+                                           (sqrt_4_pi * envelope_radius));
+      compression_update_a.at(0) = compression_and_deriv.at(0)[0];
+      compression_update_a.at(1) =
+          -object_a_radius * factor *
+          (expansion_and_deriv.at(1)[0] * factor / envelope_radius);
+
+      auto* size_a_integrated_fot =
+          dynamic_cast<domain::FunctionsOfTime::IntegratedFoT*>(
+              &*fots_no_compression["SizeA"]);
+      size_a_integrated_fot->overwrite_last_update(time, compression_update_a);
+
+      const auto& worldtube_maps =
+          db::get<Tags::WorldtubeCoordinateMapsWithCompression>(box);
+      const auto mesh_velocity_on_face =
+          std::get<3>(worldtube_maps.coords_frame_velocity_jacobians(
+              db::get<Tags::FaceCoordinates<Dim, Frame::Grid, false>>(box)
+                  .value(),
+              time, fots_no_compression));*/
+
+      /*const auto& mesh_velocity =
+      db::get<domain::Tags::MeshVelocity<Dim>>(box);
+      ASSERT(mesh_velocity.has_value(),
+             "Expected a moving grid for worldrube evolution.");
       // is an optional so we can't put the tag into variables. The shift is not
       // used at this point so we use the allocation for the mesh_velocity to
       // save memory.
       auto& mesh_velocity_on_face =
           get<gr::Tags::Shift<DataVector, Dim>>(vars_on_face);
-      data_on_slice(make_not_null(&mesh_velocity_on_face), mesh_velocity,
-                    mesh.extents(), direction.value().dimension(),
-                    index_to_slice_at(mesh.extents(), direction.value()));
+      data_on_slice(make_not_null(&mesh_velocity_on_face),
+                    mesh_velocity.value(), mesh.extents(),
+                    direction.value().dimension(),
+                    index_to_slice_at(mesh.extents(), direction.value()));*/
       db::mutate<Tags::RegularFieldAdvectiveTerm<Dim>>(
           make_not_null(&box),
           [&face_phi, &mesh_velocity_on_face,
