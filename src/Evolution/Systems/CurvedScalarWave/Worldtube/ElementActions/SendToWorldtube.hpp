@@ -137,7 +137,6 @@ struct SendToWorldtube {
 
       const auto& fots = get<domain::Tags::FunctionsOfTime>(cache);
       const double time = db::get<::Tags::Time>(box);
-      const double angle = fots.at("Rotation")->func_and_deriv(time)[0][0];
       const double angular_vel =
           fots.at("Rotation")->func_and_deriv(time)[1][0];
       const auto& inertial_face_coords =
@@ -154,23 +153,33 @@ struct SendToWorldtube {
           (get<0>(particle_position) * get<0>(particle_velocity) +
            get<1>(particle_position) * get<1>(particle_velocity)) /
           particle_radius;
-      const auto grid_radii = get(magnitude(inertial_face_coords));
+
+      auto& grid_radii = get<0, 2>(face_inv_jacobian);
+      grid_radii = get(magnitude(inertial_face_coords));
       const auto& x_face = get<0>(inertial_face_coords);
       const auto& y_face = get<1>(inertial_face_coords);
       const auto& z_face = get<2>(inertial_face_coords);
 
-      const DataVector thetas = atan2(hypot(x_face, y_face), z_face);
-      const DataVector phis = atan2(y_face, x_face);
+      auto& xy_radii = get<1, 0>(face_inv_jacobian);
+      auto& sin_thetas = get<1, 1>(face_inv_jacobian);
+      auto& cos_thetas = get<1, 2>(face_inv_jacobian);
+      auto& sin_phis = get<2, 0>(face_inv_jacobian);
+      auto& cos_phis = get<2, 1>(face_inv_jacobian);
+      xy_radii = hypot(x_face, y_face);
+      cos_thetas = z_face / grid_radii;
+      sin_thetas = xy_radii / grid_radii;
+      cos_phis = x_face / xy_radii;
+      sin_phis = y_face / xy_radii;
 
       auto& mesh_velocity_on_face =
           get<gr::Tags::Shift<DataVector, Dim>>(vars_on_face);
       get<0>(mesh_velocity_on_face) =
-          sin(thetas) *
-          (radial_vel * cos(phis) - grid_radii * sin(phis) * angular_vel);
+          sin_thetas *
+          (radial_vel * cos_phis - grid_radii * sin_phis * angular_vel);
       get<1>(mesh_velocity_on_face) =
-          sin(thetas) *
-          (radial_vel * sin(phis) + grid_radii * cos(phis) * angular_vel);
-      get<2>(mesh_velocity_on_face) = radial_vel * cos(thetas);
+          sin_thetas *
+          (radial_vel * sin_phis + grid_radii * cos_phis * angular_vel);
+      get<2>(mesh_velocity_on_face) = radial_vel * cos_thetas;
 
       /*std::unordered_map<
           std::string, std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>

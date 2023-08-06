@@ -85,7 +85,8 @@ struct ReceiveWorldtubeData {
       const auto& mesh = db::get<domain::Tags::Mesh<Dim>>(box);
       const auto face_mesh = mesh.slice_away(direction->dimension());
       const size_t face_size = face_mesh.number_of_grid_points();
-      Variables<tags_to_slice_to_face> vars_on_face(face_size);
+      Variables<tmpl::push_back<tags_to_slice_to_face, ::Tags::TempIj<0, Dim>>>
+          vars_on_face(face_size);
       tmpl::for_each<tags_to_slice_to_face>(
           [&box, &vars_on_face, &mesh, &direction](auto tag_to_slice_v) {
             using tag_to_slice = typename decltype(tag_to_slice_v)::type;
@@ -103,16 +104,19 @@ struct ReceiveWorldtubeData {
       get(get<dt_psi_tag>(received_data)) +=
           get(get<dt_psi_tag>(puncture_field.value())) -
           get(get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));
-      ::InverseJacobian<DataVector, Dim, Frame::Grid, Frame::Inertial>
-          inv_jacobian(get(get<psi_tag>(received_data)).size(), 0.);
+      auto& inv_jacobian = get<::Tags::TempIj<0, Dim>>(vars_on_face);
       const double angle =
           db::get<::domain::Tags::FunctionsOfTime>(box)
               .at("Rotation")
               ->func_and_deriv(db::get<::Tags::Time>(box))[0][0];
       inv_jacobian.get(0, 0) = cos(angle);
       inv_jacobian.get(0, 1) = sin(angle);
+      inv_jacobian.get(0, 2) = 0.;
       inv_jacobian.get(1, 0) = -sin(angle);
       inv_jacobian.get(1, 1) = cos(angle);
+      inv_jacobian.get(1, 2) = 0.;
+      inv_jacobian.get(2, 0) = 0.;
+      inv_jacobian.get(2, 1) = 0.;
       inv_jacobian.get(2, 2) = 1.;
 
       db::mutate<Tags::WorldtubeSolution<Dim>>(
