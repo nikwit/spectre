@@ -52,12 +52,12 @@ struct ObserveWorldtubeSolution {
       const ParallelComponent* const /*meta*/) {
     if (db::get<Tags::ObserveCoefficientsTrigger>(box).is_triggered(box)) {
       const auto& inertial_particle_position = db::get<Tags::Position>(box);
+      const auto& particle_velocity = db::get<Tags::Velocity>(box);
+      /*
       tnsr::I<double, Dim> particle_pos_double{};
       particle_pos_double.get(0) = inertial_particle_position.get(0)[0];
       particle_pos_double.get(1) = inertial_particle_position.get(1)[0];
       particle_pos_double.get(2) = inertial_particle_position.get(2)[0];
-
-      const auto& particle_velocity = db::get<Tags::Velocity>(box);
       const gr::Solutions::KerrSchild& kerr_schild =
           db::get<CurvedScalarWave::Tags::BackgroundSpacetime<
               gr::Solutions::KerrSchild>>(box);
@@ -99,11 +99,7 @@ struct ObserveWorldtubeSolution {
           ang_mom += spacetime_metric.get(i, j) * four_velocity.at(i) *
                      rot_killing.at(j);
         }
-      }
-
-      Parallel::printf(MakeString{} << std::setprecision(16)
-                                    << "Energy: " << energy
-                                    << ", ang mom: " << ang_mom << "\n");
+      }*/
 
       const size_t expansion_order = db::get<Tags::ExpansionOrder>(box);
       const auto& psi_monopole = db::get<
@@ -134,7 +130,8 @@ struct ObserveWorldtubeSolution {
                        << ", field value: " << psi_coefs[6] << ", wt radius "
                        << db::get<Tags::WorldtubeRadiusAndVelocity>(box)[0]
                        << ", orbital radius: "
-                       << get(magnitude(inertial_particle_position)) << "\n");
+                       << get(magnitude(inertial_particle_position))[0]
+                       << "\n");
       if (expansion_order > 0) {
         const auto& psi_dipole = db::get<
             Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>>(box);
