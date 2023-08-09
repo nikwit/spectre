@@ -10,6 +10,7 @@ spectre_target_sources(
   PRIVATE
   Tags.cpp
   OrbitRadiusTrigger.cpp
+  InsideHorizonTrigger.cpp
   PunctureField.cpp
   PunctureFieldOrder0.cpp
   PunctureFieldOrder1.cpp
@@ -25,6 +26,7 @@ spectre_target_headers(
   Inboxes.hpp
   OrbitRadiusTrigger.hpp
   SingletonChare.hpp
+  InsideHorizonTrigger.hpp
   Tags.hpp
   PunctureField.hpp
   Worldtube.hpp
