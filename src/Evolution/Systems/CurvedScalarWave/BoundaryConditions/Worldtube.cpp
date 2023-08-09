@@ -136,12 +136,17 @@ std::optional<std::string> Worldtube<Dim>::dg_ghost(
   v_psi = dot_product(normal_vector, phi_interior);
   v_zero = tenex::evaluate<ti::i>(phi_interior(ti::i) -
                                   normal_covector(ti::i) * v_psi());
-  v_plus = tenex::evaluate(pi_interior() + v_psi() -
-                           gamma2_interior() * psi_interior());
+
   v_psi = psi_interior;
   v_minus = tenex::evaluate(pi_worldtube() -
                             normal_vector(ti::I) * phi_worldtube(ti::i) -
                             gamma2_interior() * psi_worldtube());
+  v_plus = tenex::evaluate(pi_worldtube() +
+                           normal_vector(ti::I) * phi_worldtube(ti::i) -
+                           gamma2_interior() * psi_worldtube());
+
+  get(v_minus) *= step_function(get(lapse_interior) - M_SQRT1_2);
+  // get(v_plus) *= step_function(get(lapse_interior) - M_SQRT1_2);
 
   evolved_fields_from_characteristic_fields(psi, pi, phi, gamma2_interior,
                                             v_psi, v_zero, v_plus, v_minus,

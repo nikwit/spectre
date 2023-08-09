@@ -5,6 +5,7 @@
 
 #include <cstddef>
 
+#include "DataStructures/Tensor/EagerMath/Magnitude.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Variables.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Tags.hpp"
@@ -139,7 +140,8 @@ void TimeDerivativeMutator::apply(
     }
   }
 
-  if (time > 1200.) {
+  const double turn_up_time = 1200.;
+  if (time > turn_up_time) {
     ::InverseJacobian<double, Dim, Frame::Grid, Frame::Inertial> inv_jacobian{};
     const double angle = atan2(inertial_particle_position.get(1),
                                inertial_particle_position.get(0));
@@ -160,18 +162,21 @@ void TimeDerivativeMutator::apply(
       v_dot_di_psi += particle_velocity.get(i) * di_psi_inertial.get(i);
     }
     u0_squared = -1. / u0_squared;
+    const double t_minus_turnup = time - turn_up_time;
+    const double roll_on = t_minus_turnup < 800. ? t_minus_turnup / 800. : 1.;
     for (size_t i = 0; i < Dim; ++i) {
       particle_acceleration.get(i) +=
           (inverse_spacetime_metric_inertial.get(i + 1, 0) -
            particle_velocity.get(i) *
                inverse_spacetime_metric_inertial.get(0, 0)) *
-          (get(dt_psi_monopole) - v_dot_di_psi) * charge / mass / u0_squared;
+          (get(dt_psi_monopole) - v_dot_di_psi) * roll_on * charge / mass /
+          u0_squared;
       for (size_t j = 0; j < Dim; ++j) {
         particle_acceleration.get(i) +=
             (inverse_spacetime_metric_inertial.get(i + 1, j + 1) -
              particle_velocity.get(i) *
                  inverse_spacetime_metric_inertial.get(0, j + 1)) *
-            di_psi_inertial.get(j) * charge / mass / u0_squared;
+            di_psi_inertial.get(j) * roll_on * charge / mass / u0_squared;
       }
     }
   }
