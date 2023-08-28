@@ -51,8 +51,6 @@ struct ObserveWorldtubeSolution {
       const ArrayIndex& /*array_index*/, const ActionList /*meta*/,
       const ParallelComponent* const /*meta*/) {
     if (db::get<Tags::ObserveCoefficientsTrigger>(box).is_triggered(box)) {
-      const auto& inertial_particle_position = db::get<Tags::Position>(box);
-      const auto& particle_velocity = db::get<Tags::Velocity>(box);
       /*
       tnsr::I<double, Dim> particle_pos_double{};
       particle_pos_double.get(0) = inertial_particle_position.get(0)[0];
@@ -100,7 +98,10 @@ struct ObserveWorldtubeSolution {
                      rot_killing.at(j);
         }
       }*/
-
+      const auto& inertial_particle_position = db::get<Tags::Position>(box);
+      const auto& particle_velocity = db::get<Tags::Velocity>(box);
+      const auto& particle_acceleration =
+          db::get<::Tags::dt<Tags::Velocity>>(box);
       const size_t expansion_order = db::get<Tags::ExpansionOrder>(box);
       const auto& psi_monopole = db::get<
           Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Grid>>(box);
@@ -114,11 +115,12 @@ struct ObserveWorldtubeSolution {
       const size_t num_coefs = ((expansion_order + 3) * (expansion_order + 2) *
                                 (expansion_order + 1)) /
                                6;
-      std::vector<double> psi_coefs(2 * num_coefs + 6);
-      const size_t pos_offset = 6;
+      const size_t pos_offset = 9;
+      std::vector<double> psi_coefs(2 * num_coefs + pos_offset);
       for (size_t i = 0; i < 3; ++i) {
         psi_coefs[i] = inertial_particle_position.get(i)[0];
         psi_coefs[i + 3] = particle_velocity.get(i)[0];
+        psi_coefs[i + 6] = particle_acceleration.get(i)[0];
       }
       psi_coefs[0 + pos_offset] =
           expansion_order < 2 ? get(psi_monopole) : get(psi_0)[0];
@@ -127,7 +129,7 @@ struct ObserveWorldtubeSolution {
       Parallel::printf(MakeString{}
                        << "Time: " << std::setprecision(16)
                        << db::get<::Tags::Time>(box)
-                       << ", field value: " << psi_coefs[6] << ", wt radius "
+                       << ", field value: " << psi_coefs[9] << ", wt radius "
                        << db::get<Tags::WorldtubeRadiusAndVelocity>(box)[0]
                        << ", orbital radius: "
                        << get(magnitude(inertial_particle_position))[0]
@@ -174,21 +176,21 @@ struct ObserveWorldtubeSolution {
       const auto legend = [&expansion_order]() -> std::vector<std::string> {
         switch (expansion_order) {
           case (0):
-            return {"Time", "Posx", "Posy", "Posz",  "Velx",
-                    "Vely", "Velz", "Psi0", "dtPsi0"};
+            return {"Time", "Posx", "Posy", "Posz", "Velx", "Vely",
+                    "Velz", "Accx", "Accy", "Accz", "Psi0", "dtPsi0"};
             break;
           case (1):
-            return {"Time", "Posx",   "Posy",   "Posz",   "Velx",
-                    "Vely", "Velz",   "Psi0",   "Psix",   "Psiy",
-                    "Psiz", "dtPsi0", "dtPsix", "dtPsiy", "dtPsiz"};
+            return {"Time", "Posx", "Posy",   "Posz",   "Velx",   "Vely",
+                    "Velz", "Accx", "Accy",   "Accz",   "Psi0",   "Psix",
+                    "Psiy", "Psiz", "dtPsi0", "dtPsix", "dtPsiy", "dtPsiz"};
             break;
           case (2):
             return {"Time",    "Posx",    "Posy",    "Posz",    "Velx",
-                    "Vely",    "Velz",    "Psi0",    "Psix",    "Psiy",
-                    "Psiz",    "Psixx",   "Psixy",   "Psixz",   "Psiyy",
-                    "Psiyz",   "Psizz",   "dtPsi0",  "dtPsix",  "dtPsiy",
-                    "dtPsiz",  "dtPsixx", "dtPsixy", "dtPsixz", "dtPsiyy",
-                    "dtPsiyz", "dtPsizz"};
+                    "Vely",    "Velz",    "Accx",    "Accy",    "Accz",
+                    "Psi0",    "Psix",    "Psiy",    "Psiz",    "Psixx",
+                    "Psixy",   "Psixz",   "Psiyy",   "Psiyz",   "Psizz",
+                    "dtPsi0",  "dtPsix",  "dtPsiy",  "dtPsiz",  "dtPsixx",
+                    "dtPsixy", "dtPsixz", "dtPsiyy", "dtPsiyz", "dtPsizz"};
             break;
           default:
             ERROR("requested invalid expansion order");
