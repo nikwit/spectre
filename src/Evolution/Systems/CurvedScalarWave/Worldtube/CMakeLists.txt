@@ -17,6 +17,7 @@ spectre_target_sources(
   PunctureFieldOrder2.cpp
   PunctureFieldGenericOrder0.cpp
   PunctureFieldGenericOrder1.cpp
+  Worldtube.cpp
   )
 
 spectre_target_headers(

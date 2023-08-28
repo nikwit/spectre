@@ -11,6 +11,7 @@
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Inboxes.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Tags.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/Worldtube.hpp"
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/Tags.hpp"
@@ -93,9 +94,11 @@ struct UpdateFunctionsOfTime {
       expansion_update.at(1) =
           -radial_vel / grid_radius_particle * sqrt_4_pi * envelope_radius;
 
-      const double worldtube_radius_factor = r / grid_radius_particle;
+      const double worldtube_radius_factor =
+          worldtube_shrink_factor(r, grid_radius_particle, 3., 2., 0.5);
       const double worldtube_radius_factor_derivative =
-          radial_vel / grid_radius_particle;
+          worldtube_shrink_factor_derivative(r, radial_vel,
+                                             grid_radius_particle, 3., 2., 0.5);
 
       const double bh_radius_factor = r / grid_radius_particle;
       const double bh_radius_factor_derivative =

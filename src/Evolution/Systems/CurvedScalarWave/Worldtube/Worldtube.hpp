@@ -27,4 +27,17 @@
  * circular orbit around a Schwarzschild black hole.
  */
 namespace CurvedScalarWave::Worldtube {
+
+double worldtube_shrink_factor(const double orbit_radius,
+                               const double original_orbit_radius,
+                               const double start_shrink_orbit,
+                               const double end_shrink_orbit,
+                               const double shrink_factor_at_end);
+
+double worldtube_shrink_factor_derivative(const double orbit_radius,
+                                          const double orbit_velocity,
+                                          const double original_orbit_radius,
+                                          const double start_shrink_orbit,
+                                          const double end_shrink_orbit,
+                                          const double shrink_factor_at_end);
 }  // namespace CurvedScalarWave::Worldtube
