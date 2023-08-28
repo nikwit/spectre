@@ -39,7 +39,8 @@ void TimeDerivativeMutator::apply(
     const tnsr::A<double, Dim, Frame::Grid>& trace_spacetime_christoffel,
     const ExcisionSphere<Dim>& excision_sphere, const double time,
     const std::array<double, 2>& worldtube_radius_and_velocity,
-    const double mass, const double charge,
+    const double mass, const double charge, const double turn_on_time,
+    const double turn_on_interval,
     const gr::Solutions::KerrSchild& kerr_schild) {
   const double wt_radius = worldtube_radius_and_velocity.at(0);
   const auto& psi0 = get(get<Tags::Psi0>(evolved_vars));
@@ -140,8 +141,7 @@ void TimeDerivativeMutator::apply(
     }
   }
 
-  const double turn_up_time = 1200.;
-  if (time > turn_up_time) {
+  if (time > turn_on_time) {
     ::InverseJacobian<double, Dim, Frame::Grid, Frame::Inertial> inv_jacobian{};
     const double angle = atan2(inertial_particle_position.get(1),
                                inertial_particle_position.get(0));
@@ -162,8 +162,10 @@ void TimeDerivativeMutator::apply(
       v_dot_di_psi += particle_velocity.get(i) * di_psi_inertial.get(i);
     }
     u0_squared = -1. / u0_squared;
-    const double t_minus_turnup = time - turn_up_time;
-    const double roll_on = t_minus_turnup < 800. ? t_minus_turnup / 800. : 1.;
+    const double t_minus_turnup = time - turn_on_time;
+    double roll_on = t_minus_turnup < turn_on_interval
+                         ? t_minus_turnup / turn_on_interval
+                         : 1.;
     for (size_t i = 0; i < Dim; ++i) {
       particle_acceleration.get(i) +=
           (inverse_spacetime_metric_inertial.get(i + 1, 0) -

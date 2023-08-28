@@ -91,6 +91,20 @@ struct ParticleMass {
   static constexpr Options::String help{"mass of particle"};
   using group = Worldtube;
 };
+
+struct TurnOnTime {
+  using type = double;
+  static constexpr Options::String help{
+      "Time at which self force is turned on."};
+  using group = Worldtube;
+};
+
+struct TurnOnInterval {
+  using type = double;
+  static constexpr Options::String help{
+      "Time interval over which the self force will be turned on from 0 to 1."};
+  using group = Worldtube;
+};
 }  // namespace OptionTags
 
 /*!
@@ -171,6 +185,24 @@ struct ParticleCharge : db::SimpleTag {
   using option_tags = tmpl::list<OptionTags::ParticleCharge>;
   static constexpr bool pass_metavariables = false;
   static double create_from_options(const double charge) { return charge; }
+};
+
+struct TurnOnTime : db::SimpleTag {
+  using type = double;
+  using option_tags = tmpl::list<OptionTags::TurnOnTime>;
+  static constexpr bool pass_metavariables = false;
+  static double create_from_options(const double turn_on_time) {
+    return turn_on_time;
+  }
+};
+
+struct TurnOnInterval : db::SimpleTag {
+  using type = double;
+  using option_tags = tmpl::list<OptionTags::TurnOnInterval>;
+  static constexpr bool pass_metavariables = false;
+  static double create_from_options(const double transition_interval) {
+    return transition_interval;
+  }
 };
 
 /*!

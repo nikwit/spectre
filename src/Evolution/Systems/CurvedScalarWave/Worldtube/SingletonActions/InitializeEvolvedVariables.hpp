@@ -33,8 +33,9 @@ struct InitializeEvolvedVariables {
   using return_tags = simple_tags;
 
   using compute_tags = tmpl::list<>;
-  using simple_tags_from_options = tmpl::list<Tags::InitialPositionAndVelocity,
-                                              Tags::EnvelopeAndObjectRadii>;
+  using simple_tags_from_options =
+      tmpl::list<Tags::InitialPositionAndVelocity, Tags::EnvelopeAndObjectRadii,
+                 Tags::TurnOnTime, Tags::TurnOnInterval>;
   using const_global_cache_tags = tmpl::list<>;
   using mutable_global_cache_tags = tmpl::list<>;
   using argument_tags =
