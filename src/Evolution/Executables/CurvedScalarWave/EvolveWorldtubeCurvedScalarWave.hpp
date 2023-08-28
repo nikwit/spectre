@@ -181,7 +181,7 @@ struct EvolutionMetavars {
     using compute_items_on_target = tmpl::list<>;
     using compute_target_points =
         intrp::TargetPoints::LineSegment<PsiAlongAxis<Number>, volume_dim,
-                                         Frame::Grid>;
+                                         Frame::Inertial>;
     using post_interpolation_callback =
         intrp::callbacks::ObserveLineSegment<vars_to_interpolate_to_target,
                                              PsiAlongAxis<Number>>;
