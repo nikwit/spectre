@@ -12,6 +12,7 @@ set(LIBS_TO_LINK
   EventsAndTriggers
   Evolution
   GeneralRelativity
+  Importers
   Informer
   LinearOperators
   MathFunctions

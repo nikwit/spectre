@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <vector>
 
-#include "ApparentHorizons/Tags.hpp"
 #include "DataStructures/Tensor/EagerMath/Norms.hpp"
 #include "Domain/Creators/Factory1D.hpp"
 #include "Domain/Creators/Factory2D.hpp"
@@ -40,6 +39,10 @@
 #include "Evolution/Systems/CurvedScalarWave/System.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
 #include "Evolution/Tags/Filter.hpp"
+#include "IO/Importers/Actions/ReadVolumeData.hpp"
+#include "IO/Importers/Actions/ReceiveVolumeData.hpp"
+#include "IO/Importers/Actions/RegisterWithElementDataReader.hpp"
+#include "IO/Importers/ElementDataReader.hpp"
 #include "IO/Observer/Actions/RegisterEvents.hpp"
 #include "IO/Observer/Helpers.hpp"
 #include "IO/Observer/ObserverComponent.hpp"
@@ -74,11 +77,13 @@
 #include "ParallelAlgorithms/EventsAndTriggers/Trigger.hpp"
 #include "ParallelAlgorithms/Interpolation/Actions/ElementInitInterpPoints.hpp"
 #include "ParallelAlgorithms/Interpolation/Actions/InitializeInterpolationTarget.hpp"
+#include "ParallelAlgorithms/Interpolation/Callbacks/ObserveLineSegment.hpp"
 #include "ParallelAlgorithms/Interpolation/Callbacks/ObserveTimeSeriesOnSurface.hpp"
 #include "ParallelAlgorithms/Interpolation/Events/InterpolateWithoutInterpComponent.hpp"
 #include "ParallelAlgorithms/Interpolation/InterpolationTarget.hpp"
 #include "ParallelAlgorithms/Interpolation/Protocols/InterpolationTargetTag.hpp"
 #include "ParallelAlgorithms/Interpolation/Tags.hpp"
+#include "ParallelAlgorithms/Interpolation/Targets/LineSegment.hpp"
 #include "ParallelAlgorithms/Interpolation/Targets/Sphere.hpp"
 #include "PointwiseFunctions/AnalyticData/AnalyticData.hpp"
 #include "PointwiseFunctions/AnalyticData/CurvedWaveEquation/PureSphericalHarmonic.hpp"
@@ -125,6 +130,12 @@ class er;
 }  // namespace PUP
 /// \endcond
 
+struct VolumeDataGroup {
+  static std::string name() { return "Importers"; }
+  static constexpr Options::String help =
+      "Volume data to load and find horizons in";
+};
+
 template <size_t Dim, typename BackgroundSpacetime, typename InitialData>
 struct EvolutionMetavars {
   static constexpr size_t volume_dim = Dim;
@@ -135,9 +146,10 @@ struct EvolutionMetavars {
 
   using system = CurvedScalarWave::System<Dim>;
   using temporal_id = Tags::TimeStepId;
-  static constexpr bool local_time_stepping = true;
+  static constexpr bool local_time_stepping = false;
 
-  using analytic_solution_fields = typename system::variables_tag::tags_list;
+  using evolved_fields = typename system::variables_tag::tags_list;
+  using analytic_solution_fields = evolved_fields;
   using deriv_compute = ::Tags::DerivCompute<
       typename system::variables_tag,
       domain::Tags::InverseJacobian<volume_dim, Frame::ElementLogical,
@@ -166,7 +178,8 @@ struct EvolutionMetavars {
     using temporal_id = ::Tags::Time;
     using vars_to_interpolate_to_target =
         tmpl::list<gr::Tags::SpatialMetric<DataVector, Dim>,
-                   CurvedScalarWave::Tags::Psi>;
+                   CurvedScalarWave::Tags::Psi,
+                   domain::Tags::Coordinates<volume_dim, Frame::Inertial>>;
     using compute_items_on_target =
         tmpl::list<CurvedScalarWave::Tags::PsiSquaredCompute,
                    StrahlkorperGr::Tags::AreaElementCompute<::Frame::Inertial>,
@@ -183,10 +196,34 @@ struct EvolutionMetavars {
     using interpolating_component = typename metavariables::dg_element_array;
   };
 
-  using interpolation_target_tags = tmpl::list<SphericalSurface>;
+  template <size_t Number>
+  struct PsiAlongAxis
+      : tt::ConformsTo<intrp::protocols::InterpolationTargetTag> {
+    static std::string name() {
+      return "PsiAlongAxis" + std::to_string(Number);
+    }
+    using temporal_id = ::Tags::Time;
+    using vars_to_interpolate_to_target =
+        tmpl::list<CurvedScalarWave::Tags::Psi,
+                   gr::Tags::SpatialMetric<DataVector, volume_dim>,
+                   domain::Tags::Coordinates<volume_dim, Frame::Inertial>>;
+    using compute_items_on_target = tmpl::list<>;
+    using compute_target_points =
+        intrp::TargetPoints::LineSegment<PsiAlongAxis<Number>, volume_dim,
+                                         Frame::Inertial>;
+    using post_interpolation_callback =
+        intrp::callbacks::ObserveLineSegment<vars_to_interpolate_to_target,
+                                             PsiAlongAxis<Number>>;
+    template <typename metavariables>
+    using interpolating_component = typename metavariables::dg_element_array;
+  };
+
+  using interpolation_target_tags =
+      tmpl::list<PsiAlongAxis<1>, SphericalSurface>;
   using interpolator_source_vars =
       tmpl::list<gr::Tags::SpatialMetric<DataVector, volume_dim>,
-                 CurvedScalarWave::Tags::Psi>;
+                 CurvedScalarWave::Tags::Psi,
+                 domain::Tags::Coordinates<volume_dim, Frame::Inertial>>;
   struct factory_creation
       : tt::ConformsTo<Options::protocols::FactoryCreation> {
     using factory_classes = tmpl::map<
@@ -199,6 +236,9 @@ struct EvolutionMetavars {
         tmpl::pair<Event,
                    tmpl::flatten<tmpl::list<
                        Events::Completion,
+                       intrp::Events::InterpolateWithoutInterpComponent<
+                           volume_dim, PsiAlongAxis<1>, EvolutionMetavars,
+                           interpolator_source_vars>,
                        dg::Events::field_observations<volume_dim, Tags::Time,
                                                       observe_fields,
                                                       non_tensor_compute_tags>,
@@ -237,7 +277,7 @@ struct EvolutionMetavars {
   static constexpr bool use_filtering = true;
 
   struct domain {
-    static constexpr bool enable_time_dependent_maps = true;
+    static constexpr bool enable_time_dependent_maps = false;
   };
 
   using step_actions = tmpl::flatten<tmpl::list<
@@ -261,10 +301,7 @@ struct EvolutionMetavars {
               Actions::UpdateU<system>>>,
       tmpl::conditional_t<
           use_filtering,
-          dg::Actions::Filter<Filters::Exponential<0>,
-                              tmpl::list<CurvedScalarWave::Tags::Psi,
-                                         CurvedScalarWave::Tags::Pi,
-                                         CurvedScalarWave::Tags::Phi<Dim>>>,
+          dg::Actions::Filter<Filters::Exponential<0>, evolved_fields>,
           tmpl::list<>>>>;
 
   using const_global_cache_tags = tmpl::list<
@@ -301,6 +338,16 @@ struct EvolutionMetavars {
           Parallel::PhaseActions<Parallel::Phase::Initialization,
                                  initialization_actions>,
           Parallel::PhaseActions<
+              Parallel::Phase::RegisterWithElementDataReader,
+              tmpl::list<importers::Actions::RegisterWithElementDataReader,
+                         Parallel::Actions::TerminatePhase>>,
+          Parallel::PhaseActions<
+              Parallel::Phase::ImportInitialData,
+              tmpl::list<importers::Actions::ReadVolumeData<VolumeDataGroup,
+                                                            evolved_fields>,
+                         importers::Actions::ReceiveVolumeData<evolved_fields>,
+                         Parallel::Actions::TerminatePhase>>,
+          Parallel::PhaseActions<
               Parallel::Phase::InitializeTimeStepperHistory,
               SelfStart::self_start_procedure<step_actions, system>>,
           Parallel::PhaseActions<Parallel::Phase::Register,
@@ -322,6 +369,8 @@ struct EvolutionMetavars {
   using component_list = tmpl::flatten<
       tmpl::list<observers::Observer<EvolutionMetavars>,
                  observers::ObserverWriter<EvolutionMetavars>,
+                 importers::ElementDataReader<EvolutionMetavars>,
+                 intrp::InterpolationTarget<EvolutionMetavars, PsiAlongAxis<1>>,
                  tmpl::conditional_t<interpolate,
                                      intrp::InterpolationTarget<
                                          EvolutionMetavars, SphericalSurface>,
@@ -332,8 +381,10 @@ struct EvolutionMetavars {
       "Evolve a scalar wave in Dim spatial dimension on a curved background "
       "spacetime."};
 
-  static constexpr std::array<Parallel::Phase, 5> default_phase_order{
+  static constexpr std::array<Parallel::Phase, 7> default_phase_order{
       {Parallel::Phase::Initialization,
+       Parallel::Phase::RegisterWithElementDataReader,
+       Parallel::Phase::ImportInitialData,
        Parallel::Phase::InitializeTimeStepperHistory, Parallel::Phase::Register,
        Parallel::Phase::Evolve, Parallel::Phase::Exit}};
 
