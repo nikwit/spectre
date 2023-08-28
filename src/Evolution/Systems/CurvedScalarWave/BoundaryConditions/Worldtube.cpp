@@ -145,9 +145,6 @@ std::optional<std::string> Worldtube<Dim>::dg_ghost(
                            normal_vector(ti::I) * phi_worldtube(ti::i) -
                            gamma2_interior() * psi_worldtube());
 
-  get(v_minus) *= step_function(get(lapse_interior) - M_SQRT1_2);
-  // get(v_plus) *= step_function(get(lapse_interior) - M_SQRT1_2);
-
   evolved_fields_from_characteristic_fields(psi, pi, phi, gamma2_interior,
                                             v_psi, v_zero, v_plus, v_minus,
                                             normal_covector);
