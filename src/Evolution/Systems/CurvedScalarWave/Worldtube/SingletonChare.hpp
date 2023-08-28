@@ -82,6 +82,7 @@ struct WorldtubeSingleton {
   using step_actions =
       tmpl::list<Actions::UpdateFunctionsOfTime, Actions::ChangeSlabSize,
                  Actions::ReceiveElementData, Actions::ComputeTimeDerivative,
+                 Actions::ObserveWorldtubeSolution,
                  ::Actions::RecordTimeStepperData<worldtube_system>,
                  ::Actions::UpdateU<worldtube_system>,
                  Actions::SendToElements<Metavariables>,
@@ -98,8 +99,7 @@ struct WorldtubeSingleton {
                          Registration>,
                      Parallel::Actions::TerminatePhase>>,
       Parallel::PhaseActions<Parallel::Phase::Evolve,
-                             tmpl::list<Actions::ObserveWorldtubeSolution,
-                                        step_actions, ::Actions::AdvanceTime>>>;
+                             tmpl::list<step_actions, ::Actions::AdvanceTime>>>;
 
   using simple_tags_from_options = Parallel::get_simple_tags_from_options<
       Parallel::get_initialization_actions_list<phase_dependent_action_list>>;
