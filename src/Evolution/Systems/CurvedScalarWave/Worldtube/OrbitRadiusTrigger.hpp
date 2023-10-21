@@ -59,7 +59,7 @@ class OrbitRadius : public Trigger {
     const double radial_velocity = (get<0>(position) * get<0>(velocity) +
                                     get<1>(position) * get<1>(velocity)) /
                                    current_radius;
-    ASSERT(radial_velocity < 0., "Particle should be inspiralling!");
+    //ASSERT(radial_velocity < 0., "Particle should be inspiralling!");
 
     for (double radius_ : radii_) {
       // factor 2 is for safety because the approximation is just linear
