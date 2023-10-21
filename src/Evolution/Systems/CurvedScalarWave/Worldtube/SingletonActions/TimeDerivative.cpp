@@ -40,7 +40,7 @@ void TimeDerivativeMutator::apply(
     const ExcisionSphere<Dim>& excision_sphere, const double time,
     const std::array<double, 2>& worldtube_radius_and_velocity,
     const double mass, const double charge, const double turn_on_time,
-    const double turn_on_interval,
+    const double turn_on_interval, const size_t expansion_order,
     const gr::Solutions::KerrSchild& kerr_schild) {
   const double wt_radius = worldtube_radius_and_velocity.at(0);
   const auto& psi0 = get(get<Tags::Psi0>(evolved_vars));
@@ -142,43 +142,27 @@ void TimeDerivativeMutator::apply(
   }
 
   if (time > turn_on_time) {
-    ::InverseJacobian<double, Dim, Frame::Grid, Frame::Inertial> inv_jacobian{};
-    const double angle = atan2(inertial_particle_position.get(1),
-                               inertial_particle_position.get(0));
-    inv_jacobian.get(0, 0) = cos(angle);
-    inv_jacobian.get(0, 1) = sin(angle);
-    inv_jacobian.get(1, 0) = -sin(angle);
-    inv_jacobian.get(1, 1) = cos(angle);
-    inv_jacobian.get(2, 2) = 1.;
-
-    tnsr::I<double, Dim> di_psi_inertial{};
-    for (size_t i = 0; i < Dim; ++i) {
-      di_psi_inertial.get(i) = get<0>(psi_dipole) * inv_jacobian.get(0, i) +
-                               get<1>(psi_dipole) * inv_jacobian.get(1, i) +
-                               get<2>(psi_dipole) * inv_jacobian.get(2, i);
-    }
-    double v_dot_di_psi = 0.;
-    for (size_t i = 0; i < Dim; ++i) {
-      v_dot_di_psi += particle_velocity.get(i) * di_psi_inertial.get(i);
-    }
     u0_squared = -1. / u0_squared;
     const double t_minus_turnup = time - turn_on_time;
     double roll_on = t_minus_turnup < turn_on_interval
                          ? t_minus_turnup / turn_on_interval
                          : 1.;
+
+    //roll_on = 1. - std::exp(-square(square(t_minus_turnup/turn_on_interval)));
     for (size_t i = 0; i < Dim; ++i) {
       particle_acceleration.get(i) +=
           (inverse_spacetime_metric_inertial.get(i + 1, 0) -
            particle_velocity.get(i) *
                inverse_spacetime_metric_inertial.get(0, 0)) *
-          (get(dt_psi_monopole) - v_dot_di_psi) * roll_on * charge / mass /
-          u0_squared;
-      for (size_t j = 0; j < Dim; ++j) {
-        particle_acceleration.get(i) +=
-            (inverse_spacetime_metric_inertial.get(i + 1, j + 1) -
-             particle_velocity.get(i) *
-                 inverse_spacetime_metric_inertial.get(0, j + 1)) *
-            di_psi_inertial.get(j) * roll_on * charge / mass / u0_squared;
+          get(dt_psi_monopole) * roll_on * charge / mass / u0_squared;
+      if (expansion_order > 0) {
+        for (size_t j = 0; j < Dim; ++j) {
+          particle_acceleration.get(i) +=
+              (inverse_spacetime_metric_inertial.get(i + 1, j + 1) -
+               particle_velocity.get(i) *
+                   inverse_spacetime_metric_inertial.get(0, j + 1)) *
+              psi_dipole.get(j) * roll_on * charge / mass / u0_squared;
+        }
       }
     }
   }

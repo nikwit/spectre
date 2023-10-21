@@ -103,7 +103,7 @@ struct ReceiveElementData {
 
     double wt_radius_inertial =
         db::get<Tags::WorldtubeRadiusAndVelocity>(box).at(0);
-    external_ylm_coefs /= wt_radius * wt_radius;
+    external_ylm_coefs /= wt_radius_inertial * wt_radius_inertial;
 
     DataVector& psi_ylm_coefs =
         get(get<CurvedScalarWave::Tags::Psi>(external_ylm_coefs));

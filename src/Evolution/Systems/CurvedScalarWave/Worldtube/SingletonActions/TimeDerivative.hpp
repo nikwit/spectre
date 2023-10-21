@@ -65,7 +65,7 @@ struct TimeDerivativeMutator {
       gr::Tags::TraceSpacetimeChristoffelSecondKind<double, Dim, Frame::Grid>,
       Tags::ExcisionSphere<Dim>, ::Tags::Time, Tags::WorldtubeRadiusAndVelocity,
       Tags::ParticleMass, Tags::ParticleCharge, Tags::TurnOnTime,
-      Tags::TurnOnInterval,
+      Tags::TurnOnInterval, Tags::ExpansionOrder,
       CurvedScalarWave::Tags::BackgroundSpacetime<gr::Solutions::KerrSchild>>;
 
   static void apply(
@@ -85,7 +85,7 @@ struct TimeDerivativeMutator {
       const ExcisionSphere<Dim>& excision_sphere, const double time,
       const std::array<double, 2>& worldtube_radius_and_velocity,
       const double mass, const double charge, const double turn_on_time,
-      const double turn_on_interval,
+      const double turn_on_interval, const size_t expansion_order,
       const gr::Solutions::KerrSchild& kerr_schild);
 };
 

@@ -96,63 +96,47 @@ struct ReceiveWorldtubeData {
                           index_to_slice_at(mesh.extents(), direction.value()));
           });
       auto& received_data = inbox.at(time_step_id);
-      get(get<psi_tag>(received_data)) +=
-          get(get<psi_tag>(puncture_field.value()));
-
-      // the advective term transforms the time derivative back into the
-      // inertial frame
-      get(get<dt_psi_tag>(received_data)) +=
-          get(get<dt_psi_tag>(puncture_field.value())) -
-          get(get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));
-      auto& inv_jacobian = get<::Tags::TempIj<0, Dim>>(vars_on_face);
-      const double angle =
-          db::get<::domain::Tags::FunctionsOfTime>(box)
-              .at("Rotation")
-              ->func_and_deriv(db::get<::Tags::Time>(box))[0][0];
-      inv_jacobian.get(0, 0) = cos(angle);
-      inv_jacobian.get(0, 1) = sin(angle);
-      inv_jacobian.get(0, 2) = 0.;
-      inv_jacobian.get(1, 0) = -sin(angle);
-      inv_jacobian.get(1, 1) = cos(angle);
-      inv_jacobian.get(1, 2) = 0.;
-      inv_jacobian.get(2, 0) = 0.;
-      inv_jacobian.get(2, 1) = 0.;
-      inv_jacobian.get(2, 2) = 1.;
+      const auto& centered_face_coords =
+          db::get<Tags::FaceCoordinates<Dim, Frame::Inertial, true>>(box)
+              .value();
 
       db::mutate<Tags::WorldtubeSolution<Dim>>(
           make_not_null(&box),
           [&received_data, &puncture_field, &vars_on_face,
-           &inv_jacobian](const gsl::not_null<Variables<evolved_tags_list>*>
-                              worldtube_solution) {
+           &centered_face_coords](
+              const gsl::not_null<Variables<evolved_tags_list>*>
+                  worldtube_solution) {
             worldtube_solution->initialize(
                 puncture_field.value().number_of_grid_points());
-            /*auto& inv_jacobian = get<domain::Tags::InverseJacobian<
-                Dim, Frame::Grid, Frame::Inertial>>(vars_on_face);*/
-            auto& phi_inertial =
+
+            auto& psi = get<psi_tag>(*worldtube_solution);
+            auto& pi = get<CurvedScalarWave::Tags::Pi>(*worldtube_solution);
+            auto& phi =
                 get<CurvedScalarWave::Tags::Phi<Dim>>(*worldtube_solution);
+
+            auto dt_psi = psi;
+
+            get(psi) = get(get<psi_tag>(received_data))[0];
+            get(dt_psi) = get(get<dt_psi_tag>(received_data))[0];
+
             for (size_t i = 0; i < Dim; ++i) {
-              phi_inertial.get(i) =
-                  get<0>(get<di_psi_tag<Frame::Grid>>(received_data)) *
-                      inv_jacobian.get(0, i) +
-                  get<1>(get<di_psi_tag<Frame::Grid>>(received_data)) *
-                      inv_jacobian.get(1, i) +
-                  get<2>(get<di_psi_tag<Frame::Grid>>(received_data)) *
-                      inv_jacobian.get(2, i);
-              phi_inertial.get(i) +=
+              get(psi) += get(get<psi_tag>(received_data))[i + 1] *
+                          centered_face_coords.get(i);
+              get(dt_psi) += get(get<dt_psi_tag>(received_data))[i + 1] *
+                             centered_face_coords.get(i);
+              phi.get(i) =
+                  get(get<psi_tag>(received_data))[i + 1] +
                   get<di_psi_tag<Frame::Inertial>>(puncture_field.value())
                       .get(i);
             }
+            get(psi) += get(get<psi_tag>(puncture_field.value()));
+            get(dt_psi) += get(get<dt_psi_tag>(puncture_field.value()));
 
-            get<CurvedScalarWave::Tags::Psi>(*worldtube_solution) =
-                get<psi_tag>(received_data);
             const auto& shift =
                 get<gr::Tags::Shift<DataVector, Dim>>(vars_on_face);
-
             const auto& lapse = get<gr::Tags::Lapse<DataVector>>(vars_on_face);
-            auto& pi = get<CurvedScalarWave::Tags::Pi>(*worldtube_solution);
-            get(pi) = (-get(get<dt_psi_tag>(received_data)) +
-                       get(dot_product(shift, phi_inertial))) /
-                      get(lapse);
+            get(pi) =
+                (-get(dt_psi) + get(dot_product(shift, phi))) / get(lapse);
           });
       inbox.erase(time_step_id);
     }

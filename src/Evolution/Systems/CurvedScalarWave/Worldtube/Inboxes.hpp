@@ -53,9 +53,7 @@ struct RegularFieldInbox
     : Parallel::InboxInserters::Value<RegularFieldInbox<Dim>> {
   using tags_to_send =
       tmpl::list<CurvedScalarWave::Tags::Psi,
-                 ::Tags::dt<CurvedScalarWave::Tags::Psi>,
-                 ::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<Dim>,
-                               Frame::Grid>>;
+                 ::Tags::dt<CurvedScalarWave::Tags::Psi>>;
   using temporal_id = TimeStepId;
   using type = std::map<temporal_id, Variables<tags_to_send>>;
 };
