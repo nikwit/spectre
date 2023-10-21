@@ -80,7 +80,7 @@ struct UpdateFunctionsOfTime {
           db::get<Tags::EnvelopeAndObjectRadii>(box);
 
       const double grid_radius_particle =
-          get(magnitude(db::get<Tags::InitialPositionAndVelocity>(box).at(0)));
+          get(magnitude(db::get<Tags::ExcisionSphere<3>>(box).center()));
       DataVector angular_update(3, 0.);
       DataVector expansion_update(3, 0.);
       DataVector compression_update_a(3, 0.);
