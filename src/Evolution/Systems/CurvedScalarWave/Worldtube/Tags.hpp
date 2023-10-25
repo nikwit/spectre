@@ -478,6 +478,19 @@ struct WorldtubeSolution : db::SimpleTag {
                  ::CurvedScalarWave::Tags::Phi<Dim>>>;
 };
 
+template <size_t Dim>
+struct PunctureFieldAccelerated : db::SimpleTag {
+  using type =
+      Variables<tmpl::list<CurvedScalarWave::Tags::Psi,
+                           ::Tags::dt<CurvedScalarWave::Tags::Psi>,
+                           ::Tags::deriv<CurvedScalarWave::Tags::Psi,
+                                         tmpl::size_t<3>, Frame::Inertial>>>;
+};
+
+struct SelfForce : db::SimpleTag {
+  using type = Scalar<DataVector>;
+};
+
 /*!
  * \brief The scalar field inside the worldtube.
  *

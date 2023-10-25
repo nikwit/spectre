@@ -7,6 +7,7 @@ spectre_target_sources(
   PRIVATE
   InitializeSpacetimeTags.cpp
   TimeDerivative.cpp
+  UpdateAcceleration.cpp
   )
 
 spectre_target_headers(

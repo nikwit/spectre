@@ -41,6 +41,7 @@
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/InitializeConstraintGammas.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/ReceiveWorldtubeData.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/SendAccelerationTerms.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/SendToWorldtube.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/InsideHorizonTrigger.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/OrbitRadiusTrigger.hpp"
@@ -250,6 +251,7 @@ struct EvolutionMetavars {
   using step_actions = tmpl::flatten<tmpl::list<
       CurvedScalarWave::Actions::CalculateGrVars<system>,
       CurvedScalarWave::Worldtube::Actions::SendToWorldtube,
+      CurvedScalarWave::Worldtube::Actions::SendAccelerationTerms,
       CurvedScalarWave::Worldtube::Actions::ReceiveWorldtubeData,
       evolution::dg::Actions::ComputeTimeDerivative<
           volume_dim, system, AllStepChoosers, local_time_stepping>,

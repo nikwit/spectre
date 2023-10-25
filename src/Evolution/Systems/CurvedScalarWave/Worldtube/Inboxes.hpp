@@ -43,6 +43,23 @@ struct SphericalHarmonicsInbox
                std::unordered_map<ElementId<Dim>, Variables<tags_list>>>;
 };
 
+template <size_t Dim>
+struct SelfForceInbox : Parallel::InboxInserters::Value<SelfForceInbox<Dim>> {
+  using temporal_id = TimeStepId;
+  using type = std::map<temporal_id, Scalar<DataVector>>;
+};
+
+template <size_t Dim>
+struct SphericalHarmonicsAcceleratedInbox
+    : Parallel::InboxInserters::Map<SphericalHarmonicsAcceleratedInbox<Dim>> {
+  using temporal_id = TimeStepId;
+  using tags_list = tmpl::list<CurvedScalarWave::Tags::Psi,
+                               ::Tags::dt<CurvedScalarWave::Tags::Psi>>;
+  using type =
+      std::map<temporal_id,
+               std::unordered_map<ElementId<Dim>, Variables<tags_list>>>;
+};
+
 /*!
  * \brief Inbox of the element chares that contains the regular field $\Psi^R$
  * as well as its time and spatial derivative evaluated at the grid points of

@@ -1,7 +1,7 @@
 // Distributed under the MIT License.
 // See LICENSE.txt for details.
 
-#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/TimeDerivative.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/UpdateAcceleration.hpp"
 
 #include <cstddef>
 
@@ -23,46 +23,22 @@
 
 namespace CurvedScalarWave::Worldtube {
 
-void TimeDerivativeMutator::apply(
+void UpdateAccelerationMutator::apply(
     const gsl::not_null<Variables<
         tmpl::list<::Tags::dt<Tags::Psi0>, ::Tags::dt<Tags::dtPsi0>,
                    ::Tags::dt<Tags::Position>, ::Tags::dt<Tags::Velocity>>>*>
         dt_evolved_vars,
-    const gsl::not_null<Scalar<DataVector>*> self_force,
     const Variables<tmpl::list<Tags::Psi0, Tags::dtPsi0, Tags::Position,
                                Tags::Velocity>>& evolved_vars,
     const Scalar<double>& psi_monopole,
     const tnsr::i<double, Dim, Frame::Grid>& psi_dipole,
-    const tnsr::ii<double, Dim, Frame::Grid>& psi_quadrupole,
-    const Scalar<double>& dt_psi_monopole,
-    const tnsr::i<double, Dim, Frame::Grid>& dt_psi_dipole,
-    const tnsr::AA<double, Dim, Frame::Grid>& inverse_spacetime_metric,
-    const tnsr::A<double, Dim, Frame::Grid>& trace_spacetime_christoffel,
-    const ExcisionSphere<Dim>& excision_sphere, const double time,
-    const std::array<double, 2>& worldtube_radius_and_velocity,
-    const double mass, const double charge, const double turn_on_time,
-    const double turn_on_interval, const size_t expansion_order,
+    const Scalar<double>& dt_psi_monopole, const double time, const double mass,
+    const double charge, const double turn_on_time,
+    const double turn_on_interval,
     const gr::Solutions::KerrSchild& kerr_schild) {
-  const double wt_radius = worldtube_radius_and_velocity.at(0);
   const auto& psi0 = get(get<Tags::Psi0>(evolved_vars));
   const auto& dt_psi0 = get(get<Tags::dtPsi0>(evolved_vars));
-  get(get<::Tags::dt<Tags::Psi0>>(*dt_evolved_vars)) = dt_psi0;
-  double trace_inverse_spatial_metric = 0.;
-  auto& dt2_psi0 = get(get<::Tags::dt<Tags::dtPsi0>>(*dt_evolved_vars));
-  dt2_psi0 = get<0>(trace_spacetime_christoffel) * dt_psi0;
-  for (size_t i = 0; i < Dim; ++i) {
-    dt2_psi0 -=
-        2. * inverse_spacetime_metric.get(0, i + 1) * dt_psi_dipole.get(i);
-    dt2_psi0 += trace_spacetime_christoffel.get(i + 1) * psi_dipole.get(i);
-    trace_inverse_spatial_metric += inverse_spacetime_metric.get(i + 1, i + 1);
-    for (size_t j = 0; j < 3; ++j) {
-      dt2_psi0 -= 2. * inverse_spacetime_metric.get(i + 1, j + 1) *
-                  psi_quadrupole.get(i, j);
-    }
-  }
-  dt2_psi0 -= 2. * trace_inverse_spatial_metric * (get(psi_monopole) - psi0) /
-              (wt_radius * wt_radius);
-  dt2_psi0 /= inverse_spacetime_metric.get(0, 0);
+
   tnsr::I<double, 3> inertial_particle_position{};
   tnsr::I<double, 3> particle_velocity{};
   for (size_t i = 0; i < 3; ++i) {
@@ -141,93 +117,39 @@ void TimeDerivativeMutator::apply(
       }
     }
   }
-  get(*self_force) = DataVector(9, 0.);
+
   if (time > turn_on_time) {
     u0_squared = -1. / u0_squared;
+    const double u0 = sqrt(u0_squared);
+
     const double t_minus_turnup = time - turn_on_time;
     double roll_on =
         t_minus_turnup < turn_on_interval
             ? square(sin(M_PI_2 * t_minus_turnup / turn_on_interval))
             : 1.;
+    const double evolved_mass = mass - charge * get(psi_monopole);
 
     for (size_t i = 0; i < Dim; ++i) {
       particle_acceleration.get(i) +=
           (inverse_spacetime_metric_inertial.get(i + 1, 0) -
            particle_velocity.get(i) *
                inverse_spacetime_metric_inertial.get(0, 0)) *
-          get(dt_psi_monopole) * roll_on * charge / mass / u0_squared;
-      if (expansion_order > 0) {
-        for (size_t j = 0; j < Dim; ++j) {
-          particle_acceleration.get(i) +=
-              (inverse_spacetime_metric_inertial.get(i + 1, j + 1) -
-               particle_velocity.get(i) *
-                   inverse_spacetime_metric_inertial.get(0, j + 1)) *
-              psi_dipole.get(j) * roll_on * charge / mass / u0_squared;
-        }
-      }
-    }
-    const double u0 = sqrt(u0_squared);
-    const tnsr::A<double, Dim> four_velocity{
-        {u0, get<0>(particle_velocity) * u0, get<1>(particle_velocity) * u0,
-         get<2>(particle_velocity) * u0}};
-    const tnsr::a<double, Dim> d_psiR{{get(dt_psi_monopole), get<0>(psi_dipole),
-                                       get<1>(psi_dipole), get<2>(psi_dipole)}};
-    const auto contracted_christoffel_inertial =
-        trace_last_indices(christoffel, inverse_spacetime_metric_inertial);
-    double du0_dt = 0.;
-    double dt2_psiR = -get<0>(contracted_christoffel_inertial) * get<0>(d_psiR);
-    for (size_t i = 0; i < Dim; ++i) {
-      dt2_psiR +=
-          2. * inverse_spacetime_metric_inertial.get(0, i + 1) *
-              dt_psi_dipole.get(i) -
-          contracted_christoffel_inertial.get(i + 1) * d_psiR.get(i + 1);
-      du0_dt += spacetime_metric_inertial.get(0, i + 1) *
-                particle_acceleration.get(i);
+          get(dt_psi_monopole) * roll_on * charge / evolved_mass / u0_squared;
       for (size_t j = 0; j < Dim; ++j) {
-        du0_dt += spacetime_metric_inertial.get(i + 1, j + 1) +
-                  particle_velocity.get(i) * particle_acceleration.get(j);
+        particle_acceleration.get(i) +=
+            (inverse_spacetime_metric_inertial.get(i + 1, j + 1) -
+             particle_velocity.get(i) *
+                 inverse_spacetime_metric_inertial.get(0, j + 1)) *
+            psi_dipole.get(j) * roll_on * charge / evolved_mass / u0_squared;
       }
     }
-    dt2_psiR /= get<0, 0>(inverse_spacetime_metric_inertial);
-    du0_dt *= u0_squared * u0;
-
-    tnsr::a<double, Dim> dt_d_psiR{{dt2_psiR, get<0>(dt_psi_dipole),
-                                    get<1>(dt_psi_dipole),
-                                    get<2>(dt_psi_dipole)}};
-    tnsr::A<double, Dim> dt_four_velocity{};
-    get<0>(dt_four_velocity) = du0_dt;
-    for (size_t i = 0; i < Dim; ++i) {
-      dt_four_velocity.get(i + 1) =
-          u0 * particle_acceleration.get(i) + du0_dt * particle_velocity.get(i);
-    }
-    const auto f = tenex::evaluate<ti::B>(
-        roll_on * charge / mass * d_psiR(ti::a) *
-        (inverse_spacetime_metric_inertial(ti::A, ti::B) +
-         four_velocity(ti::A) * four_velocity(ti::B)));
-    const auto dt_f = tenex::evaluate<ti::A>(
-        roll_on * charge / mass *
-        ((four_velocity(ti::A) * dt_four_velocity(ti::B) +
-          dt_four_velocity(ti::A) * four_velocity(ti::B)) *
-             d_psiR(ti::b) +
-         (inverse_spacetime_metric_inertial(ti::A, ti::B) +
-          four_velocity(ti::A) * four_velocity(ti::B)) *
-             dt_d_psiR(ti::b)));
 
     for (size_t i = 0; i < Dim; ++i) {
-      get(*self_force)[i + 3] = f.get(i);
-      get(*self_force)[i + 6] = dt_f.get(i);
+      get<::Tags::dt<Tags::Position>>(*dt_evolved_vars).get(i)[0] =
+          get<Tags::Velocity>(evolved_vars).get(i)[0];
+      get<::Tags::dt<Tags::Velocity>>(*dt_evolved_vars).get(i)[0] =
+          particle_acceleration.get(i);
     }
-  }
-  for (size_t i = 0; i < Dim; ++i) {
-    get(*self_force)[i] = particle_acceleration.get(i);
-  }
-
-  for (size_t i = 0; i < Dim; ++i) {
-    get<::Tags::dt<Tags::Position>>(*dt_evolved_vars).get(i)[0] =
-        get<Tags::Velocity>(evolved_vars).get(i)[0];
-    get<::Tags::dt<Tags::Velocity>>(*dt_evolved_vars).get(i)[0] =
-        particle_acceleration.get(i);
   }
 }
-
 }  // namespace CurvedScalarWave::Worldtube

@@ -70,8 +70,10 @@ struct ReceiveWorldtubeData {
       const Parallel::GlobalCache<Metavariables>& /*cache*/,
       const ArrayIndex& /*array_index*/, const ActionList /*meta*/,
       const ParallelComponent* const /*meta*/) {
-    const auto& puncture_field = db::get<Tags::PunctureField<Dim>>(box);
-    if (puncture_field.has_value()) {
+    const auto& element_id = db::get<domain::Tags::Element<Dim>>(box).id();
+    const auto& excision_sphere = db::get<Tags::ExcisionSphere<Dim>>(box);
+    const auto direction = excision_sphere.abutting_direction(element_id);
+    if (direction.has_value()) {
       const auto& time_step_id = db::get<::Tags::TimeStepId>(box);
       auto& inbox = get<Tags::RegularFieldInbox<Dim>>(inboxes);
       if (not inbox.count(time_step_id)) {
@@ -81,7 +83,8 @@ struct ReceiveWorldtubeData {
       const auto& excision_sphere = db::get<Tags::ExcisionSphere<Dim>>(box);
       const auto direction = excision_sphere.abutting_direction(element_id);
       ASSERT(direction.has_value(), "This element should abut the worldtube!");
-
+      const auto& puncture_field =
+          db::get<Tags::PunctureFieldAccelerated<Dim>>(box);
       const auto& mesh = db::get<domain::Tags::Mesh<Dim>>(box);
       const auto face_mesh = mesh.slice_away(direction->dimension());
       const size_t face_size = face_mesh.number_of_grid_points();
@@ -107,7 +110,7 @@ struct ReceiveWorldtubeData {
               const gsl::not_null<Variables<evolved_tags_list>*>
                   worldtube_solution) {
             worldtube_solution->initialize(
-                puncture_field.value().number_of_grid_points());
+                puncture_field.number_of_grid_points());
 
             auto& psi = get<psi_tag>(*worldtube_solution);
             auto& pi = get<CurvedScalarWave::Tags::Pi>(*worldtube_solution);
@@ -126,11 +129,10 @@ struct ReceiveWorldtubeData {
                              centered_face_coords.get(i);
               phi.get(i) =
                   get(get<psi_tag>(received_data))[i + 1] +
-                  get<di_psi_tag<Frame::Inertial>>(puncture_field.value())
-                      .get(i);
+                  get<di_psi_tag<Frame::Inertial>>(puncture_field).get(i);
             }
-            get(psi) += get(get<psi_tag>(puncture_field.value()));
-            get(dt_psi) += get(get<dt_psi_tag>(puncture_field.value()));
+            get(psi) += get(get<psi_tag>(puncture_field));
+            get(dt_psi) += get(get<dt_psi_tag>(puncture_field));
 
             const auto& shift =
                 get<gr::Tags::Shift<DataVector, Dim>>(vars_on_face);

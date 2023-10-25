@@ -14,9 +14,12 @@
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/InitializeEvolvedVariables.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/InitializeSpacetimeTags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/ObserveWorldtubeSolution.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/ReceiveAcceleratedTerms.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/ReceiveElementData.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/SendSelfForceToElements.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/SendToElements.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/TimeDerivative.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/UpdateAcceleration.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/UpdateFunctionsOfTime.hpp"
 #include "IO/Observer/Actions/RegisterSingleton.hpp"
 #include "Options/Options.hpp"
@@ -83,6 +86,8 @@ struct WorldtubeSingleton {
   using step_actions =
       tmpl::list<Actions::UpdateFunctionsOfTime, Actions::ChangeSlabSize,
                  Actions::ReceiveElementData, Actions::ComputeTimeDerivative,
+                 Actions::SendSelfForceToElements<Metavariables>,
+                 Actions::ReceiveAcceleratedTerms, Actions::UpdateAcceleration,
                  Actions::ObserveWorldtubeSolution,
                  ::Actions::RecordTimeStepperData<worldtube_system>,
                  ::Actions::UpdateU<worldtube_system>,

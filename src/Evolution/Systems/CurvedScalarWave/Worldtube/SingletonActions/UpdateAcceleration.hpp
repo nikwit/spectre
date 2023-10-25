@@ -47,25 +47,20 @@ namespace CurvedScalarWave::Worldtube {
  * the regular field on the worldtube boundary transformed to symmetric
  * trace-free tensors and \f$ R\f$ is the worldtube radius.
  */
-struct TimeDerivativeMutator {
+struct UpdateAccelerationMutator {
   static constexpr size_t Dim = 3;
 
   using variables_tag = ::Tags::Variables<
       tmpl::list<Tags::Psi0, Tags::dtPsi0, Tags::Position, Tags::Velocity>>;
   using dt_variables_tag = db::add_tag_prefix<::Tags::dt, variables_tag>;
-  using return_tags = tmpl::list<dt_variables_tag, Tags::SelfForce>;
+  using return_tags = tmpl::list<dt_variables_tag>;
   using argument_tags = tmpl::list<
       variables_tag,
       Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>,
-      Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim, Frame::Grid>,
-      Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim, Frame::Grid>,
-      gr::Tags::InverseSpacetimeMetric<double, Dim, Frame::Grid>,
-      gr::Tags::TraceSpacetimeChristoffelSecondKind<double, Dim, Frame::Grid>,
-      Tags::ExcisionSphere<Dim>, ::Tags::Time, Tags::WorldtubeRadiusAndVelocity,
-      Tags::ParticleMass, Tags::ParticleCharge, Tags::TurnOnTime,
-      Tags::TurnOnInterval, Tags::ExpansionOrder,
+      ::Tags::Time, Tags::ParticleMass, Tags::ParticleCharge, Tags::TurnOnTime,
+      Tags::TurnOnInterval,
       CurvedScalarWave::Tags::BackgroundSpacetime<gr::Solutions::KerrSchild>>;
 
   static void apply(
@@ -73,25 +68,18 @@ struct TimeDerivativeMutator {
           tmpl::list<::Tags::dt<Tags::Psi0>, ::Tags::dt<Tags::dtPsi0>,
                      ::Tags::dt<Tags::Position>, ::Tags::dt<Tags::Velocity>>>*>
           dt_evolved_vars,
-      const gsl::not_null<Scalar<DataVector>*> self_force,
       const Variables<tmpl::list<Tags::Psi0, Tags::dtPsi0, Tags::Position,
                                  Tags::Velocity>>& evolved_vars,
       const Scalar<double>& psi_monopole,
       const tnsr::i<double, Dim, Frame::Grid>& psi_dipole,
-      const tnsr::ii<double, Dim, Frame::Grid>& psi_quadrupole,
-      const Scalar<double>& dt_psi_monopole,
-      const tnsr::i<double, Dim, Frame::Grid>& dt_psi_dipole,
-      const tnsr::AA<double, Dim, Frame::Grid>& inverse_spacetime_metric,
-      const tnsr::A<double, Dim, Frame::Grid>& trace_spacetime_christoffel,
-      const ExcisionSphere<Dim>& excision_sphere, const double time,
-      const std::array<double, 2>& worldtube_radius_and_velocity,
+      const Scalar<double>& dt_psi_monopole, const double time,
       const double mass, const double charge, const double turn_on_time,
-      const double turn_on_interval, const size_t expansion_order,
+      const double turn_on_interval,
       const gr::Solutions::KerrSchild& kerr_schild);
 };
 
 namespace Actions {
-struct ComputeTimeDerivative {
+struct UpdateAcceleration {
   static constexpr size_t Dim = 3;
   using variables_tag = ::Tags::Variables<
       tmpl::list<Tags::Psi0, Tags::dtPsi0, Tags::Position, Tags::Velocity>>;
@@ -117,7 +105,7 @@ struct ComputeTimeDerivative {
       const ArrayIndex& /*array_index*/, ActionList /*meta*/,
       const ParallelComponent* /*meta*/) {
     if (db::get<Tags::ExpansionOrder>(box) >= 0) {
-      db::mutate_apply<TimeDerivativeMutator>(make_not_null(&box));
+      db::mutate_apply<UpdateAccelerationMutator>(make_not_null(&box));
     }
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }
