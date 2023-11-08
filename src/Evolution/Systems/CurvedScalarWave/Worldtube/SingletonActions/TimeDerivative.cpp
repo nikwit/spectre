@@ -87,12 +87,12 @@ void TimeDerivativeMutator::apply(
           ::Tags::dt<gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>>,
           ::Tags::deriv<gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>,
                         tmpl::size_t<Dim>, Frame::Inertial>>{});
-  const auto inverse_spacetime_metric_inertial = gr::inverse_spacetime_metric(
+  const auto imetric = gr::inverse_spacetime_metric(
       get<gr::Tags::Lapse<double>>(spacetime_vars),
       get<gr::Tags::Shift<double, Dim, Frame::Inertial>>(spacetime_vars),
       get<gr::Tags::InverseSpatialMetric<double, Dim, Frame::Inertial>>(
           spacetime_vars));
-  const auto spacetime_metric_inertial = gr::spacetime_metric(
+  const auto metric = gr::spacetime_metric(
       get<gr::Tags::Lapse<double>>(spacetime_vars),
       get<gr::Tags::Shift<double, Dim, Frame::Inertial>>(spacetime_vars),
       get<gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>>(
@@ -114,30 +114,28 @@ void TimeDerivativeMutator::apply(
       get<::Tags::deriv<gr::Tags::SpatialMetric<double, Dim, Frame::Inertial>,
                         tmpl::size_t<Dim>, Frame::Inertial>>(spacetime_vars));
 
-  const auto christoffel = gr::christoffel_second_kind(
-      d_spacetime_metric, inverse_spacetime_metric_inertial);
+  const auto christoffel =
+      gr::christoffel_second_kind(d_spacetime_metric, imetric);
 
-  tnsr::I<double, Dim> particle_acceleration{};
-  double u0_squared = spacetime_metric_inertial.get(0, 0);
+  tnsr::I<double, Dim> acc{};
+  const auto& pos = inertial_particle_position;
+  const auto& vel = particle_velocity;
+
+  double u0_squared = metric.get(0, 0);
   for (size_t i = 0; i < Dim; ++i) {
-    particle_acceleration.get(i) =
-        particle_velocity.get(i) * christoffel.get(0, 0, 0) -
-        christoffel.get(i + 1, 0, 0);
-    u0_squared +=
-        2. * spacetime_metric_inertial.get(i + 1, 0) * particle_velocity.get(i);
+    acc.get(i) =
+        vel.get(i) * christoffel.get(0, 0, 0) - christoffel.get(i + 1, 0, 0);
+    u0_squared += 2. * metric.get(i + 1, 0) * vel.get(i);
 
     for (size_t j = 0; j < Dim; ++j) {
-      u0_squared += spacetime_metric_inertial.get(i + 1, j + 1) *
-                    particle_velocity.get(i) * particle_velocity.get(j);
-      particle_acceleration.get(i) +=
-          2. * particle_velocity.get(j) *
-          (particle_velocity.get(i) * christoffel.get(0, j + 1, 0) -
-           christoffel.get(i + 1, j + 1, 0));
+      u0_squared += metric.get(i + 1, j + 1) * vel.get(i) * vel.get(j);
+      acc.get(i) += 2. * vel.get(j) *
+                    (vel.get(i) * christoffel.get(0, j + 1, 0) -
+                     christoffel.get(i + 1, j + 1, 0));
       for (size_t k = 0; k < Dim; ++k) {
-        particle_acceleration.get(i) +=
-            particle_velocity.get(j) * particle_velocity.get(k) *
-            (particle_velocity.get(i) * christoffel.get(0, j + 1, k + 1) -
-             christoffel.get(i + 1, j + 1, k + 1));
+        acc.get(i) += vel.get(j) * vel.get(k) *
+                      (vel.get(i) * christoffel.get(0, j + 1, k + 1) -
+                       christoffel.get(i + 1, j + 1, k + 1));
       }
     }
   }
@@ -153,53 +151,39 @@ void TimeDerivativeMutator::apply(
             : 1.;
 
     for (size_t i = 0; i < Dim; ++i) {
-      particle_acceleration.get(i) +=
-          (inverse_spacetime_metric_inertial.get(i + 1, 0) -
-           particle_velocity.get(i) *
-               inverse_spacetime_metric_inertial.get(0, 0)) *
-          get(dt_psi_monopole) * roll_on * charge / mass / u0_squared;
+      acc.get(i) += (imetric.get(i + 1, 0) - vel.get(i) * imetric.get(0, 0)) *
+                    get(dt_psi_monopole) * roll_on * charge / mass / u0_squared;
       if (expansion_order > 0) {
         for (size_t j = 0; j < Dim; ++j) {
-          particle_acceleration.get(i) +=
-              (inverse_spacetime_metric_inertial.get(i + 1, j + 1) -
-               particle_velocity.get(i) *
-                   inverse_spacetime_metric_inertial.get(0, j + 1)) *
+          acc.get(i) +=
+              (imetric.get(i + 1, j + 1) - vel.get(i) * imetric.get(0, j + 1)) *
               psi_dipole.get(j) * roll_on * charge / mass / u0_squared;
         }
       }
     }
     const double u0 = sqrt(u0_squared);
-    const tnsr::A<double, Dim> four_velocity{
-        {u0, get<0>(particle_velocity) * u0, get<1>(particle_velocity) * u0,
-         get<2>(particle_velocity) * u0}};
+    const tnsr::A<double, Dim> u{
+        {u0, get<0>(vel) * u0, get<1>(vel) * u0, get<2>(vel) * u0}};
     const tnsr::a<double, Dim> d_psiR{{get(dt_psi_monopole), get<0>(psi_dipole),
                                        get<1>(psi_dipole), get<2>(psi_dipole)}};
     const auto contracted_christoffel_inertial =
-        trace_last_indices(christoffel, inverse_spacetime_metric_inertial);
-    double dt2_psiR = -get<0>(contracted_christoffel_inertial) * get<0>(d_psiR);
+        trace_last_indices(christoffel, imetric);
+    double dt2_psiR = get<0>(contracted_christoffel_inertial) * get<0>(d_psiR);
     for (size_t i = 0; i < Dim; ++i) {
       dt2_psiR +=
-          2. * inverse_spacetime_metric_inertial.get(0, i + 1) *
-              dt_psi_dipole.get(i) -
+          -2. * imetric.get(0, i + 1) * dt_psi_dipole.get(i) +
           contracted_christoffel_inertial.get(i + 1) * d_psiR.get(i + 1);
-      for (size_t j = 0; j < Dim; ++j) {
-      }
     }
 
-    dt2_psiR /= get<0, 0>(inverse_spacetime_metric_inertial);
-    const auto& pos = inertial_particle_position;
-    const auto& vel = particle_velocity;
-    const auto& acc = particle_acceleration;
+    dt2_psiR /= get<0, 0>(imetric);
 
     const double r = magnitude(pos).get();
     tnsr::a<double, Dim> dt_d_psiR{{dt2_psiR, get<0>(dt_psi_dipole),
                                     get<1>(dt_psi_dipole),
                                     get<2>(dt_psi_dipole)}};
-    const auto& metric = spacetime_metric_inertial;
-    tnsr::A<double, Dim> dt_four_velocity{};
-    tnsr::iaa<double, Dim> d_metric{};
-    tnsr::iAA<double, Dim> d_imetric{};
-    tnsr::ijAA<double, Dim> d2_metric{};
+
+    tnsr::iAA<double, Dim> di_imetric{};
+    tnsr::ijAA<double, Dim> dij_imetric{};
     tnsr::ii<double, Dim> delta_ll{0.};
     tnsr::Ij<double, Dim> delta_ul{0.};
     tnsr::i<double, Dim> pos_lower{};
@@ -221,7 +205,7 @@ void TimeDerivativeMutator::apply(
     const auto d_imetric_00 =
         tenex::evaluate<ti::i>(2. * pos_lower(ti::i) / cube(r));
 
-    /*const auto d2_metric_ij = tenex::evaluate<ti::i, ti::j, ti::K, ti::L>(
+    const auto d2_imetric_ij = tenex::evaluate<ti::i, ti::j, ti::K, ti::L>(
         -30. * pos_lower(ti::i) * pos_lower(ti::j) * pos(ti::K) * pos(ti::L) /
             (cube(r) * square(square(r))) +
         6. *
@@ -236,61 +220,161 @@ void TimeDerivativeMutator::apply(
              delta_ul(ti::K, ti::i) * delta_ul(ti::L, ti::j)) /
             cube(r));
 
-    const auto d2_metric_i0 = tenex::evaluate<ti::j, ti::k, ti::I>(
+    const auto d2_imetric_i0 = tenex::evaluate<ti::j, ti::k, ti::I>(
         16. * pos(ti::I) * pos_lower(ti::j) * pos_lower(ti::k) /
             (square(cube(r))) -
         4. *
-            (delta_ll(ti::k, ti::j) * pos(ti::i) +
-             delta_ul(ti::I, ti::k) * pos(ti::j) +
-             delta_ul(ti::I, ti::j) * pos(ti::k)) /
+            (delta_ll(ti::k, ti::j) * pos(ti::I) +
+             delta_ul(ti::I, ti::k) * pos_lower(ti::j) +
+             delta_ul(ti::I, ti::j) * pos_lower(ti::k)) /
             square(square(r)));
-    const auto d2_metric_00 = tenex::evaluate<ti::i, ti::k>(
-        2. * delta_ll(ij) / cube(r) -
-        6. * pos_lower(ti::i) * pos_lower(ti::j) / (cube(r) * square(r)));*/
+    const auto d2_imetric_00 = tenex::evaluate<ti::i, ti::j>(
+        2. * delta_ll(ti::i, ti::j) / cube(r) -
+        6. * pos_lower(ti::i) * pos_lower(ti::j) / (cube(r) * square(r)));
     for (size_t i = 0; i < Dim; ++i) {
-      d_imetric.get(i, 0, 0) = d_imetric_00.get(i);
-      d_metric.get(i, 0, 0) = -d_imetric_00.get(i);
-      get<0>(dt_d_psiR) += particle_velocity.get(i) * dt_psi_dipole.get(i);
+      di_imetric.get(i, 0, 0) = d_imetric_00.get(i);
+      get<0>(dt_d_psiR) += vel.get(i) * dt_psi_dipole.get(i);
       for (size_t j = 0; j < Dim; ++j) {
-        d_imetric.get(i, j + 1, 0) = d_imetric_i0.get(i, j);
-        d_metric.get(i, j + 1, 0) = d_imetric_i0.get(i, j);
-        // d2_metric.get(i, j, 0, 0) = d2_metric_00.get(i, j);
+        di_imetric.get(i, j + 1, 0) = d_imetric_i0.get(i, j);
+        dij_imetric.get(i, j, 0, 0) = d2_imetric_00.get(i, j);
         for (size_t k = 0; k < Dim; ++k) {
-          d_imetric.get(i, j + 1, k + 1) = d_imetric_ij.get(i, j, k);
-          d_metric.get(i, j + 1, k + 1) = -d_imetric_ij.get(i, j, k);
-          // d2_metric.get(i, j, k + 1, 0) = d2_metric_i0.get(i, j, k);
+          di_imetric.get(i, j + 1, k + 1) = d_imetric_ij.get(i, j, k);
+          dij_imetric.get(i, j, k + 1, 0) = d2_imetric_i0.get(i, j, k);
           for (size_t l = 0; l < Dim; ++l) {
-            // d2_metric.get(i, j, k + 1, l + 1) = d2_metric_ij.get(i, j, k, l);
+            dij_imetric.get(i, j, k + 1, l + 1) = d2_imetric_ij.get(i, j, k, l);
           }
         }
       }
     }
 
-    const auto dt_four_velocity = tenex::evaluate<ti::A>(
-        roll_on * charge / mass / u0 *
-            inverse_spacetime_metric_inertial(ti::A, ti::B) * d_psiR(ti::b) -
-        christoffel(ti::A, ti::b, ti::c) * four_velocity(ti::B) *
-            four_velocity(ti::C) / u0);
+    tnsr::iaa<double, Dim> di_metric{};
+    tnsr::ijaa<double, Dim> dij_metric{};
+    tnsr::iAbb<double, Dim> di_christoffel{};
+    tnsr::abb<double, Dim> d_metric{};
+    tnsr::iabb<double, Dim> di_d_metric{};
 
-    const auto dt_metric = tenex::evaluate<ti::A, ti::B>(
-        particle_velocity(ti::I) * d_imetric(ti::i, ti::A, ti::B));
-    /*const auto dt2_metric = tenex::evaluate<ti::A, ti::B>(
-        particle_velocity(ti::I) * particle_velocity(ti::J) *
-            d2_metric(ti::i, ti::j, ti::A, ti::B) +
-        particle_acceleration(ti::I) * d_imetric(ti::i, ti::A, ti::B));*/
-    const auto f = tenex::evaluate<ti::B>(
-        roll_on * charge / mass * d_psiR(ti::a) *
-        (inverse_spacetime_metric_inertial(ti::A, ti::B) +
-         four_velocity(ti::A) * four_velocity(ti::B)));
+    tenex::evaluate<ti::i, ti::a, ti::b>(make_not_null(&di_metric),
+                                         -metric(ti::a, ti::c) *
+                                             metric(ti::b, ti::d) *
+                                             di_imetric(ti::i, ti::C, ti::D));
+    tenex::evaluate<ti::i, ti::j, ti::a, ti::b>(
+        make_not_null(&dij_metric),
+        -metric(ti::a, ti::c) * metric(ti::b, ti::d) *
+                dij_imetric(ti::i, ti::j, ti::C, ti::D) -
+            2. * metric(ti::a, ti::c) * d_metric(ti::i, ti::b, ti::d) *
+                di_imetric(ti::j, ti::C, ti::D));
+
+    for (size_t a = 0; a <= Dim; ++a) {
+      for (size_t b = 0; b <= Dim; ++b) {
+        d_metric.get(0, a, b) = 0.;
+        for (size_t i = 0; i < Dim; ++i) {
+          d_metric.get(i + 1, a, b) = di_metric.get(i, a, b);
+          di_d_metric.get(i, 0, a, b) = 0.;
+          for (size_t j = 0; j < Dim; ++j) {
+            di_d_metric.get(i, j + 1, a, b) = dij_metric.get(i, j, a, b);
+          }
+        }
+      }
+    }
+
+    tenex::evaluate<ti::i, ti::A, ti::b, ti::c>(
+        make_not_null(&di_christoffel),
+        0.5 * di_imetric(ti::i, ti::A, ti::D) *
+                (d_metric(ti::b, ti::c, ti::d) + d_metric(ti::c, ti::b, ti::d) -
+                 d_metric(ti::d, ti::b, ti::c)) +
+            0.5 * imetric(ti::A, ti::D) *
+                (di_d_metric(ti::i, ti::b, ti::c, ti::d) +
+                 di_d_metric(ti::i, ti::c, ti::b, ti::d) -
+                 di_d_metric(ti::i, ti::d, ti::b, ti::c)));
+
+    const auto dt_christoffel = tenex::evaluate<ti::A, ti::b, ti::c>(
+        vel(ti::I) * di_christoffel(ti::i, ti::A, ti::b, ti::c));
+
+    const auto dt_u = tenex::evaluate<ti::A>(
+        roll_on * charge / mass / u0 * imetric(ti::A, ti::B) * d_psiR(ti::b) -
+        christoffel(ti::A, ti::b, ti::c) * u(ti::B) * u(ti::C) / u0);
+
+    const auto dt_imetric = tenex::evaluate<ti::A, ti::B>(
+        vel(ti::I) * di_imetric(ti::i, ti::A, ti::B));
+    const auto dt_metric = tenex::evaluate<ti::a, ti::b>(
+        vel(ti::I) * di_metric(ti::i, ti::a, ti::b));
+    const auto dt2_imetric = tenex::evaluate<ti::A, ti::B>(
+        vel(ti::I) * vel(ti::J) * dij_imetric(ti::i, ti::j, ti::A, ti::B) +
+        acc(ti::I) * di_imetric(ti::i, ti::A, ti::B));
+
+    const auto dt2_u = tenex::evaluate<ti::A>(
+        roll_on * charge / mass / u0 *
+            (dt_imetric(ti::A, ti::B) * d_psiR(ti::b) +
+             imetric(ti::A, ti::B) * dt_d_psiR(ti::b)) -
+        (dt_christoffel(ti::A, ti::b, ti::c) * u(ti::B) * u(ti::C) +
+         2. * christoffel(ti::A, ti::b, ti::c) * dt_u(ti::B) * u(ti::C) +
+         get<0>(dt_u) * dt_u(ti::A)) /
+            u0);
+    tnsr::iA<double, Dim> d_contracted_christoffel;
+    for (size_t i = 0; i < Dim; ++i) {
+      d_contracted_christoffel.get(i, 0) = 4. * pos.get(i) / square(square(r));
+      for (size_t j = 0; j < Dim; ++j) {
+        d_contracted_christoffel.get(i, j + 1) =
+            -6. * pos.get(i) * pos.get(j) / (square(r) * cube(r));
+      }
+      d_contracted_christoffel.get(i, i + 1) += 2 / cube(r);
+    }
+
+    tnsr::i<double, Dim> d_dt2_psiR{0.};
+    for (size_t i = 0; i < Dim; ++i) {
+      d_dt2_psiR.get(i) +=
+          -di_imetric.get(i, 0, 0) * dt2_psiR +
+          d_contracted_christoffel.get(i, 0) * get(dt_psi_monopole) +
+          contracted_christoffel_inertial.get(0) * dt_d_psiR.get(i + 1);
+      for (size_t j = 0; j < Dim; ++j) {
+        d_dt2_psiR.get(i) +=
+            -2. * di_imetric.get(i, 0, j + 1) * dt_d_psiR.get(j + 1) +
+            d_contracted_christoffel.get(i, j + 1) * psi_dipole.get(j);
+      }
+      d_dt2_psiR.get(i) /= get<0, 0>(imetric);
+    }
+    double dt3_psiR = contracted_christoffel_inertial.get(0) * dt2_psiR;
+    for (size_t i = 0; i < Dim; ++i) {
+      dt3_psiR +=
+          -2. * imetric.get(0, i + 1) * d_dt2_psiR.get(i) +
+          contracted_christoffel_inertial.get(i + 1) * dt_d_psiR.get(i + 1);
+    }
+
+    tnsr::a<double, Dim> dt2_d_psiR;
+    dt2_d_psiR.get(0) = dt3_psiR;
+    for (size_t i = 0; i < Dim; ++i) {
+      dt2_d_psiR.get(0) +=
+          2. * d_dt2_psiR.get(i) * vel.get(i) + dt_d_psiR.get(i) * acc.get(i);
+      dt2_d_psiR.get(i) = d_dt2_psiR.get(i);
+    }
+
+    const auto f =
+        tenex::evaluate<ti::B>(roll_on * charge / mass * d_psiR(ti::a) *
+                               (imetric(ti::A, ti::B) + u(ti::A) * u(ti::B)));
     const auto dt_f = tenex::evaluate<ti::A>(
         roll_on * charge / mass *
-        ((dt_metric(ti::A, ti::B) +
-          four_velocity(ti::A) * dt_four_velocity(ti::B) +
-          dt_four_velocity(ti::A) * four_velocity(ti::B)) *
+        ((dt_imetric(ti::A, ti::B) + u(ti::A) * dt_u(ti::B) +
+          dt_u(ti::A) * u(ti::B)) *
              d_psiR(ti::b) +
-         (inverse_spacetime_metric_inertial(ti::A, ti::B) +
-          four_velocity(ti::A) * four_velocity(ti::B)) *
-             dt_d_psiR(ti::b)));
+         (imetric(ti::A, ti::B) + u(ti::A) * u(ti::B)) * dt_d_psiR(ti::b)));
+    const auto dt2_f = tenex::evaluate<ti::A>(
+        (dt2_imetric(ti::A, ti::B) + dt2_u(ti::A) * u(ti::B) +
+         dt2_u(ti::B) * u(ti::A) + 2. * dt_u(ti::A) * dt_u(ti::B)) *
+            d_psiR(ti::b) +
+        2. * dt_d_psiR(ti::b) *
+            (dt_imetric(ti::A, ti::B) + dt_u(ti::A) * u(ti::B) +
+             dt_u(ti::B) * u(ti::A)) +
+        dt2_d_psiR(ti::b) * (imetric(ti::A, ti::B) + u(ti::A) * u(ti::B)));
+
+    const auto cov_f = tenex::evaluate<ti::A>(dt_f(ti::A) * u0 +
+                                              christoffel(ti::A, ti::b, ti::c) *
+                                                  u(ti::B) * f(ti::C));
+
+    const auto dt_cov_f = tenex::evaluate<ti::A>(
+        dt2_f(ti::A) * u0 + f(ti::A) * get<0>(dt_u) +
+        dt_christoffel(ti::A, ti::b, ti::c) * u(ti::B) * f(ti::C) +
+        christoffel(ti::A, ti::b, ti::c) * dt_u(ti::B) * f(ti::C) +
+        christoffel(ti::A, ti::b, ti::c) * u(ti::B) * dt_f(ti::C));
 
     for (size_t i = 0; i < Dim; ++i) {
       get(*self_force)[i + 3] = f.get(i);
@@ -298,14 +382,13 @@ void TimeDerivativeMutator::apply(
     }
   }
   for (size_t i = 0; i < Dim; ++i) {
-    get(*self_force)[i] = particle_acceleration.get(i);
+    get(*self_force)[i] = acc.get(i);
   }
 
   for (size_t i = 0; i < Dim; ++i) {
     get<::Tags::dt<Tags::Position>>(*dt_evolved_vars).get(i)[0] =
         get<Tags::Velocity>(evolved_vars).get(i)[0];
-    get<::Tags::dt<Tags::Velocity>>(*dt_evolved_vars).get(i)[0] =
-        particle_acceleration.get(i);
+    get<::Tags::dt<Tags::Velocity>>(*dt_evolved_vars).get(i)[0] = acc.get(i);
   }
 }
 
