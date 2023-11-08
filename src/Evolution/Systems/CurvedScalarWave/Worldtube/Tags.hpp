@@ -105,6 +105,13 @@ struct TurnOnInterval {
       "Time interval over which the self force will be turned on from 0 to 1."};
   using group = Worldtube;
 };
+
+struct UseAccTerms {
+  using type = bool;
+  static constexpr Options::String help{
+      "Time interval over which the self force will be turned on from 0 to 1."};
+  using group = Worldtube;
+};
 }  // namespace OptionTags
 
 /*!
@@ -495,6 +502,33 @@ struct PunctureFieldAccelerated : db::SimpleTag {
                            ::Tags::deriv<CurvedScalarWave::Tags::Psi,
                                          tmpl::size_t<3>, Frame::Inertial>>>;
 };
+
+struct ConstraintGamma1Compute : CurvedScalarWave::Tags::ConstraintGamma1,
+                                 db::ComputeTag {
+  using base = CurvedScalarWave::Tags::ConstraintGamma1;
+  using return_type = Scalar<DataVector>;
+  using argument_tags =
+      tmpl::list<domain::Tags::Coordinates<3, Frame::Inertial>,
+                 ParticlePositionVelocity<3>>;
+  static void function(
+      gsl::not_null<Scalar<DataVector>*> gamma1,
+      const tnsr::I<DataVector, 3, Frame::Inertial>& coords,
+      const std::array<tnsr::I<double, 3, Frame::Inertial>, 2>& pos_vel);
+};
+
+struct ConstraintGamma2Compute : CurvedScalarWave::Tags::ConstraintGamma2,
+                                 db::ComputeTag {
+  using base = CurvedScalarWave::Tags::ConstraintGamma2;
+  using return_type = Scalar<DataVector>;
+  using argument_tags =
+      tmpl::list<domain::Tags::Coordinates<3, Frame::Inertial>,
+                 ParticlePositionVelocity<3>>;
+  static void function(
+      gsl::not_null<Scalar<DataVector>*> gamma2,
+      const tnsr::I<DataVector, 3, Frame::Inertial>& coords,
+      const std::array<tnsr::I<double, 3, Frame::Inertial>, 2>& pos_vel);
+};
+
 
 struct SelfForce : db::SimpleTag {
   using type = Scalar<DataVector>;

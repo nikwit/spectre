@@ -137,6 +137,32 @@ void PunctureFieldCompute<Dim>::function(
   }
 }
 
+void ConstraintGamma1Compute::function(
+    gsl::not_null<Scalar<DataVector>*> gamma1,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coords,
+    const std::array<tnsr::I<double, 3, Frame::Inertial>, 2>& pos_vel) {
+  get(*gamma1).destructive_resize(get<0>(coords).size());
+
+  get(*gamma1) = 0.4;
+}
+
+void ConstraintGamma2Compute::function(
+    gsl::not_null<Scalar<DataVector>*> gamma2,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coords,
+    const std::array<tnsr::I<double, 3, Frame::Inertial>, 2>& pos_vel) {
+  get(*gamma2).destructive_resize(get<0>(coords).size());
+  auto centered_coords = coords;
+  for (size_t i = 0; i < 3; ++i) {
+    centered_coords.get(i) -= pos_vel[0].get(i);
+  }
+  const double amplitude = 3.;
+  const double sigma = 1.e-1;
+  const double constant = 1e-3;
+  const auto radius = magnitude(centered_coords);
+  get(*gamma2) = amplitude * exp(-square(sigma * radius.get())) + constant;
+  //get(*gamma2) += 30. * exp(-square( 2. * radius.get()));
+}
+
 template <size_t Dim>
 void ParticlePositionVelocityCompute<Dim>::function(
     gsl::not_null<std::array<tnsr::I<double, Dim, Frame::Inertial>, 2>*>
