@@ -120,12 +120,13 @@ void UpdateAccelerationMutator::apply(
 
   if (time > turn_on_time) {
     u0_squared = -1. / u0_squared;
-    const double u0 = sqrt(u0_squared);
 
     const double t_minus_turnup = time - turn_on_time;
     double roll_on =
         t_minus_turnup < turn_on_interval
-            ? square(sin(M_PI_2 * t_minus_turnup / turn_on_interval))
+            ? t_minus_turnup /
+                  turn_on_interval  // square(sin(M_PI_2 * t_minus_turnup /
+                                    // turn_on_interval))
             : 1.;
     const double evolved_mass = mass - charge * get(psi_monopole);
 
