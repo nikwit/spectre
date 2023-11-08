@@ -205,6 +205,15 @@ struct TurnOnInterval : db::SimpleTag {
   }
 };
 
+struct UseAccTerms : db::SimpleTag {
+  using type = bool;
+  using option_tags = tmpl::list<OptionTags::UseAccTerms>;
+  static constexpr bool pass_metavariables = false;
+  static bool create_from_options(const bool acc_terms) {
+    return acc_terms;
+  }
+};
+
 /*!
  * \brief The excision sphere corresponding to the worldtube
  */

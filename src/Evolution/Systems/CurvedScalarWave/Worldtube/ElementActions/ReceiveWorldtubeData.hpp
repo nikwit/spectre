@@ -79,12 +79,10 @@ struct ReceiveWorldtubeData {
       if (not inbox.count(time_step_id)) {
         return {Parallel::AlgorithmExecution::Retry, std::nullopt};
       }
-      const auto& element_id = db::get<domain::Tags::Element<Dim>>(box).id();
-      const auto& excision_sphere = db::get<Tags::ExcisionSphere<Dim>>(box);
-      const auto direction = excision_sphere.abutting_direction(element_id);
-      ASSERT(direction.has_value(), "This element should abut the worldtube!");
       const auto& puncture_field =
-          db::get<Tags::PunctureFieldAccelerated<Dim>>(box);
+          db::get<Tags::UseAccTerms>(box)
+              ? db::get<Tags::PunctureFieldAccelerated<Dim>>(box)
+              : db::get<Tags::PunctureField<Dim>>(box).value();
       const auto& mesh = db::get<domain::Tags::Mesh<Dim>>(box);
       const auto face_mesh = mesh.slice_away(direction->dimension());
       const size_t face_size = face_mesh.number_of_grid_points();

@@ -82,6 +82,9 @@ struct SendAccelerationTerms {
       Parallel::GlobalCache<Metavariables>& cache,
       const ArrayIndex& /*array_index*/, const ActionList /*meta*/,
       const ParallelComponent* const /*meta*/) {
+    if (not db::get<Worldtube::Tags::UseAccTerms>(box)) {
+      return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+    }
     const auto& puncture_field =
         db::get<Worldtube::Tags::PunctureField<Dim>>(box);
     if (puncture_field.has_value()) {

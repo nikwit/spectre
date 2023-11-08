@@ -39,12 +39,13 @@ struct SendSelfForceToElements {
         typename Metavariables::dg_element_array>(cache);
     const auto& faces_grid_coords =
         db::get<Tags::ElementFacesGridCoordinates<Dim>>(box);
-
-    for (const auto& [element_id, _] : faces_grid_coords) {
-      Scalar<DataVector> self_force = db::get<Tags::SelfForce>(box);
-      Parallel::receive_data<Tags::SelfForceInbox<Dim>>(
-          element_proxies[element_id], db::get<::Tags::TimeStepId>(box),
-          std::move(self_force));
+    if (db::get<Tags::UseAccTerms>(box)) {
+      for (const auto& [element_id, _] : faces_grid_coords) {
+        Scalar<DataVector> self_force = db::get<Tags::SelfForce>(box);
+        Parallel::receive_data<Tags::SelfForceInbox<Dim>>(
+            element_proxies[element_id], db::get<::Tags::TimeStepId>(box),
+            std::move(self_force));
+      }
     }
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }

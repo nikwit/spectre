@@ -79,6 +79,9 @@ struct ReceiveAcceleratedTerms {
       const Parallel::GlobalCache<Metavariables>& /*cache*/,
       const ArrayIndex& /*array_index*/, ActionList /*meta*/,
       const ParallelComponent* const /*meta*/) {
+    if (not db::get<Tags::UseAccTerms>(box)) {
+      return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+    }
     const size_t expected_number_of_senders =
         db::get<Tags::ElementFacesGridCoordinates<Dim>>(box).size();
     const auto& time_step_id = db::get<::Tags::TimeStepId>(box);

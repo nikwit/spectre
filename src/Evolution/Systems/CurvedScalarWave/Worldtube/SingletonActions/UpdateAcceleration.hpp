@@ -104,7 +104,8 @@ struct UpdateAcceleration {
       Parallel::GlobalCache<Metavariables>& /*cache*/,
       const ArrayIndex& /*array_index*/, ActionList /*meta*/,
       const ParallelComponent* /*meta*/) {
-    if (db::get<Tags::ExpansionOrder>(box) >= 0) {
+    if (db::get<Tags::ExpansionOrder>(box) >= 0 and
+        db::get<Tags::UseAccTerms>(box)) {
       db::mutate_apply<UpdateAccelerationMutator>(make_not_null(&box));
     }
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};

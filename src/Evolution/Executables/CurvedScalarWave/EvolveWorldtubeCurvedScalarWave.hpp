@@ -251,6 +251,7 @@ struct EvolutionMetavars {
   using step_actions = tmpl::flatten<tmpl::list<
       CurvedScalarWave::Actions::CalculateGrVars<system>,
       CurvedScalarWave::Worldtube::Actions::SendToWorldtube,
+      //CurvedScalarWave::Worldtube::Actions::SendAccelerationTerms,
       CurvedScalarWave::Worldtube::Actions::SendAccelerationTerms,
       CurvedScalarWave::Worldtube::Actions::ReceiveWorldtubeData,
       evolution::dg::Actions::ComputeTimeDerivative<
@@ -277,7 +278,8 @@ struct EvolutionMetavars {
       CurvedScalarWave::Worldtube::Tags::ParticleCharge,
       CurvedScalarWave::Worldtube::Tags::WorldtubeCoordinateMaps,
       CurvedScalarWave::Worldtube::Tags::ExpansionOrder,
-      CurvedScalarWave::Worldtube::Tags::ObserveCoefficientsTrigger>;
+      CurvedScalarWave::Worldtube::Tags::ObserveCoefficientsTrigger,
+      CurvedScalarWave::Worldtube::Tags::UseAccTerms>;
 
   using dg_registration_list =
       tmpl::list<observers::Actions::RegisterEventsWithObservers>;
