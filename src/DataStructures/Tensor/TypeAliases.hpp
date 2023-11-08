@@ -372,6 +372,20 @@ using ijAA = Tensor<DataType, tmpl::integral_list<std::int32_t, 3, 2, 1, 1>,
                                SpacetimeIndex<SpatialDim, UpLo::Up, Fr>,
                                SpacetimeIndex<SpatialDim, UpLo::Up, Fr>>>;
 
+template <typename DataType, size_t SpatialDim, typename Fr = Frame::Inertial>
+using iAbb= Tensor<DataType, tmpl::integral_list<std::int32_t, 3, 2, 1, 1>,
+                    index_list<SpatialIndex<SpatialDim, UpLo::Lo, Fr>,
+                               SpacetimeIndex<SpatialDim, UpLo::Up, Fr>,
+                               SpacetimeIndex<SpatialDim, UpLo::Lo, Fr>,
+                               SpacetimeIndex<SpatialDim, UpLo::Lo, Fr>>>;
+
+template <typename DataType, size_t SpatialDim, typename Fr = Frame::Inertial>
+using iabb= Tensor<DataType, tmpl::integral_list<std::int32_t, 3, 2, 1, 1>,
+                    index_list<SpatialIndex<SpatialDim, UpLo::Lo, Fr>,
+                               SpacetimeIndex<SpatialDim, UpLo::Lo, Fr>,
+                               SpacetimeIndex<SpatialDim, UpLo::Lo, Fr>,
+                               SpacetimeIndex<SpatialDim, UpLo::Lo, Fr>>>;
+
 // Rank 4 - generic (default spacetime)
 template <typename DataType, size_t SpatialDim, typename Fr = Frame::Inertial,
           IndexType Index = IndexType::Spacetime>
