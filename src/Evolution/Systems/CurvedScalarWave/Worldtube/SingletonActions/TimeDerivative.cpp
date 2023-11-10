@@ -139,7 +139,7 @@ void TimeDerivativeMutator::apply(
       }
     }
   }
-  get(*self_force) = DataVector(9, 0.);
+  get(*self_force) = DataVector(15, 0.);
   if (time > turn_on_time) {
     u0_squared = -1. / u0_squared;
     const double t_minus_turnup = time - turn_on_time;
@@ -371,7 +371,7 @@ void TimeDerivativeMutator::apply(
                                                   u(ti::B) * f(ti::C));
 
     const auto dt_cov_f = tenex::evaluate<ti::A>(
-        dt2_f(ti::A) * u0 + f(ti::A) * get<0>(dt_u) +
+        dt2_f(ti::A) * u0 + dt_f(ti::A) * get<0>(dt_u) +
         dt_christoffel(ti::A, ti::b, ti::c) * u(ti::B) * f(ti::C) +
         christoffel(ti::A, ti::b, ti::c) * dt_u(ti::B) * f(ti::C) +
         christoffel(ti::A, ti::b, ti::c) * u(ti::B) * dt_f(ti::C));
@@ -379,6 +379,8 @@ void TimeDerivativeMutator::apply(
     for (size_t i = 0; i < Dim; ++i) {
       get(*self_force)[i + 3] = f.get(i);
       get(*self_force)[i + 6] = dt_f.get(i);
+      get(*self_force)[i + 9] = cov_f.get(i);
+      get(*self_force)[i + 12] = dt_cov_f.get(i);
     }
   }
   for (size_t i = 0; i < Dim; ++i) {
