@@ -153,12 +153,10 @@ void TimeDerivativeMutator::apply(
     for (size_t i = 0; i < Dim; ++i) {
       acc.get(i) += (imetric.get(i + 1, 0) - vel.get(i) * imetric.get(0, 0)) *
                     get(dt_psi_monopole) * roll_on * charge / mass / u0_squared;
-      if (expansion_order > 0) {
-        for (size_t j = 0; j < Dim; ++j) {
-          acc.get(i) +=
-              (imetric.get(i + 1, j + 1) - vel.get(i) * imetric.get(0, j + 1)) *
-              psi_dipole.get(j) * roll_on * charge / mass / u0_squared;
-        }
+      for (size_t j = 0; j < Dim; ++j) {
+        acc.get(i) +=
+            (imetric.get(i + 1, j + 1) - vel.get(i) * imetric.get(0, j + 1)) *
+            psi_dipole.get(j) * roll_on * charge / mass / u0_squared;
       }
     }
     const double u0 = sqrt(u0_squared);
@@ -172,7 +170,7 @@ void TimeDerivativeMutator::apply(
     for (size_t i = 0; i < Dim; ++i) {
       dt2_psiR +=
           -2. * imetric.get(0, i + 1) * dt_psi_dipole.get(i) +
-          contracted_christoffel_inertial.get(i + 1) * d_psiR.get(i + 1);
+          contracted_christoffel_inertial.get(i + 1) * psi_dipole.get(i);
     }
 
     dt2_psiR /= get<0, 0>(imetric);
@@ -257,12 +255,12 @@ void TimeDerivativeMutator::apply(
                                          -metric(ti::a, ti::c) *
                                              metric(ti::b, ti::d) *
                                              di_imetric(ti::i, ti::C, ti::D));
-    tenex::evaluate<ti::i, ti::j, ti::a, ti::b>(
+    tenex::evaluate<ti::j, ti::i, ti::a, ti::b>(
         make_not_null(&dij_metric),
         -metric(ti::a, ti::c) * metric(ti::b, ti::d) *
-                dij_imetric(ti::i, ti::j, ti::C, ti::D) -
-            2. * metric(ti::a, ti::c) * d_metric(ti::i, ti::b, ti::d) *
-                di_imetric(ti::j, ti::C, ti::D));
+                dij_imetric(ti::j, ti::i, ti::C, ti::D) -
+            2. * metric(ti::a, ti::c) * di_metric(ti::j, ti::b, ti::d) *
+                di_imetric(ti::i, ti::C, ti::D));
 
     for (size_t a = 0; a <= Dim; ++a) {
       for (size_t b = 0; b <= Dim; ++b) {
@@ -290,10 +288,6 @@ void TimeDerivativeMutator::apply(
     const auto dt_christoffel = tenex::evaluate<ti::A, ti::b, ti::c>(
         vel(ti::I) * di_christoffel(ti::i, ti::A, ti::b, ti::c));
 
-    const auto dt_u = tenex::evaluate<ti::A>(
-        roll_on * charge / mass / u0 * imetric(ti::A, ti::B) * d_psiR(ti::b) -
-        christoffel(ti::A, ti::b, ti::c) * u(ti::B) * u(ti::C) / u0);
-
     const auto dt_imetric = tenex::evaluate<ti::A, ti::B>(
         vel(ti::I) * di_imetric(ti::i, ti::A, ti::B));
     const auto dt_metric = tenex::evaluate<ti::a, ti::b>(
@@ -302,6 +296,9 @@ void TimeDerivativeMutator::apply(
         vel(ti::I) * vel(ti::J) * dij_imetric(ti::i, ti::j, ti::A, ti::B) +
         acc(ti::I) * di_imetric(ti::i, ti::A, ti::B));
 
+    const auto dt_u = tenex::evaluate<ti::A>(
+        roll_on * charge / mass / u0 * imetric(ti::A, ti::B) * d_psiR(ti::b) -
+        christoffel(ti::A, ti::b, ti::c) * u(ti::B) * u(ti::C) / u0);
     const auto dt2_u = tenex::evaluate<ti::A>(
         roll_on * charge / mass / u0 *
             (dt_imetric(ti::A, ti::B) * d_psiR(ti::b) +
@@ -317,7 +314,7 @@ void TimeDerivativeMutator::apply(
         d_contracted_christoffel.get(i, j + 1) =
             -6. * pos.get(i) * pos.get(j) / (square(r) * cube(r));
       }
-      d_contracted_christoffel.get(i, i + 1) += 2 / cube(r);
+      d_contracted_christoffel.get(i, i + 1) += 2. / cube(r);
     }
 
     tnsr::i<double, Dim> d_dt2_psiR{0.};
@@ -325,10 +322,10 @@ void TimeDerivativeMutator::apply(
       d_dt2_psiR.get(i) +=
           -di_imetric.get(i, 0, 0) * dt2_psiR +
           d_contracted_christoffel.get(i, 0) * get(dt_psi_monopole) +
-          contracted_christoffel_inertial.get(0) * dt_d_psiR.get(i + 1);
+          contracted_christoffel_inertial.get(0) * dt_psi_dipole.get(i);
       for (size_t j = 0; j < Dim; ++j) {
         d_dt2_psiR.get(i) +=
-            -2. * di_imetric.get(i, 0, j + 1) * dt_d_psiR.get(j + 1) +
+            -2. * di_imetric.get(i, 0, j + 1) * dt_psi_dipole.get(j) +
             d_contracted_christoffel.get(i, j + 1) * psi_dipole.get(j);
       }
       d_dt2_psiR.get(i) /= get<0, 0>(imetric);
@@ -337,14 +334,14 @@ void TimeDerivativeMutator::apply(
     for (size_t i = 0; i < Dim; ++i) {
       dt3_psiR +=
           -2. * imetric.get(0, i + 1) * d_dt2_psiR.get(i) +
-          contracted_christoffel_inertial.get(i + 1) * dt_d_psiR.get(i + 1);
+          contracted_christoffel_inertial.get(i + 1) * dt_psi_dipole.get(i);
     }
 
     tnsr::a<double, Dim> dt2_d_psiR;
     dt2_d_psiR.get(0) = dt3_psiR;
     for (size_t i = 0; i < Dim; ++i) {
-      dt2_d_psiR.get(0) +=
-          2. * d_dt2_psiR.get(i) * vel.get(i) + dt_d_psiR.get(i) * acc.get(i);
+      dt2_d_psiR.get(0) += 2. * d_dt2_psiR.get(i) * vel.get(i) +
+                           dt_psi_dipole.get(i) * acc.get(i);
       dt2_d_psiR.get(i) = d_dt2_psiR.get(i);
     }
 
