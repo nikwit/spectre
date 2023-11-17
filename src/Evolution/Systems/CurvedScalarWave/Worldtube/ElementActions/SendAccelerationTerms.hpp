@@ -111,14 +111,7 @@ struct SendAccelerationTerms {
             puncture_field_generic_1(
                 accelerated_puncture_field, centered_face_coordinates,
                 position_velocity[0], position_velocity[1], acceleration, 1.);
-
-            auto acc_terms_0 = *accelerated_puncture_field;
             auto acc_terms_1 = *accelerated_puncture_field;
-            puncture_field_acc_0(
-                make_not_null(&acc_terms_0), centered_face_coordinates,
-                position_velocity[0], position_velocity[1], acceleration,
-                self_force[3], self_force[4], self_force[5], self_force[6],
-                self_force[7], self_force[8], 1.);
             puncture_field_acc_1(
                 make_not_null(&acc_terms_1), centered_face_coordinates,
                 position_velocity[0], position_velocity[1], acceleration,
@@ -126,7 +119,6 @@ struct SendAccelerationTerms {
                 self_force[7], self_force[8], self_force[9], self_force[10],
                 self_force[11], self_force[12], self_force[13], self_force[14],
                 1.);
-            //*accelerated_puncture_field += acc_terms_0;
             *accelerated_puncture_field += acc_terms_1;
             *accelerated_puncture_field *= charge;
           });
@@ -231,7 +223,20 @@ struct SendAccelerationTerms {
           Worldtube::Tags::SphericalHarmonicsAcceleratedInbox<Dim>>(
           worldtube_component, db::get<::Tags::TimeStepId>(box),
           std::make_pair(element_id, std::move(Ylm_coefs)));
+      db::mutate<Worldtube::Tags::CurrentIteration>(
+          make_not_null(&box),
+          [](const auto current_iteration) { *current_iteration += 1; });
+      if (db::get<Worldtube::Tags::CurrentIteration>(box) <
+          db::get<Worldtube::Tags::Iterations>(box)) {
+        return {Parallel::AlgorithmExecution::Continue,
+                tmpl::index_of<ActionList,
+      Actions::SendAccelerationTerms>::value};
+      }
+      db::mutate<Worldtube::Tags::CurrentIteration>(
+          make_not_null(&box),
+          [](const auto current_iteration) { *current_iteration = 0; });
     }
+
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }
 };

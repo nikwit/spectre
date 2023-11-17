@@ -112,6 +112,13 @@ struct UseAccTerms {
       "Time interval over which the self force will be turned on from 0 to 1."};
   using group = Worldtube;
 };
+
+struct Iterations {
+  using type = size_t;
+  static constexpr Options::String help{
+      "Time interval over which the self force will be turned on from 0 to 1."};
+  using group = Worldtube;
+};
 }  // namespace OptionTags
 
 /*!
@@ -216,9 +223,20 @@ struct UseAccTerms : db::SimpleTag {
   using type = bool;
   using option_tags = tmpl::list<OptionTags::UseAccTerms>;
   static constexpr bool pass_metavariables = false;
-  static bool create_from_options(const bool acc_terms) {
-    return acc_terms;
+  static bool create_from_options(const bool acc_terms) { return acc_terms; }
+};
+
+struct Iterations : db::SimpleTag {
+  using type = size_t;
+  using option_tags = tmpl::list<OptionTags::Iterations>;
+  static constexpr size_t pass_metavariables = false;
+  static size_t create_from_options(const size_t iterations) {
+    return iterations;
   }
+};
+
+struct CurrentIteration : db::SimpleTag {
+  using type = size_t;
 };
 
 /*!
@@ -528,7 +546,6 @@ struct ConstraintGamma2Compute : CurvedScalarWave::Tags::ConstraintGamma2,
       const tnsr::I<DataVector, 3, Frame::Inertial>& coords,
       const std::array<tnsr::I<double, 3, Frame::Inertial>, 2>& pos_vel);
 };
-
 
 struct SelfForce : db::SimpleTag {
   using type = Scalar<DataVector>;

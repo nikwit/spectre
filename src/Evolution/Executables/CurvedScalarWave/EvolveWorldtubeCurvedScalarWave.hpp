@@ -40,6 +40,7 @@
 #include "Evolution/Systems/CurvedScalarWave/System.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/InitializeConstraintGammas.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/InitializeIterations.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/ReceiveWorldtubeData.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/SendAccelerationTerms.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/SendToWorldtube.hpp"
@@ -251,7 +252,6 @@ struct EvolutionMetavars {
   using step_actions = tmpl::flatten<tmpl::list<
       CurvedScalarWave::Actions::CalculateGrVars<system>,
       CurvedScalarWave::Worldtube::Actions::SendToWorldtube,
-      //CurvedScalarWave::Worldtube::Actions::SendAccelerationTerms,
       CurvedScalarWave::Worldtube::Actions::SendAccelerationTerms,
       CurvedScalarWave::Worldtube::Actions::ReceiveWorldtubeData,
       evolution::dg::Actions::ComputeTimeDerivative<
@@ -279,7 +279,8 @@ struct EvolutionMetavars {
       CurvedScalarWave::Worldtube::Tags::WorldtubeCoordinateMaps,
       CurvedScalarWave::Worldtube::Tags::ExpansionOrder,
       CurvedScalarWave::Worldtube::Tags::ObserveCoefficientsTrigger,
-      CurvedScalarWave::Worldtube::Tags::UseAccTerms>;
+      CurvedScalarWave::Worldtube::Tags::UseAccTerms,
+      CurvedScalarWave::Worldtube::Tags::Iterations>;
 
   using dg_registration_list =
       tmpl::list<observers::Actions::RegisterEventsWithObservers>;
@@ -292,6 +293,8 @@ struct EvolutionMetavars {
       Initialization::Actions::NonconservativeSystem<system>,
       CurvedScalarWave::Actions::CalculateGrVars<system>,
       Initialization::Actions::AddSimpleTags<
+            CurvedScalarWave::Worldtube::Initialization::
+              InitializeIterations,
           CurvedScalarWave::Worldtube::Initialization::
               InitializeConstraintDampingGammas<volume_dim>,
           CurvedScalarWave::Initialization::InitializeEvolvedVariables<

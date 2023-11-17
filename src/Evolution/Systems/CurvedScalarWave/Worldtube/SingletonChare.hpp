@@ -8,6 +8,7 @@
 #include "Domain/FunctionsOfTime/FunctionsOfTimeAreReady.hpp"
 #include "Evolution/Initialization/Evolution.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/InitializeIterations.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/ChangeSlabSize.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/CheckFunctionsOfTimeAreReady.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/InitializeElementFacesGridCoordinates.hpp"
@@ -73,6 +74,7 @@ struct WorldtubeSingleton {
       ::Initialization::Actions::InitializeItems<
           ::Initialization::TimeStepping<Metavariables, local_time_stepping>,
           Initialization::InitializeEvolvedVariables,
+          Initialization::InitializeIterations,
           Initialization::InitializeSpacetimeTags,
           Initialization::InitializeElementFacesGridCoordinates<Dim>>,
       Parallel::Actions::TerminatePhase>;
