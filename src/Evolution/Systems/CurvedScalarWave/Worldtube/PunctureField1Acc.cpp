@@ -94,8 +94,8 @@ void puncture_field_acc_1(
   const double d_42 = 2 * rp;
   const double d_43 = 2 * d_23;
   const double d_44 = -d_12;
-  const double d_45 = pow(d_44, 3.0 / 2.0);
-  const double d_46 = pow(rp, 15.0 / 2.0);
+  const double d_45 = d_44 * sqrt(d_44);
+  const double d_46 = d_0 * d_20 * sqrt(rp);
   const double d_47 = d_45 * d_46;
   const double d_48 = 12 * ft;
   const double d_49 = d_29 * d_48;
@@ -105,19 +105,19 @@ void puncture_field_acc_1(
   const double d_53 = rp * rp * rp * rp * rp * rp;
   const double d_54 = d_12 * d_53;
   const double d_55 = 12 * d_41;
-  const double d_56 = pow(rp, 17.0 / 2.0);
+  const double d_56 = d_46 * rp;
   const double d_57 = Duft * d_56;
   const double d_58 = d_45 * d_57;
   const double d_59 = sqrt(d_44);
-  const double d_60 = pow(rp, 9.0 / 2.0);
+  const double d_60 = d_20 * sqrt(rp);
   const double d_61 = 3 * M;
   const double d_62 = d_61 * fx;
   const double d_63 = d_12 * d_20;
   const double d_64 = rp * rp * rp * rp * rp;
   const double d_65 = d_12 * d_64;
-  const double d_66 = pow(rp, 11.0 / 2.0);
+  const double d_66 = d_60 * rp;
   const double d_67 = d_13 * 1.0 / d_53;
-  const double d_68 = pow(rp, 23.0 / 2.0);
+  const double d_68 = d_46 * d_20;
   const double d_69 = d_45 * rpdot;
   const double d_70 = 1.0 / d_20;
   const double d_71 = 3 * rpdot;
@@ -149,7 +149,7 @@ void puncture_field_acc_1(
   const double d_94 = 18 * rpdot;
   const double d_95 = 1.0 / d_59;
   const double d_96 = d_77 * d_95;
-  const double d_97 = pow(rp, -1.0 / 2.0);
+  const double d_97 = 1. / sqrt(rp);
   const double d_98 = rp * rp * rp * rp * rp * rp * rp * rp;
   const double d_99 = fy * ypdot + fydot * yp;
   const double d_100 = fx * xpdot + fxdot * xp;
@@ -163,11 +163,11 @@ void puncture_field_acc_1(
   const double d_106 = d_1 * d_39 * ypdot + d_16 * (d_100 + d_104) +
                        d_19 * fydot + fy * (d_102 * d_3 + d_103);
   const double d_107 = 12 * d_58;
-  const double d_108 = pow(rp, 7.0 / 2.0);
+  const double d_108 = d_0 * sqrt(rp);
   const double d_109 = 24 * d_77;
   const double d_110 = d_29 * ft;
-  const double d_111 = pow(rp, 12);
-  const double d_112 = pow(rp, 21.0 / 2.0);
+  const double d_111 = d_53 * d_53;
+  const double d_112 = d_46 * d_0;
   const double d_113 = d_110 * d_51;
   const double d_114 = d_38 * fx;
   const double d_115 = d_41 * fy;
@@ -247,7 +247,7 @@ void puncture_field_acc_1(
   DataVector& dv_17 = temps.at(17);
   dv_17 = M * d_5 * dv_11 - d_14 * dv_9 + dv_16;
   DataVector& dv_18 = temps.at(18);
-  dv_18 = pow(dv_17, 3.0 / 2.0);
+  dv_18 = dv_17 * sqrt(dv_17);
   DataVector& dv_19 = temps.at(19);
   dv_19 = d_15 * dv_9;
   DataVector& dv_20 = temps.at(20);
@@ -561,7 +561,7 @@ void puncture_field_acc_1(
   DataVector& dv_167 = temps.at(151);
   dv_167 = M * dv_139;
   DataVector& dv_168 = temps.at(152);
-  dv_168 = 72 * dv_166 * pow(rp, 13.0 / 2.0);
+  dv_168 = 72 * dv_166 * d_60 * rp * rp;
   DataVector& dv_169 = temps.at(153);
   dv_169 = d_54 * dv_83;
   DataVector& dv_170 = temps.at(154);
@@ -726,7 +726,7 @@ void puncture_field_acc_1(
   DataVector& dv_246 = temps.at(46);
   dv_246 = (1.0 / 12.0) * 1.0 / dv_40;
   DataVector& dv_247 = temps.at(201);
-  dv_247 = pow(dv_17, 5.0 / 2.0);
+  dv_247 = square(dv_17) * sqrt(dv_17);
   DataVector& dv_248 = temps.at(202);
   dv_248 = d_119 * dv_247;
   DataVector& dv_249 = temps.at(203);
@@ -1050,8 +1050,8 @@ void puncture_field_acc_1(
             dv_141 * dv_36 - dv_141 * dv_9 - dv_143 * dv_157 - dv_143 * dv_25 -
             dv_147 * dv_158 - dv_147 * dv_29 - dv_154 * dv_35 - dv_154 * dv_38 -
             dv_156 * dv_35 - dv_156 * dv_38 - dv_161 * dv_35 - dv_161 * dv_38) -
-       d_94 * dv_122 * dv_163 / pow(rp, 3.0 / 2.0) +
-       4 * d_96 * dv_122 * dv_135 * pow(rp, 5.0 / 2.0) +
+       d_94 * dv_122 * dv_163 / (rp * sqrt(rp)) +
+       4 * d_96 * dv_122 * dv_135 * square(rp) * sqrt(rp) +
        5 * d_97 * dv_122 * dv_164 * dv_165 +
        d_97 * dv_163 *
            (48 * Duft * M * d_45 * d_56 * dv_134 * dv_17 * dv_5 * dv_8 +
@@ -1108,7 +1108,7 @@ void puncture_field_acc_1(
             d_116 * dv_157 * dv_97 - d_117 * d_118 * dv_104 * dv_17 -
             d_117 * d_118 * dv_183 * dv_97 +
             48 * d_12 * d_29 * d_50 * dv_134 * dv_17 * dv_9 * ft +
-            48 * d_12 * d_29 * d_77 * dv_40 * ft * pow(rp, 13) +
+            48 * d_12 * d_29 * d_77 * dv_40 * ft * d_24 * d_0 +
             48 * d_12 * d_38 * d_53 * dv_134 * dv_17 * dv_9 * fx +
             48 * d_12 * d_41 * d_53 * dv_134 * dv_17 * dv_9 * fy -
             6 * d_21 * dv_98 *
@@ -1154,7 +1154,7 @@ void puncture_field_acc_1(
             dv_176 * dv_77 - dv_176 * dv_82 - dv_177 * dv_77 - dv_177 * dv_82 -
             dv_180 * dv_181 - dv_181 * dv_182 - dv_189 * dv_190 -
             dv_189 * dv_191 - dv_62 * dv_70 * fxdot - dv_62 * dv_76 * fydot)) *
-      1.0 / d_68 / pow(d_44, 5.0 / 2.0);
+      1.0 / d_68 / (square(d_44) * sqrt(d_44));
   get<0>(get<::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<3>,
                            Frame::Inertial>>(*result)) =
       -dv_356 *
@@ -1248,6 +1248,6 @@ void puncture_field_acc_1(
        dv_190 * dv_389 + dv_191 * dv_389 - dv_27 * dv_390 - dv_31 * dv_390 -
        10 * dv_319 - dv_35 * dv_386 - dv_38 * dv_386 + dv_392 * dv_77 +
        dv_392 * dv_82) /
-      pow(dv_17, 7.0 / 2.0);
+      (cube(dv_17) * sqrt(dv_17));
 }
 }  // namespace CurvedScalarWave::Worldtube

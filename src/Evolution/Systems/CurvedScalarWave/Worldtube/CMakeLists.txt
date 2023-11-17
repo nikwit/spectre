@@ -13,6 +13,7 @@ spectre_target_sources(
   InsideHorizonTrigger.cpp
   PunctureField.cpp
   PunctureField0Acc.cpp
+  PunctureField1Acc.cpp
   PunctureFieldOrder0.cpp
   PunctureFieldOrder1.cpp
   PunctureFieldOrder2.cpp
