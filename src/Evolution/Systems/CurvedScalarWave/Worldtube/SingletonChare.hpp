@@ -9,6 +9,7 @@
 #include "Evolution/Initialization/Evolution.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/InitializeIterations.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/AccelerationTerms.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/ChangeSlabSize.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/CheckFunctionsOfTimeAreReady.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/InitializeElementFacesGridCoordinates.hpp"
@@ -19,7 +20,6 @@
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/ReceiveElementData.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/SendSelfForceToElements.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/SendToElements.hpp"
-#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/TimeDerivative.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/UpdateAcceleration.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/UpdateFunctionsOfTime.hpp"
 #include "IO/Observer/Actions/RegisterSingleton.hpp"
@@ -87,7 +87,7 @@ struct WorldtubeSingleton {
   };
   using step_actions =
       tmpl::list<Actions::UpdateFunctionsOfTime, Actions::ChangeSlabSize,
-                 Actions::ReceiveElementData, Actions::ComputeTimeDerivative,
+                 Actions::ReceiveElementData, Actions::ComputeAccelerationTerms,
                  Actions::SendSelfForceToElements<Metavariables>,
                  Actions::ReceiveAcceleratedTerms, Actions::UpdateAcceleration,
                  Actions::ObserveWorldtubeSolution,

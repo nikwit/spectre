@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include "DataStructures/Tensor/Tensor.hpp"
+#include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/KerrSchild.hpp"
+
 /*!
  * \brief The set of utilities for performing CurvedScalarWave evolution with a
  * worldtube excision scheme.
@@ -40,4 +43,13 @@ double worldtube_shrink_factor_derivative(const double orbit_radius,
                                           const double start_shrink_orbit,
                                           const double end_shrink_orbit,
                                           const double shrink_factor_at_end);
+
+template <size_t Dim>
+std::tuple<tnsr::aa<double, Dim>, tnsr::AA<double, Dim>, tnsr::iaa<double, Dim>,
+           tnsr::iAA<double, Dim>, tnsr::ijaa<double, Dim>,
+           tnsr::ijAA<double, Dim>, tnsr::Abb<double, Dim>,
+           tnsr::iAbb<double, Dim>, tnsr::A<double, Dim>,
+           tnsr::iA<double, Dim>>
+kerr_schild_quantities(const gr::Solutions::KerrSchild& kerr_schild,
+                       const tnsr::I<double, Dim>& pos);
 }  // namespace CurvedScalarWave::Worldtube

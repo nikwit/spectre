@@ -15,7 +15,7 @@
 #include "Domain/Structure/ElementId.hpp"
 #include "Domain/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Inboxes.hpp"
-#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/TimeDerivative.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/AccelerationTerms.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Tags.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/Tags.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/YlmToStf.hpp"
@@ -147,10 +147,11 @@ struct ReceiveAcceleratedTerms {
     db::mutate<Worldtube::Tags::CurrentIteration>(
         make_not_null(&box),
         [](const auto current_iteration) { *current_iteration += 1; });
+
     if (db::get<Worldtube::Tags::CurrentIteration>(box) <
         db::get<Worldtube::Tags::Iterations>(box)) {
       return {Parallel::AlgorithmExecution::Continue,
-              tmpl::index_of<ActionList, ComputeTimeDerivative>::value};
+              tmpl::index_of<ActionList, ComputeAccelerationTerms>::value};
     }
     db::mutate<Worldtube::Tags::CurrentIteration>(
         make_not_null(&box),
