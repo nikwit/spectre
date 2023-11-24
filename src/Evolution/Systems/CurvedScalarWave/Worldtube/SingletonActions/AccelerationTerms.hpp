@@ -82,8 +82,7 @@ struct ComputeAccelerationTerms {
       Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim, Frame::Grid>,
-      Tags::ParticlePositionVelocity<3>, Tags::SelfForce,
-      Worldtube::Tags::PsiIterations<Dim>>;
+      Tags::ParticlePositionVelocity<3>, Tags::SelfForce>;
 
   template <typename DbTagsList, typename... InboxTags, typename Metavariables,
             typename ArrayIndex, typename ActionList,

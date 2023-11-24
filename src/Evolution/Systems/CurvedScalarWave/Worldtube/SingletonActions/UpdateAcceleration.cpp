@@ -122,12 +122,10 @@ void UpdateAccelerationMutator::apply(
     u0_squared = -1. / u0_squared;
 
     const double t_minus_turnup = time - turn_on_time;
-    double roll_on =
-        t_minus_turnup < turn_on_interval
-            ? t_minus_turnup /
-                  turn_on_interval  // square(sin(M_PI_2 * t_minus_turnup /
-                                    // turn_on_interval))
-            : 1.;
+    const double t_over_tsigma = t_minus_turnup / turn_on_interval;
+    const double t_over_tsigma_pow4 = square(square(t_over_tsigma));
+    const double roll_on = 1. - exp(-t_over_tsigma_pow4);
+
     const double evolved_mass = mass - charge * get(psi_monopole);
 
     for (size_t i = 0; i < Dim; ++i) {
@@ -144,13 +142,12 @@ void UpdateAccelerationMutator::apply(
             psi_dipole.get(j) * roll_on * charge / evolved_mass / u0_squared;
       }
     }
-
-    for (size_t i = 0; i < Dim; ++i) {
-      get<::Tags::dt<Tags::Position>>(*dt_evolved_vars).get(i)[0] =
-          get<Tags::Velocity>(evolved_vars).get(i)[0];
-      get<::Tags::dt<Tags::Velocity>>(*dt_evolved_vars).get(i)[0] =
-          particle_acceleration.get(i);
-    }
+  }
+  for (size_t i = 0; i < Dim; ++i) {
+    get<::Tags::dt<Tags::Position>>(*dt_evolved_vars).get(i)[0] =
+        get<Tags::Velocity>(evolved_vars).get(i)[0];
+    get<::Tags::dt<Tags::Velocity>>(*dt_evolved_vars).get(i)[0] =
+        particle_acceleration.get(i);
   }
 }
 }  // namespace CurvedScalarWave::Worldtube

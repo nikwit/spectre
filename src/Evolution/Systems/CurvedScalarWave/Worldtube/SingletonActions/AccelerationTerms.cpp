@@ -72,16 +72,15 @@ void AccelerationTermsMutator::apply(
     const double t_minus_turnup = time - turn_on_time;
 
     const double t_over_tsigma = t_minus_turnup / turn_on_interval;
-    const double t_over_tsigma_pow4 = square(square(t_over_tsigma))
-        const double roll_on = 1. - exp(-t_over_tsigma_pow4);
-    const double dt_roll_on = 4. * t_over_tsigma_pow4 *
-                              exp(-(square(square(t_over_tsigma)))) /
-                              t_minus_turnup;
-    const double dt2_roll_on =
-        (4. * square(t_minus_turnup) * exp(-(square(square(t_over_tsigma)))) *
-         (3. * square(square(turn_on_interval)) -
-          4. * square(square(t_minus_turnup)))) /
-        square(square(square(turn_on_interval)));
+    const double t_over_tsigma_pow4 = square(square(t_over_tsigma));
+    const double roll_on = 1. - exp(-t_over_tsigma_pow4);
+    const double dt_roll_on =
+        4. * t_over_tsigma_pow4 * exp(-t_over_tsigma_pow4) / t_minus_turnup;
+    const double dt2_roll_on = 4. * square(t_minus_turnup) *
+                               exp(-t_over_tsigma_pow4) *
+                               (3. * square(square(turn_on_interval)) -
+                                4. * square(square(t_minus_turnup))) /
+                               square(square(square(turn_on_interval)));
 
     for (size_t i = 0; i < Dim; ++i) {
       acc.get(i) += (imetric.get(i + 1, 0) - vel.get(i) * imetric.get(0, 0)) *
@@ -126,17 +125,19 @@ void AccelerationTermsMutator::apply(
         acc(ti::I) * di_imetric(ti::i, ti::A, ti::B));
 
     const auto dt_u = tenex::evaluate<ti::A>(
-        roll_on * charge / mass / u0 * imetric(ti::A, ti::B) * d_psiR(ti::b) -
+        charge / mass / u0 * imetric(ti::A, ti::B) * d_psiR(ti::b) -
         christoffel(ti::A, ti::b, ti::c) * u(ti::B) * u(ti::C) / u0);
     const auto dt2_u = tenex::evaluate<ti::A>(
-        roll_on * charge / mass / u0 *
+        charge / mass / u0 *
             (dt_imetric(ti::A, ti::B) * d_psiR(ti::b) +
              imetric(ti::A, ti::B) * dt_d_psiR(ti::b)) -
         (dt_christoffel(ti::A, ti::b, ti::c) * u(ti::B) * u(ti::C) +
          2. * christoffel(ti::A, ti::b, ti::c) * dt_u(ti::B) * u(ti::C) +
          get<0>(dt_u) * dt_u(ti::A)) /
             u0);
-
+    const auto dt_u_rollon = tenex::evaluate<ti::A>(roll_on * dt_u(ti::A));
+    const auto dt2_u_rollon = tenex::evaluate<ti::A>(dt_roll_on * dt_u(ti::A) +
+                                                     roll_on * dt2_u(ti::A));
     tnsr::i<double, Dim> d_dt2_psiR{0.};
     for (size_t i = 0; i < Dim; ++i) {
       d_dt2_psiR.get(i) +=
@@ -165,36 +166,45 @@ void AccelerationTermsMutator::apply(
     }
 
     const auto f =
-        tenex::evaluate<ti::B>(roll_on * charge / mass * d_psiR(ti::a) *
+        tenex::evaluate<ti::B>(charge / mass * d_psiR(ti::a) *
                                (imetric(ti::A, ti::B) + u(ti::A) * u(ti::B)));
     const auto dt_f = tenex::evaluate<ti::A>(
-        roll_on * charge / mass *
-        ((dt_imetric(ti::A, ti::B) + u(ti::A) * dt_u(ti::B) +
-          dt_u(ti::A) * u(ti::B)) *
+        charge / mass *
+        ((dt_imetric(ti::A, ti::B) + u(ti::A) * dt_u_rollon(ti::B) +
+          dt_u_rollon(ti::A) * u(ti::B)) *
              d_psiR(ti::b) +
          (imetric(ti::A, ti::B) + u(ti::A) * u(ti::B)) * dt_d_psiR(ti::b)));
     const auto dt2_f = tenex::evaluate<ti::A>(
-        (dt2_imetric(ti::A, ti::B) + dt2_u(ti::A) * u(ti::B) +
-         dt2_u(ti::B) * u(ti::A) + 2. * dt_u(ti::A) * dt_u(ti::B)) *
+        (dt2_imetric(ti::A, ti::B) + dt2_u_rollon(ti::A) * u(ti::B) +
+         dt2_u_rollon(ti::B) * u(ti::A) +
+         2. * dt_u_rollon(ti::A) * dt_u_rollon(ti::B)) *
             d_psiR(ti::b) +
         2. * dt_d_psiR(ti::b) *
-            (dt_imetric(ti::A, ti::B) + dt_u(ti::A) * u(ti::B) +
-             dt_u(ti::B) * u(ti::A)) +
+            (dt_imetric(ti::A, ti::B) + dt_u_rollon(ti::A) * u(ti::B) +
+             dt_u_rollon(ti::B) * u(ti::A)) +
         dt2_d_psiR(ti::b) * (imetric(ti::A, ti::B) + u(ti::A) * u(ti::B)));
 
-    const auto cov_f = tenex::evaluate<ti::A>(dt_f(ti::A) * u0 +
+    const auto f_roll_on = tenex::evaluate<ti::A>(roll_on * f(ti::A));
+    const auto dt_f_roll_on =
+        tenex::evaluate<ti::A>(dt_roll_on * f(ti::A) + roll_on * dt_f(ti::A));
+    const auto dt2_f_roll_on = tenex::evaluate<ti::A>(
+        dt2_roll_on * f(ti::A) + 2. * dt_roll_on * dt_f(ti::A) +
+        roll_on * dt2_f(ti::A));
+
+    const auto cov_f = tenex::evaluate<ti::A>(dt_f_roll_on(ti::A) * u0 +
                                               christoffel(ti::A, ti::b, ti::c) *
-                                                  u(ti::B) * f(ti::C));
+                                                  u(ti::B) * f_roll_on(ti::C));
 
     const auto dt_cov_f = tenex::evaluate<ti::A>(
-        dt2_f(ti::A) * u0 + dt_f(ti::A) * get<0>(dt_u) +
-        dt_christoffel(ti::A, ti::b, ti::c) * u(ti::B) * f(ti::C) +
-        christoffel(ti::A, ti::b, ti::c) * dt_u(ti::B) * f(ti::C) +
-        christoffel(ti::A, ti::b, ti::c) * u(ti::B) * dt_f(ti::C));
+        dt2_f_roll_on(ti::A) * u0 + dt_f_roll_on(ti::A) * get<0>(dt_u_rollon) +
+        dt_christoffel(ti::A, ti::b, ti::c) * u(ti::B) * f_roll_on(ti::C) +
+        christoffel(ti::A, ti::b, ti::c) * dt_u_rollon(ti::B) *
+            f_roll_on(ti::C) +
+        christoffel(ti::A, ti::b, ti::c) * u(ti::B) * dt_f_roll_on(ti::C));
 
     for (size_t i = 0; i < Dim; ++i) {
-      get(*self_force)[i + 3] = f.get(i);
-      get(*self_force)[i + 6] = dt_f.get(i);
+      get(*self_force)[i + 3] = f_roll_on.get(i);
+      get(*self_force)[i + 6] = dt_f_roll_on.get(i);
       get(*self_force)[i + 9] = cov_f.get(i);
       get(*self_force)[i + 12] = dt_cov_f.get(i);
     }
