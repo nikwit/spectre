@@ -438,6 +438,40 @@ struct IrreducibleMassCompute : IrreducibleMass, db::ComputeTag {
   using argument_tags = tmpl::list<Area>;
 };
 
+template <typename IntegrandTag, typename Frame>
+struct SurfaceIntegralVector : db::SimpleTag {
+  static std::string name() {
+    return "SurfaceIntegralVector(" + db::tag_name<IntegrandTag>() + ")";
+  }
+  using type = double;
+};
+
+template <typename IntegrandTag, typename Frame>
+struct SurfaceIntegralVectorCompute
+    : SurfaceIntegralVector<IntegrandTag, Frame>,
+      db::ComputeTag {
+  using base = SurfaceIntegralVector<IntegrandTag, Frame>;
+  using return_type = double;
+  static void function(
+      const gsl::not_null<double*> surface_integral,
+      const Scalar<DataVector>& area_element,
+      const tnsr::I<DataVector, 3, Frame>& integrand,
+      const tnsr::i<DataVector, 3, Frame>& normal_one_form,
+      const StrahlkorperTags::aliases::Jacobian<Frame>& jacobian,
+      const tnsr::aa<DataVector, 3, Frame>& spacetime_metric,
+      const ::Strahlkorper<Frame>& strahlkorper) {
+    *surface_integral = ::StrahlkorperGr::surface_integral_of_vector<Frame>(
+        area_element, integrand, normal_one_form, jacobian, spacetime_metric,
+        strahlkorper);
+  }
+  using argument_tags =
+      tmpl::list<AreaElement<Frame>, IntegrandTag,
+                 StrahlkorperTags::UnitNormalOneForm<Frame>,
+                 StrahlkorperTags::Jacobian<Frame>,
+                 gr::Tags::SpacetimeMetric<DataVector, 3, Frame>,
+                 StrahlkorperTags::Strahlkorper<Frame>>;
+};
+
 /// The spin function is proportional to the imaginary part of the
 /// Strahlkorper’s complex scalar curvature.
 

@@ -10,6 +10,7 @@
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "Evolution/Systems/CurvedScalarWave/TagsDeclarations.hpp"
+#include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "Utilities/Gsl.hpp"
 
 namespace CurvedScalarWave::Tags {
@@ -30,6 +31,54 @@ struct PsiSquaredCompute : PsiSquared, db::ComputeTag {
   static void function(const gsl::not_null<Scalar<DataVector>*> psi_squared,
                        const Scalar<DataVector>& psi) {
     get(*psi_squared) = get(psi) * get(psi);
+  }
+};
+
+template <size_t Dim, typename Frame>
+struct StressEnergyFlux : db::SimpleTag {
+  using type = tnsr::I<DataVector, Dim, Frame>;
+};
+
+template <size_t Dim, typename Frame>
+struct StressEnergyFluxCompute : StressEnergyFlux<Dim, Frame>, db::ComputeTag {
+  using base = StressEnergyFlux<Dim, Frame>;
+  using return_type = tnsr::I<DataVector, Dim, Frame>;
+  using argument_tags =
+      tmpl::list<::Tags::dt<CurvedScalarWave::Tags::Psi>,
+                 CurvedScalarWave::Tags::Phi<Dim>,
+                 gr::Tags::SpacetimeMetric<DataVector, Dim, Frame>,
+                 gr::Tags::InverseSpacetimeMetric<DataVector, Dim, Frame>,
+                 gr::Tags::Lapse<DataVector>>;
+
+  static void function(
+      const gsl::not_null<tnsr::I<DataVector, Dim, Frame>*> stress_energy_flux,
+      const Scalar<DataVector>& dt_psi,
+      const tnsr::i<DataVector, Dim, Frame>& phi,
+      const tnsr::aa<DataVector, Dim, Frame>& spacetime_metric,
+      const tnsr::AA<DataVector, Dim, Frame>& inverse_spacetime_metric,
+      const Scalar<DataVector>& lapse) {
+    tnsr::a<DataVector, Dim, Frame> dmu_psi(get(dt_psi).size());
+    get<0>(dmu_psi) = get(dt_psi);
+    for (size_t i = 0; i < Dim; ++i) {
+      dmu_psi.get(i + 1) = phi.get(i);
+    }
+    tnsr::A<DataVector, Dim, Frame> timelike_killing_vector(get(dt_psi).size(),
+                                                            0.);
+    get<0>(timelike_killing_vector) = 1.;
+    const auto stress_energy_tensor = tenex::evaluate<ti::a, ti::b>(
+        0.25 * M_1_PI *
+        (dmu_psi(ti::a) * dmu_psi(ti::b) -
+         0.5 * spacetime_metric(ti::a, ti::b) *
+             inverse_spacetime_metric(ti::C, ti::D) * dmu_psi(ti::c) *
+             dmu_psi(ti::d)));
+
+    const auto spacetime_stress_energy_flux = tenex::evaluate<ti::A>(
+        inverse_spacetime_metric(ti::A, ti::B) *
+        stress_energy_tensor(ti::b, ti::c) * timelike_killing_vector(ti::C));
+    for (size_t i = 0; i < Dim; ++i) {
+      stress_energy_flux->get(i) =
+          spacetime_stress_energy_flux.get(i + 1);
+    }
   }
 };
 }  // namespace CurvedScalarWave::Tags

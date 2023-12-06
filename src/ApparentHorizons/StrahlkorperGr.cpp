@@ -11,6 +11,7 @@
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Matrix.hpp"
+#include "DataStructures/Tensor/EagerMath/Determinant.hpp"
 #include "DataStructures/Tensor/EagerMath/DeterminantAndInverse.hpp"
 #include "DataStructures/Tensor/EagerMath/DotProduct.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
@@ -665,6 +666,37 @@ double euclidean_surface_integral_of_vector(
 }
 
 template <typename Frame>
+double surface_integral_of_vector(
+    const Scalar<DataVector>& area_element,
+    const tnsr::I<DataVector, 3, Frame>& vector,
+    const tnsr::i<DataVector, 3, Frame>& normal_one_form,
+    const StrahlkorperTags::aliases::Jacobian<Frame>& jacobian,
+    const tnsr::aa<DataVector, 3, Frame>& spacetime_metric,
+    const Strahlkorper<Frame>& strahlkorper) {
+  tnsr::ii<DataVector, 3, Frame> induced_metric(get(area_element).size(), 0.);
+  for (size_t i = 0; i < 2; ++i) {
+    for (size_t j = 0; j <= i; ++j) {
+      for (size_t k = 0; k < 3; ++k) {
+        for (size_t l = 0; l < 3; ++l) {
+          induced_metric.get(i + 1, j + 1) +=
+              spacetime_metric.get(k + 1, l + 1) * jacobian.get(k, i) *
+              jacobian.get(l, j);
+        }
+      }
+    }
+  }
+  get<0, 0>(induced_metric) = spacetime_metric.get(0, 0);
+  for (size_t i = 0; i < 2; ++i) {
+    for (size_t j = 0; j < 2; ++j)
+      induced_metric.get(i + 1, 0) =
+          spacetime_metric.get(j + 1, 0) * jacobian.get(j, i);
+  }
+  const DataVector integrand = sqrt(get(determinant(induced_metric))) *
+                               get(dot_product(vector, normal_one_form));
+  return strahlkorper.ylm_spherepack().definite_integral(integrand.data());
+}
+
+template <typename Frame>
 void spin_function(const gsl::not_null<Scalar<DataVector>*> result,
                    const StrahlkorperTags::aliases::Jacobian<Frame>& tangents,
                    const Strahlkorper<Frame>& strahlkorper,
@@ -897,7 +929,6 @@ double dimensionless_spin_magnitude(const double dimensionful_spin_magnitude,
   return result;
 }
 
-
 template <typename Frame>
 void radial_distance(const gsl::not_null<Scalar<DataVector>*> radial_distance,
                      const Strahlkorper<Frame>& strahlkorper_a,
@@ -1029,6 +1060,13 @@ void radial_distance(const gsl::not_null<Scalar<DataVector>*> radial_distance,
       const Scalar<DataVector>& area_element,                               \
       const tnsr::I<DataVector, 3, FRAME(data)>& vector,                    \
       const tnsr::i<DataVector, 3, FRAME(data)>& normal_one_form,           \
+      const Strahlkorper<FRAME(data)>& strahlkorper);                       \
+  template double StrahlkorperGr::surface_integral_of_vector(               \
+      const Scalar<DataVector>& area_element,                               \
+      const tnsr::I<DataVector, 3, FRAME(data)>& vector,                    \
+      const tnsr::i<DataVector, 3, FRAME(data)>& normal_one_form,           \
+      const StrahlkorperTags::aliases::Jacobian<FRAME(data)>& jacobian,     \
+      const tnsr::aa<DataVector, 3, FRAME(data)>& spacetime_metric,         \
       const Strahlkorper<FRAME(data)>& strahlkorper);                       \
   template void StrahlkorperGr::spin_function<FRAME(data)>(                 \
       const gsl::not_null<Scalar<DataVector>*> result,                      \

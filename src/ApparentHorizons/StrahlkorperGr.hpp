@@ -307,6 +307,16 @@ double euclidean_surface_integral_of_vector(
     const tnsr::i<DataVector, 3, Frame>& normal_one_form,
     const Strahlkorper<Frame>& strahlkorper);
 
+template <typename Frame>
+double surface_integral_of_vector(
+    const Scalar<DataVector>& area_element,
+    const tnsr::I<DataVector, 3, Frame>& vector,
+    const tnsr::i<DataVector, 3, Frame>& normal_one_form,
+    const StrahlkorperTags::aliases::Jacobian<Frame>& jacobian,
+    const tnsr::aa<DataVector, 3, Frame>& spacetime_metric,
+    const Strahlkorper<Frame>& strahlkorper);
+
+
 /// @{
 /*!
  * \ingroup SurfacesGroup
