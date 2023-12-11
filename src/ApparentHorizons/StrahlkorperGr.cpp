@@ -669,7 +669,7 @@ template <typename Frame>
 double surface_integral_of_vector(
     const Scalar<DataVector>& area_element,
     const tnsr::I<DataVector, 3, Frame>& vector,
-    const tnsr::i<DataVector, 3, Frame>& normal_one_form,
+    const tnsr::i<DataVector, 3, Frame>& unit_normal_one_form,
     const StrahlkorperTags::aliases::Jacobian<Frame>& jacobian,
     const tnsr::aa<DataVector, 3, Frame>& spacetime_metric,
     const Strahlkorper<Frame>& strahlkorper) {
@@ -687,12 +687,12 @@ double surface_integral_of_vector(
   }
   get<0, 0>(induced_metric) = spacetime_metric.get(0, 0);
   for (size_t i = 0; i < 2; ++i) {
-    for (size_t j = 0; j < 2; ++j)
+    for (size_t j = 0; j < 3; ++j)
       induced_metric.get(i + 1, 0) =
           spacetime_metric.get(j + 1, 0) * jacobian.get(j, i);
   }
-  const DataVector integrand = sqrt(get(determinant(induced_metric))) *
-                               get(dot_product(vector, normal_one_form));
+  const DataVector integrand = sqrt(abs(get(determinant(induced_metric)))) *
+                               get(dot_product(vector, unit_normal_one_form));
   return strahlkorper.ylm_spherepack().definite_integral(integrand.data());
 }
 

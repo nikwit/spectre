@@ -44,25 +44,28 @@ struct StressEnergyFluxCompute : StressEnergyFlux<Dim, Frame>, db::ComputeTag {
   using base = StressEnergyFlux<Dim, Frame>;
   using return_type = tnsr::I<DataVector, Dim, Frame>;
   using argument_tags =
-      tmpl::list<::Tags::dt<CurvedScalarWave::Tags::Psi>,
+      tmpl::list<CurvedScalarWave::Tags::Psi, CurvedScalarWave::Tags::Pi,
                  CurvedScalarWave::Tags::Phi<Dim>,
                  gr::Tags::SpacetimeMetric<DataVector, Dim, Frame>,
                  gr::Tags::InverseSpacetimeMetric<DataVector, Dim, Frame>,
-                 gr::Tags::Lapse<DataVector>>;
+                 gr::Tags::Lapse<DataVector>,
+                 gr::Tags::Shift<DataVector, Dim, Frame>>;
 
   static void function(
       const gsl::not_null<tnsr::I<DataVector, Dim, Frame>*> stress_energy_flux,
-      const Scalar<DataVector>& dt_psi,
+      const Scalar<DataVector>& psi, const Scalar<DataVector>& pi,
       const tnsr::i<DataVector, Dim, Frame>& phi,
       const tnsr::aa<DataVector, Dim, Frame>& spacetime_metric,
       const tnsr::AA<DataVector, Dim, Frame>& inverse_spacetime_metric,
-      const Scalar<DataVector>& lapse) {
-    tnsr::a<DataVector, Dim, Frame> dmu_psi(get(dt_psi).size());
-    get<0>(dmu_psi) = get(dt_psi);
+      const Scalar<DataVector>& lapse,
+      const tnsr::I<DataVector, Dim, Frame>& shift) {
+    tnsr::a<DataVector, Dim, Frame> dmu_psi(get(psi).size());
+    get<0>(dmu_psi) = -get(lapse) * get(pi);
     for (size_t i = 0; i < Dim; ++i) {
+      get<0>(dmu_psi) += shift.get(i) * phi.get(i);
       dmu_psi.get(i + 1) = phi.get(i);
     }
-    tnsr::A<DataVector, Dim, Frame> timelike_killing_vector(get(dt_psi).size(),
+    tnsr::A<DataVector, Dim, Frame> timelike_killing_vector(get(psi).size(),
                                                             0.);
     get<0>(timelike_killing_vector) = 1.;
     const auto stress_energy_tensor = tenex::evaluate<ti::a, ti::b>(
@@ -76,8 +79,7 @@ struct StressEnergyFluxCompute : StressEnergyFlux<Dim, Frame>, db::ComputeTag {
         inverse_spacetime_metric(ti::A, ti::B) *
         stress_energy_tensor(ti::b, ti::c) * timelike_killing_vector(ti::C));
     for (size_t i = 0; i < Dim; ++i) {
-      stress_energy_flux->get(i) =
-          spacetime_stress_energy_flux.get(i + 1);
+      stress_energy_flux->get(i) = spacetime_stress_energy_flux.get(i + 1);
     }
   }
 };

@@ -456,6 +456,40 @@ struct SurfaceIntegralVectorCompute
       const gsl::not_null<double*> surface_integral,
       const Scalar<DataVector>& area_element,
       const tnsr::I<DataVector, 3, Frame>& integrand,
+      const tnsr::i<DataVector, 3, Frame>& unit_normal_one_form,
+      const StrahlkorperTags::aliases::Jacobian<Frame>& jacobian,
+      const tnsr::aa<DataVector, 3, Frame>& spacetime_metric,
+      const ::Strahlkorper<Frame>& strahlkorper) {
+    *surface_integral = ::StrahlkorperGr::surface_integral_of_vector<Frame>(
+        area_element, integrand, unit_normal_one_form, jacobian,
+        spacetime_metric, strahlkorper);
+  }
+  using argument_tags =
+      tmpl::list<AreaElement<Frame>, IntegrandTag,
+                 StrahlkorperTags::UnitNormalOneForm<Frame>,
+                 StrahlkorperTags::Tangents<Frame>,
+                 gr::Tags::SpacetimeMetric<DataVector, 3, Frame>,
+                 StrahlkorperTags::Strahlkorper<Frame>>;
+};
+
+template <typename IntegrandTag, typename Frame>
+struct NullSurfaceIntegralVector : db::SimpleTag {
+  static std::string name() {
+    return "NullSurfaceIntegralVector(" + db::tag_name<IntegrandTag>() + ")";
+  }
+  using type = double;
+};
+
+template <typename IntegrandTag, typename Frame>
+struct NullSurfaceIntegralVectorCompute
+    : NullSurfaceIntegralVector<IntegrandTag, Frame>,
+      db::ComputeTag {
+  using base = NullSurfaceIntegralVector<IntegrandTag, Frame>;
+  using return_type = double;
+  static void function(
+      const gsl::not_null<double*> surface_integral,
+      const Scalar<DataVector>& area_element,
+      const tnsr::I<DataVector, 3, Frame>& integrand,
       const tnsr::i<DataVector, 3, Frame>& normal_one_form,
       const StrahlkorperTags::aliases::Jacobian<Frame>& jacobian,
       const tnsr::aa<DataVector, 3, Frame>& spacetime_metric,
@@ -466,8 +500,8 @@ struct SurfaceIntegralVectorCompute
   }
   using argument_tags =
       tmpl::list<AreaElement<Frame>, IntegrandTag,
-                 StrahlkorperTags::UnitNormalOneForm<Frame>,
-                 StrahlkorperTags::Jacobian<Frame>,
+                 StrahlkorperTags::NormalOneForm<Frame>,
+                 StrahlkorperTags::Tangents<Frame>,
                  gr::Tags::SpacetimeMetric<DataVector, 3, Frame>,
                  StrahlkorperTags::Strahlkorper<Frame>>;
 };
