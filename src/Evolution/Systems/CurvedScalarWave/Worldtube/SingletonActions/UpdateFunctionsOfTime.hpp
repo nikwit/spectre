@@ -100,9 +100,10 @@ struct UpdateFunctionsOfTime {
           worldtube_shrink_factor_derivative(r, radial_vel,
                                              grid_radius_particle, 3., 2., 0.5);
 
-      const double bh_radius_factor = r / grid_radius_particle;
+      const double bh_radius_factor = sqrt(r / grid_radius_particle);
       const double bh_radius_factor_derivative =
-          radial_vel / grid_radius_particle;
+          0.5 * sqrt(grid_radius_particle / r) * radial_vel /
+          grid_radius_particle;
 
       const double factor =
           1. / (1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));
