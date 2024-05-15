@@ -66,16 +66,6 @@ struct SendToElements {
     const auto& dt_psi_l1 =
         get<Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim,
                                  Frame::Grid>>(box);
-    const auto& psi_l2 =
-        get<Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim, Frame::Grid>>(box);
-    const auto& dt_psi_l2 =
-        get<Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 2, Dim,
-                                 Frame::Grid>>(box);
-    const auto& psi_0 = get<Tags::Psi0>(box);
-    double wt_radius_inertial =
-        db::get<Tags::WorldtubeRadiusAndVelocity>(box).at(0);
-    const double trace_psi_2_over_3 = (get(psi_l0) - get(psi_0).at(0)) /
-                                      wt_radius_inertial / wt_radius_inertial;
     for (const auto& [element_id, grid_coords] : faces_grid_coords) {
       Variables<tags_to_send> vars_to_send(4, 0.);
       get(get<psi_tag>(vars_to_send))[0] = get(psi_l0);

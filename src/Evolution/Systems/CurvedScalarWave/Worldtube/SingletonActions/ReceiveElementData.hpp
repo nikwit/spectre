@@ -99,7 +99,6 @@ struct ReceiveElementData {
     for (const auto& [_, element_ylm_coefs] : inbox.at(time_step_id)) {
       external_ylm_coefs += element_ylm_coefs;
     }
-    double wt_radius = db::get<Tags::ExcisionSphere<Dim>>(box).radius();
 
     double wt_radius_inertial =
         db::get<Tags::WorldtubeRadiusAndVelocity>(box).at(0);
