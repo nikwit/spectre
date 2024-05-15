@@ -84,6 +84,7 @@
 #include "ParallelAlgorithms/Interpolation/Actions/InterpolatorRegisterElement.hpp"
 #include "ParallelAlgorithms/Interpolation/Callbacks/ObserveLineSegment.hpp"
 #include "ParallelAlgorithms/Interpolation/Callbacks/ObserveTimeSeriesOnSurface.hpp"
+#include "ParallelAlgorithms/Interpolation/Callbacks/ObserveYlms.hpp"
 #include "ParallelAlgorithms/Interpolation/Events/InterpolateWithoutInterpComponent.hpp"
 #include "ParallelAlgorithms/Interpolation/InterpolationTarget.hpp"
 #include "ParallelAlgorithms/Interpolation/PointInfoTag.hpp"
@@ -177,37 +178,17 @@ struct EvolutionMetavars {
     }
     using temporal_id = ::Tags::Time;
     using vars_to_interpolate_to_target = tmpl::list<
-        CurvedScalarWave::Tags::Psi, CurvedScalarWave::Tags::Pi,
-        CurvedScalarWave::Tags::Phi<volume_dim>, gr::Tags::Lapse<DataVector>,
-        gr::Tags::Shift<DataVector, volume_dim, Frame::Inertial>,
-        gr::Tags::SpatialMetric<DataVector, volume_dim, Frame::Inertial>,
-        gr::Tags::InverseSpatialMetric<DataVector, volume_dim, Frame::Inertial>,
-        domain::Tags::Coordinates<volume_dim, Frame::Inertial>>;
-    using compute_items_on_target = tmpl::list<
-        StrahlkorperTags::OneOverOneFormMagnitudeCompute<DataVector, volume_dim,
-                                                         Frame::Inertial>,
-        StrahlkorperTags::UnitNormalOneFormCompute<Frame::Inertial>,
-        gr::Tags::SpacetimeMetricCompute<DataVector, volume_dim,
-                                         Frame::Inertial>,
-        gr::Tags::InverseSpacetimeMetricCompute<DataVector, volume_dim,
-                                                Frame::Inertial>,
-        CurvedScalarWave::Tags::StressEnergyFluxCompute<volume_dim,
-                                                        Frame::Inertial>,
-        StrahlkorperGr::Tags::AreaElementCompute<::Frame::Inertial>,
-        StrahlkorperGr::Tags::SurfaceIntegralVectorCompute<
-            CurvedScalarWave::Tags::StressEnergyFlux<volume_dim,
-                                                     Frame::Inertial>,
-            ::Frame::Inertial>>;
+        CurvedScalarWave::Tags::Psi,
+        domain::Tags::Coordinates<volume_dim, Frame::Inertial>,
+        gr::Tags::SpatialMetric<DataVector, volume_dim, Frame::Inertial>>;
+    using compute_items_on_target = tmpl::list<>;
     using compute_target_points =
         intrp::TargetPoints::Sphere<SphericalSurface<Number>,
                                     ::Frame::Inertial>;
     using post_interpolation_callback =
-        intrp::callbacks::ObserveTimeSeriesOnSurface<
-            tmpl::list<StrahlkorperGr::Tags::SurfaceIntegralVectorCompute<
-                CurvedScalarWave::Tags::StressEnergyFlux<volume_dim,
-                                                         Frame::Inertial>,
-                ::Frame::Inertial>>,
-            SphericalSurface<Number>>;
+        intrp::callbacks::ObserveYlms<CurvedScalarWave::Tags::Psi,
+                                      SphericalSurface<Number>,
+                                      ::Frame::Inertial>;
     template <typename metavariables>
     using interpolating_component = typename metavariables::dg_element_array;
   };
@@ -223,16 +204,13 @@ struct EvolutionMetavars {
         gr::Tags::InverseSpatialMetric<DataVector, volume_dim, Frame::Inertial>,
         domain::Tags::Coordinates<volume_dim, Frame::Inertial>>;
     using compute_items_on_target = tmpl::list<
-        StrahlkorperTags::OneOverOneFormMagnitudeCompute<DataVector, volume_dim,
-                                                         Frame::Inertial>,
-        StrahlkorperTags::UnitNormalOneFormCompute<Frame::Inertial>,
         gr::Tags::SpacetimeMetricCompute<DataVector, volume_dim,
                                          Frame::Inertial>,
         gr::Tags::InverseSpacetimeMetricCompute<DataVector, volume_dim,
                                                 Frame::Inertial>,
         CurvedScalarWave::Tags::StressEnergyFluxCompute<volume_dim,
                                                         Frame::Inertial>,
-        StrahlkorperGr::Tags::AreaElementCompute<::Frame::Inertial>,
+        StrahlkorperTags::EuclideanAreaElementCompute<::Frame::Inertial>,
         StrahlkorperGr::Tags::NullSurfaceIntegralVectorCompute<
             CurvedScalarWave::Tags::StressEnergyFlux<volume_dim,
                                                      Frame::Inertial>,
@@ -274,15 +252,18 @@ struct EvolutionMetavars {
   };
 
   using interpolation_target_tags =
-      tmpl::list<PsiAlongAxis<1>, PsiAlongAxis<2>, SphericalNullSurface,
-                 SphericalSurface<1>, SphericalSurface<2>, SphericalSurface<3>,
-                 SphericalSurface<4>>;
+      tmpl::list<PsiAlongAxis<1>, PsiAlongAxis<2>, SphericalSurface<1>,
+                 SphericalSurface<2>, SphericalNullSurface>;
 
   using interpolator_source_vars = tmpl::list<
       CurvedScalarWave::Tags::Psi,
       domain::Tags::Coordinates<volume_dim, Frame::Inertial>,
       gr::Tags::SpatialMetric<DataVector, volume_dim, Frame::Inertial>>;
   using sphere_source_vars = tmpl::list<
+      CurvedScalarWave::Tags::Psi,
+      domain::Tags::Coordinates<volume_dim, Frame::Inertial>,
+      gr::Tags::SpatialMetric<DataVector, volume_dim, Frame::Inertial>>;
+  using null_sphere_source_vars = tmpl::list<
       CurvedScalarWave::Tags::Psi, CurvedScalarWave::Tags::Pi,
       CurvedScalarWave::Tags::Phi<volume_dim>, gr::Tags::Lapse<DataVector>,
       gr::Tags::Shift<DataVector, volume_dim, Frame::Inertial>,
@@ -315,14 +296,8 @@ struct EvolutionMetavars {
                                   volume_dim, SphericalSurface<2>,
                                   EvolutionMetavars, sphere_source_vars>,
                               intrp::Events::InterpolateWithoutInterpComponent<
-                                  volume_dim, SphericalSurface<3>,
-                                  EvolutionMetavars, sphere_source_vars>,
-                              intrp::Events::InterpolateWithoutInterpComponent<
-                                  volume_dim, SphericalSurface<4>,
-                                  EvolutionMetavars, sphere_source_vars>,
-                              intrp::Events::InterpolateWithoutInterpComponent<
                                   volume_dim, SphericalNullSurface,
-                                  EvolutionMetavars, sphere_source_vars>,
+                                  EvolutionMetavars, null_sphere_source_vars>,
                               dg::Events::field_observations<
                                   volume_dim, Tags::Time, observe_fields,
                                   non_tensor_compute_tags>>>>,
@@ -388,7 +363,8 @@ struct EvolutionMetavars {
       CurvedScalarWave::Worldtube::Tags::ExpansionOrder,
       CurvedScalarWave::Worldtube::Tags::ObserveCoefficientsTrigger,
       CurvedScalarWave::Worldtube::Tags::UseAccTerms,
-      CurvedScalarWave::Worldtube::Tags::Iterations>;
+      CurvedScalarWave::Worldtube::Tags::Iterations,
+      CurvedScalarWave::Worldtube::Tags::PowerLawParams>;
 
   using dg_registration_list =
       tmpl::list<observers::Actions::RegisterEventsWithObservers>;
@@ -460,9 +436,6 @@ struct EvolutionMetavars {
       intrp::InterpolationTarget<EvolutionMetavars, PsiAlongAxis<2>>,
       intrp::InterpolationTarget<EvolutionMetavars, SphericalSurface<1>>,
       intrp::InterpolationTarget<EvolutionMetavars, SphericalSurface<2>>,
-      intrp::InterpolationTarget<EvolutionMetavars, SphericalSurface<3>>,
-      intrp::InterpolationTarget<EvolutionMetavars, SphericalSurface<4>>,
-
       intrp::InterpolationTarget<EvolutionMetavars, SphericalNullSurface>,
       CurvedScalarWave::Worldtube::WorldtubeSingleton<EvolutionMetavars>,
       dg_element_array>>;

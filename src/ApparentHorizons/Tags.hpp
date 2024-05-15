@@ -458,16 +458,18 @@ struct SurfaceIntegralVectorCompute
       const tnsr::I<DataVector, 3, Frame>& integrand,
       const tnsr::i<DataVector, 3, Frame>& unit_normal_one_form,
       const StrahlkorperTags::aliases::Jacobian<Frame>& jacobian,
+      const tnsr::i<DataVector, 2, ::Frame::Spherical<Frame>>& theta_phi,
       const tnsr::aa<DataVector, 3, Frame>& spacetime_metric,
       const ::Strahlkorper<Frame>& strahlkorper) {
     *surface_integral = ::StrahlkorperGr::surface_integral_of_vector<Frame>(
-        area_element, integrand, unit_normal_one_form, jacobian,
+        area_element, integrand, unit_normal_one_form, jacobian, theta_phi,
         spacetime_metric, strahlkorper);
   }
   using argument_tags =
-      tmpl::list<AreaElement<Frame>, IntegrandTag,
+      tmpl::list<StrahlkorperTags::EuclideanAreaElement<Frame>, IntegrandTag,
                  StrahlkorperTags::UnitNormalOneForm<Frame>,
                  StrahlkorperTags::Tangents<Frame>,
+                 StrahlkorperTags::ThetaPhi<Frame>,
                  gr::Tags::SpacetimeMetric<DataVector, 3, Frame>,
                  StrahlkorperTags::Strahlkorper<Frame>>;
 };
@@ -486,23 +488,18 @@ struct NullSurfaceIntegralVectorCompute
       db::ComputeTag {
   using base = NullSurfaceIntegralVector<IntegrandTag, Frame>;
   using return_type = double;
-  static void function(
-      const gsl::not_null<double*> surface_integral,
-      const Scalar<DataVector>& area_element,
-      const tnsr::I<DataVector, 3, Frame>& integrand,
-      const tnsr::i<DataVector, 3, Frame>& normal_one_form,
-      const StrahlkorperTags::aliases::Jacobian<Frame>& jacobian,
-      const tnsr::aa<DataVector, 3, Frame>& spacetime_metric,
-      const ::Strahlkorper<Frame>& strahlkorper) {
-    *surface_integral = ::StrahlkorperGr::surface_integral_of_vector<Frame>(
-        area_element, integrand, normal_one_form, jacobian, spacetime_metric,
-        strahlkorper);
+  static void function(const gsl::not_null<double*> surface_integral,
+                       const Scalar<DataVector>& area_element,
+                       const tnsr::I<DataVector, 3, Frame>& integrand,
+                       const tnsr::i<DataVector, 3, Frame>& normal_one_form,
+                       const ::Strahlkorper<Frame>& strahlkorper) {
+    *surface_integral =
+        ::StrahlkorperGr::euclidean_surface_integral_of_vector<Frame>(
+            area_element, integrand, normal_one_form, strahlkorper);
   }
   using argument_tags =
-      tmpl::list<AreaElement<Frame>, IntegrandTag,
+      tmpl::list<StrahlkorperTags::EuclideanAreaElement<Frame>, IntegrandTag,
                  StrahlkorperTags::NormalOneForm<Frame>,
-                 StrahlkorperTags::Tangents<Frame>,
-                 gr::Tags::SpacetimeMetric<DataVector, 3, Frame>,
                  StrahlkorperTags::Strahlkorper<Frame>>;
 };
 

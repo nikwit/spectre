@@ -660,8 +660,7 @@ double euclidean_surface_integral_of_vector(
     const tnsr::i<DataVector, 3, Frame>& normal_one_form,
     const Strahlkorper<Frame>& strahlkorper) {
   const DataVector integrand =
-      get(area_element) * get(dot_product(vector, normal_one_form)) /
-      sqrt(get(dot_product(normal_one_form, normal_one_form)));
+      get(area_element) * get(dot_product(vector, normal_one_form));
   return strahlkorper.ylm_spherepack().definite_integral(integrand.data());
 }
 
@@ -671,28 +670,35 @@ double surface_integral_of_vector(
     const tnsr::I<DataVector, 3, Frame>& vector,
     const tnsr::i<DataVector, 3, Frame>& unit_normal_one_form,
     const StrahlkorperTags::aliases::Jacobian<Frame>& jacobian,
+    const tnsr::i<DataVector, 2, ::Frame::Spherical<Frame>>& theta_phi,
     const tnsr::aa<DataVector, 3, Frame>& spacetime_metric,
     const Strahlkorper<Frame>& strahlkorper) {
-  tnsr::ii<DataVector, 3, Frame> induced_metric(get(area_element).size(), 0.);
+  /*auto jacobian_corrected = jacobian;
+  for (size_t i = 0; i < 3; ++i) {
+    jacobian_corrected.get(i, 1) *= theta_phi.get(0);
+  }
+  tnsr::ij<DataVector, 3, Frame> induced_metric(get(area_element).size(), 0.);
   for (size_t i = 0; i < 2; ++i) {
-    for (size_t j = 0; j <= i; ++j) {
+    for (size_t j = 0; j < 2; ++j) {
       for (size_t k = 0; k < 3; ++k) {
         for (size_t l = 0; l < 3; ++l) {
           induced_metric.get(i + 1, j + 1) +=
-              spacetime_metric.get(k + 1, l + 1) * jacobian.get(k, i) *
-              jacobian.get(l, j);
+              spacetime_metric.get(k + 1, l + 1) *
+              jacobian_corrected.get(k, i) * jacobian_corrected.get(l, j);
         }
       }
     }
   }
   get<0, 0>(induced_metric) = spacetime_metric.get(0, 0);
   for (size_t i = 0; i < 2; ++i) {
-    for (size_t j = 0; j < 3; ++j)
-      induced_metric.get(i + 1, 0) =
-          spacetime_metric.get(j + 1, 0) * jacobian.get(j, i);
-  }
-  const DataVector integrand = sqrt(abs(get(determinant(induced_metric)))) *
-                               get(dot_product(vector, unit_normal_one_form));
+    for (size_t j = 0; j < 3; ++j) {
+      induced_metric.get(i + 1, 0) +=
+          spacetime_metric.get(j + 1, 0) * jacobian_corrected.get(j, i);
+      induced_metric.get(0, i + 1) +=
+          spacetime_metric.get(j + 1, 0) * jacobian_corrected.get(j, i);
+    }
+  }*/
+  const DataVector integrand = get<0>(vector) * get(area_element);
   return strahlkorper.ylm_spherepack().definite_integral(integrand.data());
 }
 
@@ -1066,6 +1072,8 @@ void radial_distance(const gsl::not_null<Scalar<DataVector>*> radial_distance,
       const tnsr::I<DataVector, 3, FRAME(data)>& vector,                    \
       const tnsr::i<DataVector, 3, FRAME(data)>& normal_one_form,           \
       const StrahlkorperTags::aliases::Jacobian<FRAME(data)>& jacobian,     \
+      const tnsr::i<DataVector, 2, ::Frame::Spherical<FRAME(data)>>&        \
+          theta_phi,                                                        \
       const tnsr::aa<DataVector, 3, FRAME(data)>& spacetime_metric,         \
       const Strahlkorper<FRAME(data)>& strahlkorper);                       \
   template void StrahlkorperGr::spin_function<FRAME(data)>(                 \

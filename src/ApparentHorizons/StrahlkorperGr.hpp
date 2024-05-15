@@ -5,8 +5,8 @@
 
 #include <array>
 
-#include "NumericalAlgorithms/SphericalHarmonics/TagsTypeAliases.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/TagsTypeAliases.hpp"
 
 /// \cond
 class DataVector;
@@ -313,9 +313,9 @@ double surface_integral_of_vector(
     const tnsr::I<DataVector, 3, Frame>& vector,
     const tnsr::i<DataVector, 3, Frame>& normal_one_form,
     const StrahlkorperTags::aliases::Jacobian<Frame>& jacobian,
+    const tnsr::i<DataVector, 2, ::Frame::Spherical<Frame>>& theta_phi,
     const tnsr::aa<DataVector, 3, Frame>& spacetime_metric,
     const Strahlkorper<Frame>& strahlkorper);
-
 
 /// @{
 /*!
@@ -533,7 +533,6 @@ void dimensionless_spin_magnitude(const gsl::not_null<double*> result,
 double dimensionless_spin_magnitude(const double dimensionful_spin_magnitude,
                                     const double christodoulou_mass);
 /// @}
-
 
 /*!
  * \ingroup SurfacesGroup

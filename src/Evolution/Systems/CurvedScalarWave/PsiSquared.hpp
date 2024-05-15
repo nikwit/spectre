@@ -9,6 +9,10 @@
 #include "DataStructures/DataBox/Tag.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
+
+#include "DataStructures/Tensor/EagerMath/DotProduct.hpp"
+#include "DataStructures/Tensor/EagerMath/Magnitude.hpp"
+
 #include "Evolution/Systems/CurvedScalarWave/TagsDeclarations.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "Utilities/Gsl.hpp"
@@ -42,7 +46,7 @@ struct StressEnergyFlux : db::SimpleTag {
 template <size_t Dim, typename Frame>
 struct StressEnergyFluxCompute : StressEnergyFlux<Dim, Frame>, db::ComputeTag {
   using base = StressEnergyFlux<Dim, Frame>;
-  using return_type = tnsr::I<DataVector, Dim, Frame>;
+  using return_type = Scalar<DataVector>;
   using argument_tags =
       tmpl::list<CurvedScalarWave::Tags::Psi, CurvedScalarWave::Tags::Pi,
                  CurvedScalarWave::Tags::Phi<Dim>,
