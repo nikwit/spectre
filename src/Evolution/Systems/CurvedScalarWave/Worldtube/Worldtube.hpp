@@ -32,24 +32,24 @@
 namespace CurvedScalarWave::Worldtube {
 
 double worldtube_shrink_factor(const double orbit_radius,
-                               const double original_orbit_radius,
-                               const double start_shrink_orbit,
-                               const double end_shrink_orbit,
-                               const double shrink_factor_at_end);
+                               const double original_orbit_radius);
 
 double worldtube_shrink_factor_derivative(const double orbit_radius,
                                           const double orbit_velocity,
-                                          const double original_orbit_radius,
-                                          const double start_shrink_orbit,
-                                          const double end_shrink_orbit,
-                                          const double shrink_factor_at_end);
+                                          const double original_orbit_radius);
 
 template <size_t Dim>
 std::tuple<tnsr::aa<double, Dim>, tnsr::AA<double, Dim>, tnsr::iaa<double, Dim>,
            tnsr::iAA<double, Dim>, tnsr::ijaa<double, Dim>,
            tnsr::ijAA<double, Dim>, tnsr::Abb<double, Dim>,
-           tnsr::iAbb<double, Dim>, tnsr::A<double, Dim>,
-           tnsr::iA<double, Dim>>
+           tnsr::iAbb<double, Dim>, tnsr::A<double, Dim>, tnsr::iA<double, Dim>>
 kerr_schild_quantities(const gr::Solutions::KerrSchild& kerr_schild,
                        const tnsr::I<double, Dim>& pos);
+
+double broken_power_shrink(const double orbit_radius, const double amp,
+                           const double rb);
+double broken_power_shrink_derivative(const double orbit_radius,
+                                      const double amp, const double rb,
+                                      const double orbit_radius_derivative);
+
 }  // namespace CurvedScalarWave::Worldtube

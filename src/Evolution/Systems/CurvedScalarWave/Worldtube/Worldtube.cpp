@@ -16,23 +16,37 @@
 namespace CurvedScalarWave::Worldtube {
 
 double worldtube_shrink_factor(const double orbit_radius,
-                               const double original_orbit_radius,
-                               const double start_shrink_orbit,
-                               const double end_shrink_orbit,
-                               const double shrink_factor_at_end) {
+                               const double original_orbit_radius) {
   const double orbit_radius_fraction = orbit_radius / original_orbit_radius;
   return orbit_radius_fraction * sqrt(orbit_radius_fraction);
 }
 
 double worldtube_shrink_factor_derivative(const double orbit_radius,
                                           const double orbit_velocity,
-                                          const double original_orbit_radius,
-                                          const double start_shrink_orbit,
-                                          const double end_shrink_orbit,
-                                          const double shrink_factor_at_end) {
+                                          const double original_orbit_radius) {
   const double orbit_radius_fraction = orbit_radius / original_orbit_radius;
   return 1.5 * sqrt(orbit_radius_fraction) * orbit_velocity /
          original_orbit_radius;
+}
+
+double broken_power_shrink(const double orbit_radius, const double amp,
+                           const double rb) {
+  const double delta = 0.05;
+  const double r_by_rb = orbit_radius / rb;
+  return amp * r_by_rb * sqrt(r_by_rb) *
+         pow(0.5 * (1. + pow(r_by_rb, 1. / delta)), -1.5 * delta);
+}
+double broken_power_shrink_derivative(const double orbit_radius,
+                                      const double amp, const double rb,
+                                      const double orbit_radius_derivative) {
+  const double delta = 0.05;
+  const double r_by_rb = orbit_radius / rb;
+  double sol = amp * 1.5 * sqrt(r_by_rb) * orbit_radius_derivative / rb *
+               pow(0.5 * (1. + pow(r_by_rb, 1. / delta)), -1.5 * delta);
+  sol += amp * r_by_rb * sqrt(r_by_rb) * -1.5 * delta *
+         pow(0.5 * (1. + pow(r_by_rb, 1. / delta)), -1.5 * delta - 1.) * 0.5 /
+         delta * pow(r_by_rb, 1. / delta - 1.) * orbit_radius_derivative / rb;
+  return sol;
 }
 
 template <size_t Dim>

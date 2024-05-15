@@ -34,6 +34,12 @@
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Serialization/Serialize.hpp"
 
+/// \cond
+namespace OptionTags {
+struct InitialTime;
+}  // namespace OptionTags
+/// \endcond
+
 namespace CurvedScalarWave::Worldtube {
 /*!
  * \brief Option tags for the worldtube
@@ -117,6 +123,12 @@ struct Iterations {
   using type = size_t;
   static constexpr Options::String help{
       "Time interval over which the self force will be turned on from 0 to 1."};
+  using group = Worldtube;
+};
+
+struct PowerLawParams {
+  using type = std::array<double, 2>;
+  static constexpr Options::String help{"power law params"};
   using group = Worldtube;
 };
 }  // namespace OptionTags
@@ -232,6 +244,16 @@ struct Iterations : db::SimpleTag {
   static constexpr size_t pass_metavariables = false;
   static size_t create_from_options(const size_t iterations) {
     return iterations;
+  }
+};
+
+struct PowerLawParams : db::SimpleTag {
+  using type = std::array<double, 2>;
+  using option_tags = tmpl::list<OptionTags::PowerLawParams>;
+  static constexpr size_t pass_metavariables = false;
+  static std::array<double, 2> create_from_options(
+      const std::array<double, 2> power_law_params) {
+    return power_law_params;
   }
 };
 
