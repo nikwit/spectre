@@ -104,7 +104,8 @@ struct SendAccelerationTerms {
            &centered_face_coordinates =
                db::get<Tags::FaceCoordinates<Dim, Frame::Inertial, true>>(box)
                    .value(),
-           &charge = db::get<Tags::ParticleCharge>(box)](
+           &charge = db::get<Tags::ParticleCharge>(box),
+           &time = db::get<::Tags::Time>(box)](
               const auto accelerated_puncture_field) {
             tnsr::I<double, Dim> acceleration{
                 {self_force[0], self_force[1], self_force[2]}};
@@ -228,9 +229,9 @@ struct SendAccelerationTerms {
           [](const auto current_iteration) { *current_iteration += 1; });
       if (db::get<Worldtube::Tags::CurrentIteration>(box) <
           db::get<Worldtube::Tags::Iterations>(box)) {
-        return {Parallel::AlgorithmExecution::Continue,
-                tmpl::index_of<ActionList,
-      Actions::SendAccelerationTerms>::value};
+        return {
+            Parallel::AlgorithmExecution::Continue,
+            tmpl::index_of<ActionList, Actions::SendAccelerationTerms>::value};
       }
       db::mutate<Worldtube::Tags::CurrentIteration>(
           make_not_null(&box),

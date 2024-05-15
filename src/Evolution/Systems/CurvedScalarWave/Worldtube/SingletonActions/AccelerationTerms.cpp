@@ -5,6 +5,7 @@
 
 #include <cstddef>
 
+#include "DataStructures/Tensor/EagerMath/DotProduct.hpp"
 #include "DataStructures/Tensor/EagerMath/Magnitude.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Variables.hpp"
@@ -28,11 +29,12 @@ void AccelerationTermsMutator::apply(
     const gsl::not_null<Scalar<DataVector>*> self_force,
     const tnsr::I<DataVector, Dim, Frame::Inertial>& position,
     const tnsr::I<DataVector, Dim, Frame::Inertial>& velocity,
+    const Scalar<double>& psi_monopole,
     const tnsr::i<double, Dim, Frame::Grid>& psi_dipole,
     const Scalar<double>& dt_psi_monopole,
     const tnsr::i<double, Dim, Frame::Grid>& dt_psi_dipole, const double time,
     const double mass, const double charge, const double turn_on_time,
-    const double turn_on_interval,
+    const double turn_on_interval, const size_t iteration,
     const gr::Solutions::KerrSchild& kerr_schild) {
   tnsr::I<double, 3> pos{};
   tnsr::I<double, 3> vel{};
@@ -74,21 +76,25 @@ void AccelerationTermsMutator::apply(
     const double t_over_tsigma = t_minus_turnup / turn_on_interval;
     const double t_over_tsigma_pow4 = square(square(t_over_tsigma));
     const double roll_on = 1. - exp(-t_over_tsigma_pow4);
-    const double dt_roll_on =
-        4. * t_over_tsigma_pow4 * exp(-t_over_tsigma_pow4) / t_minus_turnup;
+    const double dt_roll_on = 4. * cube(t_minus_turnup) *
+                              exp(-t_over_tsigma_pow4) /
+                              square(square(turn_on_interval));
     const double dt2_roll_on = 4. * square(t_minus_turnup) *
                                exp(-t_over_tsigma_pow4) *
                                (3. * square(square(turn_on_interval)) -
                                 4. * square(square(t_minus_turnup))) /
                                square(square(square(turn_on_interval)));
+    const double evolved_mass =
+        iteration == 0 ? mass : mass - charge * get(psi_monopole);
 
     for (size_t i = 0; i < Dim; ++i) {
       acc.get(i) += (imetric.get(i + 1, 0) - vel.get(i) * imetric.get(0, 0)) *
-                    get(dt_psi_monopole) * roll_on * charge / mass / u0_squared;
+                    get(dt_psi_monopole) * roll_on * charge / evolved_mass /
+                    u0_squared;
       for (size_t j = 0; j < Dim; ++j) {
         acc.get(i) +=
             (imetric.get(i + 1, j + 1) - vel.get(i) * imetric.get(0, j + 1)) *
-            psi_dipole.get(j) * roll_on * charge / mass / u0_squared;
+            psi_dipole.get(j) * roll_on * charge / evolved_mass / u0_squared;
       }
     }
     const double u0 = sqrt(u0_squared);
@@ -104,7 +110,6 @@ void AccelerationTermsMutator::apply(
 
     dt2_psiR /= get<0, 0>(imetric);
 
-    const double r = magnitude(pos).get();
     tnsr::a<double, Dim> dt_d_psiR{{dt2_psiR, get<0>(dt_psi_dipole),
                                     get<1>(dt_psi_dipole),
                                     get<2>(dt_psi_dipole)}};
@@ -112,6 +117,24 @@ void AccelerationTermsMutator::apply(
     for (size_t i = 0; i < Dim; ++i) {
       get<0>(dt_d_psiR) += vel.get(i) * dt_psi_dipole.get(i);
     }
+
+    double dt_evolved_mass = get(dt_psi_monopole);
+    double dt2_evolved_mass = dt2_psiR;
+
+    for (size_t i = 0; i < Dim; ++i) {
+      dt_evolved_mass += psi_dipole.get(i) * vel.get(i);
+      dt2_evolved_mass += 2. * dt_psi_dipole.get(i) * vel.get(i) +
+                          psi_dipole.get(i) * acc.get(i);
+    }
+    dt_evolved_mass *= iteration == 0 ? 0. : -charge;
+    dt2_evolved_mass *= iteration == 0 ? 0. : -charge;
+
+    const double dt_mass_factor =
+        -dt_evolved_mass * charge / (evolved_mass * evolved_mass);
+    const double dt2_mass_factor = charge *
+                                   (2. * dt_evolved_mass * dt_evolved_mass -
+                                    evolved_mass * dt2_evolved_mass) /
+                                   cube(evolved_mass);
 
     const auto dt_christoffel = tenex::evaluate<ti::A, ti::b, ti::c>(
         vel(ti::I) * di_christoffel(ti::i, ti::A, ti::b, ti::c));
@@ -125,12 +148,13 @@ void AccelerationTermsMutator::apply(
         acc(ti::I) * di_imetric(ti::i, ti::A, ti::B));
 
     const auto dt_u = tenex::evaluate<ti::A>(
-        charge / mass / u0 * imetric(ti::A, ti::B) * d_psiR(ti::b) -
+        charge / evolved_mass / u0 * imetric(ti::A, ti::B) * d_psiR(ti::b) -
         christoffel(ti::A, ti::b, ti::c) * u(ti::B) * u(ti::C) / u0);
     const auto dt2_u = tenex::evaluate<ti::A>(
-        charge / mass / u0 *
+        charge / evolved_mass / u0 *
             (dt_imetric(ti::A, ti::B) * d_psiR(ti::b) +
-             imetric(ti::A, ti::B) * dt_d_psiR(ti::b)) -
+             imetric(ti::A, ti::B) * dt_d_psiR(ti::b)) +
+        dt_mass_factor / u0 * imetric(ti::A, ti::B) * d_psiR(ti::b) -
         (dt_christoffel(ti::A, ti::b, ti::c) * u(ti::B) * u(ti::C) +
          2. * christoffel(ti::A, ti::b, ti::c) * dt_u(ti::B) * u(ti::C) +
          get<0>(dt_u) * dt_u(ti::A)) /
@@ -166,24 +190,29 @@ void AccelerationTermsMutator::apply(
     }
 
     const auto f =
-        tenex::evaluate<ti::B>(charge / mass * d_psiR(ti::a) *
+        tenex::evaluate<ti::B>(charge / evolved_mass * d_psiR(ti::a) *
                                (imetric(ti::A, ti::B) + u(ti::A) * u(ti::B)));
-    const auto dt_f = tenex::evaluate<ti::A>(
-        charge / mass *
+    auto dt_f = tenex::evaluate<ti::A>(
+        charge / evolved_mass *
         ((dt_imetric(ti::A, ti::B) + u(ti::A) * dt_u_rollon(ti::B) +
           dt_u_rollon(ti::A) * u(ti::B)) *
              d_psiR(ti::b) +
          (imetric(ti::A, ti::B) + u(ti::A) * u(ti::B)) * dt_d_psiR(ti::b)));
-    const auto dt2_f = tenex::evaluate<ti::A>(
-        (dt2_imetric(ti::A, ti::B) + dt2_u_rollon(ti::A) * u(ti::B) +
-         dt2_u_rollon(ti::B) * u(ti::A) +
-         2. * dt_u_rollon(ti::A) * dt_u_rollon(ti::B)) *
-            d_psiR(ti::b) +
-        2. * dt_d_psiR(ti::b) *
-            (dt_imetric(ti::A, ti::B) + dt_u_rollon(ti::A) * u(ti::B) +
-             dt_u_rollon(ti::B) * u(ti::A)) +
-        dt2_d_psiR(ti::b) * (imetric(ti::A, ti::B) + u(ti::A) * u(ti::B)));
-
+    auto dt2_f = tenex::evaluate<ti::A>(
+        charge / evolved_mass *
+        ((dt2_imetric(ti::A, ti::B) + dt2_u_rollon(ti::A) * u(ti::B) +
+          dt2_u_rollon(ti::B) * u(ti::A) +
+          2. * dt_u_rollon(ti::A) * dt_u_rollon(ti::B)) *
+             d_psiR(ti::b) +
+         2. * dt_d_psiR(ti::b) *
+             (dt_imetric(ti::A, ti::B) + dt_u_rollon(ti::A) * u(ti::B) +
+              dt_u_rollon(ti::B) * u(ti::A)) +
+         dt2_d_psiR(ti::b) * (imetric(ti::A, ti::B) + u(ti::A) * u(ti::B))));
+    for (size_t i = 0; i < 4; ++i) {
+      dt_f.get(i) += dt_mass_factor * f.get(i);
+      dt2_f.get(i) +=
+          2. * dt_mass_factor * dt_f.get(i) + dt2_mass_factor * f.get(i);
+    }
     const auto f_roll_on = tenex::evaluate<ti::A>(roll_on * f(ti::A));
     const auto dt_f_roll_on =
         tenex::evaluate<ti::A>(dt_roll_on * f(ti::A) + roll_on * dt_f(ti::A));

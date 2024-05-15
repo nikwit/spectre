@@ -53,21 +53,24 @@ struct AccelerationTermsMutator {
   using return_tags = tmpl::list<Tags::SelfForce>;
   using argument_tags = tmpl::list<
       Tags::Position, Tags::Velocity,
+      Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim, Frame::Grid>,
       ::Tags::Time, Tags::ParticleMass, Tags::ParticleCharge, Tags::TurnOnTime,
-      Tags::TurnOnInterval,
+      Tags::TurnOnInterval, Tags::CurrentIteration,
       CurvedScalarWave::Tags::BackgroundSpacetime<gr::Solutions::KerrSchild>>;
 
   static void apply(const gsl::not_null<Scalar<DataVector>*> self_force,
                     const tnsr::I<DataVector, Dim, Frame::Inertial>& position,
                     const tnsr::I<DataVector, Dim, Frame::Inertial>& velocity,
+                    const Scalar<double>& psi_monopole,
                     const tnsr::i<double, Dim, Frame::Grid>& psi_dipole,
                     const Scalar<double>& dt_psi_monopole,
                     const tnsr::i<double, Dim, Frame::Grid>& dt_psi_dipole,
                     const double time, const double mass, const double charge,
                     const double turn_on_time, const double turn_on_interval,
+                    const size_t iteration,
                     const gr::Solutions::KerrSchild& kerr_schild);
 };
 
@@ -79,6 +82,7 @@ struct ComputeAccelerationTerms {
   using dt_variables_tag = db::add_tag_prefix<::Tags::dt, variables_tag>;
   using simple_tags = tmpl::list<
       dt_variables_tag, variables_tag,
+      Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim, Frame::Grid>,
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim, Frame::Grid>,
