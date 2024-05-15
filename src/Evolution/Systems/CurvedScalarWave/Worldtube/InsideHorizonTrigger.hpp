@@ -41,25 +41,21 @@ class InsideHorizon : public Trigger {
   using options = tmpl::list<>;
   using argument_tags = tmpl::list<
       CurvedScalarWave::Worldtube::Tags::ParticlePositionVelocity<Dim>,
-      CurvedScalarWave::Worldtube::Tags::ExcisionSphere<Dim>>;
+      CurvedScalarWave::Worldtube::Tags::ExcisionSphere<Dim>,
+      CurvedScalarWave::Worldtube::Tags::PowerLawParams>;
 
   bool operator()(const std::array<tnsr::I<double, Dim, Frame::Inertial>, 2>&
                       position_and_velocity,
-                  const ExcisionSphere<Dim>& excision_sphere) const {
+                  const ExcisionSphere<Dim>& excision_sphere,
+                  const std::array<double, 2>& power_law_params) const {
     const double orbit_radius = get(magnitude(position_and_velocity[0]));
-
-    const double original_orbit_radius =
-        get(magnitude(excision_sphere.center()));
-    const double worldtube_radius_factor =
-        CurvedScalarWave::Worldtube::worldtube_shrink_factor(
-            orbit_radius, original_orbit_radius, 3., 2., 0.5);
-    return orbit_radius + excision_sphere.radius() * worldtube_radius_factor <
-                   1.99
-               ? true
-               : false;
+    const double worldtube_radius =
+        CurvedScalarWave::Worldtube::broken_power_shrink(
+            orbit_radius, power_law_params.at(0), power_law_params.at(1));
+    return orbit_radius + worldtube_radius < 1.99 ? true : false;
   }
 
   // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er& p) override {}
+  void pup(PUP::er& /*p*/) override {}
 };
 }  // namespace Triggers

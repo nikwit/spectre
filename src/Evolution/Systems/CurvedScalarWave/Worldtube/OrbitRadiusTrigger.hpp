@@ -61,10 +61,10 @@ class OrbitRadius : public Trigger {
                                    current_radius;
     // ASSERT(radial_velocity < 0., "Particle should be inspiralling!");
     const double last_radius =
-        current_radius - 2. * radial_velocity * time_step.value();
+        current_radius - 1.2 * radial_velocity * time_step.value();
     for (double radius_ : radii_) {
-      // factor 2 is for safety because the approximation is just linear
-      // (Euler), triggering it a few times doesn't matter
+      // factor 1.2 is for safety because the approximation is just linear
+      // (Euler), triggering it multiple times doesn't matter
       if ((current_radius - radius_) * (last_radius - radius_) < 0.) {
         return true;
       }
