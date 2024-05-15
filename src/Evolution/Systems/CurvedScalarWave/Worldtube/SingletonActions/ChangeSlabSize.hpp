@@ -68,6 +68,11 @@ struct ChangeSlabSize {
       const auto new_next_time_step_id =
           db::get<::Tags::TimeStepper<>>(box).next_time_id(inbox_time_step_id,
                                                            new_step);
+
+      Parallel::printf(MakeString{}
+                       << "Changing time step from "
+                       << time_step_id.step_time().slab().duration().value()
+                       << " to " << new_step.value() << "\n");
       db::mutate<::Tags::Next<::Tags::TimeStepId>, ::Tags::TimeStep,
                  ::Tags::Next<::Tags::TimeStep>, ::Tags::TimeStepId>(
           make_not_null(&box),
