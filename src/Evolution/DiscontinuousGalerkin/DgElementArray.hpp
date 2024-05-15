@@ -126,14 +126,19 @@ void DgElementArray<Metavariables, PhaseDepActionList>::allocate_array(
   const size_t num_of_procs_to_use = number_of_procs - procs_to_ignore.size();
 
   const auto& blocks = domain.blocks();
-
-  const std::unordered_map<ElementId<volume_dim>, double> element_costs =
+  const auto& worldtube = domain.excision_spheres().at("ExcisionSphereA");
+  std::unordered_map<ElementId<volume_dim>, double> element_costs =
       domain::get_element_costs(
           blocks, initial_refinement_levels, initial_extents,
           local_time_stepping
               ? domain::ElementWeight::NumGridPointsAndGridSpacing
               : domain::ElementWeight::NumGridPoints,
           quadrature);
+  for (auto& [element_id, weight] : element_costs) {
+    if (worldtube.abutting_direction(element_id).has_value()) {
+      weight *= 8.;
+    }
+  }
   const domain::BlockZCurveProcDistribution<volume_dim> element_distribution{
       element_costs,   num_of_procs_to_use, blocks, initial_refinement_levels,
       initial_extents, procs_to_ignore};
