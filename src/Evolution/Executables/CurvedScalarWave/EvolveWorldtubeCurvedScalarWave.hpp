@@ -373,15 +373,9 @@ struct EvolutionMetavars {
       Initialization::Actions::InitializeItems<
           Initialization::TimeStepping<EvolutionMetavars, local_time_stepping>,
           evolution::dg::Initialization::Domain<volume_dim>,
-          CurvedScalarWave::Worldtube::Initialization::
-              InitializeConstraintDampingGammas<volume_dim>,
           Initialization::TimeStepperHistory<EvolutionMetavars>>,
       Initialization::Actions::NonconservativeSystem<system>,
       CurvedScalarWave::Actions::CalculateGrVars<system>,
-      Initialization::Actions::AddSimpleTags<
-          CurvedScalarWave::Worldtube::Initialization::InitializeIterations,
-          CurvedScalarWave::Initialization::InitializeEvolvedVariables<
-              volume_dim>>,
       Initialization::Actions::AddComputeTags<
           StepChoosers::step_chooser_compute_tags<EvolutionMetavars,
                                                   local_time_stepping>>,
@@ -397,10 +391,16 @@ struct EvolutionMetavars {
           CurvedScalarWave::Worldtube::Tags::FaceCoordinatesCompute<
               volume_dim, Frame::Inertial, true>,
           CurvedScalarWave::Worldtube::Tags::PunctureFieldCompute<volume_dim>,
+          CurvedScalarWave::Worldtube::Tags::ConstraintGamma1Compute,
+          CurvedScalarWave::Worldtube::Tags::ConstraintGamma2Compute,
           ::domain::Tags::GridToInertialInverseJacobian<volume_dim>>>,
       ::evolution::dg::Initialization::Mortars<volume_dim, system>,
       intrp::Actions::ElementInitInterpPoints<
           intrp::Tags::InterpPointInfo<EvolutionMetavars>>,
+      Initialization::Actions::AddSimpleTags<
+          CurvedScalarWave::Worldtube::Initialization::InitializeIterations,
+          CurvedScalarWave::Initialization::InitializeEvolvedVariables<
+              volume_dim>>,
       evolution::Actions::InitializeRunEventsAndDenseTriggers,
       Parallel::Actions::TerminatePhase>;
 

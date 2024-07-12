@@ -127,7 +127,7 @@ struct Iterations {
 };
 
 struct PowerLawParams {
-  using type = std::array<double, 2>;
+  using type = std::array<double, 4>;
   static constexpr Options::String help{"power law params"};
   using group = Worldtube;
 };
@@ -248,11 +248,11 @@ struct Iterations : db::SimpleTag {
 };
 
 struct PowerLawParams : db::SimpleTag {
-  using type = std::array<double, 2>;
+  using type = std::array<double, 4>;
   using option_tags = tmpl::list<OptionTags::PowerLawParams>;
   static constexpr size_t pass_metavariables = false;
-  static std::array<double, 2> create_from_options(
-      const std::array<double, 2> power_law_params) {
+  static std::array<double, 4> create_from_options(
+      const std::array<double, 4> power_law_params) {
     return power_law_params;
   }
 };

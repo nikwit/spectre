@@ -59,7 +59,7 @@ struct ObserveYlms
     std::vector<std::string> ylm_legend{};
     std::vector<double> ylm_data{};
     const DataVector spectral_data = ylm.phys_to_spec(collocation_values);
-    const size_t l_max_output = 10;
+    const size_t l_max_output = 4;
     const size_t num_coefficients =
         YlmSpherepack::spectral_size(l_max_output, l_max_output) / 2;
     const size_t num_columns = num_coefficients + 1;

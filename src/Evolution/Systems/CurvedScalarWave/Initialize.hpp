@@ -12,6 +12,7 @@
 #include "Evolution/Initialization/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/BackgroundSpacetime.hpp"
 #include "Evolution/Systems/CurvedScalarWave/System.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/PunctureField.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
 #include "Evolution/Systems/ScalarWave/TagsDeclarations.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
@@ -87,10 +88,13 @@ struct InitializeEvolvedVariables {
   using curved_variables_tag =
       typename CurvedScalarWave::System<Dim>::variables_tag;
   using return_tags = tmpl::list<curved_variables_tag>;
-  using argument_tags =
-      tmpl::list<::Tags::Time, domain::Tags::Coordinates<Dim, Frame::Inertial>,
-                 ::Tags::AnalyticSolutionOrData, gr::Tags::Lapse<DataVector>,
-                 gr::Tags::Shift<DataVector, Dim>>;
+  using argument_tags = tmpl::list<
+      ::Tags::Time, domain::Tags::Coordinates<Dim, Frame::Inertial>,
+      ::Tags::AnalyticSolutionOrData, gr::Tags::Lapse<DataVector>,
+      gr::Tags::Shift<DataVector, Dim>,
+      CurvedScalarWave::Worldtube::Tags::ParticlePositionVelocity<Dim>,
+      CurvedScalarWave::Worldtube::Tags::ParticleAcceleration<Dim>,
+      CurvedScalarWave::Worldtube::Tags::ParticleCharge>;
   template <typename AnalyticSolutionOrData>
   static void apply(
       const gsl::not_null<typename curved_variables_tag::type*> evolved_vars,
@@ -98,7 +102,9 @@ struct InitializeEvolvedVariables {
       const tnsr::I<DataVector, Dim>& inertial_coords,
       const AnalyticSolutionOrData& solution_or_data,
       [[maybe_unused]] const Scalar<DataVector>& lapse,
-      [[maybe_unused]] const tnsr::I<DataVector, Dim>& shift) {
+      [[maybe_unused]] const tnsr::I<DataVector, Dim>& shift,
+      const std::array<tnsr::I<double, Dim>, 2>& pos_vel,
+      const tnsr::I<double, Dim>& acc, const double charge) {
     if constexpr (tmpl::list_contains_v<typename AnalyticSolutionOrData::tags,
                                         CurvedScalarWave::Tags::Psi>) {
       // for analytic solutions/data of the CurvedScalarWave system, the evolved
@@ -106,6 +112,20 @@ struct InitializeEvolvedVariables {
       evolved_vars->assign_subset(evolution::Initialization::initial_data(
           solution_or_data, inertial_coords, initial_time,
           typename curved_variables_tag::tags_list{}));
+      const auto& [pos, vel] = pos_vel;
+      auto centered_coords = inertial_coords;
+      for (size_t i = 0; i < Dim; ++i) {
+        centered_coords.get(i) - pos.get(i);
+      }
+      Variables<tmpl::list<CurvedScalarWave::Tags::Psi,
+                           ::Tags::dt<CurvedScalarWave::Tags::Psi>,
+                           ::Tags::deriv<CurvedScalarWave::Tags::Psi,
+                                         tmpl::size_t<3>, Frame::Inertial>>>
+          puncture_0(get<0>(centered_coords).size());
+      puncture_field_generic_0(make_not_null(&puncture_0), centered_coords, pos,
+                               vel, acc, 1.);
+      evolved_vars->assign_subset(puncture_0);
+
     } else {
       // for analytic solutions/data of the ScalarWave system,`Psi` and `Phi`
       // are initialized directly from the solution but `Pi` will be adjusted to
@@ -114,19 +134,36 @@ struct InitializeEvolvedVariables {
                                           ScalarWave::Tags::Psi>,
                     "The initial data class must either calculate ScalarWave "
                     "or CurvedScalarWave variables.");
-      const auto initial_data = evolution::Initialization::initial_data(
-          solution_or_data, inertial_coords, initial_time,
-          typename flat_variables_tag::tags_list{});
 
+      const auto& [pos, vel] = pos_vel;
+      auto centered_coords = inertial_coords;
+      for (size_t i = 0; i < Dim; ++i) {
+        centered_coords.get(i) -= pos.get(i);
+      }
+      Variables<tmpl::list<CurvedScalarWave::Tags::Psi,
+                           ::Tags::dt<CurvedScalarWave::Tags::Psi>,
+                           ::Tags::deriv<CurvedScalarWave::Tags::Psi,
+                                         tmpl::size_t<3>, Frame::Inertial>>>
+          puncture_0(get<0>(centered_coords).size());
+      CurvedScalarWave::Worldtube::puncture_field_generic_0(
+          make_not_null(&puncture_0), centered_coords, pos, vel, acc, 1.);
+
+      const auto shift_dot_dpsi = dot_product(
+          shift, get<::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<3>,
+                                   Frame::Inertial>>(puncture_0));
       get<CurvedScalarWave::Tags::Psi>(*evolved_vars) =
-          get<ScalarWave::Tags::Psi>(initial_data);
-      get<CurvedScalarWave::Tags::Phi<Dim>>(*evolved_vars) =
-          get<ScalarWave::Tags::Phi<Dim>>(initial_data);
-      const auto shift_dot_dpsi =
-          dot_product(shift, get<ScalarWave::Tags::Phi<Dim>>(initial_data));
+          get<CurvedScalarWave::Tags::Psi>(puncture_0);
+      for (size_t i = 0; i < Dim; ++i) {
+        get<CurvedScalarWave::Tags::Phi<Dim>>(*evolved_vars).get(i) =
+            get<::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<3>,
+                              Frame::Inertial>>(puncture_0)
+                .get(i);
+      }
       get(get<CurvedScalarWave::Tags::Pi>(*evolved_vars)) =
-          (get(shift_dot_dpsi) + get(get<ScalarWave::Tags::Pi>(initial_data))) /
+          (get(shift_dot_dpsi) -
+           get(get<::Tags::dt<CurvedScalarWave::Tags::Psi>>(puncture_0))) /
           get(lapse);
+      *evolved_vars *= charge;
     }
   }
 };

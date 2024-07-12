@@ -93,17 +93,18 @@ struct UpdateFunctionsOfTime {
           (1 - r / grid_radius_particle) * sqrt_4_pi * envelope_radius;
       expansion_update.at(1) =
           -radial_vel / grid_radius_particle * sqrt_4_pi * envelope_radius;
-      const auto& [amp, rb] = db::get<Tags::PowerLawParams>(box);
+      const auto& [amp, rb, amp_bh, rb_bh] = db::get<Tags::PowerLawParams>(box);
       const double worldtube_radius_factor =
           broken_power_shrink(r, amp, rb) / object_a_radius;
       const double worldtube_radius_factor_derivative =
           broken_power_shrink_derivative(r, amp, rb, radial_vel) /
           object_a_radius;
 
-      const double bh_radius_factor = sqrt(r / grid_radius_particle);
+      const double bh_radius_factor =
+          broken_power_shrink(r, amp_bh, rb_bh) / object_b_radius;
       const double bh_radius_factor_derivative =
-          0.5 * sqrt(grid_radius_particle / r) * radial_vel /
-          grid_radius_particle;
+          broken_power_shrink_derivative(r, amp_bh, rb_bh, radial_vel) /
+          object_b_radius;
 
       const double factor =
           1. / (1. - expansion_update.at(0) / (sqrt_4_pi * envelope_radius));

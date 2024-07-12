@@ -25,7 +25,7 @@ void InitializeConstraintDampingGammas<Dim>::apply(
   const double constant = 1.e-3;
 
   auto inertial_coords_centered = inertial_coords;
-  inertial_coords_centered.get(0) -= 20.;
+  //inertial_coords_centered.get(0) -= 200.;
   const auto radius = magnitude(inertial_coords_centered);
   get(*gamma2) = amplitude * exp(-square(sigma * radius.get())) + constant;
 }

@@ -12,6 +12,7 @@
 #include "DataStructures/DataVector.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Tags.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/Worldtube.hpp"
 #include "IO/Observer/Helpers.hpp"
 #include "IO/Observer/ObservationId.hpp"
 #include "IO/Observer/ObserverComponent.hpp"
@@ -126,14 +127,17 @@ struct ObserveWorldtubeSolution {
           expansion_order < 2 ? get(psi_monopole) : get(psi_0)[0];
       psi_coefs[num_coefs + pos_offset] =
           expansion_order < 2 ? get(dt_psi_monopole) : get(dt_psi_0)[0];
+      const double r = get(magnitude(inertial_particle_position))[0];
+      const auto& power_law_params = db::get<Tags::PowerLawParams>(box);
+      const double bh_radius =
+          broken_power_shrink(r, power_law_params[2], power_law_params[3]);
       Parallel::printf(MakeString{}
                        << "Time: " << std::setprecision(16)
                        << db::get<::Tags::Time>(box)
                        << ", field value: " << psi_coefs[9] << ", wt radius "
                        << db::get<Tags::WorldtubeRadiusAndVelocity>(box)[0]
-                       << ", orbital radius: "
-                       << get(magnitude(inertial_particle_position))[0]
-                       << "\n");
+                       << ", BH radius: " << bh_radius
+                       << ", orbital radius: " << r << "\n");
       if (expansion_order > 0) {
         const auto& psi_dipole = db::get<
             Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>>(box);

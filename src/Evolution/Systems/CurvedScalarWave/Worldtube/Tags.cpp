@@ -143,7 +143,7 @@ void ConstraintGamma1Compute::function(
     const std::array<tnsr::I<double, 3, Frame::Inertial>, 2>& pos_vel) {
   get(*gamma1).destructive_resize(get<0>(coords).size());
 
-  get(*gamma1) = 0.4;
+  get(*gamma1) = 0.;
 }
 
 void ConstraintGamma2Compute::function(
@@ -155,8 +155,8 @@ void ConstraintGamma2Compute::function(
   for (size_t i = 0; i < 3; ++i) {
     centered_coords.get(i) -= pos_vel[0].get(i);
   }
-  const double amplitude = 3.;
-  const double sigma = 1.e-1;
+  const double amplitude = 10.;
+  const double sigma = 1e-1;
   const double constant = 1e-3;
   const auto radius = magnitude(centered_coords);
   get(*gamma2) = amplitude * exp(-square(sigma * radius.get())) + constant;

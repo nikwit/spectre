@@ -47,7 +47,7 @@ class InsideHorizon : public Trigger {
   bool operator()(const std::array<tnsr::I<double, Dim, Frame::Inertial>, 2>&
                       position_and_velocity,
                   const ExcisionSphere<Dim>& excision_sphere,
-                  const std::array<double, 2>& power_law_params) const {
+                  const std::array<double, 4>& power_law_params) const {
     const double orbit_radius = get(magnitude(position_and_velocity[0]));
     const double worldtube_radius =
         CurvedScalarWave::Worldtube::broken_power_shrink(
