@@ -16,7 +16,7 @@
 #include "Domain/CoordinateMaps/TimeDependent/ProductMaps.tpp"
 #include "Domain/FunctionsOfTime/FixedSpeedCubic.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
-#include "Domain/FunctionsOfTime/IntegratedFoT.hpp"
+#include "Domain/FunctionsOfTime/IntegratedFunctionOfTime.hpp"
 #include "Domain/FunctionsOfTime/PiecewisePolynomial.hpp"
 #include "Domain/FunctionsOfTime/QuaternionFunctionOfTime.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/YlmSpherepack.hpp"
@@ -63,13 +63,13 @@ TimeDependentMapOptions::create_functions_of_time(
 
   // ExpansionMap FunctionOfTime for the function \f$a(t)\f$ in the
   // domain::CoordinateMaps::TimeDependent::CubicScale map
-  result[expansion_name] = std::make_unique<FunctionsOfTime::IntegratedFoT>(
-      initial_time_,
-      std::array<DataVector, 3>{
-          {{gsl::at(expansion_map_options_.initial_values, 0)},
-           {gsl::at(expansion_map_options_.initial_values, 1)},
-           {0.0}}},
-      expiration_times.at(expansion_name));
+  result[expansion_name] =
+      std::make_unique<FunctionsOfTime::IntegratedFunctionOfTime>(
+          initial_time_,
+          std::array<double, 2>{
+              {gsl::at(expansion_map_options_.initial_values, 0),
+               gsl::at(expansion_map_options_.initial_values, 1)}},
+          expiration_times.at(expansion_name), false);
 
   // ExpansionMap FunctionOfTime for the function \f$b(t)\f$ in the
   // domain::CoordinateMaps::TimeDependent::CubicScale map
@@ -84,23 +84,21 @@ TimeDependentMapOptions::create_functions_of_time(
   // (omega) to determine map parameters. In theory we could determine
   // each initial angle from the input axis-angle representation, but
   // we don't need to.
-  result[rotation_name] = std::make_unique<FunctionsOfTime::IntegratedFoT>(
-      initial_time_,
-      std::array<DataVector, 3>{{{1, 0.0},
-                                 {gsl::at(initial_angular_velocity_, 2)},
-                                 {1, 0.0}}},
-      expiration_times.at(rotation_name));
+  result[rotation_name] =
+      std::make_unique<FunctionsOfTime::IntegratedFunctionOfTime>(
+          initial_time_,
+          std::array<double, 2>{{0., gsl::at(initial_angular_velocity_, 2)}},
+          expiration_times.at(rotation_name), false);
 
   // CompressionMap FunctionOfTime for objects A and B
   for (size_t i = 0; i < size_names.size(); i++) {
     result[gsl::at(size_names, i)] =
-        std::make_unique<FunctionsOfTime::IntegratedFoT>(
+        std::make_unique<FunctionsOfTime::IntegratedFunctionOfTime>(
             initial_time_,
-            std::array<DataVector, 3>{
-                {{gsl::at(gsl::at(initial_size_values_, i), 0)},
-                 {gsl::at(gsl::at(initial_size_values_, i), 1)},
-                 {0.0}}},
-            expiration_times.at(gsl::at(size_names, i)));
+            std::array<double, 2>{
+                {gsl::at(gsl::at(initial_size_values_, i), 0),
+                 gsl::at(gsl::at(initial_size_values_, i), 1)}},
+            expiration_times.at(gsl::at(size_names, i)), false);
   }
 
   return result;
