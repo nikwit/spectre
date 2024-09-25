@@ -112,7 +112,7 @@ struct InitializeEvolvedVariables {
       evolved_vars->assign_subset(evolution::Initialization::initial_data(
           solution_or_data, inertial_coords, initial_time,
           typename curved_variables_tag::tags_list{}));
-      const auto& [pos, vel] = pos_vel;
+      /*const auto& [pos, vel] = pos_vel;
       auto centered_coords = inertial_coords;
       for (size_t i = 0; i < Dim; ++i) {
         centered_coords.get(i) - pos.get(i);
@@ -124,7 +124,7 @@ struct InitializeEvolvedVariables {
           puncture_0(get<0>(centered_coords).size());
       puncture_field_generic_0(make_not_null(&puncture_0), centered_coords, pos,
                                vel, acc, 1.);
-      evolved_vars->assign_subset(puncture_0);
+      evolved_vars->assign_subset(puncture_0);*/
 
     } else {
       // for analytic solutions/data of the ScalarWave system,`Psi` and `Phi`
