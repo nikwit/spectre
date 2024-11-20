@@ -163,7 +163,7 @@ struct InitializeEvolvedVariables {
           (get(shift_dot_dpsi) -
            get(get<::Tags::dt<CurvedScalarWave::Tags::Psi>>(puncture_0))) /
           get(lapse);
-      *evolved_vars *= charge;
+      *evolved_vars *= 0.;
     }
   }
 };
