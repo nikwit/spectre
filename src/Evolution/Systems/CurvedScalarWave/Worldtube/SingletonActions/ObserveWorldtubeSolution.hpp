@@ -12,6 +12,7 @@
 #include "DataStructures/DataVector.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Tags.hpp"
+#include "DataStructures/Tensor/EagerMath/Magnitude.hpp"
 #include "IO/Observer/Helpers.hpp"
 #include "IO/Observer/ObservationId.hpp"
 #include "IO/Observer/ObserverComponent.hpp"
@@ -118,6 +119,15 @@ struct ObserveWorldtubeSolution {
         }
       }();
       const auto current_time = db::get<::Tags::Time>(box);
+
+      Parallel::printf(MakeString{}
+        << "Time: " << std::setprecision(16)
+        << current_time
+        << ", field value: " << psi_coefs[9] << ", wt radius "
+        << db::get<Tags::WorldtubeRadius>(box)
+        << ", orbital radius: "
+        << get(magnitude(inertial_particle_position))[0]
+        << "\n");
       const auto observation_id =
           observers::ObservationId(current_time, "/Worldtube");
       auto& reduction_writer = Parallel::get_parallel_component<
