@@ -6,6 +6,7 @@
 #include <cstddef>
 
 #include "DataStructures/Variables.hpp"
+#include "Utilities/Kokkos/KokkosCore.hpp"
 #include "Utilities/TMPL.hpp"
 #include "Utilities/TaggedTuple.hpp"
 
@@ -31,10 +32,10 @@ struct TempBuffer;
 
 template <typename TagList>
 struct TempBuffer<TagList, true> : tuples::tagged_tuple_from_typelist<TagList> {
-  explicit TempBuffer(const size_t /*size*/)
+  KOKKOS_FUNCTION explicit TempBuffer(const size_t /*size*/)
       : tuples::tagged_tuple_from_typelist<TagList>::TaggedTuple() {}
 
-  static size_t number_of_grid_points() { return 1; }
+  KOKKOS_FUNCTION static size_t number_of_grid_points() { return 1; }
 };
 
 template <typename TagList>
