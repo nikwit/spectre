@@ -163,21 +163,21 @@ class Tensor<X, Symm, IndexList<Indices...>> {
   using reverse_iterator = typename storage_type::reverse_iterator;
   using const_reverse_iterator = typename storage_type::const_reverse_iterator;
 
-  iterator begin() { return data_.begin(); }
-  const_iterator begin() const { return data_.begin(); }
-  const_iterator cbegin() const { return data_.begin(); }
+  constexpr iterator begin() { return data_.begin(); }
+  constexpr const_iterator begin() const { return data_.begin(); }
+  constexpr const_iterator cbegin() const { return data_.begin(); }
 
-  iterator end() { return data_.end(); }
-  const_iterator end() const { return data_.end(); }
-  const_iterator cend() const { return data_.end(); }
+  constexpr iterator end() { return data_.end(); }
+  constexpr const_iterator end() const { return data_.end(); }
+  constexpr const_iterator cend() const { return data_.end(); }
 
-  reverse_iterator rbegin() { return data_.rbegin(); }
-  const_reverse_iterator rbegin() const { return data_.rbegin(); }
-  const_reverse_iterator crbegin() const { return data_.rbegin(); }
+  constexpr reverse_iterator rbegin() { return data_.rbegin(); }
+  constexpr const_reverse_iterator rbegin() const { return data_.rbegin(); }
+  constexpr const_reverse_iterator crbegin() const { return data_.rbegin(); }
 
-  reverse_iterator rend() { return data_.rend(); }
-  const_reverse_iterator rend() const { return data_.rend(); }
-  const_reverse_iterator crend() const { return data_.rend(); }
+  constexpr reverse_iterator rend() { return data_.rend(); }
+  constexpr const_reverse_iterator rend() const { return data_.rend(); }
+  constexpr const_reverse_iterator crend() const { return data_.rend(); }
 
   /// @{
   /// Get data entry using an array representing a tensor index
