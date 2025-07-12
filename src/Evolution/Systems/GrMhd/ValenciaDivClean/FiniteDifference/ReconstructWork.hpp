@@ -9,6 +9,7 @@
 
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
+#include "DataStructures/VariablesDeclaration.hpp"
 #include "Domain/Structure/DirectionalIdMap.hpp"
 #include "Evolution/Systems/GrMhd/ValenciaDivClean/TagsDeclarations.hpp"
 #include "PointwiseFunctions/GeneralRelativity/TagsDeclarations.hpp"
@@ -17,8 +18,6 @@
 
 /// \cond
 class DataVector;
-template <typename TagsList>
-class Variables;
 namespace gsl {
 template <typename>
 class not_null;

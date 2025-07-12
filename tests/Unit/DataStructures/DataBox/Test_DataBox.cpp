@@ -37,14 +37,13 @@
 #include "Utilities/TMPL.hpp"
 #include "Utilities/TaggedTuple.hpp"
 #include "Utilities/TypeTraits.hpp"
+#include "DataStructures/VariablesDeclaration.hpp"
 
 namespace db {
 template <typename TagsList>
 class DataBox;
 }  // namespace db
 struct NoSuchType;
-template <typename TagsList>
-class Variables;
 template <typename X, typename Symm, typename IndexList>
 class Tensor;
 
