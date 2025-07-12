@@ -20,14 +20,12 @@ if(${ENABLE_WARNINGS})
 -Wformat-y2k;\
 -Wformat=2;\
 -Winvalid-pch;\
--Wmissing-declarations;\
 -Wmissing-field-initializers;\
 -Wmissing-format-attribute;\
 -Wmissing-include-dirs;\
 -Wmissing-noreturn;\
 -Wnewline-eof;\
 -Wnon-virtual-dtor;\
--Wold-style-cast;\
 -Woverloaded-virtual;\
 -Wpacked;\
 -Wpedantic;\
@@ -89,6 +87,8 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
 endif()
 
 # Suppress CUDA warnings that we don't want
+# - 1222 (old-style-cast): std::runtime_error("msg") is misidentified as an
+#   old-style cast
 create_cxx_flag_target(
   "-Xcudafe \"--diag_suppress=177,186,191,554,1301,1305,2189,3060,20012\""
   SpectreCudaWarnings)
