@@ -34,6 +34,7 @@
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/ForceInline.hpp"
 #include "Utilities/Gsl.hpp"
+#include "Utilities/Kokkos/KokkosCore.hpp"
 #include "Utilities/MakeArray.hpp"
 #include "Utilities/MakeWithValue.hpp"
 #include "Utilities/PrettyType.hpp"
@@ -98,6 +99,7 @@ class Tensor<X, Symm, IndexList<Indices...>> {
                 "If you are sure you need rank 5 or higher Tensor's please "
                 "file an issue on GitHub or discuss with a core developer of "
                 "SpECTRE.");
+
  public:
   /// The type of the sequence that holds the data
   using storage_type =
@@ -136,22 +138,35 @@ class Tensor<X, Symm, IndexList<Indices...>> {
   Tensor& operator=(const Tensor&) = default;
   Tensor& operator=(Tensor&&) = default;
 
+  /// @{
   /// Initialize a vector or scalar from an array
   ///
   /// \example
   /// \snippet Test_Tensor.cpp init_vector
   /// \param data the values of the individual components of the Vector
+  KOKKOS_FUNCTION explicit Tensor(storage_type data)
+    requires(sizeof...(Indices) <= 1 and std::is_fundamental_v<X>);
   explicit Tensor(storage_type data)
-    requires(sizeof...(Indices) <= 1);
+    requires(sizeof...(Indices) <= 1 and not std::is_fundamental_v<X>);
+  /// @}
 
+  /// @{
   /// Constructor that passes "args" to constructor of X and initializes each
   /// component to be the same
+  template <typename Arg0, typename... Args>
+  KOKKOS_FUNCTION explicit Tensor(Arg0&& arg0, Args&&... args)
+      // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+    requires(not(sizeof...(Args) == 0 and
+                 std::same_as<std::decay_t<Arg0>, Tensor>) and
+             std::constructible_from<X, Arg0, Args...> and
+             std::is_fundamental_v<X>);
   template <typename Arg0, typename... Args>
   explicit Tensor(Arg0&& arg0, Args&&... args)
       // NOLINTNEXTLINE(readability-simplify-boolean-expr)
     requires(not(sizeof...(Args) == 0 and
                  std::same_as<std::decay_t<Arg0>, Tensor>) and
-             std::constructible_from<X, Arg0, Args...>);
+             std::constructible_from<X, Arg0, Args...> and
+             not std::is_fundamental_v<X>);
 
   using value_type = typename storage_type::value_type;
   using reference = typename storage_type::reference;
@@ -484,9 +499,28 @@ Tensor<X, Symm, IndexList<Indices...>>::component_suffix(
 
 template <typename X, typename Symm, template <typename...> class IndexList,
           typename... Indices>
-Tensor<X, Symm, IndexList<Indices...>>::Tensor(storage_type data)
-  requires(sizeof...(Indices) <= 1)
+KOKKOS_FUNCTION Tensor<X, Symm, IndexList<Indices...>>::Tensor(
+    storage_type data)
+  requires(sizeof...(Indices) <= 1 and std::is_fundamental_v<X>)
     : data_(std::move(data)) {}
+template <typename X, typename Symm, template <typename...> class IndexList,
+          typename... Indices>
+Tensor<X, Symm, IndexList<Indices...>>::Tensor(storage_type data)
+  requires(sizeof...(Indices) <= 1 and not std::is_fundamental_v<X>)
+    : data_(std::move(data)) {}
+
+template <typename X, typename Symm, template <typename...> class IndexList,
+          typename... Indices>
+template <typename Arg0, typename... Args>
+KOKKOS_FUNCTION Tensor<X, Symm, IndexList<Indices...>>::Tensor(Arg0&& arg0,
+                                                               Args&&... args)
+    // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+  requires(not(sizeof...(Args) == 0 and
+               std::same_as<std::decay_t<Arg0>, Tensor>) and
+           std::constructible_from<X, Arg0, Args...> and
+           std::is_fundamental_v<X>)
+    : data_(make_array<size(), X>(std::forward<Arg0>(arg0),
+                                  std::forward<Args>(args)...)) {}
 
 template <typename X, typename Symm, template <typename...> class IndexList,
           typename... Indices>
@@ -495,7 +529,8 @@ Tensor<X, Symm, IndexList<Indices...>>::Tensor(Arg0&& arg0, Args&&... args)
     // NOLINTNEXTLINE(readability-simplify-boolean-expr)
   requires(not(sizeof...(Args) == 0 and
                std::same_as<std::decay_t<Arg0>, Tensor>) and
-           std::constructible_from<X, Arg0, Args...>)
+           std::constructible_from<X, Arg0, Args...> and
+           not std::is_fundamental_v<X>)
     : data_(make_array<size(), X>(std::forward<Arg0>(arg0),
                                   std::forward<Args>(args)...)) {}
 
