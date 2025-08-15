@@ -65,13 +65,21 @@ target_link_libraries(
 # warnings by the preprocessor:
 # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=53431
 # So we disable the warning about unknown pragmas because we can't silence it.
+# GCC versions below 13 also have many false positives for `stringop-overflow`,
+# `array-bounds`, and `restrict`, specifically in libstdc++-12 <string> with
+# C++20, leading to warnings from `__builtin_memcpy`.
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
     AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13)
-  create_cxx_flag_target("-Wno-unknown-pragmas" SpectreWarnNoUnknownPragmas)
+  create_cxx_flags_target(
+    "-Wno-unknown-pragmas;\
+-Wno-stringop-overflow;\
+-Wno-array-bounds;\
+-Wno-restrict"
+    SpectreDisableGccWarnings)
   target_link_libraries(
     SpectreWarnings
     INTERFACE
-    SpectreWarnNoUnknownPragmas
+    SpectreDisableGccWarnings
     )
 endif()
 

@@ -412,9 +412,9 @@ jobs:
         # GitHub cache space we use. GCC being the production compiler on
         # supercomputers means we need to thoroughly test it.
         compiler:
-          - gcc-9
           - gcc-10
           - gcc-11
+          - gcc-12
         build_type: [Debug, Release]
         include:
           # Generate code coverage report for a single build
@@ -1341,17 +1341,17 @@ ${{ matrix.build_type }}-pch-${{ matrix.use_pch || 'ON' }}"
       fail-fast: false
       matrix:
         compiler:
-          - gcc-9
           - gcc-10
+          - gcc-11
           - clang-13
           - clang-14
         include:
           - sde_arch: ("-nhm;nehalem" "-snb;sandybridge" "-hsw;haswell"
-              "-skl;skylake")
-            compiler: gcc-9
-          - sde_arch: ("-nhm;nehalem" "-snb;sandybridge" "-hsw;haswell"
               "-skl;skylake" "-icx;icelake-server")
             compiler: gcc-10
+          - sde_arch: ("-nhm;nehalem" "-snb;sandybridge" "-hsw;haswell"
+              "-skl;skylake" "-icx;icelake-server")
+            compiler: gcc-11
           - sde_arch: ("-nhm;nehalem" "-snb;sandybridge" "-hsw;haswell"
               "-skl;skylake" "-icx;icelake-server")
             compiler: clang-13
