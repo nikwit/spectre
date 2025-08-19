@@ -61,20 +61,25 @@ target_link_libraries(
   SpectreDisableSomeWarnings
   )
 
-# GCC versions below 13 don't respect 'GCC diagnostic' pragmas to disable
-# warnings by the preprocessor:
-# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=53431
-# So we disable the warning about unknown pragmas because we can't silence it.
-# GCC versions below 13 also have many false positives for `stringop-overflow`,
-# `array-bounds`, and `restrict`, specifically in libstdc++-12 <string> with
-# C++20, leading to warnings from `__builtin_memcpy`.
+# - GCC versions below 13 don't respect 'GCC diagnostic' pragmas to disable
+#   warnings by the preprocessor:
+#   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=53431
+#   So we disable the warning about unknown pragmas because we can't silence it.
+# - GCC versions below 13 have many false positives for `stringop-overflow`,
+#   `array-bounds`, and `restrict`, specifically in libstdc++-12 <string> with
+#   C++20, leading to warnings from `__builtin_memcpy`.
+# - GCC version 12 has false-positive `use-after-free` warnings from Blaze's
+#   DynamicMatrix constructor that gets inlined in many places. Rather than
+#   silencing the warning at every call site or forcing no-inline, we silence
+#   it here.
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
     AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13)
   create_cxx_flags_target(
     "-Wno-unknown-pragmas;\
 -Wno-stringop-overflow;\
 -Wno-array-bounds;\
--Wno-restrict"
+-Wno-restrict;\
+-Wno-use-after-free"
     SpectreDisableGccWarnings)
   target_link_libraries(
     SpectreWarnings

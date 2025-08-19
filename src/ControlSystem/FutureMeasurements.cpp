@@ -11,6 +11,10 @@
 #include "Utilities/StdHelpers.hpp"
 
 namespace control_system {
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif  // defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
 FutureMeasurements::FutureMeasurements(const size_t measurements_per_update,
                                        const double first_measurement_time)
     : measurements_{std::numeric_limits<double>::signaling_NaN(),
@@ -19,6 +23,9 @@ FutureMeasurements::FutureMeasurements(const size_t measurements_per_update,
       measurements_per_update_(measurements_per_update) {
   ASSERT(measurements_per_update > 0, "Cannot update without measurements.");
 }
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
+#pragma GCC diagnostic pop
+#endif  // defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
 
 std::optional<double> FutureMeasurements::next_measurement() const {
   if (measurements_.size() <= 1) {

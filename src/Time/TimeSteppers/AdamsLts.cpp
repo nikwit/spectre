@@ -309,6 +309,10 @@ LtsCoefficients lts_coefficients_for_gts(
 }
 }  // namespace
 
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overread"
+#endif  // defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
 template <typename TimeType>
 LtsCoefficients lts_coefficients(const ConstBoundaryHistoryTimes& local_times,
                                  const ConstBoundaryHistoryTimes& remote_times,
@@ -444,6 +448,9 @@ LtsCoefficients lts_coefficients(const ConstBoundaryHistoryTimes& local_times,
   step_coefficients.erase(std::next(unique_entry), step_coefficients.end());
   return step_coefficients;
 }
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
+#pragma GCC diagnostic pop
+#endif  // defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
 
 #define MATH_WRAPPER_TYPE(data) BOOST_PP_TUPLE_ELEM(0, data)
 
