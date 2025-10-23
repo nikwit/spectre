@@ -15,6 +15,7 @@ spectre_target_sources(
   ${LIBRARY}
   PRIVATE
   Exporter.cpp
+  ModalSpacetimeInterpolator.cpp
   PointwiseInterpolator.cpp
   SelectObservation.cpp
   SpacetimeInterpolator.cpp
@@ -25,6 +26,7 @@ spectre_target_headers(
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
   Exporter.hpp
+  ModalSpacetimeInterpolator.hpp
   PointwiseInterpolator.hpp
   SelectObservation.hpp
   SpacetimeInterpolator.hpp

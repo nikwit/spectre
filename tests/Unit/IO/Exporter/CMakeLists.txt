@@ -5,6 +5,7 @@ set(LIBRARY "Test_Exporter")
 
 set(LIBRARY_SOURCES
   Test_Exporter.cpp
+  Test_ModalSpacetimeInterpolator.cpp
   Test_SpacetimeInterpolator.cpp
   )
 
