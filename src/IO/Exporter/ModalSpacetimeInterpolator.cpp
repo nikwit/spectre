@@ -314,10 +314,38 @@ ModalSpacetimeInterpolator<Dim, Frame>::load_component_time_series(
   std::vector<std::vector<double>> per_grid_point_values(
       num_grid_points, std::vector<double>(num_observations, 0.0));
 
+  const std::string element_name = get_output(element_id);
   h5::H5File<h5::AccessType::ReadOnly> element_file(filenames[file_index]);
   const auto& element_volfile = element_file.get<h5::VolumeData>(subfile_name_);
   for (size_t obs_index = 0; obs_index < num_observations; ++obs_index) {
     const size_t obs_id = obs_ids_and_times_[obs_index].first;
+    const auto grid_names = element_volfile.get_grid_names(obs_id);
+    ASSERT(
+        std::find(grid_names.begin(), grid_names.end(), element_name) !=
+            grid_names.end(),
+        "Element "
+            << element_id << " is not present in file index " << file_index
+            << " for observation " << obs_id
+            << ". Each element is expected to reside in the same volume file "
+               "for all observations.");
+    const auto extents = element_volfile.get_extents(obs_id);
+    const auto [expected_offset, expected_length] =
+        h5::offset_and_length_for_grid(element_name, grid_names, extents);
+    ASSERT(expected_offset == offset,
+           "Inconsistent offset detected for element "
+               << element_id << " in file index " << file_index
+               << ". Expected offset " << offset << " from metadata but found "
+               << expected_offset << " at observation " << obs_id
+               << ". This usually indicates the element migrated between "
+                  "volume files.");
+    ASSERT(expected_length == metadata.length,
+           "Inconsistent length detected for element "
+               << element_id << " in file index " << file_index
+               << ". Expected length " << metadata.length << " from metadata "
+               << "but found " << expected_length << " at observation "
+               << obs_id
+               << ". This usually indicates the element migrated between "
+                  "volume files or the file is corrupted.");
     const auto component_data =
         element_volfile
             .get_tensor_component(obs_id, tensor_components_[component_index])
