@@ -329,20 +329,22 @@ ModalSpacetimeInterpolator<Dim, Frame>::load_component_time_series(
             << ". Each element is expected to reside in the same volume file "
                "for all observations.");
     const auto extents = element_volfile.get_extents(obs_id);
-    const auto [expected_offset, expected_length] =
+    const auto [obs_offset, obs_length] =
         h5::offset_and_length_for_grid(element_name, grid_names, extents);
-    ASSERT(expected_offset == offset,
-           "Inconsistent offset detected for element "
-               << element_id << " in file index " << file_index
-               << ". Expected offset " << offset << " from metadata but found "
-               << expected_offset << " at observation " << obs_id
-               << ". This usually indicates the element migrated between "
-                  "volume files.");
-    ASSERT(expected_length == metadata.length,
+    if (UNLIKELY(obs_offset != offset)) {
+      Parallel::printf(
+          MakeString{}
+          << "Element " << element_id
+          << " has different data offset at observation " << obs_id
+          << " (reference offset " << offset << ", current offset "
+          << obs_offset << "). Assuming the element remains in the same file, "
+             "continuing with the per-observation offset.\n");
+    }
+    ASSERT(obs_length == metadata.length,
            "Inconsistent length detected for element "
                << element_id << " in file index " << file_index
                << ". Expected length " << metadata.length << " from metadata "
-               << "but found " << expected_length << " at observation "
+               << "but found " << obs_length << " at observation "
                << obs_id
                << ". This usually indicates the element migrated between "
                   "volume files or the file is corrupted.");
@@ -353,7 +355,7 @@ ModalSpacetimeInterpolator<Dim, Frame>::load_component_time_series(
     if (std::holds_alternative<DataVector>(component_data)) {
       const auto& data = std::get<DataVector>(component_data);
       const double* element_data =
-          data.data() + static_cast<std::ptrdiff_t>(offset);
+          data.data() + static_cast<std::ptrdiff_t>(obs_offset);
       for (size_t i = 0; i < num_grid_points; ++i) {
         per_grid_point_values[i][obs_index] = element_data[i];
       }
@@ -361,7 +363,7 @@ ModalSpacetimeInterpolator<Dim, Frame>::load_component_time_series(
       const auto& data = std::get<std::vector<float>>(component_data);
       for (size_t i = 0; i < num_grid_points; ++i) {
         per_grid_point_values[i][obs_index] =
-            static_cast<double>(data[offset + i]);
+            static_cast<double>(data[obs_offset + i]);
       }
     }
   }
