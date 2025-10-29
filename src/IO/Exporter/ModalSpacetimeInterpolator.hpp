@@ -46,7 +46,7 @@ class ModalSpacetimeInterpolator {
   ModalSpacetimeInterpolator(
       std::variant<std::vector<std::string>, std::string> volume_files_or_glob,
       std::string subfile_name, std::vector<std::string> tensor_components,
-      double relative_error, size_t max_interpolation_order = 12);
+      double relative_error, size_t max_interpolation_order = 8);
 
   void interpolate_to_point(gsl::not_null<std::vector<double>*> result,
                             const tnsr::I<double, Dim, Frame>& target_point,
@@ -64,7 +64,7 @@ class ModalSpacetimeInterpolator {
 
   struct ComponentInterpolator {
     std::vector<boost::math::interpolators::barycentric_rational<double>>
-        nodal_interpolants;
+        modal_interpolants;
   };
 
   struct ElementInterpolator {

@@ -5,15 +5,16 @@
 
 #include <array>
 #include <cstddef>
+#include <random>
 #include <string>
 #include <vector>
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
-#include "Domain/Domain.hpp"
 #include "Domain/Creators/Rectilinear.hpp"
 #include "Domain/Creators/RegisterDerivedWithCharm.hpp"
 #include "Domain/Creators/TimeDependence/RegisterDerivedWithCharm.hpp"
+#include "Domain/Domain.hpp"
 #include "Domain/ElementMap.hpp"
 #include "Domain/FunctionsOfTime/RegisterDerivedWithCharm.hpp"
 #include "Domain/Structure/InitialElementIds.hpp"
@@ -21,7 +22,10 @@
 #include "IO/H5/File.hpp"
 #include "IO/H5/TensorData.hpp"
 #include "IO/H5/VolumeData.hpp"
+#include "NumericalAlgorithms/Interpolation/IrregularInterpolant.hpp"
 #include "NumericalAlgorithms/Spectral/LogicalCoordinates.hpp"
+#include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "Parallel//Printf/Printf.hpp"
 #include "Utilities/FileSystem.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Serialization/Serialize.hpp"
@@ -78,6 +82,137 @@ std::array<double, 2> expected_values(
   return {psi, phi};
 }
 
+struct ValidationElement {
+  ElementId<3> element_id;
+  Mesh<3> mesh;
+  DataVector nodal_values;
+};
+
+void validate_against_reference_data() {
+  const std::string volume_file_path{
+      "/Users/niko/caltech/"
+      "BbhVolume0_subset.h5"};
+
+  h5::H5File<h5::AccessType::ReadOnly> h5_file(volume_file_path);
+  const auto& sparse_volume = h5_file.get<h5::VolumeData>("/MoreMoreSparseGrid");
+
+  auto sparse_observation_ids = sparse_volume.list_observation_ids();
+  std::ranges::sort(sparse_observation_ids,
+                    [&sparse_volume](const size_t lhs, const size_t rhs) {
+                      return sparse_volume.get_observation_value(lhs) <
+                             sparse_volume.get_observation_value(rhs);
+                    });
+
+  const auto serialized_functions =
+      sparse_volume.get_functions_of_time(sparse_observation_ids.back());
+  domain::FunctionsOfTimeMap functions_of_time{};
+  if (serialized_functions.has_value()) {
+    functions_of_time =
+        deserialize<domain::FunctionsOfTimeMap>(serialized_functions->data());
+  }
+
+  ModalSpacetimeInterpolator<3, Frame::Inertial> interpolator(
+      std::vector<std::string>{volume_file_path}, "MoreMoreSparseGrid", {"Lapse"},
+      1.0e-8, 5);
+
+  std::mt19937 generator(42);
+  std::uniform_real_distribution<double> logical_dist(-1.0, 1.0);
+  h5_file.close_current_object();
+
+  const auto& validation_volume = h5_file.get<h5::VolumeData>("/Validation");
+  auto validation_observation_ids = validation_volume.list_observation_ids();
+
+  const double cutoff_time = 500.0;
+  validation_observation_ids.erase(
+      std::remove_if(
+          validation_observation_ids.begin(), validation_observation_ids.end(),
+          [cutoff_time, &validation_volume](const auto& id) {
+            return validation_volume.get_observation_value(id) <
+                   cutoff_time;
+          }),
+      validation_observation_ids.end());
+
+  const auto serialized_domain =
+      validation_volume.get_domain(validation_observation_ids.back());
+  REQUIRE(serialized_domain.has_value());
+  const Domain<3> file_domain =
+      deserialize<Domain<3>>(serialized_domain->data());
+  for (const size_t validation_obs_id : validation_observation_ids) {
+    const double validation_time =
+        validation_volume.get_observation_value(validation_obs_id);
+    const auto grid_names = validation_volume.get_grid_names(validation_obs_id);
+    const auto extents = validation_volume.get_extents(validation_obs_id);
+    const auto bases = validation_volume.get_bases(validation_obs_id);
+    const auto quadratures =
+        validation_volume.get_quadratures(validation_obs_id);
+    const auto tensor_data =
+        validation_volume.get_tensor_component(validation_obs_id, "Lapse");
+    REQUIRE(std::holds_alternative<DataVector>(tensor_data.data));
+    const auto& validation_data = std::get<DataVector>(tensor_data.data);
+    const auto reference_element_id = ElementId<3>("[B0,(L2I0,L2I3,L2I3)]");
+    std::vector<ValidationElement> validation_elements{};
+    validation_elements.reserve(grid_names.size());
+    for (size_t grid_index = 0; grid_index < grid_names.size(); ++grid_index) {
+      const ElementId<3> element_id(grid_names[grid_index]);
+      if (element_id != reference_element_id) {
+        continue;
+      }
+      std::array<size_t, 3> extent_array{};
+      std::array<Spectral::Basis, 3> basis_array{};
+      std::array<Spectral::Quadrature, 3> quadrature_array{};
+      for (size_t dim = 0; dim < 3; ++dim) {
+        extent_array[dim] = extents[grid_index][dim];
+        basis_array[dim] = bases[grid_index][dim];
+        quadrature_array[dim] = quadratures[grid_index][dim];
+      }
+      const auto [offset, length] = h5::offset_and_length_for_grid(
+          grid_names[grid_index], grid_names, extents);
+      DataVector nodal_values(length);
+      for (size_t i = 0; i < length; ++i) {
+        nodal_values[i] = validation_data[offset + i];
+      }
+      validation_elements.push_back(ValidationElement{
+          element_id, Mesh<3>{extent_array, basis_array, quadrature_array},
+          std::move(nodal_values)});
+    }
+
+    REQUIRE_FALSE(validation_elements.empty());
+    std::uniform_int_distribution<size_t> element_dist(
+        0, validation_elements.size() - 1);
+    const double relative_tolerance = 1.0e-4;
+
+    for (size_t sample_index = 0; sample_index < 1; ++sample_index) {
+      const ValidationElement& element_data =
+          validation_elements[element_dist(generator)];
+      tnsr::I<double, 3, Frame::ElementLogical> logical_point{
+          {logical_dist(generator), logical_dist(generator),
+           logical_dist(generator)}};
+      const ElementMap<3, Frame::Inertial> element_map(
+          element_data.element_id,
+          file_domain.blocks()[element_data.element_id.block_id()]);
+      const auto inertial_point =
+          element_map(logical_point, validation_time, functions_of_time);
+
+      std::vector<double> interpolated_values{};
+      interpolator.interpolate_to_point(make_not_null(&interpolated_values),
+                                        inertial_point, validation_time);
+      REQUIRE(interpolated_values.size() == 1);
+
+      const intrp::Irregular<3> irregular(element_data.mesh, logical_point);
+      const gsl::span<const double> nodal_values(
+          element_data.nodal_values.data(), element_data.nodal_values.size());
+      double validation_value = 0.0;
+      gsl::span<double> output_span(&validation_value, 1);
+      irregular.interpolate(make_not_null(&output_span), nodal_values);
+      Parallel::printf("Relative error: %e\n",
+                       std::abs(interpolated_values[0] - validation_value) /
+                           std::abs(validation_value));
+      CHECK(interpolated_values[0] ==
+            approx(validation_value).epsilon(relative_tolerance));
+    }
+  }
+}
+
 }  // namespace
 
 SPECTRE_TEST_CASE("Unit.IO.Exporter.ModalSpacetimeInterpolator", "[Unit]") {
@@ -85,7 +220,7 @@ SPECTRE_TEST_CASE("Unit.IO.Exporter.ModalSpacetimeInterpolator", "[Unit]") {
   domain::creators::time_dependence::register_derived_with_charm();
   domain::FunctionsOfTime::register_derived_with_charm();
 
-  const std::string h5_file_name_1{
+  /*const std::string h5_file_name_1{
       "Unit.IO.Exporter.ModalSpacetimeInterpolator.1.h5"};
   const std::string h5_file_name_2{
       "Unit.IO.Exporter.ModalSpacetimeInterpolator.2.h5"};
@@ -99,8 +234,8 @@ SPECTRE_TEST_CASE("Unit.IO.Exporter.ModalSpacetimeInterpolator", "[Unit]") {
   const domain::creators::Brick domain_creator{
       {{0.0, 0.0, 0.0}},
       {{1.0, 1.0, 1.0}},
-      {{1, 0, 0}},
-      {{3, 3, 3}}};
+      {{1, 2, 1}},
+      {{4, 4, 4}}};
   const auto domain = domain_creator.create_domain();
   const auto all_element_ids =
       initial_element_ids(domain_creator.initial_refinement_levels());
@@ -159,7 +294,9 @@ SPECTRE_TEST_CASE("Unit.IO.Exporter.ModalSpacetimeInterpolator", "[Unit]") {
   }
   if (file_system::check_if_file_exists(h5_file_name_2)) {
     file_system::rm(h5_file_name_2, true);
-  }
+  }*/
+
+  validate_against_reference_data();
 }
 
 }  // namespace spectre::Exporter

@@ -41,6 +41,7 @@ target_link_libraries(
   FunctionsOfTime
   H5
   Interpolation
+  LinearOperators
   Serialization
   Utilities
   )
