@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <optional>
@@ -15,7 +16,7 @@
 #include <variant>
 #include <vector>
 
-#include <boost/math/interpolators/barycentric_rational.hpp>
+#include <boost/math/interpolators/pchip.hpp>
 
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Domain/Domain.hpp"
@@ -57,13 +58,11 @@ class ModalSpacetimeInterpolator {
  private:
   struct ElementMetadata {
     Mesh<Dim> mesh{};
-    size_t offset{};
-    size_t length{};
     size_t file_index{};
   };
 
   struct ComponentInterpolator {
-    std::vector<boost::math::interpolators::barycentric_rational<double>>
+    std::vector<boost::math::interpolators::pchip<std::vector<double>>>
         modal_interpolants;
   };
 
@@ -72,18 +71,22 @@ class ModalSpacetimeInterpolator {
     std::vector<ComponentInterpolator> component_interpolators{};
   };
 
-  void load_observation_ids(const std::vector<std::string>& filenames);
-  void gather_element_metadata(const std::vector<std::string>& filenames);
-  void build_interpolators(const std::vector<std::string>& filenames);
+  void gather_element_metadata(const std::vector<std::string>& filenames,
+                               const std::string& subfile_name,
+                               size_t reference_obs_id);
+  void build_interpolators(
+      const std::vector<std::string>& filenames,
+      const std::string& subfile_name,
+      const std::vector<std::pair<size_t, double>>& obs_id_and_times);
   std::vector<std::vector<double>> load_component_time_series(
       const ElementMetadata& metadata, const ElementId<Dim>& element_id,
-      size_t component_index, const std::vector<std::string>& filenames) const;
+      size_t component_index, const std::vector<std::string>& filenames,
+      const std::string& subfile_name,
+      const std::vector<std::pair<size_t, double>>& obs_id_and_times) const;
 
   std::variant<std::vector<std::string>, std::string> volume_files_or_glob_;
-  std::string subfile_name_;
   std::vector<std::string> tensor_components_;
 
-  std::vector<std::pair<size_t, double>> obs_ids_and_times_;
   double relative_error_ = 0.0;
   size_t max_interpolation_order_ = 12;
   std::array<double, 2> time_bounds_{
