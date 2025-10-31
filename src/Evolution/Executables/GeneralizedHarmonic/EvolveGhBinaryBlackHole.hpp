@@ -135,6 +135,7 @@
 #include "ParallelAlgorithms/ApparentHorizonFinder/Tags.hpp"
 #include "ParallelAlgorithms/Events/Factory.hpp"
 #include "ParallelAlgorithms/Events/MonitorMemory.hpp"
+#include "ParallelAlgorithms/Events/ObserveModalFields.hpp"
 #include "ParallelAlgorithms/Events/ObserveTimeStepVolume.hpp"
 #include "ParallelAlgorithms/EventsAndDenseTriggers/DenseTrigger.hpp"
 #include "ParallelAlgorithms/EventsAndDenseTriggers/DenseTriggers/Factory.hpp"
@@ -497,6 +498,8 @@ struct EvolutionMetavars {
                            3, ExcisionBoundaryB, ah::source_vars<3>>,
                        Events::MonitorMemory<3>, Events::Completion,
                        dg::Events::field_observations<
+                           volume_dim, observe_fields, non_tensor_compute_tags>,
+                       dg::Events::ObserveModalFields<
                            volume_dim, observe_fields, non_tensor_compute_tags>,
                        control_system::metafunctions::control_system_events<
                            control_systems>,
