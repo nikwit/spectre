@@ -221,8 +221,12 @@ void write_combined_volume_data(
     // The domain is retrieved from the global cache using the standard
     // domain tag. If more flexibility is required here later, then the
     // domain can be passed along with the `ContributeVolumeData` action.
-    const auto serialized_domain = serialize(
-        Parallel::get<domain::Tags::Domain<Metavariables::volume_dim>>(cache));
+    std::optional<std::vector<char>> serialized_domain{};
+    if (not volume_file.has_domain()) {
+      serialized_domain = serialize(
+          Parallel::get<domain::Tags::Domain<Metavariables::volume_dim>>(
+              cache));
+    }
     const auto serialized_functions_of_time =
         [&cache]() -> std::optional<std::vector<char>> {
       // Functions-of-time are in the _mutable_ global cache, so they aren't

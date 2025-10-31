@@ -108,7 +108,9 @@ class VolumeData : public h5::Object {
 
   /// Insert tensor components at `observation_id` with floating point value
   /// `observation_value`. Optionally write a serialized representation of the
-  /// domain and the functions of time into the subfile as well.
+  /// domain and the functions of time into the subfile as well. The serialized
+  /// domain is stored once per VolumeData subfile (subsequent calls do not
+  /// overwrite it).
   ///
   /// All `elements` must contain the same tensor components in the same order.
   void write_volume_data(
@@ -117,6 +119,13 @@ class VolumeData : public h5::Object {
       const std::optional<std::vector<char>>& serialized_domain = std::nullopt,
       const std::optional<std::vector<char>>& serialized_functions_of_time =
           std::nullopt);
+
+  /// \returns true if a serialized domain has been written to the subfile.
+  bool has_domain() const;
+
+  /// \returns true if serialized functions of time have been written to the
+  /// subfile.
+  bool has_functions_of_time() const;
 
   /// Overwrites the current connectivity dataset with a new one. This new
   /// connectivity dataset builds connectivity within each block in the domain

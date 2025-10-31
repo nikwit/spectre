@@ -18,12 +18,15 @@
 #include "Domain/Creators/TimeDependence/RegisterDerivedWithCharm.hpp"
 #include "Domain/Creators/TimeDependence/UniformTranslation.hpp"
 #include "Domain/Domain.hpp"
+#include "Domain/FunctionsOfTime/PiecewisePolynomial.hpp"
 #include "Domain/FunctionsOfTime/RegisterDerivedWithCharm.hpp"
 #include "Helpers/Domain/BoundaryConditions/BoundaryCondition.hpp"
 #include "Helpers/IO/VolumeData.hpp"
 #include "IO/H5/AccessType.hpp"
 #include "IO/H5/CheckH5.hpp"
 #include "IO/H5/File.hpp"
+#include "IO/H5/Helpers.hpp"
+#include "IO/H5/OpenGroup.hpp"
 #include "IO/H5/TensorData.hpp"
 #include "IO/H5/VolumeData.hpp"
 #include "NumericalAlgorithms/Spectral/Basis.hpp"
@@ -32,6 +35,7 @@
 #include "NumericalAlgorithms/SphericalHarmonics/Strahlkorper.hpp"
 #include "Utilities/ConstantExpressions.hpp"
 #include "Utilities/FileSystem.hpp"
+#include "Utilities/Gsl.hpp"
 #include "Utilities/Serialization/Serialize.hpp"
 
 namespace {
@@ -283,12 +287,38 @@ void test() {
   // Open the read volume file and check that the observation id and values are
   // correct. No leading slash should also find the subfile, and a ".vol"
   // extension as well.
-  const auto& volume_file =
+  auto& volume_file =
       my_file.get<h5::VolumeData>("element_data.vol", version_number);
   CHECK(volume_file.subfile_path() == "/element_data");
   const auto read_observation_ids = volume_file.list_observation_ids();
   // The observation IDs should be sorted by their observation value
   CHECK(read_observation_ids == std::vector<size_t>{size_t(-1), 8435087234});
+  CHECK(volume_file.has_domain());
+  CHECK(volume_file.has_functions_of_time());
+  const std::string subfile_group_path =
+      std::string(volume_file.subfile_path()) + h5::VolumeData::extension();
+  const hid_t read_only_file_id =
+      H5Fopen(h5_file_name.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+  CHECK(read_only_file_id >= 0);
+  {
+    h5::detail::OpenGroup subfile_group(read_only_file_id, subfile_group_path,
+                                        h5::AccessType::ReadOnly);
+    CHECK(h5::contains_dataset_or_group(subfile_group.id(), "", "domain"));
+    CHECK(h5::contains_dataset_or_group(subfile_group.id(), "",
+                                        "functions_of_time"));
+  }
+  {
+    const std::string observation_group_path =
+        subfile_group_path + "/ObservationId" +
+        std::to_string(observation_ids.front());
+    h5::detail::OpenGroup observation_group(
+        read_only_file_id, observation_group_path, h5::AccessType::ReadOnly);
+    CHECK_FALSE(
+        h5::contains_dataset_or_group(observation_group.id(), "", "domain"));
+    CHECK_FALSE(h5::contains_dataset_or_group(observation_group.id(), "",
+                                              "functions_of_time"));
+  }
+  CHECK_H5(H5Fclose(read_only_file_id), "Failed to close HDF5 file");
   {
     INFO("Test find_observation_id");
     std::vector<size_t> found_observation_ids(observation_values.size());
@@ -351,6 +381,80 @@ void test() {
                              all_bases, all_quadratures);
     CHECK(last_mesh == Mesh<3>(2, Spectral::Basis::Legendre,
                                Spectral::Quadrature::GaussLobatto));
+  }
+
+  {
+    INFO("Functions of time overwrite ordering");
+    const size_t fot_observation_id_base = 9100;
+    const double fot_observation_value_base = 12.5;
+    const std::vector<ElementVolumeData> simple_element_data{
+        {"[FOTGrid]",
+         {TensorComponent{"SimpleScalar", DataVector(8, 1.0)}},
+         {2, 2, 2},
+         {Spectral::Basis::Legendre, Spectral::Basis::Legendre,
+          Spectral::Basis::Legendre},
+         {Spectral::Quadrature::Gauss, Spectral::Quadrature::Gauss,
+          Spectral::Quadrature::Gauss}}};
+    const auto serialized_domain = serialize(domain_creator.create_domain());
+    const auto make_serialized_functions_of_time =
+        [](const double expiration_time) {
+          domain::FunctionsOfTimeMap map{};
+          std::array<DataVector, 3> initial_data{
+              DataVector{1.0}, DataVector{0.0}, DataVector{0.0}};
+          map["Translation"] = std::make_unique<
+              domain::FunctionsOfTime::PiecewisePolynomial<2>>(
+              0.0, initial_data, expiration_time);
+          return serialize(map);
+        };
+    const auto write_volume_with_data =
+        [&](const size_t observation_id, const double observation_value,
+            std::vector<char> serialized_functions_of_time) {
+          volume_file.write_volume_data(
+              observation_id, observation_value, simple_element_data,
+              serialized_domain, std::move(serialized_functions_of_time));
+        };
+    const auto read_stored_functions_of_time =
+        [&](const size_t observation_id) -> std::vector<char> {
+      const auto stored_functions_of_time =
+          volume_file.get_functions_of_time(observation_id);
+      REQUIRE(stored_functions_of_time.has_value());
+      return *stored_functions_of_time;
+    };
+    const auto read_observation_value_attribute = [&]() {
+      const hid_t read_file_id =
+          H5Fopen(h5_file_name.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+      CHECK(read_file_id >= 0);
+      h5::detail::OpenGroup read_subfile_group(
+          read_file_id, subfile_group_path, h5::AccessType::ReadOnly);
+      const double stored_value = h5::read_value_attribute<double>(
+          read_subfile_group.id(), "functions_of_time_observation_value");
+      CHECK_H5(H5Fclose(read_file_id), "Failed to close HDF5 file");
+      return stored_value;
+    };
+
+    const auto initial_fot = make_serialized_functions_of_time(5.0);
+    write_volume_with_data(fot_observation_id_base, fot_observation_value_base,
+                           initial_fot);
+    CHECK(read_stored_functions_of_time(fot_observation_id_base) ==
+          initial_fot);
+    CHECK(read_observation_value_attribute() ==
+          approx(fot_observation_value_base));
+
+    const auto earlier_fot = make_serialized_functions_of_time(3.0);
+    write_volume_with_data(fot_observation_id_base + 1,
+                           fot_observation_value_base - 0.1, earlier_fot);
+    CHECK(read_stored_functions_of_time(fot_observation_id_base + 1) ==
+          initial_fot);
+    CHECK(read_observation_value_attribute() ==
+          approx(fot_observation_value_base));
+
+    const auto later_fot = make_serialized_functions_of_time(7.0);
+    write_volume_with_data(fot_observation_id_base + 2,
+                           fot_observation_value_base + 0.1, later_fot);
+    CHECK(read_stored_functions_of_time(fot_observation_id_base + 2) ==
+          later_fot);
+    CHECK(read_observation_value_attribute() ==
+          approx(fot_observation_value_base + 0.1));
   }
 
   if (file_system::check_if_file_exists(h5_file_name)) {
