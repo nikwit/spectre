@@ -298,13 +298,15 @@ class ObserveModalFields<VolumeDim, tmpl::list<Tensors...>,
     };
     EXPAND_PACK_LEFT_TO_RIGHT(record_tensor_components(tmpl::type_<Tensors>{}));
 
+    const std::string modal_subfile_path = subfile_path + "_modal";
+
     const Parallel::ArrayComponentId array_component_id{
         std::add_pointer_t<ParallelComponent>{nullptr},
         Parallel::ArrayIndex<ElementId<VolumeDim>>{element_id}};
     ElementVolumeData element_volume_data{element_id, std::move(components),
                                           mesh_for_output};
     observers::ObservationId observation_id{observation_value.value,
-                                            subfile_path + ".vol"};
+                                            modal_subfile_path + ".vol"};
 
     auto& local_observer = *Parallel::local_branch(
         Parallel::get_parallel_component<
@@ -321,10 +323,10 @@ class ObserveModalFields<VolumeDim, tmpl::list<Tensors...>,
       Parallel::threaded_action<
           observers::ThreadedActions::ContributeVolumeDataToWriter>(
           local_observer, std::move(observation_id), array_component_id,
-          subfile_path, std::move(data_to_send), dependency);
+          modal_subfile_path, std::move(data_to_send), dependency);
     } else {
       Parallel::simple_action<observers::Actions::ContributeVolumeData>(
-          local_observer, std::move(observation_id), subfile_path,
+          local_observer, std::move(observation_id), modal_subfile_path,
           array_component_id, std::move(element_volume_data), dependency);
     }
   }
@@ -346,8 +348,9 @@ class ObserveModalFields<VolumeDim, tmpl::list<Tensors...>,
       return std::nullopt;
     }
     return {{observers::TypeOfObservation::Volume,
-             observers::ObservationKey{
-                 subfile_path_ + section_observation_key.value() + ".vol"}}};
+             observers::ObservationKey{subfile_path_ +
+                                       section_observation_key.value() +
+                                       "_modal.vol"}}};
   }
 
   using is_ready_argument_tags = tmpl::list<>;

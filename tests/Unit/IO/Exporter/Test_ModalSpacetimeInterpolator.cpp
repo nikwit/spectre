@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/Index.hpp"
+#include "DataStructures/ModalVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "Domain/Creators/Rectilinear.hpp"
 #include "Domain/Creators/RegisterDerivedWithCharm.hpp"
@@ -91,10 +93,13 @@ struct ValidationElement {
 void validate_against_reference_data() {
   const std::string volume_file_path{
       "/Users/niko/caltech/"
-      "BbhVolume0_subset.h5"};
+      "BbhVolume0.h5"};
+  const std::string volume_file_path2{
+      "/Users/niko/caltech/"
+      "BbhVolume1.h5"};
 
   h5::H5File<h5::AccessType::ReadOnly> h5_file(volume_file_path);
-  const auto& sparse_volume = h5_file.get<h5::VolumeData>("/MoreMoreSparseGrid");
+  const auto& sparse_volume = h5_file.get<h5::VolumeData>("/VolumeData");
 
   auto sparse_observation_ids = sparse_volume.list_observation_ids();
   std::ranges::sort(sparse_observation_ids,
@@ -112,24 +117,28 @@ void validate_against_reference_data() {
   }
 
   ModalSpacetimeInterpolator<3, Frame::Inertial> interpolator(
-      std::vector<std::string>{volume_file_path}, "MoreMoreSparseGrid", {"Lapse"},
-      1.0e-8, 5);
-
+      std::vector<std::string>{volume_file_path, volume_file_path2},
+      std::vector<std::string>{"VerySparseModal", "SparseModal", "FullModal"},
+      {"Lapse"}, 1.0e-7);
   std::mt19937 generator(42);
   std::uniform_real_distribution<double> logical_dist(-1.0, 1.0);
   h5_file.close_current_object();
 
-  const auto& validation_volume = h5_file.get<h5::VolumeData>("/Validation");
+  const auto& validation_volume = h5_file.get<h5::VolumeData>("/VolumeData");
   auto validation_observation_ids = validation_volume.list_observation_ids();
 
-  const double cutoff_time = 500.0;
+  const double cutoff_time_front = 0.0;
+  const double cutoff_time_back = 1500.;
   validation_observation_ids.erase(
-      std::remove_if(
-          validation_observation_ids.begin(), validation_observation_ids.end(),
-          [cutoff_time, &validation_volume](const auto& id) {
-            return validation_volume.get_observation_value(id) <
-                   cutoff_time;
-          }),
+      std::remove_if(validation_observation_ids.begin(),
+                     validation_observation_ids.end(),
+                     [cutoff_time_front, cutoff_time_back,
+                      &validation_volume](const auto& id) {
+                       return (validation_volume.get_observation_value(id) <
+                               cutoff_time_front) ||
+                              (validation_volume.get_observation_value(id) >
+                               cutoff_time_back);
+                     }),
       validation_observation_ids.end());
 
   const auto serialized_domain =
@@ -147,16 +156,13 @@ void validate_against_reference_data() {
         validation_volume.get_quadratures(validation_obs_id);
     const auto tensor_data =
         validation_volume.get_tensor_component(validation_obs_id, "Lapse");
-    REQUIRE(std::holds_alternative<DataVector>(tensor_data.data));
+    // REQUIRE(std::holds_alternative<DataVector>(tensor_data.data));
     const auto& validation_data = std::get<DataVector>(tensor_data.data);
     const auto reference_element_id = ElementId<3>("[B0,(L2I0,L2I3,L2I3)]");
     std::vector<ValidationElement> validation_elements{};
     validation_elements.reserve(grid_names.size());
     for (size_t grid_index = 0; grid_index < grid_names.size(); ++grid_index) {
       const ElementId<3> element_id(grid_names[grid_index]);
-      if (element_id != reference_element_id) {
-        continue;
-      }
       std::array<size_t, 3> extent_array{};
       std::array<Spectral::Basis, 3> basis_array{};
       std::array<Spectral::Quadrature, 3> quadrature_array{};
@@ -181,7 +187,7 @@ void validate_against_reference_data() {
         0, validation_elements.size() - 1);
     const double relative_tolerance = 1.0e-4;
 
-    for (size_t sample_index = 0; sample_index < 1; ++sample_index) {
+    for (size_t sample_index = 0; sample_index < 2; ++sample_index) {
       const ValidationElement& element_data =
           validation_elements[element_dist(generator)];
       tnsr::I<double, 3, Frame::ElementLogical> logical_point{

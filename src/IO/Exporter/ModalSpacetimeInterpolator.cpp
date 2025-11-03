@@ -87,7 +87,7 @@ std::vector<std::pair<size_t, double>> load_observation_ids(
                       return lhs.second < rhs.second;
                     });
 
-  const double cutoff_time = 500.0;
+  const double cutoff_time = 0.0;
   obs_ids_and_times.erase(
       std::remove_if(obs_ids_and_times.begin(), obs_ids_and_times.end(),
                      [cutoff_time](const auto& id_and_time) {
@@ -135,17 +135,22 @@ auto load_grids(const h5::VolumeData& volfile, const size_t obs_id) {
 
 auto interpolant_for_mode(
     const std::vector<std::pair<size_t, double>>& obs_ids_and_times,
-    const std::vector<double>& values, double relative_error) {
+    const std::vector<double>& values, double absolute_error) {
   const size_t num_observations = obs_ids_and_times.size();
   std::vector<size_t> selected_indices{{0, num_observations / 3,
                                         2 * num_observations / 3,
                                         num_observations - 1}};
-  auto build_interpolant = [&obs_ids_and_times, &selected_indices, &values]() {
+
+  std::vector<size_t> largest_residual_indices(num_observations);
+  std::iota(largest_residual_indices.begin(), largest_residual_indices.end(),
+            0);
+  auto build_interpolant = [&obs_ids_and_times,
+                            &values](std::vector<size_t>& current_indices) {
     std::vector<double> selected_times;
     std::vector<double> selected_values;
-    selected_times.reserve(selected_indices.size());
-    selected_values.reserve(selected_indices.size());
-    for (const size_t index : selected_indices) {
+    selected_times.reserve(current_indices.size());
+    selected_values.reserve(current_indices.size());
+    for (const size_t index : current_indices) {
       selected_times.push_back(obs_ids_and_times[index].second);
       selected_values.push_back(values[index]);
     }
@@ -154,44 +159,45 @@ auto interpolant_for_mode(
     return boost::math::interpolators::pchip<std::vector<double>>(
         std::move(selected_times_copy), std::move(selected_values_copy));
   };
-  auto compute_max_residual = [obs_ids_and_times, &values,
-                               num_observations](const auto& interpolant) {
-    double current_max_error = 0.0;
-    size_t max_index = 0;
-    for (size_t obs_index = 0; obs_index < num_observations; ++obs_index) {
-      const double prediction =
-          interpolant(obs_ids_and_times[obs_index].second);
-      const double actual = values[obs_index];
-      const double abs_error = std::abs(prediction - actual);
-      if (abs_error > current_max_error) {
-        current_max_error = abs_error;
-        max_index = obs_index;
-      }
-    }
-    return std::make_pair(current_max_error, max_index);
-  };
-  auto interpolant = build_interpolant();
-  double max_error = std::numeric_limits<double>::infinity();
-
+  auto interpolant = build_interpolant(selected_indices);
+  double max_error = std::numeric_limits<double>::max();
   while (true) {
-    const auto [current_max_error, max_index] =
-        compute_max_residual(interpolant);
-    max_error = current_max_error;
-    if (std::find(selected_indices.begin(), selected_indices.end(),
-                  max_index) != selected_indices.end()) {
-      // max_index is already included
-      ERROR(
-          "The interpolator tried to add an observation index that is "
-          "already included. This indicates a logic error or numerical "
-          "instability.");
-    }
-    if (max_error <= relative_error) {
+    std::vector<double> residuals(num_observations);
+    std::transform(
+        obs_ids_and_times.begin(), obs_ids_and_times.end(), values.begin(),
+        residuals.begin(),
+        [&interpolant](const auto& id_and_time, const double actual_value) {
+          const double predicted_value = interpolant(id_and_time.second);
+          return std::abs(predicted_value - actual_value);
+        });
+    const size_t batch_size = 1;
+    std::partial_sort(largest_residual_indices.begin(),
+                      largest_residual_indices.begin() + batch_size,
+                      largest_residual_indices.end(),
+                      [&residuals](const size_t lhs, const size_t rhs) {
+                        return residuals[lhs] > residuals[rhs];
+                      });
+    const size_t max_index = largest_residual_indices.front();
+    max_error = residuals[max_index];
+    if (max_error <= absolute_error) {
+      // achieved the desired accuracy
       break;
     }
-    selected_indices.push_back(max_index);
-    std::sort(selected_indices.begin(), selected_indices.end());
-    interpolant = build_interpolant();
+    for (size_t i = 0; i < batch_size; ++i) {
+      if (std::find(selected_indices.begin(), selected_indices.end(),
+                    largest_residual_indices[i]) == selected_indices.end()) {
+        selected_indices.push_back(largest_residual_indices[i]);
+      }
+    }
+    std::ranges::sort(selected_indices);
+    if (std::adjacent_find(selected_indices.begin(), selected_indices.end()) !=
+        selected_indices.end()) {
+      // duplicate indices, cannot build a valid interpolant
+      ERROR("Failed to build interpolant: duplicate indices selected.");
+    }
+    interpolant = build_interpolant(selected_indices);
     if (selected_indices.size() == num_observations - 1) {
+      // all points have been selected, the max error is still too large
       break;
     }
   }
@@ -203,23 +209,25 @@ auto interpolant_for_mode(
 template <size_t Dim, typename Frame>
 ModalSpacetimeInterpolator<Dim, Frame>::ModalSpacetimeInterpolator(
     std::variant<std::vector<std::string>, std::string> volume_files_or_glob,
-    std::string subfile_name, std::vector<std::string> tensor_components,
-    const double relative_error, const size_t max_interpolation_order)
+    std::vector<std::string> subfile_names,
+    std::vector<std::string> tensor_components, const double absolute_error)
     : volume_files_or_glob_(std::move(volume_files_or_glob)),
       tensor_components_(std::move(tensor_components)),
-      relative_error_(relative_error),
-      max_interpolation_order_(max_interpolation_order) {
-  if (relative_error_ < 0.0) {
-    ERROR("Relative error tolerance must be non-negative but is "
-          << relative_error_ << ".");
+      absolute_error_(absolute_error) {
+  if (absolute_error < 0.0) {
+    ERROR("Absolute error tolerance must be non-negative but is "
+          << absolute_error_ << ".");
   }
   const auto filenames = resolve_filenames(volume_files_or_glob_);
-  const auto& obs_ids_and_times = load_observation_ids(filenames, subfile_name);
+  const std::string last_subfile_name = subfile_names.back();
+  const auto& obs_ids_and_times =
+      load_observation_ids(filenames, last_subfile_name);
   domain::creators::register_derived_with_charm();
   domain::creators::time_dependence::register_derived_with_charm();
   domain::FunctionsOfTime::register_derived_with_charm();
   const h5::H5File<h5::AccessType::ReadOnly> first_h5file(filenames.front());
-  const auto& first_volfile = first_h5file.get<h5::VolumeData>(subfile_name);
+  const auto& first_volfile =
+      first_h5file.get<h5::VolumeData>(last_subfile_name);
   const size_t reference_obs_id = obs_ids_and_times.back().first;
   auto serialized_domain = first_volfile.get_domain(reference_obs_id);
   domain_ = deserialize<Domain<Dim>>(serialized_domain->data());
@@ -230,8 +238,8 @@ ModalSpacetimeInterpolator<Dim, Frame>::ModalSpacetimeInterpolator(
   } else {
     functions_of_time_.clear();
   }
-  gather_element_metadata(filenames, subfile_name, reference_obs_id);
-  build_interpolators(filenames, subfile_name, obs_ids_and_times);
+  gather_element_metadata(filenames, last_subfile_name, reference_obs_id);
+  build_interpolators(filenames, subfile_names);
 }
 
 template <size_t Dim, typename Frame>
@@ -247,8 +255,16 @@ void ModalSpacetimeInterpolator<Dim, Frame>::gather_element_metadata(
     const auto [element_ids, meshes] =
         load_grids<Dim>(volfile, reference_obs_id);
     for (const auto& element_id : element_ids) {
-      const ElementMetadata element_metadata{meshes.at(element_id), file_index};
-      element_metadata_.emplace(element_id, element_metadata);
+      const auto& mesh = meshes.at(element_id);
+      const size_t number_of_grid_points = mesh.number_of_grid_points();
+      const std::vector<
+          std::optional<boost::math::interpolators::pchip<std::vector<double>>>>
+          modal_interpolants(number_of_grid_points, std::nullopt);
+      const ComponentInterpolator component_interpolator{modal_interpolants};
+      const std::vector<ComponentInterpolator> component_interpolators(
+          tensor_components_.size(), component_interpolator);
+      ElementData element_data{mesh, file_index, component_interpolators};
+      element_data_.emplace(element_id, std::move(element_data));
       element_search_trees_[element_id.block_id()].insert(element_id);
     }
   }
@@ -256,124 +272,158 @@ void ModalSpacetimeInterpolator<Dim, Frame>::gather_element_metadata(
 
 template <size_t Dim, typename Frame>
 void ModalSpacetimeInterpolator<Dim, Frame>::build_interpolators(
-    const std::vector<std::string>& filenames, const std::string& subfile_name,
-    const std::vector<std::pair<size_t, double>>& obs_ids_and_times) {
+    const std::vector<std::string>& filenames,
+    const std::vector<std::string>& subfile_names) {
   // Build a time interpolant for every tensor component / grid point pair by
   // streaming the observations from disk element-by-element.
-  const size_t num_observations = obs_ids_and_times.size();
   const size_t num_components = tensor_components_.size();
-
   const ElementId<Dim> reference_id("[B0,(L2I0,L2I3,L2I3)]");
-  for (const auto& [_, tree] : element_search_trees_) {
-    for (const auto& element_id : tree) {
-      if (element_id != reference_id) {
-        continue;
-      }
-      const auto& metadata = element_metadata_.at(element_id);
-      ElementInterpolator element_interpolator{};
-      element_interpolator.mesh = metadata.mesh;
-      element_interpolator.component_interpolators.resize(num_components);
-      const size_t num_grid_points =
-          element_interpolator.mesh.number_of_grid_points();
+  for (size_t i = 0; i < subfile_names.size(); ++i) {
+    const std::string& subfile_name = subfile_names[i];
+    const auto obs_ids_and_times =
+        load_observation_ids(filenames, subfile_name);
 
-      for (size_t component_index = 0; component_index < num_components;
-           ++component_index) {
-        auto& component_interpolator =
-            element_interpolator.component_interpolators[component_index];
-        const auto per_mode_values = load_component_time_series(
-            metadata, element_id, component_index, filenames, subfile_name,
-            obs_ids_and_times);
-        component_interpolator.modal_interpolants.reserve(num_grid_points);
-        for (size_t mode_index = 0; mode_index < num_grid_points;
-             ++mode_index) {
-          const auto& values = per_mode_values[mode_index];
-          const auto [interpolant, max_error, num_abscissae] =
-              interpolant_for_mode(obs_ids_and_times, values, relative_error_);
-          if (max_error > relative_error_) {
-            Parallel::printf(
-                "For element %s, component %s, mode %zu, could not achieve "
-                "the requested relative error tolerance %.3e; achieved "
-                "maximum error %.3e using all %zu observation points.\n",
-                get_output(element_id).c_str(),
-                tensor_components_[component_index].c_str(), mode_index,
-                relative_error_, max_error, num_observations);
-          } else {
-            Parallel::printf(
-                "For element %s, component %s, mode %zu, achieved "
-                "maximum error %.3e using %zu observation points.\n",
-                get_output(element_id).c_str(),
-                tensor_components_[component_index].c_str(), mode_index,
-                max_error, num_abscissae);
+    for (const auto& [_, tree] : element_search_trees_) {
+      for (const auto& element_id : tree) {
+        // if (element_id != reference_id) {
+        //   continue;
+        // }
+        const auto& element_data = element_data_.at(element_id);
+        const auto& total_mesh = element_data.mesh;
+        const auto& component_interpolators =
+            element_data.component_interpolators;
+
+        for (size_t component_index = 0; component_index < num_components;
+             ++component_index) {
+          const auto& component_interpolator =
+              component_interpolators[component_index];
+          const auto [per_mode_values, extents] = load_component_time_series(
+              element_data.file_index, element_id, component_index, filenames,
+              subfile_name, obs_ids_and_times);
+          const size_t num_grid_points = per_mode_values.size();
+          ASSERT(num_grid_points == extents.product(),
+                 "Number of grid points does not match extents.");
+          for (size_t mode_index = 0; mode_index < num_grid_points;
+               ++mode_index) {
+            const auto full_index = expanded_index<Dim>(mode_index, extents);
+            const auto collapsed_total_index =
+                collapsed_index<Dim>(full_index, total_mesh.extents());
+            if (component_interpolator.modal_interpolants
+                    .at(collapsed_total_index)
+                    .has_value()) {
+              continue;
+            }
+            const auto& values = per_mode_values[mode_index];
+            const auto [interpolant, max_error, num_abscissae] =
+                interpolant_for_mode(obs_ids_and_times, values,
+                                     absolute_error_);
+            const auto full_index_str = get_output(full_index);
+            if (max_error > absolute_error_) {
+              Parallel::printf(
+                  "For element %s, component %s, mode %s, could not achieve "
+                  "the requested relative error tolerance %.3e; achieved "
+                  "maximum error %.3e using %zu observation points.\n",
+                  get_output(element_id).c_str(),
+                  tensor_components_[component_index].c_str(),
+                  full_index_str.c_str(), absolute_error_, max_error,
+                  num_abscissae);
+            } else {
+              Parallel::printf(
+                  "For element %s, component %s, mode %s, achieved "
+                  "maximum error %.3e using %zu observation points.\n",
+                  get_output(element_id).c_str(),
+                  tensor_components_[component_index].c_str(),
+                  full_index_str.c_str(), max_error, num_abscissae);
+            }
+            element_data_.at(element_id)
+                .component_interpolators[component_index]
+                .modal_interpolants[collapsed_total_index] =
+                std::move(interpolant);
           }
-          component_interpolator.modal_interpolants.push_back(interpolant);
         }
+        Parallel::printf(
+            "Constructed interpolator for element %s with %zu tensor "
+            "components.\n",
+            get_output(element_id).c_str(), num_components);
       }
-      Parallel::printf(
-          "Constructed interpolator for element %s with %zu tensor components "
-          "and %zu grid points per component.\n",
-          get_output(element_id).c_str(), num_components, num_grid_points);
-      interpolators_.emplace(element_id, std::move(element_interpolator));
     }
   }
 }
 
 template <size_t Dim, typename Frame>
-std::vector<std::vector<double>>
+std::pair<std::vector<std::vector<double>>, Index<Dim>>
 ModalSpacetimeInterpolator<Dim, Frame>::load_component_time_series(
-    const ElementMetadata& metadata, const ElementId<Dim>& element_id,
+    const size_t file_index, const ElementId<Dim>& element_id,
     const size_t component_index, const std::vector<std::string>& filenames,
     const std::string& subfile_name,
     const std::vector<std::pair<size_t, double>>& obs_ids_and_times) const {
-  const size_t num_grid_points = metadata.mesh.number_of_grid_points();
-  const size_t file_index = metadata.file_index;
   const size_t num_observations = obs_ids_and_times.size();
   // Every row is a modal coefficient, every column corresponds to an
   // observation.
-  std::vector<std::vector<double>> per_mode_values(
-      num_grid_points, std::vector<double>(num_observations, 0.0));
 
   const std::string element_name = get_output(element_id);
   h5::H5File<h5::AccessType::ReadOnly> element_file(filenames[file_index]);
   const auto& element_volfile = element_file.get<h5::VolumeData>(subfile_name);
-  DataVector nodal_values(num_grid_points, 0.0);
+  const auto first_obs_id = obs_ids_and_times.front().first;
+  const auto all_grid_names_first_obs =
+      element_volfile.get_grid_names(first_obs_id);
+  const auto all_extents_first_obs = element_volfile.get_extents(first_obs_id);
+  const auto all_bases_first_obs = element_volfile.get_bases(first_obs_id);
+  const auto all_quadratures_first_obs =
+      element_volfile.get_quadratures(first_obs_id);
+  const auto mesh_first_obs = h5::mesh_for_grid<Dim>(
+      element_name, all_grid_names_first_obs, all_extents_first_obs,
+      all_bases_first_obs, all_quadratures_first_obs);
+  const size_t num_grid_points = mesh_first_obs.number_of_grid_points();
+  std::vector<std::vector<double>> per_mode_values(
+      num_grid_points, std::vector<double>(num_observations, 0.0));
   for (size_t obs_index = 0; obs_index < num_observations; ++obs_index) {
     const size_t obs_id = obs_ids_and_times[obs_index].first;
-    const auto grid_names = element_volfile.get_grid_names(obs_id);
+    const auto all_grid_names = element_volfile.get_grid_names(obs_id);
+    const auto all_extents = element_volfile.get_extents(obs_id);
+    const auto all_bases = element_volfile.get_bases(obs_id);
+    const auto all_quadratures = element_volfile.get_quadratures(obs_id);
+    const auto mesh = h5::mesh_for_grid<Dim>(
+        element_name, all_grid_names, all_extents, all_bases, all_quadratures);
+    const auto [offset, length] = h5::offset_and_length_for_grid(
+        element_name, all_grid_names, all_extents);
     ASSERT(
-        std::find(grid_names.begin(), grid_names.end(), element_name) !=
-            grid_names.end(),
+        std::find(all_grid_names.begin(), all_grid_names.end(), element_name) !=
+            all_grid_names.end(),
         "Element "
             << element_id << " is not present in file index " << file_index
             << " for observation " << obs_id
             << ". Each element is expected to reside in the same volume file "
                "for all observations.");
-    const auto extents = element_volfile.get_extents(obs_id);
-    const auto [offset, length] =
-        h5::offset_and_length_for_grid(element_name, grid_names, extents);
+
+    if (mesh != mesh_first_obs) {
+      ERROR("Element " << element_id
+                       << " has inconsistent mesh between observations. AMR is "
+                          "not yet supported");
+    }
     const auto component_data =
         element_volfile
             .get_tensor_component(obs_id, tensor_components_[component_index])
             .data;
+    DataVector modal_data(num_grid_points, 0.0);
     if (std::holds_alternative<DataVector>(component_data)) {
       const auto& data = std::get<DataVector>(component_data);
       const double* element_data =
           data.data() + static_cast<std::ptrdiff_t>(offset);
       for (size_t i = 0; i < num_grid_points; ++i) {
-        nodal_values[i] = element_data[i];
+        modal_data[i] = element_data[i];
       }
     } else {
       const auto& data = std::get<std::vector<float>>(component_data);
       for (size_t i = 0; i < num_grid_points; ++i) {
-        nodal_values[i] = static_cast<double>(data[offset + i]);
+        modal_data[i] = static_cast<double>(data[offset + i]);
       }
     }
-    const ModalVector modal_coefficients =
-        to_modal_coefficients<Dim>(nodal_values, metadata.mesh);
     for (size_t mode = 0; mode < num_grid_points; ++mode) {
-      per_mode_values[mode][obs_index] = modal_coefficients[mode];
+      per_mode_values[mode][obs_index] = modal_data[mode];
     }
   }
-  return per_mode_values;
+  return std::make_pair(per_mode_values, mesh_first_obs.extents());
 }
 
 template <size_t Dim, typename Frame>
@@ -382,7 +432,7 @@ void ModalSpacetimeInterpolator<Dim, Frame>::interpolate_to_point(
     const tnsr::I<double, Dim, Frame>& target_point, const double time,
     const std::optional<gsl::not_null<std::vector<size_t>*>> block_order)
     const {
-  if (UNLIKELY(interpolators_.empty())) {
+  if (UNLIKELY(element_data_.empty())) {
     ERROR("ModalSpacetimeInterpolator has not been initialized.");
   }
   if (UNLIKELY(time < time_bounds_[0] || time > time_bounds_[1])) {
@@ -409,17 +459,14 @@ void ModalSpacetimeInterpolator<Dim, Frame>::interpolate_to_point(
   const auto& element_id = element_coords->first;
   const auto& logical_coords = element_coords->second;
 
-  const auto element_it = interpolators_.find(element_id);
-  if (UNLIKELY(element_it == interpolators_.end())) {
+  if (not element_data_.contains(element_id)) {
     ERROR("No interpolator data found for element " << element_id << ".");
   }
 
-  const auto& element_interpolator = element_it->second;
-  const Mesh<Dim>& mesh = element_interpolator.mesh;
-  const auto& component_interpolators =
-      element_interpolator.component_interpolators;
+  const auto& element_data = element_data_.at(element_id);
+  const auto& component_interpolators = element_data.component_interpolators;
+  const Mesh<Dim>& mesh = element_data.mesh;
   const size_t num_components = component_interpolators.size();
-
   if (UNLIKELY(num_components != tensor_components_.size())) {
     ERROR("Inconsistent number of tensor components stored in interpolator.");
   }
@@ -441,7 +488,14 @@ void ModalSpacetimeInterpolator<Dim, Frame>::interpolate_to_point(
     }
     for (size_t point = 0; point < num_grid_points; ++point) {
       modal_values[point] =
-          component_interpolator.modal_interpolants[point](time);
+          component_interpolator.modal_interpolants[point].value()(time);
+      if (point == 0) {
+        Parallel::printf(
+            "Time interpolation for component %s, element %s, point %zu: value "
+            "%.16e\n",
+            tensor_components_[component_index].c_str(),
+            get_output(element_id).c_str(), point, modal_values[point]);
+      }
     }
     to_nodal_coefficients<Dim>(make_not_null(&nodal_values), modal_values,
                                mesh);
@@ -460,7 +514,7 @@ void ModalSpacetimeInterpolator<Dim, Frame>::interpolate_to_point(
 #define INSTANTIATE(_, data) \
   template class ModalSpacetimeInterpolator<DIM(data), FRAME(data)>;
 
-GENERATE_INSTANTIATIONS(INSTANTIATE, (1, 2, 3), (Frame::Inertial))
+GENERATE_INSTANTIATIONS(INSTANTIATE, (3), (Frame::Inertial))
 
 #undef INSTANTIATE
 #undef DIM

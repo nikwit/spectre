@@ -46,8 +46,8 @@ class ModalSpacetimeInterpolator {
 
   ModalSpacetimeInterpolator(
       std::variant<std::vector<std::string>, std::string> volume_files_or_glob,
-      std::string subfile_name, std::vector<std::string> tensor_components,
-      double relative_error, size_t max_interpolation_order = 8);
+      std::vector<std::string> subfile_names,
+      std::vector<std::string> tensor_components, double absolute_error);
 
   void interpolate_to_point(gsl::not_null<std::vector<double>*> result,
                             const tnsr::I<double, Dim, Frame>& target_point,
@@ -56,30 +56,26 @@ class ModalSpacetimeInterpolator {
                                 block_order = std::nullopt) const;
 
  private:
-  struct ElementMetadata {
-    Mesh<Dim> mesh{};
-    size_t file_index{};
-  };
-
   struct ComponentInterpolator {
-    std::vector<boost::math::interpolators::pchip<std::vector<double>>>
+    std::vector<
+        std::optional<boost::math::interpolators::pchip<std::vector<double>>>>
         modal_interpolants;
   };
 
-  struct ElementInterpolator {
+  struct ElementData {
     Mesh<Dim> mesh{};
+    size_t file_index{};
     std::vector<ComponentInterpolator> component_interpolators{};
   };
 
   void gather_element_metadata(const std::vector<std::string>& filenames,
                                const std::string& subfile_name,
                                size_t reference_obs_id);
-  void build_interpolators(
-      const std::vector<std::string>& filenames,
-      const std::string& subfile_name,
-      const std::vector<std::pair<size_t, double>>& obs_id_and_times);
-  std::vector<std::vector<double>> load_component_time_series(
-      const ElementMetadata& metadata, const ElementId<Dim>& element_id,
+  void build_interpolators(const std::vector<std::string>& filenames,
+                           const std::vector<std::string>& subfile_names);
+  std::pair<std::vector<std::vector<double>>, Index<Dim>>
+  load_component_time_series(
+      size_t file_index, const ElementId<Dim>& element_id,
       size_t component_index, const std::vector<std::string>& filenames,
       const std::string& subfile_name,
       const std::vector<std::pair<size_t, double>>& obs_id_and_times) const;
@@ -87,8 +83,7 @@ class ModalSpacetimeInterpolator {
   std::variant<std::vector<std::string>, std::string> volume_files_or_glob_;
   std::vector<std::string> tensor_components_;
 
-  double relative_error_ = 0.0;
-  size_t max_interpolation_order_ = 12;
+  double absolute_error_ = 0.0;
   std::array<double, 2> time_bounds_{
       {std::numeric_limits<double>::signaling_NaN(),
        std::numeric_limits<double>::signaling_NaN()}};
@@ -96,9 +91,7 @@ class ModalSpacetimeInterpolator {
   Domain<Dim> domain_{};
   domain::FunctionsOfTimeMap functions_of_time_{};
   std::map<size_t, domain::ElementSearchTree<Dim>> element_search_trees_;
-  std::unordered_map<ElementId<Dim>, ElementMetadata> element_metadata_;
-  std::vector<std::unordered_set<size_t>> file_observation_ids_;
-  std::unordered_map<ElementId<Dim>, ElementInterpolator> interpolators_;
+  std::unordered_map<ElementId<Dim>, ElementData> element_data_;
 };
 
 }  // namespace spectre::Exporter

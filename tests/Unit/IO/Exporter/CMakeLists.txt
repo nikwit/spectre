@@ -19,6 +19,7 @@ target_link_libraries(
   Exporter
   H5
   Informer
+  Interpolation
   Serialization
   Spectral
   Utilities
