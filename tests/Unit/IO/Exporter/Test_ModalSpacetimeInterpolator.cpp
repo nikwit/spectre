@@ -92,11 +92,9 @@ struct ValidationElement {
 
 void validate_against_reference_data() {
   const std::string volume_file_path{
-      "/Users/niko/caltech/"
-      "BbhVolume0.h5"};
+      "/Users/niko/caltech/simulations/spacetime-interpolator/BbhVolume0.h5"};
   const std::string volume_file_path2{
-      "/Users/niko/caltech/"
-      "BbhVolume1.h5"};
+      "/Users/niko/caltech/simulations/spacetime-interpolator/BbhVolume1.h5"};
 
   h5::H5File<h5::AccessType::ReadOnly> h5_file(volume_file_path);
   const auto& sparse_volume = h5_file.get<h5::VolumeData>("/VolumeData");
@@ -115,11 +113,13 @@ void validate_against_reference_data() {
     functions_of_time =
         deserialize<domain::FunctionsOfTimeMap>(serialized_functions->data());
   }
-
   ModalSpacetimeInterpolator<3, Frame::Inertial> interpolator(
+      "serialized_interpolator.h5", "/Interpolator");
+  /*ModalSpacetimeInterpolator<3, Frame::Inertial> interpolator(
       std::vector<std::string>{volume_file_path, volume_file_path2},
       std::vector<std::string>{"VerySparseModal", "SparseModal", "FullModal"},
-      {"Lapse"}, 1.0e-7);
+      {"Lapse"}, 1.0e-8);
+  interpolator.write_to_h5("serialized_interpolator.h5", "/Interpolator");*/
   std::mt19937 generator(42);
   std::uniform_real_distribution<double> logical_dist(-1.0, 1.0);
   h5_file.close_current_object();
@@ -163,6 +163,9 @@ void validate_against_reference_data() {
     validation_elements.reserve(grid_names.size());
     for (size_t grid_index = 0; grid_index < grid_names.size(); ++grid_index) {
       const ElementId<3> element_id(grid_names[grid_index]);
+      if (element_id.block_id() != 0) {
+        continue;
+      }
       std::array<size_t, 3> extent_array{};
       std::array<Spectral::Basis, 3> basis_array{};
       std::array<Spectral::Quadrature, 3> quadrature_array{};

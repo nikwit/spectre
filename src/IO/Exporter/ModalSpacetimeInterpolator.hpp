@@ -49,6 +49,12 @@ class ModalSpacetimeInterpolator {
       std::vector<std::string> subfile_names,
       std::vector<std::string> tensor_components, double absolute_error);
 
+  ModalSpacetimeInterpolator(const std::string& h5_filename,
+                             const std::string& group_path);
+
+  void write_to_h5(const std::string& h5_filename,
+                   const std::string& group_path) const;
+
   void interpolate_to_point(gsl::not_null<std::vector<double>*> result,
                             const tnsr::I<double, Dim, Frame>& target_point,
                             double time,
@@ -56,10 +62,15 @@ class ModalSpacetimeInterpolator {
                                 block_order = std::nullopt) const;
 
  private:
+  struct ModeInterpolator {
+    std::optional<boost::math::interpolators::pchip<std::vector<double>>>
+        interpolant{};
+    std::vector<double> times{};
+    std::vector<double> values{};
+  };
+
   struct ComponentInterpolator {
-    std::vector<
-        std::optional<boost::math::interpolators::pchip<std::vector<double>>>>
-        modal_interpolants;
+    std::vector<ModeInterpolator> modal_interpolants{};
   };
 
   struct ElementData {
