@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -37,6 +38,8 @@
 #include "IO/H5/Wrappers.hpp"
 #include "NumericalAlgorithms/Interpolation/IrregularInterpolant.hpp"
 #include "NumericalAlgorithms/LinearOperators/CoefficientTransforms.hpp"
+#include "NumericalAlgorithms/Spectral/Chebyshev.hpp"
+#include "NumericalAlgorithms/Spectral/Legendre.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "Parallel//Printf/Printf.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
@@ -92,7 +95,7 @@ std::vector<std::pair<size_t, double>> load_observation_ids(
                       return lhs.second < rhs.second;
                     });
 
-  const double cutoff_time = 0.0;
+  const double cutoff_time = 500.0;
   obs_ids_and_times.erase(
       std::remove_if(obs_ids_and_times.begin(), obs_ids_and_times.end(),
                      [cutoff_time](const auto& id_and_time) {
@@ -474,7 +477,6 @@ void ModalSpacetimeInterpolator<Dim, Frame>::build_interpolators(
   // Build a time interpolant for every tensor component / grid point pair by
   // streaming the observations from disk element-by-element.
   const size_t num_components = tensor_components_.size();
-  const ElementId<Dim> reference_id("[B0,(L2I0,L2I3,L2I3)]");
   for (size_t i = 0; i < subfile_names.size(); ++i) {
     const std::string& subfile_name = subfile_names[i];
     const auto obs_ids_and_times =
@@ -793,10 +795,30 @@ void ModalSpacetimeInterpolator<Dim, Frame>::interpolate_to_point(
     ERROR("Inconsistent number of tensor components stored in interpolator.");
   }
 
-  const intrp::Irregular<Dim> spatial_interpolant(mesh, logical_coords);
+  const auto basis_array = mesh.basis();
+  Spectral::Basis representative_basis = Spectral::Basis::Uninitialized;
+  if constexpr (Dim > 0) {
+    representative_basis = basis_array[0];
+  }
+  const bool homogeneous_basis =
+      std::all_of(basis_array.begin(), basis_array.end(),
+                  [representative_basis](const Spectral::Basis basis_value) {
+                    return basis_value == representative_basis;
+                  });
+  const bool use_chebyshev =
+      homogeneous_basis and representative_basis == Spectral::Basis::Chebyshev;
+  const bool use_legendre =
+      homogeneous_basis and representative_basis == Spectral::Basis::Legendre;
+  const bool use_direct_series = use_chebyshev or use_legendre;
+
   const size_t num_grid_points = mesh.number_of_grid_points();
   ModalVector modal_values(num_grid_points);
-  DataVector nodal_values(num_grid_points);
+  DataVector nodal_values{};
+  std::optional<intrp::Irregular<Dim>> spatial_interpolant{};
+  if (not use_direct_series) {
+    nodal_values.destructive_resize(num_grid_points);
+    spatial_interpolant.emplace(mesh, logical_coords);
+  }
 
   result->resize(num_components);
   for (size_t component_index = 0; component_index < num_components;
@@ -816,20 +838,25 @@ void ModalSpacetimeInterpolator<Dim, Frame>::interpolate_to_point(
               << element_id << " at grid point " << point << ".");
       }
       modal_values[point] = mode_data.interpolant.value()(time);
-      if (point == 0) {
-        Parallel::printf(
-            "Time interpolation for component %s, element %s, point %zu: value "
-            "%.16e\n",
-            tensor_components_[component_index].c_str(),
-            get_output(element_id).c_str(), point, modal_values[point]);
-      }
     }
+    if (use_chebyshev) {
+      (*result)[component_index] = Spectral::evaluate_chebyshev_series<Dim>(
+          modal_values, mesh, logical_coords);
+      continue;
+    }
+    if (use_legendre) {
+      (*result)[component_index] = Spectral::evaluate_legendre_series<Dim>(
+          modal_values, mesh, logical_coords);
+      continue;
+    }
+    ASSERT(spatial_interpolant.has_value(),
+           "Irregular interpolant must exist when not evaluating directly.");
     to_nodal_coefficients<Dim>(make_not_null(&nodal_values), modal_values,
                                mesh);
     const gsl::span<const double> input_span(nodal_values.data(),
                                              nodal_values.size());
     gsl::span<double> output_span(&(*result)[component_index], 1);
-    spatial_interpolant.interpolate(make_not_null(&output_span), input_span);
+    spatial_interpolant->interpolate(make_not_null(&output_span), input_span);
   }
 }
 

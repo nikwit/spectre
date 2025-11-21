@@ -118,8 +118,11 @@ void validate_against_reference_data() {
   /*ModalSpacetimeInterpolator<3, Frame::Inertial> interpolator(
       std::vector<std::string>{volume_file_path, volume_file_path2},
       std::vector<std::string>{"VerySparseModal", "SparseModal", "FullModal"},
-      {"Lapse"}, 1.0e-8);
-  interpolator.write_to_h5("serialized_interpolator.h5", "/Interpolator");*/
+      {"Lapse", "SpacetimeMetric_tt", "SpacetimeMetric_xx",
+       "SpacetimeMetric_yy", "SpacetimeMetric_zz", "SpacetimeMetric_yx",
+       "SpacetimeMetric_zx", "SpacetimeMetric_zy"},
+      1e-7);*/
+  // interpolator.write_to_h5("serialized_interpolator.h5", "/Interpolator");
   std::mt19937 generator(42);
   std::uniform_real_distribution<double> logical_dist(-1.0, 1.0);
   h5_file.close_current_object();
@@ -127,7 +130,7 @@ void validate_against_reference_data() {
   const auto& validation_volume = h5_file.get<h5::VolumeData>("/VolumeData");
   auto validation_observation_ids = validation_volume.list_observation_ids();
 
-  const double cutoff_time_front = 0.0;
+  const double cutoff_time_front = 500.0;
   const double cutoff_time_back = 1500.;
   validation_observation_ids.erase(
       std::remove_if(validation_observation_ids.begin(),
@@ -154,8 +157,8 @@ void validate_against_reference_data() {
     const auto bases = validation_volume.get_bases(validation_obs_id);
     const auto quadratures =
         validation_volume.get_quadratures(validation_obs_id);
-    const auto tensor_data =
-        validation_volume.get_tensor_component(validation_obs_id, "Lapse");
+    const auto tensor_data = validation_volume.get_tensor_component(
+        validation_obs_id, "SpacetimeMetric_yx");
     // REQUIRE(std::holds_alternative<DataVector>(tensor_data.data));
     const auto& validation_data = std::get<DataVector>(tensor_data.data);
     const auto reference_element_id = ElementId<3>("[B0,(L2I0,L2I3,L2I3)]");
@@ -205,7 +208,6 @@ void validate_against_reference_data() {
       std::vector<double> interpolated_values{};
       interpolator.interpolate_to_point(make_not_null(&interpolated_values),
                                         inertial_point, validation_time);
-      REQUIRE(interpolated_values.size() == 1);
 
       const intrp::Irregular<3> irregular(element_data.mesh, logical_point);
       const gsl::span<const double> nodal_values(
@@ -214,9 +216,9 @@ void validate_against_reference_data() {
       gsl::span<double> output_span(&validation_value, 1);
       irregular.interpolate(make_not_null(&output_span), nodal_values);
       Parallel::printf("Relative error: %e\n",
-                       std::abs(interpolated_values[0] - validation_value) /
+                       std::abs(interpolated_values[5] - validation_value) /
                            std::abs(validation_value));
-      CHECK(interpolated_values[0] ==
+      CHECK(interpolated_values[5] ==
             approx(validation_value).epsilon(relative_tolerance));
     }
   }

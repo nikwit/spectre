@@ -9,12 +9,14 @@ set(LIBRARY_SOURCES
   BasisFunctions/Test_Fourier.cpp
   Test_Basis.cpp
   Test_Cartoon.cpp
+  Test_Chebyshev.cpp
   Test_ChebyshevGauss.cpp
   Test_ChebyshevGaussLobatto.cpp
   Test_Clenshaw.cpp
   Test_Filtering.cpp
   Test_FiniteDifference.cpp
   Test_IndefiniteIntegral.cpp
+  Test_Legendre.cpp
   Test_LegendreGauss.cpp
   Test_LegendreGaussLobatto.cpp
   Test_LogicalCoordinates.cpp

@@ -45,6 +45,7 @@ spectre_target_headers(
   BoundaryInterpolationMatrices.hpp
   BoundaryInterpolationTerm.hpp
   BoundaryLiftingTerm.hpp
+  Chebyshev.hpp
   Clenshaw.hpp
   CollocationPoints.hpp
   CollocationPointsAndWeights.hpp
@@ -54,6 +55,7 @@ spectre_target_headers(
   IntegrationMatrix.hpp
   InterpolationMatrix.hpp
   InverseWeightFunctionValues.hpp
+  Legendre.hpp
   LinearFilteringMatrix.hpp
   LogicalCoordinates.hpp
   MaximumNumberOfPoints.hpp

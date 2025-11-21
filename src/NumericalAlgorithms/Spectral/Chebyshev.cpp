@@ -4,17 +4,25 @@
 #include <cmath>
 #include <cstddef>
 #include <utility>
+#include <vector>
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Matrix.hpp"
+#include "DataStructures/ModalVector.hpp"
+#include "DataStructures/Tensor/Tensor.hpp"
+#include "DataStructures/Tensor/TypeAliases.hpp"
 #include "NumericalAlgorithms/Spectral/Basis.hpp"
 #include "NumericalAlgorithms/Spectral/BasisFunctionNormalizationSquare.hpp"
 #include "NumericalAlgorithms/Spectral/BasisFunctionValue.hpp"
+#include "NumericalAlgorithms/Spectral/Chebyshev.hpp"
+#include "NumericalAlgorithms/Spectral/Clenshaw.hpp"
 #include "NumericalAlgorithms/Spectral/CollocationPointsAndWeights.hpp"
 #include "NumericalAlgorithms/Spectral/InverseWeightFunctionValues.hpp"
+#include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "Utilities/ConstantExpressions.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
+#include "Utilities/GenerateInstantiations.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/MakeWithValue.hpp"
 
@@ -149,4 +157,68 @@ Matrix spectral_indefinite_integral_matrix<Basis::Chebyshev>(
   return constant * indef_int;
 }
 
+namespace {
+double evaluate_chebyshev_segment(gsl::span<const double> coefficients,
+                                  const double x) {
+  if (coefficients.empty()) {
+    return 0.0;
+  }
+  double y_upper = 0.0;
+  double y_lower = 0.0;
+  for (size_t k = coefficients.size(); k > 1; --k) {
+    const double coefficient = gsl::at(coefficients, k - 1);
+    const double new_y_lower = coefficient + 2.0 * x * y_lower - y_upper;
+    y_upper = y_lower;
+    y_lower = new_y_lower;
+  }
+  return gsl::at(coefficients, 0) + x * y_lower - y_upper;
+}
+}  // namespace
+
+template <size_t Dim>
+double evaluate_chebyshev_series(
+    const ModalVector& coefficients, const Mesh<Dim>& mesh,
+    const tnsr::I<double, Dim, Frame::ElementLogical>& logical_coords) {
+  ASSERT(mesh.number_of_grid_points() == coefficients.size(),
+         "Mesh and coefficient sizes do not match: mesh has "
+             << mesh.number_of_grid_points() << " points but coefficients hold "
+             << coefficients.size() << " entries.");
+  const auto& extents = mesh.extents();
+  for (size_t d = 0; d < Dim; ++d) {
+    ASSERT(mesh.basis(d) == Basis::Chebyshev,
+           "evaluate_chebyshev_series only supports Chebyshev bases. Found "
+               << mesh.basis(d) << " in dimension " << d << ".");
+  }
+  std::vector<double> working(coefficients.begin(), coefficients.end());
+  size_t current_size = working.size();
+  for (size_t dim = 0; dim < Dim; ++dim) {
+    const size_t extent = extents[dim];
+    ASSERT(extent > 0, "Mesh extent must be non-zero.");
+    const size_t num_slices = current_size / extent;
+    const double x_dim = logical_coords.get(dim);
+    for (size_t slice = 0; slice < num_slices; ++slice) {
+      const gsl::span<const double> slice_view(working.data() + slice * extent,
+                                               extent);
+      working[slice] = evaluate_chebyshev_segment(slice_view, x_dim);
+    }
+    current_size = num_slices;
+  }
+  ASSERT(current_size == 1,
+         "After evaluating all dimensions there should be a single value.");
+  return working.front();
+}
+
 }  // namespace Spectral
+
+#define DIM(data) BOOST_PP_TUPLE_ELEM(0, data)
+
+#define INSTANTIATE(_, data)                                        \
+  template double Spectral::evaluate_chebyshev_series<DIM(data)>(   \
+      const ModalVector& coefficients, const Mesh<DIM(data)>& mesh, \
+      const tnsr::I<double, DIM(data), Frame::ElementLogical>&      \
+          logical_coords);
+
+GENERATE_INSTANTIATIONS(INSTANTIATE, (1, 2, 3))
+
+#undef INSTANTIATE
+#undef DIM
