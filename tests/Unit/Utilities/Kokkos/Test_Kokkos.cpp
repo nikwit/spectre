@@ -1,6 +1,8 @@
 // Distributed under the MIT License.
 // See LICENSE.txt for details.
 
+#include <iostream>
+
 #include "Framework/TestingFramework.hpp"
 
 #include "Utilities/Kokkos/KokkosCore.hpp"

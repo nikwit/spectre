@@ -91,10 +91,7 @@ class Index {
     for (size_t i = d + 1; i < Dim; ++i) {
       gsl::at(t, i - 1) = gsl::at(indices_, i);
     }
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 13
-#pragma GCC diagnostic pop
-#endif  // defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 13
-    return Index<Dim - 1>(t);
+    return Index<Dim - 1>{t};
   }
 
   /// \cond
