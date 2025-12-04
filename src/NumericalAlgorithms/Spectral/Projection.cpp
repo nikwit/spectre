@@ -433,7 +433,7 @@ const Matrix& projection_matrix_parent_to_child(const Mesh<1>& parent_mesh,
                                              Quadrature::GaussLobatto>,
                             CacheRange<2_st, max_points_l + 1>>(
               make_interpolators([](const DataVector& x) {
-                return DataVector(0.5 * (x + 1.));
+                return DataVector{0.5 * (x + 1.)};
               }));
       return cache(child_mesh.quadrature(0), child_mesh.extents(0),
                    parent_mesh.quadrature(0), parent_mesh.extents(0));
@@ -448,7 +448,7 @@ const Matrix& projection_matrix_parent_to_child(const Mesh<1>& parent_mesh,
                                              Quadrature::GaussLobatto>,
                             CacheRange<2_st, max_points_l + 1>>(
               make_interpolators([](const DataVector& x) {
-                return DataVector(0.5 * (x - 1.));
+                return DataVector{0.5 * (x - 1.)};
               }));
       return cache(child_mesh.quadrature(0), child_mesh.extents(0),
                    parent_mesh.quadrature(0), parent_mesh.extents(0));
