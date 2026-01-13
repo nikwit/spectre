@@ -23,6 +23,7 @@ spectre_target_sources(
   ProjectionOperators.cpp
   Psi4.cpp
   Psi4Real.cpp
+  CubicCurvatureScalars.cpp
   QuadraticCurvatureScalars.cpp
   Ricci.cpp
   Shift.cpp
@@ -61,6 +62,7 @@ spectre_target_headers(
   Ricci.hpp
   Psi4.hpp
   Psi4Real.hpp
+  CubicCurvatureScalars.hpp
   QuadraticCurvatureScalars.hpp
   Shift.hpp
   SpacetimeDerivativeOfGothG.hpp

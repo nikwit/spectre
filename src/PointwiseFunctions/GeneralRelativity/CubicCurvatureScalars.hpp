@@ -65,7 +65,8 @@ Scalar<DataType> cubic_invariant_imag(
 
 }  // namespace gr
 
-namespace gr::Tags {
+namespace gr {
+namespace Tags {
 // Simple and compute tags for cubic invariants
 template <typename DataType>
 struct CubicInvariantReal : db::SimpleTag {
@@ -108,4 +109,5 @@ struct CubicInvariantImagCompute : CubicInvariantImag<DataType>,
       &gr::cubic_invariant_imag<DataType, Dim, Frame>);
   using base = CubicInvariantImag<DataType>;
 };
-}  // namespace gr::Tags
+}  // namespace Tags
+}  // namespace gr

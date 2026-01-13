@@ -60,8 +60,8 @@ void test_curvature_scalars_schwarzschild() {
                                       theta, mass);
 
   const DataVector a = mass / (r * r * r);
-  tnsr::ii<DataVector, 3, Frame::Inertial> electric_weyl(num_points, 0.0);
-  const tnsr::ii<DataVector, 3, Frame::Inertial> magnetic_weyl(num_points, 0.0);
+  tnsr::ii<DataVector, 3, Frame::Inertial> electric_weyl(num_points, 0.0),
+      magnetic_weyl(num_points, 0.0);
   electric_weyl.get(0, 0) = -2.0 * a * spatial_metric.get(0, 0);
   electric_weyl.get(1, 1) = a * spatial_metric.get(1, 1);
   electric_weyl.get(2, 2) = a * spatial_metric.get(2, 2);
@@ -76,9 +76,9 @@ void test_curvature_scalars_schwarzschild() {
       electric_weyl_scalar, magnetic_weyl_scalar);
   CHECK_ITERABLE_APPROX(gauss_bonnet.get(), 48.0 * a * a);
 
-  const auto pontryagin = gr::pontryagin_scalar_in_vacuum<Frame::Inertial>(
+  const auto Pontryagin = gr::pontryagin_scalar_in_vacuum<Frame::Inertial>(
       electric_weyl, magnetic_weyl, inverse_spatial_metric);
-  CHECK_ITERABLE_APPROX(pontryagin.get(), DataVector(num_points, 0.0));
+  CHECK_ITERABLE_APPROX(Pontryagin.get(), DataVector(num_points, 0.0));
 
   const auto cubic_invariant_real = gr::cubic_invariant_real(
       electric_weyl, magnetic_weyl, inverse_spatial_metric);
