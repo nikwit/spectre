@@ -80,6 +80,7 @@ Scalar<DataVector> gauss_bonnet_scalar_in_vacuum(
 
 }  // namespace gr
 
+<<<<<<< HEAD
 namespace gr::Tags {
 /// @{
 /*!
@@ -87,6 +88,11 @@ namespace gr::Tags {
  *
  * The tags are tested in Test_CurvatureScalarComputeTags.cpp
  */
+=======
+namespace gr {
+namespace Tags {
+// Simple and compute tags for Pontryagin (vacuum)
+>>>>>>> 2b2736099c (Add compute tags for quadratic curvature scalars)
 template <typename DataType>
 struct PontryaginScalar : db::SimpleTag {
   using type = Scalar<DataType>;
@@ -100,12 +106,18 @@ struct PontryaginScalarCompute : PontryaginScalar<DataType>, db::ComputeTag {
                  gr::Tags::InverseSpatialMetric<DataType, Dim, Frame>>;
   using return_type = Scalar<DataType>;
   static constexpr auto function = static_cast<void (*)(
+<<<<<<< HEAD
       gsl::not_null<Scalar<DataType>*>, const tnsr::ii<DataType, Dim, Frame>&,
+=======
+      gsl::not_null<Scalar<DataType>*>,
+      const tnsr::ii<DataType, Dim, Frame>&,
+>>>>>>> 2b2736099c (Add compute tags for quadratic curvature scalars)
       const tnsr::ii<DataType, Dim, Frame>&,
       const tnsr::II<DataType, Dim, Frame>&)>(
       &gr::pontryagin_scalar_in_vacuum<Frame>);
   using base = PontryaginScalar<DataType>;
 };
+<<<<<<< HEAD
 /// @{
 
 /// @{
@@ -114,6 +126,10 @@ struct PontryaginScalarCompute : PontryaginScalar<DataType>, db::ComputeTag {
  *
  * The tags are tested in Test_CurvatureScalarComputeTags.cpp
  */
+=======
+
+// Simple and compute tags for Gauss–Bonnet (vacuum)
+>>>>>>> 2b2736099c (Add compute tags for quadratic curvature scalars)
 template <typename DataType>
 struct GaussBonnetScalar : db::SimpleTag {
   using type = Scalar<DataType>;
@@ -121,6 +137,7 @@ struct GaussBonnetScalar : db::SimpleTag {
 
 template <typename DataType>
 struct GaussBonnetScalarCompute : GaussBonnetScalar<DataType>, db::ComputeTag {
+<<<<<<< HEAD
   using argument_tags = tmpl::list<gr::Tags::WeylElectricScalar<DataType>,
                                    gr::Tags::WeylMagneticScalar<DataType>>;
   using return_type = Scalar<DataType>;
@@ -132,3 +149,17 @@ struct GaussBonnetScalarCompute : GaussBonnetScalar<DataType>, db::ComputeTag {
 };
 /// @}
 }  // namespace gr::Tags
+=======
+  using argument_tags =
+      tmpl::list<gr::Tags::WeylElectricScalar<DataType>,
+                 gr::Tags::WeylMagneticScalar<DataType>>;
+  using return_type = Scalar<DataType>;
+  static constexpr auto function = static_cast<void (*)(
+      gsl::not_null<Scalar<DataType>*>, const Scalar<DataType>&,
+      const Scalar<DataType>&)>(
+      &gr::gauss_bonnet_scalar_in_vacuum);
+  using base = GaussBonnetScalar<DataType>;
+};
+}  // namespace Tags
+}  // namespace gr
+>>>>>>> 2b2736099c (Add compute tags for quadratic curvature scalars)
