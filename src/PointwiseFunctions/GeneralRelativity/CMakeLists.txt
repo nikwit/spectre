@@ -38,6 +38,7 @@ spectre_target_sources(
   WeylElectric.cpp
   WeylMagnetic.cpp
   WeylPropagating.cpp
+  WeylScalars.cpp
   WeylTypeD1.cpp
   )
 
@@ -78,6 +79,7 @@ spectre_target_headers(
   WeylElectric.hpp
   WeylMagnetic.hpp
   WeylPropagating.hpp
+  WeylScalars.hpp
   WeylTypeD1.hpp
   )
 
