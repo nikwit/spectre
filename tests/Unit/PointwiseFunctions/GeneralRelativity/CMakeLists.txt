@@ -21,6 +21,7 @@ set(LIBRARY_SOURCES
   Test_WeylElectric.cpp
   Test_WeylMagnetic.cpp
   Test_WeylPropagating.cpp
+  Test_WeylScalars.cpp
   Test_WeylTypeD1.cpp
   Test_CurvatureScalarComputeTags.cpp
   Test_CurvatureScalars.cpp
