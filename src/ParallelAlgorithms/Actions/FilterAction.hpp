@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "DataStructures/DataBox/DataBox.hpp"
+#include "DataStructures/TaggedTuple.hpp"
 #include "Domain/Structure/BlockGroups.hpp"
 #include "Domain/Tags.hpp"
 #include "Evolution/Tags/Filter.hpp"
@@ -25,7 +26,6 @@
 #include "Utilities/Serialization/Serialize.hpp"
 #include "Utilities/StdHelpers.hpp"
 #include "Utilities/TMPL.hpp"
-#include "Utilities/TaggedTuple.hpp"
 #include "Utilities/TypeTraits.hpp"
 
 /// \cond
