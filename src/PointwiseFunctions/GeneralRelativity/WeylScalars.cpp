@@ -21,8 +21,8 @@
 
 namespace gr {
 template <typename Frame>
-void weyl_scalars(gsl::not_null<std::array<Scalar<ComplexDataVector>, 5>*>
-                      weyl_scalars_result,
+void weyl_scalars(
+    gsl::not_null<WeylScalarsResult<Frame>*> weyl_scalars_result,
                   const tnsr::ii<DataVector, 3, Frame>& weyl_electric,
                   const tnsr::ii<DataVector, 3, Frame>& weyl_magnetic,
                   const tnsr::ii<DataVector, 3, Frame>& spatial_metric,
@@ -44,10 +44,10 @@ void weyl_scalars(gsl::not_null<std::array<Scalar<ComplexDataVector>, 5>*>
     const auto& y = get<1>(spatial_normal_vector)[i];
     const auto& z = get<2>(spatial_normal_vector)[i];
     bool y_greater_x = std::abs(y) > std::abs(x);
-    vector1.get(0)[i] = y_greater_x ? 0.0 : 1.0;
-    vector1.get(1)[i] = y_greater_x ? 1.0 : 0.0;
+    vector1.get(0)[i] = y_greater_x ? 1.0 : 0.0;
+    vector1.get(1)[i] = y_greater_x ? 0.0 : 1.0;
     if (std::abs(z) > (y_greater_x ? std::abs(y) : std::abs(x))) {
-      const size_t index_not_set = y_greater_x ? 0 : 1;
+      const size_t index_not_set = y_greater_x ? 1 : 0;
       vector2.get(index_not_set)[i] = 1.0;
     } else {
       vector2.get(2)[i] = 1.0;
@@ -117,35 +117,41 @@ void weyl_scalars(gsl::not_null<std::array<Scalar<ComplexDataVector>, 5>*>
       tenex::evaluate<ti::I>(M_SQRT1_2 * (e1(ti::I) + imag * e2(ti::I)));
   const auto mbar =
       tenex::evaluate<ti::I>(M_SQRT1_2 * (e1(ti::I) - imag * e2(ti::I)));
+  weyl_scalars_result->m = m;
 
-  auto& psi_0 = (*weyl_scalars_result)[0];
+  auto& psi_0 = weyl_scalars_result->scalars[0];
   psi_0 = tenex::evaluate(-electric_minus_magnetic(ti::i, ti::j) * m(ti::I) *
                           m(ti::J));
-  auto& psi_1 = (*weyl_scalars_result)[1];
+  auto& psi_1 = weyl_scalars_result->scalars[1];
   psi_1 = tenex::evaluate(M_SQRT1_2 * electric_minus_magnetic(ti::i, ti::j) *
                           m(ti::I) * e0(ti::J));
-  auto& psi_2 = (*weyl_scalars_result)[2];
+  auto& psi_2 = weyl_scalars_result->scalars[2];
   psi_2 = tenex::evaluate(-0.5 * electric_minus_magnetic(ti::i, ti::j) *
                           e0(ti::I) * e0(ti::J));
-  auto& psi_3 = (*weyl_scalars_result)[3];
+  auto& psi_3 = weyl_scalars_result->scalars[3];
   psi_3 = tenex::evaluate(-M_SQRT1_2 * electric_minus_magnetic(ti::i, ti::j) *
                           mbar(ti::I) * e0(ti::J));
-  auto& psi_4 = (*weyl_scalars_result)[4];
+  auto& psi_4 = weyl_scalars_result->scalars[4];
   psi_4 = tenex::evaluate(-electric_minus_magnetic(ti::i, ti::j) * mbar(ti::I) *
                           mbar(ti::J));
 }
 
 template <typename Frame>
-std::array<Scalar<ComplexDataVector>, 5> weyl_scalars(
+WeylScalarsResult<Frame> weyl_scalars(
     const tnsr::ii<DataVector, 3, Frame>& weyl_electric,
     const tnsr::ii<DataVector, 3, Frame>& weyl_magnetic,
     const tnsr::ii<DataVector, 3, Frame>& spatial_metric,
     const tnsr::I<DataVector, 3, Frame>& spatial_normal_vector) {
-  std::array<Scalar<ComplexDataVector>, 5> weyl_scalars_result{};
-  for (auto& scalar : weyl_scalars_result) {
+  WeylScalarsResult<Frame> weyl_scalars_result{
+      {}, tnsr::I<ComplexDataVector, 3, Frame>{}};
+  for (auto& scalar : weyl_scalars_result.scalars) {
     scalar = make_with_value<Scalar<ComplexDataVector>>(
         get<0, 0>(weyl_electric), std::numeric_limits<double>::signaling_NaN());
   }
+  weyl_scalars_result.m =
+      make_with_value<tnsr::I<ComplexDataVector, 3, Frame>>(
+          get<0, 0>(weyl_electric),
+          std::numeric_limits<double>::signaling_NaN());
   weyl_scalars(make_not_null(&weyl_scalars_result), weyl_electric,
                weyl_magnetic, spatial_metric, spatial_normal_vector);
   return weyl_scalars_result;
@@ -156,13 +162,13 @@ std::array<Scalar<ComplexDataVector>, 5> weyl_scalars(
 
 #define INSTANTIATE(_, data)                                             \
   template void gr::weyl_scalars(                                        \
-      const gsl::not_null<std::array<Scalar<ComplexDataVector>, 5>*>     \
+      const gsl::not_null<gr::WeylScalarsResult<FRAME(data)>*>           \
           weyl_scalars_result,                                           \
       const tnsr::ii<DataVector, 3, FRAME(data)>& weyl_electric,         \
       const tnsr::ii<DataVector, 3, FRAME(data)>& weyl_magnetic,         \
       const tnsr::ii<DataVector, 3, FRAME(data)>& spatial_metric,        \
       const tnsr::I<DataVector, 3, FRAME(data)>& spatial_normal_vector); \
-  template std::array<Scalar<ComplexDataVector>, 5> gr::weyl_scalars(    \
+  template gr::WeylScalarsResult<FRAME(data)> gr::weyl_scalars(          \
       const tnsr::ii<DataVector, 3, FRAME(data)>& weyl_electric,         \
       const tnsr::ii<DataVector, 3, FRAME(data)>& weyl_magnetic,         \
       const tnsr::ii<DataVector, 3, FRAME(data)>& spatial_metric,        \

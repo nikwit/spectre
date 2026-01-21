@@ -6,18 +6,28 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/LeviCivitaIterator.hpp"
 #include "DataStructures/Tags/TempTensor.hpp"
 #include "DataStructures/TempBuffer.hpp"
+#include "DataStructures/Tensor/EagerMath/Determinant.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
+#include "Parallel/Printf/Printf.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Christoffel.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/CovariantDerivOfExtrinsicCurvature.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/Ricci.hpp"
 #include "PointwiseFunctions/GeneralRelativity/ProjectionOperators.hpp"
+#include "PointwiseFunctions/GeneralRelativity/QuadraticCurvatureScalars.hpp"
+#include "PointwiseFunctions/GeneralRelativity/WeylElectric.hpp"
+#include "PointwiseFunctions/GeneralRelativity/WeylMagnetic.hpp"
 #include "PointwiseFunctions/GeneralRelativity/WeylPropagating.hpp"
+<<<<<<< HEAD
 #include "PointwiseFunctions/MathFunctions/MathFunction.hpp"
+=======
+#include "PointwiseFunctions/GeneralRelativity/WeylScalars.hpp"
+>>>>>>> 701fd5ed2a (some BCs)
 #include "Utilities/ContainerHelpers.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
@@ -507,6 +517,274 @@ void add_physical_terms_to_dt_v_minus(
     }
   }
 }
+
+template <size_t VolumeDim, typename DataType>
+void add_physical_terms_to_dt_v_minus_worldtube(
+    const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
+        bc_dt_v_minus,
+    const Scalar<DataType>& gamma2,
+    const tnsr::i<DataType, VolumeDim, Frame::Inertial>&
+        unit_interface_normal_one_form,
+    const tnsr::I<DataType, VolumeDim, Frame::Inertial>&
+        unit_interface_normal_vector,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>&
+        spacetime_unit_normal_vector,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& projection_ab,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>& projection_AB,
+    const tnsr::II<DataType, VolumeDim, Frame::Inertial>&
+        inverse_spatial_metric,
+    const tnsr::ii<DataType, VolumeDim, Frame::Inertial>& extrinsic_curvature,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& spacetime_metric,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>&
+        inverse_spacetime_metric,
+    const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>&
+        three_index_constraint,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>&
+        char_projected_rhs_dt_v_minus,
+    const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& phi,
+    const tnsr::ijaa<DataType, VolumeDim, Frame::Inertial>& d_phi,
+    const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& d_pi,
+    const std::array<DataType, 4>& char_speeds) {
+  // hard-coded value from SpEC Bbh input file Mu = MuPhys = 0
+  constexpr double mu_phys = 0.;
+  constexpr bool adjust_phys_using_c4 = true;
+  constexpr bool gamma2_in_phys = true;
+
+  // In what follows, we follow Kidder, Scheel & Teukolsky (2001)
+  // https://arxiv.org/pdf/gr-qc/0105031.pdf.
+  TempBuffer<tmpl::list<::Tags::Tempaa<0, VolumeDim, Frame::Inertial, DataType>,
+                        ::Tags::Tempaa<1, VolumeDim, Frame::Inertial, DataType>,
+                        ::Tags::TempScalar<0, DataType>>>
+      u3_buffer(get_size(get<0>(unit_interface_normal_vector)), 0.);
+  auto& U3p =
+      get<::Tags::Tempaa<0, VolumeDim, Frame::Inertial, DataType>>(u3_buffer);
+  auto& U3m =
+      get<::Tags::Tempaa<1, VolumeDim, Frame::Inertial, DataType>>(u3_buffer);
+
+  TempBuffer<
+      tmpl::list<::Tags::Tempijj<0, VolumeDim, Frame::Inertial, DataType>,
+                 // cov deriv of Kij
+                 ::Tags::Tempijj<1, VolumeDim, Frame::Inertial, DataType>,
+                 // spatial Ricci
+                 ::Tags::Tempii<0, VolumeDim, Frame::Inertial, DataType>,
+                 // spatial projection operators P_ij, P^ij, and P^i_j
+                 ::Tags::TempII<0, VolumeDim, Frame::Inertial, DataType>,
+                 ::Tags::Tempii<1, VolumeDim, Frame::Inertial, DataType>,
+                 ::Tags::TempIj<0, VolumeDim, Frame::Inertial, DataType>,
+                 // weyl propagating modes
+                 ::Tags::Tempii<2, VolumeDim, Frame::Inertial, DataType>,
+                 ::Tags::Tempii<3, VolumeDim, Frame::Inertial, DataType>,
+                 ::Tags::Tempii<4, VolumeDim, Frame::Inertial, DataType>>>
+      local_buffer(get_size(get<0>(unit_interface_normal_vector)), 0.);
+
+  auto& spatial_phi =
+      get<::Tags::Tempijj<0, VolumeDim, Frame::Inertial, DataType>>(
+          local_buffer);
+  auto& cov_deriv_ex_curv =
+      get<::Tags::Tempijj<1, VolumeDim, Frame::Inertial, DataType>>(
+          local_buffer);
+  auto& ricci_3 = get<::Tags::Tempii<0, VolumeDim, Frame::Inertial, DataType>>(
+      local_buffer);
+  auto& spatial_projection_IJ =
+      get<::Tags::TempII<0, VolumeDim, Frame::Inertial, DataType>>(
+          local_buffer);
+  auto& spatial_projection_ij =
+      get<::Tags::Tempii<1, VolumeDim, Frame::Inertial, DataType>>(
+          local_buffer);
+  auto& spatial_projection_Ij =
+      get<::Tags::TempIj<0, VolumeDim, Frame::Inertial, DataType>>(
+          local_buffer);
+  auto weyl_prop_minus =
+      get<::Tags::Tempii<2, VolumeDim, Frame::Inertial, DataType>>(
+          local_buffer);
+  auto& spatial_metric =
+      get<::Tags::Tempii<3, VolumeDim, Frame::Inertial, DataType>>(
+          local_buffer);
+
+  // D_(k,i,j) = (1/2) \partial_k g_(ij) and its derivative
+  for (size_t i = 0; i < VolumeDim; ++i) {
+    for (size_t j = i; j < VolumeDim; ++j) {
+      for (size_t k = 0; k < VolumeDim; ++k) {
+        spatial_phi.get(k, i, j) = phi.get(k, i + 1, j + 1);
+      }
+    }
+  }
+
+  // Compute covariant deriv of extrinsic curvature
+  gh::covariant_deriv_of_extrinsic_curvature(
+      make_not_null(&cov_deriv_ex_curv), extrinsic_curvature,
+      spacetime_unit_normal_vector,
+      raise_or_lower_first_index(gr::christoffel_first_kind(spatial_phi),
+                                 inverse_spatial_metric),
+      inverse_spacetime_metric, phi, d_pi, d_phi);
+
+  // Compute spatial Ricci tensor
+  gh::spatial_ricci_tensor(make_not_null(&ricci_3), phi, d_phi,
+                           inverse_spatial_metric);
+  const auto ricci_3_clean = ricci_3;
+
+  if (adjust_phys_using_c4) {
+    // This adds 4-index constraint terms to 3Ricci so as to cancel
+    // out normal derivatives from the final expression for U8.
+    // It is much easier to add them here than to recalculate U8
+    // from scratch.
+
+    // Add some 4-index constraint terms to 3Ricci.
+    for (size_t i = 0; i < VolumeDim; ++i) {
+      for (size_t j = i; j < VolumeDim; ++j) {
+        for (size_t k = 0; k < VolumeDim; ++k) {
+          for (size_t l = 0; l < VolumeDim; ++l) {
+            ricci_3.get(i, j) +=
+                0.25 * inverse_spatial_metric.get(k, l) *
+                (d_phi.get(i, k, 1 + l, 1 + j) - d_phi.get(k, i, 1 + l, 1 + j) +
+                 d_phi.get(j, k, 1 + l, 1 + i) - d_phi.get(k, j, 1 + l, 1 + i));
+          }
+        }
+      }
+    }
+
+    // Add more 4-index constraint terms to 3Ricci
+    // These compensate for some of the cov_deriv_ex_curv terms.
+    for (size_t i = 0; i < VolumeDim; ++i) {
+      for (size_t j = i; j < VolumeDim; ++j) {
+        for (size_t a = 0; a <= VolumeDim; ++a) {
+          for (size_t k = 0; k < VolumeDim; ++k) {
+            ricci_3.get(i, j) +=
+                0.5 * unit_interface_normal_vector.get(k) *
+                spacetime_unit_normal_vector.get(a) *
+                (d_phi.get(i, k, j + 1, a) - d_phi.get(k, i, j + 1, a) +
+                 d_phi.get(j, k, i + 1, a) - d_phi.get(k, j, i + 1, a));
+          }
+        }
+      }
+    }
+  }
+
+  // Make spatial projection operators
+  for (size_t j = 0; j < VolumeDim; ++j) {
+    for (size_t k = j; k < VolumeDim; ++k) {
+      spatial_metric.get(j, k) = spacetime_metric.get(1 + j, 1 + k);
+    }
+  }
+  gr::transverse_projection_operator(make_not_null(&spatial_projection_IJ),
+                                     inverse_spatial_metric,
+                                     unit_interface_normal_vector);
+  gr::transverse_projection_operator(make_not_null(&spatial_projection_ij),
+                                     spatial_metric,
+                                     unit_interface_normal_one_form);
+  gr::transverse_projection_operator(make_not_null(&spatial_projection_Ij),
+                                     unit_interface_normal_vector,
+                                     unit_interface_normal_one_form);
+
+  // Weyl propagating mode
+  gr::weyl_propagating(
+      make_not_null(&weyl_prop_minus), ricci_3, extrinsic_curvature,
+      inverse_spatial_metric, cov_deriv_ex_curv, unit_interface_normal_vector,
+      spatial_projection_IJ, spatial_projection_ij, spatial_projection_Ij, -1);
+  auto weyl_prop_bc = weyl_prop_minus;
+
+  const auto weyl_electric = gr::weyl_electric(
+      ricci_3_clean, extrinsic_curvature, inverse_spatial_metric);
+  const auto det_spatial_metric = determinant(spatial_metric);
+  Scalar<DataType> sqrt_det_spatial_metric{};
+  get(sqrt_det_spatial_metric) = sqrt(get(det_spatial_metric));
+  if constexpr (VolumeDim == 3) {
+    const auto weyl_magnetic = gr::weyl_magnetic(
+        cov_deriv_ex_curv, spatial_metric, sqrt_det_spatial_metric);
+    const auto weyl_electric_scalar =
+        gr::weyl_electric_scalar(weyl_electric, inverse_spatial_metric);
+    const auto weyl_magnetic_scalar =
+        gr::weyl_magnetic_scalar(weyl_magnetic, inverse_spatial_metric);
+    const auto gauss_bonnet_scalar = gr::gauss_bonnet_scalar_in_vacuum(
+        weyl_electric_scalar, weyl_magnetic_scalar);
+    const auto psi2_kinnersley = sqrt(get(gauss_bonnet_scalar) / 48.0);
+
+    const auto weyl_scalars_and_m =
+        gr::weyl_scalars(weyl_electric, weyl_magnetic, spatial_metric,
+                         unit_interface_normal_vector);
+    const auto& m = weyl_scalars_and_m.m;
+    const auto [weyl_psi0, weyl_psi1, weyl_psi2, weyl_psi3, weyl_psi4] =
+        weyl_scalars_and_m.scalars;
+
+    const auto x =
+        (-6. + sqrt(36. - 24. * (1. - get(weyl_psi2) / psi2_kinnersley))) / 12.;
+    const auto y = get(weyl_psi1) / (3. * psi2_kinnersley * (1. + 2. * x));
+
+    const auto psi0 = 6. * psi2_kinnersley * y * y;
+    Parallel::printf(MakeString{} << "Worldtube Weyl scalars: Psi0: "
+                                  << real(get(weyl_psi0))[0] << "  "
+                                  << imag(get(weyl_psi0))[0] << "  "
+                                  << "Psi1: " << real(get(weyl_psi1))[0] << "  "
+                                  << imag(get(weyl_psi1))[0] << "  "
+                                  << "Psi2: " << real(get(weyl_psi2))[0] << "  "
+                                  << imag(get(weyl_psi2))[0] << "  "
+                                  << "Psi3: " << real(get(weyl_psi3))[0] << "  "
+                                  << imag(get(weyl_psi3))[0] << "  "
+                                  << "Psi4: " << real(get(weyl_psi4))[0] << "  "
+                                  << imag(get(weyl_psi4))[0] << "  "
+                                  << "  Kinnersley Psi2: " << psi2_kinnersley[0]
+                                  << " Inferred Psi0: " << real(psi0)[0] << "  "
+                                  << imag(psi0)[0] << "\n");
+
+    for (size_t i = 0; i < VolumeDim; ++i) {
+      for (size_t j = 0; j < VolumeDim; ++j) {
+        weyl_prop_bc.get(i, j) =
+            2. * real(psi0 * conj(m.get(i)) * conj(m.get(j)) +
+                      conj(psi0) * m.get(i) * m.get(j));
+      }
+    }
+
+    if constexpr (mu_phys == 0.) {
+      // No need to compute U3p or weyl_prop_plus in this case
+      for (size_t a = 0; a <= VolumeDim; ++a) {
+        for (size_t b = a; b <= VolumeDim; ++b) {
+          for (size_t i = 0; i < VolumeDim; ++i) {
+            for (size_t j = 0; j < VolumeDim; ++j) {
+              U3m.get(a, b) += 2. * projection_Ab.get(i + 1, a) *
+                               projection_Ab.get(j + 1, b) *
+                               weyl_prop_minus.get(i, j);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Add physical boundary corrections
+  if (gamma2_in_phys) {
+    auto& normal_dot_three_index_constraint_gamma2 =
+        get(get<::Tags::TempScalar<0, DataType>>(u3_buffer));
+
+    for (size_t a = 0; a <= VolumeDim; ++a) {
+      for (size_t b = a; b <= VolumeDim; ++b) {
+        for (size_t c = 0; c <= VolumeDim; ++c) {
+          for (size_t d = 0; d <= VolumeDim; ++d) {
+            normal_dot_three_index_constraint_gamma2 =
+                get<0>(unit_interface_normal_vector) *
+                three_index_constraint.get(0, c, d);
+            for (size_t i = 1; i < VolumeDim; ++i) {
+              normal_dot_three_index_constraint_gamma2 +=
+                  unit_interface_normal_vector.get(i) *
+                  three_index_constraint.get(i, c, d);
+            }
+            normal_dot_three_index_constraint_gamma2 *= get(gamma2);
+
+            if constexpr (mu_phys == 0.) {
+              bc_dt_v_minus->get(a, b) +=
+                  (projection_Ab.get(c, a) * projection_Ab.get(d, b) -
+                   0.5 * projection_ab.get(a, b) * projection_AB.get(c, d)) *
+                  (char_projected_rhs_dt_v_minus.get(c, d) +
+                   char_speeds[3] * (U3m.get(c, d) -
+                                     normal_dot_three_index_constraint_gamma2 -
+                                     U3p.get(c, d)));
+            }
+          }
+        }
+      }
+    }
+  }
+}
 }  // namespace detail
 
 template <size_t VolumeDim, typename DataType>
@@ -638,6 +916,67 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus(
       bc_dt_v_minus, gamma2, inertial_coords, incoming_null_one_form,
       outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
       projection_Ab, char_projected_rhs_dt_v_psi);
+}
+
+template <size_t VolumeDim, typename DataType>
+void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
+    const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
+        bc_dt_v_minus,
+    const Scalar<DataType>& gamma2,
+    const tnsr::I<DataType, VolumeDim, Frame::Inertial>& inertial_coords,
+    const tnsr::i<DataType, VolumeDim, Frame::Inertial>&
+        unit_interface_normal_one_form,
+    const tnsr::I<DataType, VolumeDim, Frame::Inertial>&
+        unit_interface_normal_vector,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>&
+        spacetime_unit_normal_vector,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& incoming_null_one_form,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& outgoing_null_one_form,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& incoming_null_vector,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& outgoing_null_vector,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& projection_ab,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>& projection_AB,
+    const tnsr::II<DataType, VolumeDim, Frame::Inertial>&
+        inverse_spatial_metric,
+    const tnsr::ii<DataType, VolumeDim, Frame::Inertial>& extrinsic_curvature,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& spacetime_metric,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>&
+        inverse_spacetime_metric,
+    const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>&
+        three_index_constraint,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>&
+        char_projected_rhs_dt_v_psi,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>&
+        char_projected_rhs_dt_v_minus,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>&
+        constraint_char_zero_plus,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>&
+        constraint_char_zero_minus,
+    const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& phi,
+    const tnsr::ijaa<DataType, VolumeDim, Frame::Inertial>& d_phi,
+    const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& d_pi,
+    const std::array<DataType, 4>& char_speeds) {
+  for (size_t a = 0; a <= VolumeDim; ++a) {
+    for (size_t b = a; b <= VolumeDim; ++b) {
+      bc_dt_v_minus->get(a, b) = -char_projected_rhs_dt_v_minus.get(a, b);
+    }
+  }
+  /*detail::add_constraint_dependent_terms_to_dt_v_minus(
+      bc_dt_v_minus, outgoing_null_one_form, incoming_null_vector,
+      outgoing_null_vector, projection_ab, projection_Ab, projection_AB,
+      constraint_char_zero_plus, constraint_char_zero_minus,
+      char_projected_rhs_dt_v_minus, char_speeds);
+  detail::add_physical_terms_to_dt_v_minus_worldtube(
+      bc_dt_v_minus, gamma2, unit_interface_normal_one_form,
+      unit_interface_normal_vector, spacetime_unit_normal_vector, projection_ab,
+      projection_Ab, projection_AB, inverse_spatial_metric, extrinsic_curvature,
+      spacetime_metric, inverse_spacetime_metric, three_index_constraint,
+      char_projected_rhs_dt_v_minus, phi, d_phi, d_pi, char_speeds);
+  detail::add_gauge_sommerfeld_terms_to_dt_v_minus(
+      bc_dt_v_minus, gamma2, inertial_coords, incoming_null_one_form,
+      outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
+      projection_Ab, char_projected_rhs_dt_v_psi);*/
 }
 }  // namespace gh::BoundaryConditions::Bjorhus
 
@@ -845,8 +1184,62 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus(
           const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>& phi,       \
           const tnsr::ijaa<DTYPE(data), DIM(data), Frame::Inertial>& d_phi,    \
           const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>& d_pi,      \
+<<<<<<< HEAD
           const std::array<DTYPE(data), 4>& char_speeds,                       \
           const MathFunction<1, Frame::Inertial>* incoming_wave_profile);
+=======
+          const std::array<DTYPE(data), 4>& char_speeds);                      \
+  template void gh::BoundaryConditions::Bjorhus::                              \
+      constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(   \
+          const gsl::not_null<                                                 \
+              tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>*>              \
+              bc_dt_v_minus,                                                   \
+          const Scalar<DTYPE(data)>& gamma2,                                   \
+          const tnsr::I<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              inertial_coords,                                                 \
+          const tnsr::i<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              unit_interface_normal_one_form,                                  \
+          const tnsr::I<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              unit_interface_normal_vector,                                    \
+          const tnsr::A<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              spacetime_unit_normal_vector,                                    \
+          const tnsr::a<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              incoming_null_one_form,                                          \
+          const tnsr::a<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              outgoing_null_one_form,                                          \
+          const tnsr::A<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              incoming_null_vector,                                            \
+          const tnsr::A<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              outgoing_null_vector,                                            \
+          const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              projection_ab,                                                   \
+          const tnsr::Ab<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              projection_Ab,                                                   \
+          const tnsr::AA<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              projection_AB,                                                   \
+          const tnsr::II<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              inverse_spatial_metric,                                          \
+          const tnsr::ii<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              extrinsic_curvature,                                             \
+          const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              spacetime_metric,                                                \
+          const tnsr::AA<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              inverse_spacetime_metric,                                        \
+          const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>&            \
+              three_index_constraint,                                          \
+          const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              char_projected_rhs_dt_v_psi,                                     \
+          const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              char_projected_rhs_dt_v_minus,                                   \
+          const tnsr::a<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              constraint_char_zero_plus,                                       \
+          const tnsr::a<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              constraint_char_zero_minus,                                      \
+          const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>& phi,       \
+          const tnsr::ijaa<DTYPE(data), DIM(data), Frame::Inertial>& d_phi,    \
+          const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>& d_pi,      \
+          const std::array<DTYPE(data), 4>& char_speeds);
+>>>>>>> 701fd5ed2a (some BCs)
 
 GENERATE_INSTANTIATIONS(INSTANTIATE, (1, 2, 3), (DataVector))
 
