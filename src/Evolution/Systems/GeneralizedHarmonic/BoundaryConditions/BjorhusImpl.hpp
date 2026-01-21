@@ -248,6 +248,46 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus(
     const tnsr::ijaa<DataType, VolumeDim, Frame::Inertial>& d_phi,
     const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& d_pi,
     const std::array<DataType, 4>& char_speeds);
+
+template <size_t VolumeDim, typename DataType>
+void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
+    gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
+        bc_dt_v_minus,
+    const Scalar<DataType>& gamma2,
+    const tnsr::I<DataType, VolumeDim, Frame::Inertial>& inertial_coords,
+    const tnsr::i<DataType, VolumeDim, Frame::Inertial>&
+        unit_interface_normal_one_form,
+    const tnsr::I<DataType, VolumeDim, Frame::Inertial>&
+        unit_interface_normal_vector,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>&
+        spacetime_unit_normal_vector,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& incoming_null_one_form,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& outgoing_null_one_form,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& incoming_null_vector,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& outgoing_null_vector,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& projection_ab,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>& projection_AB,
+    const tnsr::II<DataType, VolumeDim, Frame::Inertial>&
+        inverse_spatial_metric,
+    const tnsr::ii<DataType, VolumeDim, Frame::Inertial>& extrinsic_curvature,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& spacetime_metric,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>&
+        inverse_spacetime_metric,
+    const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>&
+        three_index_constraint,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>&
+        char_projected_rhs_dt_v_psi,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>&
+        char_projected_rhs_dt_v_minus,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>&
+        constraint_char_zero_plus,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>&
+        constraint_char_zero_minus,
+    const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& phi,
+    const tnsr::ijaa<DataType, VolumeDim, Frame::Inertial>& d_phi,
+    const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& d_pi,
+    const std::array<DataType, 4>& char_speeds);
 /// @}
 
 namespace detail {

@@ -7,6 +7,7 @@
 
 #include "DataStructures/ComplexDataVector.hpp"
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
 
 /// \cond
@@ -17,6 +18,12 @@ struct not_null;
 /// \endcond
 
 namespace gr {
+
+template <typename Frame>
+struct WeylScalarsResult {
+  std::array<Scalar<ComplexDataVector>, 5> scalars;
+  tnsr::I<ComplexDataVector, 3, Frame> m;
+};
 
 /// @{
 /*!
@@ -33,15 +40,15 @@ namespace gr {
  *
  */
 template <typename Frame>
-void weyl_scalars(gsl::not_null<std::array<Scalar<ComplexDataVector>, 5>*>
-                      weyl_scalars_result,
-                  const tnsr::ii<DataVector, 3, Frame>& weyl_electric,
-                  const tnsr::ii<DataVector, 3, Frame>& weyl_magnetic,
-                  const tnsr::ii<DataVector, 3, Frame>& spatial_metric,
-                  const tnsr::I<DataVector, 3, Frame>& spatial_normal_vector);
+void weyl_scalars(
+    gsl::not_null<WeylScalarsResult<Frame>*> weyl_scalars_result,
+    const tnsr::ii<DataVector, 3, Frame>& weyl_electric,
+    const tnsr::ii<DataVector, 3, Frame>& weyl_magnetic,
+    const tnsr::ii<DataVector, 3, Frame>& spatial_metric,
+    const tnsr::I<DataVector, 3, Frame>& spatial_normal_vector);
 
 template <typename Frame>
-std::array<Scalar<ComplexDataVector>, 5> weyl_scalars(
+WeylScalarsResult<Frame> weyl_scalars(
     const tnsr::ii<DataVector, 3, Frame>& weyl_electric,
     const tnsr::ii<DataVector, 3, Frame>& weyl_magnetic,
     const tnsr::ii<DataVector, 3, Frame>& spatial_metric,
