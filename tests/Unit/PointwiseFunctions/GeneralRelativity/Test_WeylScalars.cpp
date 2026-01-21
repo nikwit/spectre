@@ -67,11 +67,11 @@ SPECTRE_TEST_CASE(
   const auto weyl_scalars = gr::weyl_scalars(
       weyl_electric, weyl_magnetic, spatial_metric, spatial_normal_vector);
 
-  const auto& psi_0 = weyl_scalars[0];
-  const auto& psi_1 = weyl_scalars[1];
-  const auto& psi_2 = weyl_scalars[2];
-  const auto& psi_3 = weyl_scalars[3];
-  const auto& psi_4 = weyl_scalars[4];
+  const auto& psi_0 = weyl_scalars.scalars[0];
+  const auto& psi_1 = weyl_scalars.scalars[1];
+  const auto& psi_2 = weyl_scalars.scalars[2];
+  const auto& psi_3 = weyl_scalars.scalars[3];
+  const auto& psi_4 = weyl_scalars.scalars[4];
 
   Scalar<ComplexDataVector> invariant_I{ComplexDataVector(num_points, 0.0)};
   get(invariant_I) = get(psi_0) * get(psi_4) - 4.0 * get(psi_1) * get(psi_3) +
