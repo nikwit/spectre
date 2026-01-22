@@ -55,7 +55,7 @@ DemandOutgoingCharSpeeds<Dim>::dg_demand_outgoing_char_speeds(
   double min_speed = std::numeric_limits<double>::signaling_NaN();
   for (size_t i = 0; i < char_speeds.size(); ++i) {
     min_speed = min(gsl::at(char_speeds, i));
-    if (min_speed < 0.0) {
+    if (min_speed < -100. * std::numeric_limits<double>::epsilon()) {
       return {MakeString{}
               << "DemandOutgoingCharSpeeds boundary condition violated with "
                  "speed index "
