@@ -54,8 +54,17 @@ DemandOutgoingCharSpeeds<Dim>::dg_demand_outgoing_char_speeds(
       face_mesh_velocity);
   double min_speed = std::numeric_limits<double>::signaling_NaN();
   for (size_t i = 0; i < char_speeds.size(); ++i) {
+<<<<<<< HEAD
     min_speed = min(gsl::at(char_speeds, i));
     if (min_speed < 0.0) {
+=======
+    if (face_mesh_velocity.has_value()) {
+      min_speed = min(gsl::at(char_speeds, i) - get(normal_dot_mesh_velocity));
+    } else {
+      min_speed = min(gsl::at(char_speeds, i));
+    }
+    if (min_speed < -100. * std::numeric_limits<double>::epsilon()) {
+>>>>>>> 9cb2bb6970 (DemandOutgoingCharSpeeds: handle roundoff error)
       return {MakeString{}
               << "DemandOutgoingCharSpeeds boundary condition violated with "
                  "speed index "
