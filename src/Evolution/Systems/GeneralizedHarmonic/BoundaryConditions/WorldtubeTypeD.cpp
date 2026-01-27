@@ -311,6 +311,11 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
     for (size_t b = a; b <= Dim; ++b) {
       bc_dt_v_plus.get(a, b) = -char_projected_rhs_dt_v_plus.get(a, b);
       // bc_dt_v_minus.get(a, b) = -char_projected_rhs_dt_v_minus.get(a, b);
+      // bc_dt_v_psi.get(a, b) = -char_projected_rhs_dt_v_psi.get(a, b);
+      for (size_t c = 0; c <= Dim; ++c) {
+        // bc_dt_v_zero.get(a, b, c) = -char_projected_rhs_dt_v_zero.get(a, b,
+        // c);
+      }
     }
   }
 
