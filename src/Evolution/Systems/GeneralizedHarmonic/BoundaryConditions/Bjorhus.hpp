@@ -24,6 +24,7 @@
 #include "PointwiseFunctions/AnalyticSolutions/AnalyticSolution.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ConstraintDampingTags.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
+#include "Time/Tags/Time.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Serialization/CharmPupable.hpp"
 #include "Utilities/TMPL.hpp"
@@ -168,7 +169,7 @@ class ConstraintPreservingBjorhus final : public BoundaryCondition<Dim> {
                                Frame::Inertial>,
                  ::Tags::deriv<Tags::Phi<DataVector, Dim>, tmpl::size_t<Dim>,
                                Frame::Inertial>>;
-  using dg_gridless_tags = tmpl::list<>;
+  using dg_gridless_tags = tmpl::list<::Tags::Time>;
 
   std::optional<std::string> dg_time_derivative(
       gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
@@ -177,7 +178,6 @@ class ConstraintPreservingBjorhus final : public BoundaryCondition<Dim> {
           dt_pi_correction,
       gsl::not_null<tnsr::iaa<DataVector, Dim, Frame::Inertial>*>
           dt_phi_correction,
-
       const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
           face_mesh_velocity,
       const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_covector,
@@ -207,7 +207,8 @@ class ConstraintPreservingBjorhus final : public BoundaryCondition<Dim> {
       // c.f. dg_interior_deriv_vars_tags
       const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_spacetime_metric,
       const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_pi,
-      const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi) const;
+      const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi,
+      double time) const;
 
  private:
   void compute_intermediate_vars(

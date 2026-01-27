@@ -215,6 +215,7 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus(
         bc_dt_v_minus,
     const Scalar<DataType>& gamma2,
     const tnsr::I<DataType, VolumeDim, Frame::Inertial>& inertial_coords,
+    const double time,
     const tnsr::i<DataType, VolumeDim, Frame::Inertial>&
         unit_interface_normal_one_form,
     const tnsr::I<DataType, VolumeDim, Frame::Inertial>&
@@ -350,7 +351,7 @@ void add_physical_terms_to_dt_v_minus(
     const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& phi,
     const tnsr::ijaa<DataType, VolumeDim, Frame::Inertial>& d_phi,
     const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& d_pi,
-    const std::array<DataType, 4>& char_speeds);
+    const std::array<DataType, 4>& char_speeds, const double time);
 }  // namespace detail
 }  // namespace Bjorhus
 }  // namespace gh::BoundaryConditions
