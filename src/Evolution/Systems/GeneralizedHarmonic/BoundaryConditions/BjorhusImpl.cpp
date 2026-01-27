@@ -709,7 +709,7 @@ void add_physical_terms_to_dt_v_minus_worldtube(
     const auto y = get(weyl_psi1) / (3. * psi2_kinnersley * (1. + 2. * x));
 
     const auto psi0 = 6. * psi2_kinnersley * y * y;
-    Parallel::printf(MakeString{} << "Worldtube Weyl scalars: Psi0: "
+    /*Parallel::printf(MakeString{} << "Worldtube Weyl scalars: Psi0: "
                                   << real(get(weyl_psi0))[0] << "  "
                                   << imag(get(weyl_psi0))[0] << "  "
                                   << "Psi1: " << real(get(weyl_psi1))[0] << "  "
@@ -722,7 +722,7 @@ void add_physical_terms_to_dt_v_minus_worldtube(
                                   << imag(get(weyl_psi4))[0] << "  "
                                   << "  Kinnersley Psi2: " << psi2_kinnersley[0]
                                   << " Inferred Psi0: " << real(psi0)[0] << "  "
-                                  << imag(psi0)[0] << "\n");
+                                  << imag(psi0)[0] << "\n");*/
 
     for (size_t i = 0; i < VolumeDim; ++i) {
       for (size_t j = 0; j < VolumeDim; ++j) {
@@ -741,6 +741,9 @@ void add_physical_terms_to_dt_v_minus_worldtube(
               U3m.get(a, b) += 2. * projection_Ab.get(i + 1, a) *
                                projection_Ab.get(j + 1, b) *
                                weyl_prop_minus.get(i, j);
+              U3p.get(a, b) += 2. * projection_Ab.get(i + 1, a) *
+                               projection_Ab.get(j + 1, b) *
+                               weyl_prop_bc.get(i, j);
             }
           }
         }
@@ -959,11 +962,18 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
       bc_dt_v_minus->get(a, b) = -char_projected_rhs_dt_v_minus.get(a, b);
     }
   }
-  /*detail::add_constraint_dependent_terms_to_dt_v_minus(
+
+  /*Parallel::printf(MakeString{} << "Characteristic speeds: "
+                                    << char_speeds[0][0] << "  "
+                                    << char_speeds[1][0] << "  "
+                                    <<  char_speeds[2][0] << "  "
+                                    << char_speeds[3][0] << "\n");*/
+  detail::add_constraint_dependent_terms_to_dt_v_minus(
       bc_dt_v_minus, outgoing_null_one_form, incoming_null_vector,
       outgoing_null_vector, projection_ab, projection_Ab, projection_AB,
       constraint_char_zero_plus, constraint_char_zero_minus,
       char_projected_rhs_dt_v_minus, char_speeds);
+
   detail::add_physical_terms_to_dt_v_minus_worldtube(
       bc_dt_v_minus, gamma2, unit_interface_normal_one_form,
       unit_interface_normal_vector, spacetime_unit_normal_vector, projection_ab,
@@ -973,7 +983,7 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
   detail::add_gauge_sommerfeld_terms_to_dt_v_minus(
       bc_dt_v_minus, gamma2, inertial_coords, incoming_null_one_form,
       outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
-      projection_Ab, char_projected_rhs_dt_v_psi);*/
+      projection_Ab, char_projected_rhs_dt_v_psi);
 }
 }  // namespace gh::BoundaryConditions::Bjorhus
 
