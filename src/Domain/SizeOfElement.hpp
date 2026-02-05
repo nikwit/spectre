@@ -31,6 +31,8 @@ template <size_t VolumeDim, typename Frame>
 class ElementMap;
 namespace domain {
 namespace Tags {
+template <size_t Dim>
+struct Mesh;
 template <size_t Dim, typename Frame>
 struct ElementMap;
 }  // namespace Tags
@@ -83,7 +85,8 @@ template <size_t VolumeDim>
 struct SizeOfElementCompute : db::ComputeTag, SizeOfElement<VolumeDim> {
   using base = SizeOfElement<VolumeDim>;
   using argument_tags =
-      tmpl::list<Tags::ElementMap<VolumeDim, Frame::Grid>,
+      tmpl::list<domain::Tags::Mesh<VolumeDim>,
+                 Tags::ElementMap<VolumeDim, Frame::Grid>,
                  CoordinateMaps::Tags::CoordinateMap<VolumeDim, Frame::Grid,
                                                      Frame::Inertial>,
                  ::Tags::Time, domain::Tags::FunctionsOfTime>;
@@ -91,6 +94,7 @@ struct SizeOfElementCompute : db::ComputeTag, SizeOfElement<VolumeDim> {
 
   static constexpr void function(
       gsl::not_null<std::array<double, VolumeDim>*> result,
+      const ::Mesh<VolumeDim>& mesh,
       const ::ElementMap<VolumeDim, Frame::Grid>& logical_to_grid_map,
       const domain::CoordinateMapBase<Frame::Grid, Frame::Inertial, VolumeDim>&
           grid_to_inertial_map,
@@ -99,6 +103,16 @@ struct SizeOfElementCompute : db::ComputeTag, SizeOfElement<VolumeDim> {
           std::string,
           std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
           functions_of_time) {
+    ASSERT(alg::all_of(mesh.basis(),
+                       [](const auto& basis) {
+                         return basis == Spectral::Basis::Chebyshev or
+                                basis == Spectral::Basis::Legendre or
+                                basis == Spectral::Basis::FiniteDifference;
+                       }),
+           "SizeOfElement is not implemented for elements with basis "
+               << mesh.basis()
+               << ". Check if this basis makes sense for computing the size of "
+                  "an element.");
     *result = size_of_element(logical_to_grid_map, grid_to_inertial_map, time,
                               functions_of_time);
   }
