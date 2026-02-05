@@ -1,0 +1,370 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+Executable: EvolveGhSingleBlackHole
+
+---
+
+Parallelization:
+  ElementDistribution: NumGridPointsAndGridSpacing
+
+# Note: most of the parameters in this file are just made up. They should be
+# replaced with values that make sense once we have a better idea of the
+# transition to ringdown.
+
+# For 0.8 Spin
+InitialData: #&InitialData
+  GeneralizedHarmonic(KerrSchild):
+    Mass: &Mass 1.0
+    Spin: &Spin [0.0, 0.0, 0.0] # Change to 0.0 for Non-Spinning
+    Center: &Center [0.0, 0.0, 0.0]
+    Velocity: [0.0, 0.0, 0.0]
+
+DomainCreator:
+  SphericalShells:
+    InnerRadius: &InnerRadius 1.8 #1.57 #1.57 # Change to 1.8 for Non-Spinning
+    OuterRadius: 100.0
+    InitialRadialRefinement: 3
+    InitialNumberOfRadialGridPoints: 12
+    InitialSphericalHarmonicL: 16
+    RadialPartitioning: [20.0]
+    RadialDistribution: [Logarithmic, Linear]
+    TimeDependentMaps: # None for spin = 0
+      InitialTime: 0.0
+      ShapeMap:
+        LMax: &LMax 2
+        #CoefficientTruncationLimit: 0.0
+        #InitialValues:  # for Schwarzschild
+        InitialValues:
+          Mass: *Mass
+          Spin: *Spin
+        SizeInitialValues: Auto #[0.0, 0.0, 0.0]
+      RotationMap: None
+      ExpansionMap:
+        InitialValues: [1.0, 0.0, 0.0]
+        InitialValuesOuterBoundary: [1.0, -1.0e-6, 0.0]
+        DecayTimescale: 1.0
+        DecayTimescaleOuterBoundary: 1.0
+      TranslationMap: None
+      TransitionRotScaleTrans: false
+    InnerBoundaryCondition:
+      DemandOutgoingCharSpeeds:
+    OuterBoundaryCondition:
+      ConstraintPreservingBjorhus:
+        Type: ConstraintPreservingPhysical
+
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.0002
+  MinimumTimeStep: 1e-7
+  # This is the smallest interval we'd need to observe time step/constraints. If
+  # you would like more frequent output, consider using dense output.
+  InitialSlabSize: 0.1
+  VariableOrderAlgorithm:
+    GoalOrder: 4
+  StepChoosers:
+    - LimitIncrease:
+        Factor: 2
+    - ErrorControl:
+        AbsoluteTolerance: 1e-11
+        RelativeTolerance: 1e-9
+        MaxFactor: 2
+        MinFactor: 0.25
+        SafetyFactor: 0.95
+  # Found that order 4 offers a significant speedup compared to order 5
+  TimeStepper:
+    AdamsMoultonPcMonotonic:
+      Order: 4
+    # DormandPrince5
+
+EvolutionSystem:
+  GeneralizedHarmonic:
+    GaugeCondition:
+      #DampedHarmonic: # set to Harmonic for Harmonic
+      #  SpatialDecayWidth: 17.0152695482514
+      #  Amplitudes: [1.0, 0.0, 1.0]
+      #  Exponents: [2, 2, 2]
+    # For KerrSchild gauge, instead of DampedHarmonic use...
+      AnalyticChristoffel:
+          AnalyticPrescription: &InitialData
+            GeneralizedHarmonic(KerrSchild):
+              Mass: *Mass
+              Spin: *Spin # Change to 0.0 for Non-Spinning
+              Center: *Center
+              Velocity: [0.0, 0.0, 0.0]
+
+    # The parameter choices here come from our experience with the Spectral
+    # Einstein Code (SpEC). They should be suitable for evolutions of a
+    # perturbation of a Kerr-Schild black hole.
+    DampingFunctionGamma0:
+      # SpEC uses a sum of 2 gaussians. Here, the Expansion func of time
+      # is just the identity, so TimeDependentTripleGaussian ought to work.
+      # I set the Gaussian amplitudes, widths, and centers according to what
+      # spec does ringdown for q=1, spin=0, circular inspiral.
+      TimeDependentTripleGaussian:
+        Constant: 0.001
+        MovementMethod: ExpansionFactor
+        Gaussian1:
+          Amplitude: 7.0
+          Width: 2.5                 
+          Center: *Center
+        Gaussian2:
+          Amplitude: 0.1             
+          Width: 100.0                 
+          Center: *Center
+        Gaussian3:
+          Amplitude: 0.0
+          Width: 100.0
+          Center: *Center
+    DampingFunctionGamma1:
+      Constant:
+        Value: -1.0
+    DampingFunctionGamma2:
+      TimeDependentTripleGaussian:
+        Constant: 0.001
+        MovementMethod: ExpansionFactor
+        Gaussian1:
+          Amplitude: 7.0
+          Width: 2.5                 
+          Center: *Center
+        Gaussian2:
+          Amplitude: 0.1             
+          Width: 100.0                 
+          Center: *Center
+        Gaussian3:
+          Amplitude: 0.0
+          Width: 100.0
+          Center: *Center
+
+Filtering:
+  ExpFilter0:
+    Alpha: 64.0
+    HalfPower: 210
+    Enable: false
+    BlocksToFilter: All
+  TensorYlmFilter:
+    NumModesToKill: 4
+    HalfPower: None
+    Enable: true
+
+# For details... https://www.icts.res.in/program/gws2023/talks by
+# Geoffrey and Harald
+SpatialDiscretization:
+  BoundaryCorrection:
+    UpwindPenalty:
+  DiscontinuousGalerkin:
+    Formulation: StrongInertial
+    Quadrature: GaussLobatto
+
+Observers:
+  VolumeFileName: "BlackHoleVolume"
+  ReductionFileName: "BlackHoleReductions"
+  SurfaceFileName: "BlackHoleSurfaces"
+
+Amr:
+  Criteria:
+  # EnableInBlocks: All
+  Policies:
+    EnforceTwoToOneBalanceInNormalDirection: true
+    Isotropy: Anisotropic
+    Limits:
+      RefinementLevel: Auto
+      NumGridPoints: Auto
+      ErrorBeyondLimits: False
+    AllowCoarsening: True
+  Verbosity: Quiet
+  EnableInBlocks: []
+
+PhaseChangeAndTriggers:
+  - Trigger:
+      Slabs:
+       EvenlySpaced:
+         # Current implementation checks wallclock at these global syncs
+         Interval: 100
+         Offset: 0
+    PhaseChanges:
+      - CheckpointAndExitAfterWallclock:
+          WallclockHours: 23.5
+
+EventsAndTriggersAtSlabs:
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 1
+          Offset: 0
+    Events:
+      - ObserveTimeStep:
+          SubfileName: TimeSteps
+          PrintTimeToTerminal: True
+          ObservePerCore: False
+      - ObserveNorms:
+          SubfileName: Norms
+          TensorsToObserve:
+          - Name: Lapse
+            NormType: L2Norm
+            Components: Individual
+          - Name: PointwiseL2Norm(GaugeConstraint)
+            NormType: L2Norm
+            Components: Sum
+          - Name: PointwiseL2Norm(ThreeIndexConstraint)
+            NormType: L2Norm
+            Components: Sum
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 10
+          Offset: 0
+    Events:
+      - ErrorIfDataTooBig:
+          Threshold: 100
+          VariablesToCheck: [SpacetimeMetric]
+  # Turn this on if something breaks to see where the constraints are bad
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 10
+          Offset: 0
+    Events:
+      - ObserveFields:
+          BlocksToObserve: All
+          SubfileName: VolumeData
+          VariablesToObserve:
+            - SpacetimeMetric
+            - Lapse
+            - Psi4Real
+            - WeylElectricScalar
+            - PointwiseL2Norm(FConstraint)
+            - PointwiseL2Norm(FourIndexConstraint)
+            - PointwiseL2Norm(GaugeConstraint)
+            - PointwiseL2Norm(ThreeIndexConstraint)
+            - PointwiseL2Norm(TwoIndexConstraint)
+            - ConstraintEnergy
+          InterpolateToMesh: None
+          CoordinatesFloatingPointType: Double
+          FloatingPointTypes: [Double]
+  #- Trigger:
+  #    Slabs:
+  #      EvenlySpaced:
+  #        Interval: 1
+  #        Offset: 0
+  #  Events:
+  #    - ApparentHorizon
+  #    - ExcisionBoundary  
+  # Never terminate... run until something fails!
+
+EventsAndTriggersAtCheckpoints:
+
+EventsAndTriggersAtSteps:
+
+EventsRunAtCleanup:
+  ObservationValue: -1000.0
+  Events:
+    - ObserveTimeStepVolume:
+        SubfileName: FailureTimeStep
+        FloatingPointType: Double
+        CoordinatesFloatingPointType: Float
+
+EventsAndDenseTriggers:
+  # BondiSachs output needs to be often enough for CCE to run properly. An
+  # interval of 0.1 was found to work well in SpEC.
+  - Trigger:
+      Times:
+        EvenlySpaced:
+          Interval: 0.1
+          Offset: 0.0
+    Events:
+      - BondiSachsInterpolation
+
+Interpolator:
+  Verbosity: Silent
+
+ApparentHorizons:
+  LMax: *LMax
+  ApparentHorizon: &Ah
+    Criteria:
+    InitialGuess:
+      LMax: *LMax
+      Radius: 2.2
+      Center: *Center
+    FastFlow:
+      Flow: Fast
+      Alpha: 1.0
+      Beta: 0.5
+      AbsTol: 1e-12
+      TruncationTol: 1e-2
+      DivergenceTol: 1.2
+      DivergenceIter: 5
+      MaxIts: 1000
+    Verbosity: Verbose
+    MaxComputeCoordsRetries: 3
+    BlocksForHorizonFind: ["Shell0"]
+  ControlSystemSingleAh: *Ah
+  ControlSystemCharSpeedAh: *Ah
+
+InterpolationTargets:
+  BondiSachsInterpolation:
+    LMax: *LMax
+    Radius: [100, 150, 200]
+    Center: *Center
+    AngularOrdering: Cce
+  ExcisionBoundary: &ExBdry
+    LMax: *LMax
+    Center: *Center
+    Radius: *InnerRadius
+    AngularOrdering: "Strahlkorper"
+  ControlSystemCharSpeedExcision: *ExBdry
+
+Cce:
+  BondiSachsOutputFilePrefix: "BondiSachs"
+
+ControlSystems:
+  WriteDataToDisk: true
+  MeasurementsPerUpdate: 4
+  DelayUpdate: true
+  Verbosity: Silent
+  Translation: None
+  Shape: None
+    # Averager:
+    #   AverageTimescaleFraction: 0.25
+    #   Average0thDeriv: false
+    # Controller:
+    #   UpdateFraction: 0.2 # if you find your run is going slow, try adjusting this to be 0.2
+    # TimescaleTuner:
+    #   InitialTimescales: 0.2
+    #   MinTimescale: 1.0e-2
+    #   MaxTimescale: 10.0
+    #   IncreaseThreshold: 2.5e-4
+    #   DecreaseThreshold: 1.0e-3
+    #   IncreaseFactor: 1.01
+    #   DecreaseFactor: 0.98
+    # ControlError:
+  Size: None
+    # Averager:
+    #   AverageTimescaleFraction: 0.25
+    #   Average0thDeriv: true
+    # Controller:
+    #   UpdateFraction: 0.1 # Could also adjust this to 0.1 and see if it's stable.
+    # TimescaleTuner:
+    #   InitialTimescales: 0.2
+    #   MinTimescale: 1.0e-4
+    #   MaxTimescale: 20.0
+    #   IncreaseThreshold: 2.5e-4
+    #   IncreaseFactor: 1.01
+    # ControlError:
+    #   MaxNumTimesForZeroCrossingPredictor: 4
+    #   SmoothAvgTimescaleFraction: 0.25
+    #   DeltaRDriftOutwardOptions: None
+    #   DeltaRDriftInwardOptions: None
+    #   InitialState: DeltaR
+    #   SmootherTuner:
+    #     InitialTimescales: [0.2]
+    #     MinTimescale: 1.0e-4
+    #     MaxTimescale: 20.0
+    #     IncreaseThreshold: 2.5e-4
+    #     DecreaseThreshold: 1.0e-3
+    #     IncreaseFactor: 1.01
+    #     DecreaseFactor: 0.9
+
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
