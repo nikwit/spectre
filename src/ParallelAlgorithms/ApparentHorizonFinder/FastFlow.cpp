@@ -55,6 +55,8 @@ size_t FastFlow::current_l_mesh(
   const size_t l_max = strahlkorper.ylm_spherepack().l_max();
   // This is the formula used in SpEC (if l_max>=4). We may want to make this
   // formula an option in the future, if we want to experiment with it.
+  // Possible performance optimization: just add a few modes (should suffice
+  // with spectral convergence)
   return static_cast<size_t>(std::floor(1.5 * l_max));
 }
 
@@ -96,6 +98,8 @@ FastFlow::iterate_horizon_finder(
   const size_t l_mesh = current_l_mesh(*current_strahlkorper);
 
   // Evaluate the Strahlkorper on a higher resolution mesh
+  // Possible performance optimization: allocate memory for this Strahlkorper
+  // when resolution changes, then reuse it for each iteration.
   const ylm::Strahlkorper<Frame> strahlkorper(l_mesh, l_mesh,
                                               *current_strahlkorper);
 
