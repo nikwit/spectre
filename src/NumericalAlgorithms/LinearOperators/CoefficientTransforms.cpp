@@ -15,21 +15,31 @@
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/Spectral/ModalToNodalMatrix.hpp"
 #include "NumericalAlgorithms/Spectral/NodalToModalMatrix.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/SpherepackCache.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
 #include "Utilities/Gsl.hpp"
 
 namespace {
-template <size_t Dim, size_t... Is>
+template <size_t Dim>
 std::array<std::reference_wrapper<const Matrix>, Dim> make_transform_matrices(
-    const Mesh<Dim>& mesh, const bool nodal_to_modal,
-    std::index_sequence<Is...> /*meta*/) {
-  return nodal_to_modal ? std::array<std::reference_wrapper<const Matrix>,
-                                     Dim>{{Spectral::nodal_to_modal_matrix(
-                              mesh.slice_through(Is))...}}
-                        : std::array<std::reference_wrapper<const Matrix>, Dim>{
-                              {Spectral::modal_to_nodal_matrix(
-                                  mesh.slice_through(Is))...}};
+    const Mesh<Dim>& mesh, const bool nodal_to_modal) {
+  static const Matrix identity{};
+  auto result = make_array<Dim>(std::cref(identity));
+  for (size_t d = 0; d < Dim; ++d) {
+    if (mesh.basis(d) == Spectral::Basis::SphericalHarmonic) {
+      continue;
+    }
+    if (nodal_to_modal) {
+      gsl::at(result, d) =
+          std::cref(Spectral::nodal_to_modal_matrix(mesh.slice_through(d)));
+    } else {
+      gsl::at(result, d) =
+          std::cref(Spectral::modal_to_nodal_matrix(mesh.slice_through(d)));
+    }
+  }
+  return result;
 }
 }  // namespace
 
@@ -38,10 +48,9 @@ void to_modal_coefficients(
     const gsl::not_null<ComplexModalVector*> modal_coefficients,
     const ComplexDataVector& nodal_coefficients, const Mesh<Dim>& mesh) {
   modal_coefficients->destructive_resize(nodal_coefficients.size());
-  apply_matrices<ComplexModalVector>(
-      modal_coefficients,
-      make_transform_matrices<Dim>(mesh, true, std::make_index_sequence<Dim>{}),
-      nodal_coefficients, mesh.extents());
+  apply_matrices<ComplexModalVector>(modal_coefficients,
+                                     make_transform_matrices<Dim>(mesh, true),
+                                     nodal_coefficients, mesh.extents());
 }
 
 // overload provided so that the most common case of transforming from
@@ -51,10 +60,17 @@ void to_modal_coefficients(gsl::not_null<ModalVector*> modal_coefficients,
                            const DataVector& nodal_coefficients,
                            const Mesh<Dim>& mesh) {
   modal_coefficients->destructive_resize(nodal_coefficients.size());
-  apply_matrices<ModalVector>(
-      modal_coefficients,
-      make_transform_matrices<Dim>(mesh, true, std::make_index_sequence<Dim>{}),
-      nodal_coefficients, mesh.extents());
+  apply_matrices<ModalVector>(modal_coefficients,
+                              make_transform_matrices<Dim>(mesh, true),
+                              nodal_coefficients, mesh.extents());
+  if (mesh.basis(1) == Spectral::Basis::SphericalHarmonic) {
+    const size_t l_max = mesh.extents(1) - 1;
+    const auto& ylm = ylm::get_spherepack_cache(l_max);
+    ModalVector ylm_modes(mesh.extents(0) * ylm.spectral_size());
+    ylm.phys_to_spec_all_offsets(ylm_modes.data(), modal_coefficients->data(),
+                                 mesh.extents(0));
+    *modal_coefficients = std::move(ylm_modes);
+  }
 }
 
 template <size_t Dim>
@@ -80,11 +96,9 @@ void to_nodal_coefficients(
     const gsl::not_null<ComplexDataVector*> nodal_coefficients,
     const ComplexModalVector& modal_coefficients, const Mesh<Dim>& mesh) {
   nodal_coefficients->destructive_resize(modal_coefficients.size());
-  apply_matrices<ComplexDataVector>(
-      nodal_coefficients,
-      make_transform_matrices<Dim>(mesh, false,
-                                   std::make_index_sequence<Dim>{}),
-      modal_coefficients, mesh.extents());
+  apply_matrices<ComplexDataVector>(nodal_coefficients,
+                                    make_transform_matrices<Dim>(mesh, false),
+                                    modal_coefficients, mesh.extents());
 }
 
 template <size_t Dim>
@@ -93,8 +107,7 @@ void to_nodal_coefficients(const gsl::not_null<DataVector*> nodal_coefficients,
                            const Mesh<Dim>& mesh) {
   nodal_coefficients->destructive_resize(modal_coefficients.size());
   apply_matrices<DataVector>(nodal_coefficients,
-                             make_transform_matrices<Dim>(
-                                 mesh, false, std::make_index_sequence<Dim>{}),
+                             make_transform_matrices<Dim>(mesh, false),
                              modal_coefficients, mesh.extents());
 }
 
