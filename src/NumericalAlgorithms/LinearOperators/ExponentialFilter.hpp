@@ -134,6 +134,9 @@ class Exponential {
     std::array<std::reference_wrapper<const Matrix>, Dim> filter =
         make_array<Dim>(std::cref(empty));
     for (size_t d = 0; d < Dim; d++) {
+      if (mesh.basis(d) == Spectral::Basis::SphericalHarmonic) {
+        continue;
+      }
       gsl::at(filter, d) = std::cref(filter_matrix(mesh.slice_through(d)));
     }
     *vars = apply_matrices(filter, *vars, mesh.extents());
