@@ -17,6 +17,7 @@
 #include "DataStructures/Variables.hpp"
 #include "Evolution/BoundaryCorrection.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Formulation.hpp"
+#include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Lapse.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Shift.hpp"
 #include "PointwiseFunctions/GeneralRelativity/SpatialMetric.hpp"
@@ -120,12 +121,64 @@ void AveragedUpwindPenalty<Dim>::dg_boundary_terms(
     const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_ext,
     const tnsr::I<DataVector, Dim, Frame::Inertial>& mesh_velocity_ext,
 
-    const dg::Formulation dg_formulation) const {
+    const dg::Formulation dg_formulation, const Mesh<Dim>& volume_mesh,
+    const ylm::TensorYlm::TensorYlmFilter& tensor_ylm_filter) const {
   if (dg_formulation != dg::Formulation::StrongInertial) {
     ERROR_NO_TRACE("AveragedUpwindPenalty only coded for StrongInertial form");
   }
 
   const size_t num_pts = get<0, 0>(spacetime_metric_int).size();
+  const tnsr::aa<DataVector, Dim, Frame::Inertial>* spacetime_metric_ext_ptr =
+      &spacetime_metric_ext;
+  const tnsr::aa<DataVector, Dim, Frame::Inertial>* pi_ext_ptr = &pi_ext;
+  const tnsr::iaa<DataVector, Dim, Frame::Inertial>* phi_ext_ptr = &phi_ext;
+  std::optional<
+      Variables<ylm::TensorYlm::filter_detail::gh_spacetime_vars_list>>
+      filtered_ext_vars{};
+  if constexpr (Dim == 3) {
+    if (volume_mesh.basis(1) == Spectral::Basis::SphericalHarmonic and
+        volume_mesh.basis(2) == Spectral::Basis::SphericalHarmonic) {
+      const Mesh<2> angular_mesh = volume_mesh.slice_away(0);
+      filtered_ext_vars.emplace(num_pts);
+      ASSERT(angular_mesh.number_of_grid_points() == num_pts,
+             "Expected number of points in the angular mesh to match the number "
+             "of points in the volume mesh, but got "
+                 << angular_mesh.number_of_grid_points() << " and " << num_pts);
+      get<gr::Tags::SpacetimeMetric<DataVector, Dim, Frame::Inertial>>(
+          *filtered_ext_vars) = spacetime_metric_ext;
+      get<gh::Tags::Pi<DataVector, Dim, Frame::Inertial>>(*filtered_ext_vars) =
+          pi_ext;
+      get<gh::Tags::Phi<DataVector, Dim, Frame::Inertial>>(*filtered_ext_vars) =
+          phi_ext;
+
+      InverseJacobian<DataVector, 3, Frame::Grid, Frame::Inertial>
+          jac_grid_to_inertial{num_pts};
+      for (size_t i = 0; i < 3; ++i) {
+        for (size_t j = 0; j < 3; ++j) {
+          jac_grid_to_inertial.get(i, j) = (i == j) ? 1.0 : 0.0;
+        }
+      }
+      //const ylm::TensorYlm::TensorYlmFilter my_filter(20, std::nullopt, true);
+      tensor_ylm_filter(make_not_null(&*filtered_ext_vars), angular_mesh,
+                        jac_grid_to_inertial);
+
+      spacetime_metric_ext_ptr =
+          &get<gr::Tags::SpacetimeMetric<DataVector, Dim, Frame::Inertial>>(
+              *filtered_ext_vars);
+      pi_ext_ptr = &get<gh::Tags::Pi<DataVector, Dim, Frame::Inertial>>(
+          *filtered_ext_vars);
+      phi_ext_ptr = &get<gh::Tags::Phi<DataVector, Dim, Frame::Inertial>>(
+          *filtered_ext_vars);
+    } else {
+      ERROR("not at spherical harmonic boundary?");
+    }
+  } else {
+    (void)volume_mesh;
+    (void)tensor_ylm_filter;
+  }
+  const auto& spacetime_metric_ext_used = *spacetime_metric_ext_ptr;
+  const auto& pi_ext_used = *pi_ext_ptr;
+  const auto& phi_ext_used = *phi_ext_ptr;
   Variables<tmpl::list<
       ::Tags::Tempaa<0, Dim>, ::Tags::Tempii<1, Dim>, ::Tags::TempII<2, Dim>,
       ::Tags::TempI<3, Dim>, ::Tags::TempScalar<4>, ::Tags::Tempi<5, Dim>,
@@ -137,9 +190,10 @@ void AveragedUpwindPenalty<Dim>::dg_boundary_terms(
   // is _ext - _int.  Other things are averages of the function
   // arguments or things computed from such averages.
   auto& spacetime_metric = get<::Tags::Tempaa<0, Dim>>(buffer);
-  tenex::evaluate<ti::a, ti::b>(make_not_null(&spacetime_metric),
-                                0.5 * (spacetime_metric_int(ti::a, ti::b) +
-                                       spacetime_metric_ext(ti::a, ti::b)));
+  tenex::evaluate<ti::a, ti::b>(
+      make_not_null(&spacetime_metric),
+      0.5 * (spacetime_metric_int(ti::a, ti::b) +
+             spacetime_metric_ext_used(ti::a, ti::b)));
   auto& spatial_metric = get<::Tags::Tempii<1, Dim>>(buffer);
   gr::spatial_metric(make_not_null(&spatial_metric), spacetime_metric);
   auto& inverse_spatial_metric = get<::Tags::TempII<2, Dim>>(buffer);
@@ -206,18 +260,19 @@ void AveragedUpwindPenalty<Dim>::dg_boundary_terms(
   // The correction to the spatial_metric is proportional to the jump,
   // so store that here for convenience.
   auto& spacetime_metric_jump = *boundary_correction_spacetime_metric;
-  tenex::evaluate<ti::a, ti::b>(
-      make_not_null(&spacetime_metric_jump),
-      spacetime_metric_ext(ti::a, ti::b) - spacetime_metric_int(ti::a, ti::b));
+  tenex::evaluate<ti::a, ti::b>(make_not_null(&spacetime_metric_jump),
+                                spacetime_metric_ext_used(ti::a, ti::b) -
+                                    spacetime_metric_int(ti::a, ti::b));
 
   auto& pi_jump = get<::Tags::Tempaa<11, Dim>>(buffer);
-  tenex::evaluate<ti::a, ti::b>(make_not_null(&pi_jump),
-                                pi_ext(ti::a, ti::b) - pi_int(ti::a, ti::b));
+  tenex::evaluate<ti::a, ti::b>(
+      make_not_null(&pi_jump),
+      pi_ext_used(ti::a, ti::b) - pi_int(ti::a, ti::b));
 
   // boundary_correction_phi holds phi_jump, briefly
   tenex::evaluate<ti::i, ti::a, ti::b>(
       boundary_correction_phi,
-      phi_ext(ti::i, ti::a, ti::b) - phi_int(ti::i, ti::a, ti::b));
+      phi_ext_used(ti::i, ti::a, ti::b) - phi_int(ti::i, ti::a, ti::b));
   // spacetime_metric no longer needed, but again, just have to be
   // careful.
   auto& normal_phi_jump = spacetime_metric;

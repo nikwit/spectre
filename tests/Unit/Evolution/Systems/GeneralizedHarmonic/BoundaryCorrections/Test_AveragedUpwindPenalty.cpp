@@ -21,6 +21,8 @@
 #include "Framework/TestHelpers.hpp"
 #include "Helpers/DataStructures/MakeWithRandomValues.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Formulation.hpp"
+#include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/ApplyTensorYlmFilter.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ConstraintDampingTags.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Lapse.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Shift.hpp"
@@ -85,7 +87,17 @@ template <size_t Dim, typename Correction>
 GhVars<Dim> call_dg_boundary_terms(
     const Correction& correction,
     const Variables<typename Correction::dg_package_field_tags>& packaged_int,
-    const Variables<typename Correction::dg_package_field_tags>& packaged_ext) {
+    const Variables<typename Correction::dg_package_field_tags>& packaged_ext,
+    const ylm::TensorYlm::TensorYlmFilter& tensor_ylm_filter) {
+  const Mesh<Dim> dummy_mesh{5, Spectral::Basis::Legendre,
+                             Spectral::Quadrature::GaussLobatto};
+  InverseJacobian<DataVector, Dim, Frame::Grid, Frame::Inertial>
+      jac_grid_to_inertial{packaged_int.number_of_grid_points()};
+  for (size_t i = 0; i < Dim; ++i) {
+    for (size_t j = 0; j < Dim; ++j) {
+      jac_grid_to_inertial.get(i, j) = (i == j) ? 1.0 : 0.0;
+    }
+  }
   GhVars<Dim> boundary_terms{packaged_int.number_of_grid_points()};
   tmpl::as_pack<gh_tags<Dim>>(
       [&]<typename... GhVarTags>(tmpl::type_<GhVarTags>... /*meta*/) {
@@ -96,7 +108,8 @@ GhVars<Dim> call_dg_boundary_terms(
                   make_not_null(&get<GhVarTags>(boundary_terms))...,
                   get<DgPackageFieldTags>(packaged_int)...,
                   get<DgPackageFieldTags>(packaged_ext)...,
-                  dg::Formulation::StrongInertial);
+                  dg::Formulation::StrongInertial, dummy_mesh,
+                  tensor_ylm_filter, jac_grid_to_inertial);
             });
       });
   return boundary_terms;
@@ -107,6 +120,8 @@ template <size_t Dim>
 GhVars<Dim> boundary_correction(const Args<Dim>& interior, Args<Dim> exterior,
                                 const bool include_mesh_velocity = true) {
   const gh::BoundaryCorrections::AveragedUpwindPenalty<Dim> correction{};
+  const ylm::TensorYlm::TensorYlmFilter tensor_ylm_filter{
+      0, std::nullopt, false};
 
   for (auto& component :
        get<domain::Tags::UnnormalizedFaceNormal<Dim>>(exterior)) {
@@ -117,7 +132,8 @@ GhVars<Dim> boundary_correction(const Args<Dim>& interior, Args<Dim> exterior,
       call_dg_package_data<Dim>(correction, interior, include_mesh_velocity);
   const auto packaged_ext =
       call_dg_package_data<Dim>(correction, exterior, include_mesh_velocity);
-  return call_dg_boundary_terms<Dim>(correction, packaged_int, packaged_ext);
+  return call_dg_boundary_terms<Dim>(correction, packaged_int, packaged_ext,
+                                     tensor_ylm_filter);
 }
 
 template <size_t Dim>

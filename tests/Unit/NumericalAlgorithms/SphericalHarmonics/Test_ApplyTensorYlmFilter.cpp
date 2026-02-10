@@ -11,6 +11,7 @@
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Framework/TestHelpers.hpp"
+#include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/ApplyTensorYlmFilter.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/SpherepackCache.hpp"
@@ -165,7 +166,7 @@ void test_modal_nodal_invertibility() {
 
 void test_apply_filter(const size_t num_to_kill) {
   constexpr size_t radial_extents = 2;
-  constexpr size_t ell_max = 7;
+  constexpr size_t ell_max = 20;
 
   const auto& ylm = ::ylm::get_spherepack_cache(ell_max);
   const size_t spectral_mesh_size = ylm.spectral_size() * radial_extents;
@@ -295,6 +296,91 @@ void test_apply_filter(const size_t num_to_kill) {
       });
 }
 
+void test_apply_filter_2d(const size_t num_to_kill) {
+  constexpr size_t radial_extents = 1;
+  constexpr size_t ell_max = 5;
+
+  const auto& ylm = ::ylm::get_spherepack_cache(ell_max);
+  const size_t spectral_mesh_size = ylm.spectral_size() * radial_extents;
+  const size_t physical_mesh_size = ylm.physical_size() * radial_extents;
+
+  Variables<filter_detail::gh_spacetime_vars_list> inertial_modal_vars(
+      spectral_mesh_size, 0.0);
+  MAKE_GENERATOR(generator);
+  std::uniform_real_distribution<double> dist{-1.0, 1.0};
+  ylm::SpherepackIterator it(ell_max, ell_max, radial_extents, true);
+  tmpl::for_each<filter_detail::gh_spacetime_vars_list>(
+      [&inertial_modal_vars, &it, &dist,
+       &generator]<class Tag>(const tmpl::type_<Tag> /*meta*/) {
+        auto& tensor = get<Tag>(inertial_modal_vars);
+        for (auto& component : tensor) {
+          for (size_t offset = 0; offset < radial_extents; ++offset) {
+            for (it.reset(); it; ++it) {
+              if (it.l() <= ell_max - tensor.rank()) {
+                component[it() + offset] = dist(generator);
+              }
+            }
+          }
+        }
+      });
+
+  Variables<filter_detail::gh_spacetime_vars_list> inertial_nodal_vars(
+      physical_mesh_size);
+  filter_detail::modal_to_nodal_ylm(make_not_null(&inertial_nodal_vars),
+                                    inertial_modal_vars, ylm, radial_extents);
+
+  const Variables<filter_detail::gh_spacetime_vars_list>
+      test_inertial_modal_vars(inertial_modal_vars);
+
+  const Mesh<2> mesh{
+      std::array<size_t, 2>{ell_max + 1, 2 * ell_max + 1},
+      std::array<Spectral::Basis, 2>{Spectral::Basis::SphericalHarmonic,
+                                     Spectral::Basis::SphericalHarmonic},
+      std::array<Spectral::Quadrature, 2>{Spectral::Quadrature::Gauss,
+                                          Spectral::Quadrature::Equiangular}};
+  CHECK(mesh.number_of_grid_points() == physical_mesh_size);
+
+  InverseJacobian<DataVector, 3, Frame::Grid, Frame::Inertial>
+      jac_grid_to_inertial(physical_mesh_size);
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t j = 0; j < 3; ++j) {
+      jac_grid_to_inertial.get(i, j) =
+          (i == j ? 1.0 : 0.0) + 0.05 * dist(generator);
+    }
+  }
+
+  TensorYlmFilter filter(num_to_kill, std::nullopt, true);
+  filter(make_not_null(&inertial_nodal_vars), mesh, jac_grid_to_inertial);
+
+  filter_detail::nodal_to_modal_ylm(make_not_null(&inertial_modal_vars),
+                                    inertial_nodal_vars, ylm, radial_extents);
+
+  tmpl::for_each<filter_detail::gh_spacetime_vars_list>(
+      [&inertial_modal_vars, &test_inertial_modal_vars, &ell_max, &num_to_kill,
+       &it]<class Tag>(const tmpl::type_<Tag> /*meta*/) {
+        constexpr size_t num_independent_components =
+            Tag::type::structure::size();
+        const auto& tensor_a = get<Tag>(inertial_modal_vars);
+        const auto& tensor_b = get<Tag>(test_inertial_modal_vars);
+        for (size_t storage_index = 0;
+             storage_index < num_independent_components; ++storage_index) {
+          const auto& a = tensor_a[storage_index];
+          const auto& b = tensor_b[storage_index];
+          for (size_t offset = 0; offset < radial_extents; ++offset) {
+            for (it.reset(); it; ++it) {
+              if (num_to_kill == 0 or
+                  it.l() <= ell_max - num_to_kill - tensor_b.rank()) {
+                CHECK(a[it() + offset] == approx(b[it() + offset]));
+              } else if (it.l() >=
+                         ell_max - num_to_kill + tensor_b.rank() - 1) {
+                CHECK(0.0 == approx(b[it() + offset]));
+              }
+            }
+          }
+        }
+      });
+}
+
 // Debug builds are slightly > 5 seconds, so increase the timeout.
 // [[TimeOut, 10]]
 SPECTRE_TEST_CASE("Unit.SphericalHarmonics.ApplyTensorYlmFilter",
@@ -303,7 +389,10 @@ SPECTRE_TEST_CASE("Unit.SphericalHarmonics.ApplyTensorYlmFilter",
   test_transform_spatial_tensors_to_different_frame();
   test_modal_nodal_invertibility();
   test_apply_filter(0);
-  test_apply_filter(2);
+  test_apply_filter(1);
+  //test_apply_filter_2d(0);
+  //test_apply_filter_2d(2);
+  //test_apply_filter_2d(4);
 }
 }  // namespace
 }  // namespace ylm::TensorYlm

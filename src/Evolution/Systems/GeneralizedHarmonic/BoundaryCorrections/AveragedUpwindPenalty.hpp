@@ -12,7 +12,10 @@
 #include "Domain/FaceNormal.hpp"
 #include "Evolution/BoundaryCorrection.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
+#include "Evolution/Tags/Filter.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Formulation.hpp"
+#include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/ApplyTensorYlmFilter.hpp"
 #include "Options/String.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ConstraintDampingTags.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
@@ -139,7 +142,9 @@ class AveragedUpwindPenalty final : public evolution::BoundaryCorrection {
                  gr::Tags::Lapse<DataVector>, gr::Tags::Shift<DataVector, Dim>>;
   using dg_package_data_primitive_tags = tmpl::list<>;
   using dg_package_data_volume_tags = tmpl::list<>;
-  using dg_boundary_terms_volume_tags = tmpl::list<>;
+  using dg_boundary_terms_volume_tags =
+      tmpl::list<domain::Tags::Mesh<Dim>,
+                 ::Filters::Tags::Filter<ylm::TensorYlm::TensorYlmFilter>>;
 
   double dg_package_data(
       gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
@@ -151,7 +156,6 @@ class AveragedUpwindPenalty final : public evolution::BoundaryCorrection {
       gsl::not_null<tnsr::i<DataVector, Dim, Frame::Inertial>*> packaged_normal,
       gsl::not_null<tnsr::I<DataVector, Dim, Frame::Inertial>*>
           packaged_mesh_velocity,
-
       const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
       const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
       const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
@@ -181,7 +185,6 @@ class AveragedUpwindPenalty final : public evolution::BoundaryCorrection {
       const Scalar<DataVector>& constraint_gamma2_int,
       const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_int,
       const tnsr::I<DataVector, Dim, Frame::Inertial>& mesh_velocity_int,
-
       const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric_ext,
       const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi_ext,
       const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi_ext,
@@ -190,7 +193,8 @@ class AveragedUpwindPenalty final : public evolution::BoundaryCorrection {
       const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_ext,
       const tnsr::I<DataVector, Dim, Frame::Inertial>& mesh_velocity_ext,
 
-      dg::Formulation dg_formulation) const;
+      dg::Formulation dg_formulation, const Mesh<Dim>& volume_mesh,
+      const ylm::TensorYlm::TensorYlmFilter& tensor_ylm_filter) const;
 };
 
 template <size_t Dim>

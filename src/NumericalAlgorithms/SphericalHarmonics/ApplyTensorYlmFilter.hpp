@@ -283,7 +283,11 @@ class TensorYlmFilter {
   using argument_tags = tmpl::list<
       domain::Tags::Mesh<3>,
       domain::Tags::InverseJacobian<3, Frame::Grid, Frame::Inertial>>;
-
+  void operator()(
+      gsl::not_null<Variables<filter_detail::gh_spacetime_vars_list>*> gh_vars,
+      const Mesh<2>& mesh,
+      const InverseJacobian<DataVector, 3, Frame::Grid, Frame::Inertial>&
+          jac_grid_to_inertial) const;
   void operator()(
       gsl::not_null<Variables<filter_detail::gh_spacetime_vars_list>*> gh_vars,
       const Mesh<3>& mesh,
@@ -315,6 +319,7 @@ class TensorYlmFilter {
   mutable Variables<filter_detail::gh_spacetime_vars_list> temp_storage_{};
 };
 
+bool operator==(const TensorYlmFilter& lhs, const TensorYlmFilter& rhs);
 bool operator!=(const TensorYlmFilter& lhs, const TensorYlmFilter& rhs);
 
 }  // namespace ylm::TensorYlm

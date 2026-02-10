@@ -437,6 +437,16 @@ struct GeneralizedHarmonicTemplateBase {
                                         Frame::Inertial>,
           typename system::gradient_variables>>,
       gh::Actions::InitializeGhAnd3Plus1Variables<volume_dim>,
+      dg::Actions::Filter<
+          Filters::Exponential<volume_dim, 0>,
+          tmpl::list<gr::Tags::SpacetimeMetric<DataVector, volume_dim>,
+                     gh::Tags::Pi<DataVector, volume_dim>,
+                     gh::Tags::Phi<DataVector, volume_dim>>>,
+      dg::Actions::Filter<
+          ylm::TensorYlm::TensorYlmFilter,
+          tmpl::list<gr::Tags::SpacetimeMetric<DataVector, volume_dim>,
+                     gh::Tags::Pi<DataVector, volume_dim>,
+                     gh::Tags::Phi<DataVector, volume_dim>>>,
       Initialization::Actions::AddComputeTags<
           tmpl::push_back<StepChoosers::step_chooser_compute_tags<
               GeneralizedHarmonicTemplateBase, local_time_stepping>>>,

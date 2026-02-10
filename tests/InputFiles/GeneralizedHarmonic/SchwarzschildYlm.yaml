@@ -2,11 +2,15 @@
 # See LICENSE.txt for details.
 
 Executable: EvolveGhSingleBlackHole
+Testing:
+  Check: parse
+  Priority: High
+  Timeout: 10
 
 ---
 
 Parallelization:
-  ElementDistribution: NumGridPointsAndGridSpacing
+  ElementDistribution: NumGridPoints
 
 # Note: most of the parameters in this file are just made up. They should be
 # replaced with values that make sense once we have a better idea of the
@@ -16,19 +20,19 @@ Parallelization:
 InitialData: #&InitialData
   GeneralizedHarmonic(KerrSchild):
     Mass: &Mass 1.0
-    Spin: &Spin [0.0, 0.0, 0.0] # Change to 0.0 for Non-Spinning
+    Spin: &Spin [0.1, 0.2, 0.3] # Change to 0.0 for Non-Spinning
     Center: &Center [0.0, 0.0, 0.0]
     Velocity: [0.0, 0.0, 0.0]
 
 DomainCreator:
   SphericalShells:
-    InnerRadius: &InnerRadius 1.8 #1.57 #1.57 # Change to 1.8 for Non-Spinning
-    OuterRadius: 100.0
-    InitialRadialRefinement: 3
-    InitialNumberOfRadialGridPoints: 12
-    InitialSphericalHarmonicL: 16
-    RadialPartitioning: [20.0]
-    RadialDistribution: [Logarithmic, Linear]
+    InnerRadius: &InnerRadius 1.82 #1.57 #1.57 # Change to 1.8 for Non-Spinning
+    OuterRadius: 400.0
+    InitialRadialRefinement: 0
+    InitialNumberOfRadialGridPoints: 13
+    InitialSphericalHarmonicL: 13
+    RadialPartitioning: [6., 12., 20., 30., 50., 150., 200., 250., 300., 350.]
+    RadialDistribution: [Linear, Linear, Linear, Linear, Linear, Linear, Linear, Linear, Linear, Linear, Linear]
     TimeDependentMaps: # None for spin = 0
       InitialTime: 0.0
       ShapeMap:
@@ -55,7 +59,7 @@ DomainCreator:
 
 Evolution:
   InitialTime: 0.0
-  InitialTimeStep: 0.0002
+  InitialTimeStep: 0.001
   MinimumTimeStep: 1e-7
   # This is the smallest interval we'd need to observe time step/constraints. If
   # you would like more frequent output, consider using dense output.
@@ -66,8 +70,8 @@ Evolution:
     - LimitIncrease:
         Factor: 2
     - ErrorControl:
-        AbsoluteTolerance: 1e-11
-        RelativeTolerance: 1e-9
+        AbsoluteTolerance: 1e-12
+        RelativeTolerance: 1e-10
         MaxFactor: 2
         MinFactor: 0.25
         SafetyFactor: 0.95
@@ -97,50 +101,26 @@ EvolutionSystem:
     # Einstein Code (SpEC). They should be suitable for evolutions of a
     # perturbation of a Kerr-Schild black hole.
     DampingFunctionGamma0:
-      # SpEC uses a sum of 2 gaussians. Here, the Expansion func of time
-      # is just the identity, so TimeDependentTripleGaussian ought to work.
-      # I set the Gaussian amplitudes, widths, and centers according to what
-      # spec does ringdown for q=1, spin=0, circular inspiral.
-      TimeDependentTripleGaussian:
+      GaussianPlusConstant:
         Constant: 0.001
-        MovementMethod: ExpansionFactor
-        Gaussian1:
-          Amplitude: 7.0
-          Width: 2.5                 
-          Center: *Center
-        Gaussian2:
-          Amplitude: 0.1             
-          Width: 100.0                 
-          Center: *Center
-        Gaussian3:
-          Amplitude: 0.0
-          Width: 100.0
-          Center: *Center
+        Amplitude: 3.0
+        Width: 11.313708499 # sqrt(128), from SpEC
+        Center: [0.,0.,0.]
     DampingFunctionGamma1:
       Constant:
         Value: -1.0
     DampingFunctionGamma2:
-      TimeDependentTripleGaussian:
+      GaussianPlusConstant:
         Constant: 0.001
-        MovementMethod: ExpansionFactor
-        Gaussian1:
-          Amplitude: 7.0
-          Width: 2.5                 
-          Center: *Center
-        Gaussian2:
-          Amplitude: 0.1             
-          Width: 100.0                 
-          Center: *Center
-        Gaussian3:
-          Amplitude: 0.0
-          Width: 100.0
-          Center: *Center
+        Amplitude: 1.0
+        Width: 11.313708499 # sqrt(128), from SpEC
+        Center: [0.,0.,0.]
 
 Filtering:
   ExpFilter0:
     Alpha: 64.0
     HalfPower: 210
-    Enable: false
+    Enable: true
     BlocksToFilter: All
   TensorYlmFilter:
     NumModesToKill: 4
@@ -151,7 +131,7 @@ Filtering:
 # Geoffrey and Harald
 SpatialDiscretization:
   BoundaryCorrection:
-    UpwindPenalty:
+    AveragedUpwindPenalty:
   DiscontinuousGalerkin:
     Formulation: StrongInertial
     Quadrature: GaussLobatto
@@ -222,7 +202,7 @@ EventsAndTriggersAtSlabs:
   - Trigger:
       Slabs:
         EvenlySpaced:
-          Interval: 10
+          Interval: 50
           Offset: 0
     Events:
       - ObserveFields:

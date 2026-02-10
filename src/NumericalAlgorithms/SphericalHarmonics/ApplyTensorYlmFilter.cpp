@@ -11,6 +11,7 @@
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/SpherepackCache.hpp"
+#include "Parallel/Printf/Printf.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -225,7 +226,7 @@ void apply_tensor_ylm_filter(
       radial_extents * ylm.physical_size() == gh_vars->number_of_grid_points(),
       "Mismatch " << radial_extents * ylm.physical_size() << " must equal "
                   << gh_vars->number_of_grid_points());
-  if (temp_storage->number_of_grid_points() <=
+  if (temp_storage->number_of_grid_points() !=
       radial_extents * ylm.spectral_size()) {
     temp_storage->initialize(radial_extents * ylm.spectral_size());
   }
@@ -288,13 +289,12 @@ void apply_tensor_ylm_filter(
       [&gh_spatial_spectral_vars, &temp_spatial_vars, radial_extents,
        &filter_matrix_i, &filter_matrix_ii, &filter_matrix_ij,
        &filter_matrix_kii,
-       &filter_matrix_scalar]<class Tag>(const tmpl::type_<Tag> /*meta*/) {
+       &filter_matrix_scalar, &ylm]<class Tag>(const tmpl::type_<Tag> /*meta*/) {
         // Different compilers disagree on whether radial_extents
         // needs to be in the capture list of this lambda, and
         // whether radial_extents is 'used' in the lambda.
         // Adding it to the capture list and adding a cast here
         // satisfies everyone.
-        (void)radial_extents;
         constexpr size_t num_independent_components =
             Tag::type::structure::size();
         // Create destination tensor: non-owning and pointing into
@@ -302,13 +302,17 @@ void apply_tensor_ylm_filter(
         // *SINGLE* tensor in gh_spatial_spectral_vars, so this is ok.
         // Note that gh_spatial_spectral_vars.number_of_grid_points()
         // is used for the size because that is the spectral size.
-        ASSERT(gh_spatial_spectral_vars.number_of_grid_points() *
-                       num_independent_components <=
-                   temp_spatial_vars.size(),
-               "Insufficient size: must have "
-                   << gh_spatial_spectral_vars.number_of_grid_points() *
-                          num_independent_components
-                   << " <= " << temp_spatial_vars.size());
+        ASSERT(
+            gh_spatial_spectral_vars.number_of_grid_points() *
+                    num_independent_components <=
+                temp_spatial_vars.size(),
+            "Insufficient size: must have "
+                << gh_spatial_spectral_vars.number_of_grid_points() *
+                       num_independent_components
+                << " <= " << temp_spatial_vars.size() << ". radial_extents = "
+                << radial_extents << ", num_independent_components = "
+                << num_independent_components
+                << ", l_max = " << ylm.l_max());
 
         Variables<tmpl::list<Tag>> dest_tensor(
             temp_spatial_vars.data(),
@@ -465,6 +469,54 @@ void TensorYlmFilter::pup(PUP::er& p) {
   p | enable_;
   // The filter matrices and temp storage are lazily initialized,
   // so we don't pup them.
+}
+
+void TensorYlmFilter::operator()(
+    const gsl::not_null<Variables<filter_detail::gh_spacetime_vars_list>*>
+        gh_vars,
+    const Mesh<2>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::Grid, Frame::Inertial>&
+        jac_grid_to_inertial) const {
+  if (not enable_) {
+    return;
+  }
+  if (mesh.basis(0) != Spectral::Basis::SphericalHarmonic) {
+    return;
+  }
+  ASSERT(mesh.basis(1) == Spectral::Basis::SphericalHarmonic,
+         "TensorYlmFilter requires spherical harmonic basis in both angular "
+         "directions for Dim=2.");
+  const size_t radial_extents = 1;
+  const size_t l_max = mesh.extents(0) - 1;
+
+  // Cache the filter matrices
+  if (cached_l_max_ != l_max) {
+    fill_filter<Scalar<DataVector>::structure>(
+        make_not_null(&filter_matrix_scalar_), l_max, num_modes_to_kill_,
+        half_power_);
+    fill_filter<tnsr::i<DataVector, 3>::structure>(
+        make_not_null(&filter_matrix_i_), l_max, num_modes_to_kill_,
+        half_power_);
+    fill_filter<tnsr::ii<DataVector, 3>::structure>(
+        make_not_null(&filter_matrix_ii_), l_max, num_modes_to_kill_,
+        half_power_);
+    fill_filter<tnsr::ij<DataVector, 3>::structure>(
+        make_not_null(&filter_matrix_ij_), l_max, num_modes_to_kill_,
+        half_power_);
+    fill_filter<tnsr::ijj<DataVector, 3>::structure>(
+        make_not_null(&filter_matrix_kii_), l_max, num_modes_to_kill_,
+        half_power_);
+    cached_l_max_ = l_max;
+  }
+
+  // Apply the filter
+  const auto jac_inertial_to_grid =
+      determinant_and_inverse(jac_grid_to_inertial).second;
+  apply_tensor_ylm_filter(gh_vars, make_not_null(&temp_storage_),
+                          jac_inertial_to_grid, jac_grid_to_inertial,
+                          filter_matrix_scalar_, filter_matrix_i_,
+                          filter_matrix_ii_, filter_matrix_ij_,
+                          filter_matrix_kii_, l_max, radial_extents);
 }
 
 void TensorYlmFilter::operator()(
