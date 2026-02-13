@@ -222,24 +222,6 @@ void volume_terms(
           time_derivative_args...);
     }
   } else {
-#ifdef SPECTRE_KOKKOS
-    auto dt_vars_on_device = copy_to_device(*dt_vars_ptr);
-    auto volume_fluxes_on_device = copy_to_device(*volume_fluxes);
-    auto temporaries_on_device = copy_to_device(*temporaries);
-    ComputeVolumeTermsOnDevice<
-        ComputeVolumeTimeDerivativeTerms, Dim,
-        tmpl::list<TimeDerivativeArguments...>, tmpl::list<VariablesTags...>,
-        tmpl::list<PartialDerivTags...>, tmpl::list<FluxVariablesTags...>,
-        tmpl::list<TemporaryTags...>>
-        functor{dt_vars_on_device, volume_fluxes_on_device,
-                temporaries_on_device, partial_derivs_on_device,
-                std::make_tuple(copy_to_device(time_derivative_args)...)};
-    Kokkos::parallel_for("compute_volume_time_derivative_terms", num_points,
-                         functor);
-    copy_to_host(dt_vars_ptr, dt_vars_on_device);
-    copy_to_host(volume_fluxes, volume_fluxes_on_device);
-    copy_to_host(temporaries, temporaries_on_device);
-#else   // SPECTRE_KOKKOS
     time_derivative_decisions = ComputeVolumeTimeDerivativeTerms::apply(
         make_not_null(&get<::Tags::dt<VariablesTags>>(*dt_vars_ptr))...,
         make_not_null(&get<::Tags::Flux<FluxVariablesTags, tmpl::size_t<Dim>,
@@ -248,7 +230,6 @@ void volume_terms(
         get<::Tags::deriv<PartialDerivTags, tmpl::size_t<Dim>,
                           Frame::Inertial>>(*partial_derivs)...,
         time_derivative_args...);
-#endif  // SPECTRE_KOKKOS
   }
 
   // Add volume terms for moving meshes
