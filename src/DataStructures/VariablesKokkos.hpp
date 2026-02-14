@@ -75,12 +75,16 @@ class Variables<tmpl::list<Tags...>, Kokkos::View<DataType, Properties...>> {
   storage_type& view() { return storage_; }
   const storage_type& view() const { return storage_; }
 
-  template <typename Tag, typename TagList, typename VT>
-  friend constexpr typename Tag::type& get(  // NOLINT
-      Variables<TagList, VT>& v);
-  template <typename Tag, typename TagList, typename VT>
-  friend constexpr const typename Tag::type& get(  // NOLINT
-      const Variables<TagList, VT>& v);
+  template <typename Tag, typename... FriendTags, typename FriendDataType,
+            typename... FriendProperties>
+  friend KOKKOS_INLINE_FUNCTION constexpr typename Tag::type& get(  // NOLINT
+      Variables<tmpl::list<FriendTags...>,
+                Kokkos::View<FriendDataType, FriendProperties...>>& v);
+  template <typename Tag, typename... FriendTags, typename FriendDataType,
+            typename... FriendProperties>
+  friend KOKKOS_INLINE_FUNCTION constexpr const typename Tag::type& get(  // NOLINT
+      const Variables<tmpl::list<FriendTags...>,
+                      Kokkos::View<FriendDataType, FriendProperties...>>& v);
 
   template <typename Space>
   auto create_mirror_view(const Space& space) const {
@@ -129,6 +133,31 @@ void Variables<tmpl::list<Tags...>, Kokkos::View<DataType, Properties...>>::
   });
 }
 
+template <typename Tag, typename... Tags, typename DataType,
+          typename... Properties>
+KOKKOS_INLINE_FUNCTION constexpr typename Tag::type& get(
+    Variables<tmpl::list<Tags...>, Kokkos::View<DataType, Properties...>>& v) {
+  static_assert(tmpl::list_contains_v<tmpl::list<Tags...>, Tag>,
+                "Could not retrieve Tag from Variables. See the first "
+                "template parameter of the instantiation for what Tag is "
+                "being retrieved and the second template parameter for "
+                "what Tags are available.");
+  return tuples::get<Tag>(v.reference_variable_data_);
+}
+
+template <typename Tag, typename... Tags, typename DataType,
+          typename... Properties>
+KOKKOS_INLINE_FUNCTION constexpr const typename Tag::type& get(
+    const Variables<tmpl::list<Tags...>,
+                    Kokkos::View<DataType, Properties...>>& v) {
+  static_assert(tmpl::list_contains_v<tmpl::list<Tags...>, Tag>,
+                "Could not retrieve Tag from Variables. See the first "
+                "template parameter of the instantiation for what Tag is "
+                "being retrieved and the second template parameter for "
+                "what Tags are available.");
+  return tuples::get<Tag>(v.reference_variable_data_);
+}
+
 template <typename... Tags, typename... Is>
 KOKKOS_FUNCTION auto make_at_index(const Variables<tmpl::list<Tags...>>& vars,
                                    const Is&... i) {
@@ -155,6 +184,21 @@ auto copy_to_device(const Variables<tmpl::list<Tags...>>& vars) {
 template <typename... Properties>
 auto copy_to_device(const Tensor<DataVector, Properties...>& tensor) {
   Tensor<Kokkos::View<double*>, Properties...> tensor_on_device{
+      "Tensor", tensor.begin()->size()};
+  for (size_t i = 0; i < tensor.size(); ++i) {
+    // First copy to a Kokkos::View on the host
+    auto tensor_on_host = Kokkos::create_mirror_view(tensor_on_device[i]);
+    std::copy_n(tensor[i].data(), tensor[i].size(), tensor_on_host.data());
+    // Then copy to device
+    Kokkos::deep_copy(tensor_on_device[i], tensor_on_host);
+  }
+  return tensor_on_device;
+}
+
+template <typename Space, typename... Properties>
+auto copy_to_device(const Tensor<DataVector, Properties...>& tensor,
+                    tmpl::type_<Space> /*meta*/) {
+  Tensor<Kokkos::View<double*, Space>, Properties...> tensor_on_device{
       "Tensor", tensor.begin()->size()};
   for (size_t i = 0; i < tensor.size(); ++i) {
     // First copy to a Kokkos::View on the host
