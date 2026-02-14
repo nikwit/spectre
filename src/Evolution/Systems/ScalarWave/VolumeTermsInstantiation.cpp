@@ -3,10 +3,12 @@
 
 #include "DataStructures/DataBox/PrefixHelpers.hpp"
 #include "DataStructures/DataBox/Prefixes.hpp"
+#include "DataStructures/Tags/MirrorView.hpp"
 #include "Evolution/DiscontinuousGalerkin/Actions/VolumeTermsImpl.tpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
 #include "Evolution/Systems/ScalarWave/TimeDerivative.hpp"
 #include "NumericalAlgorithms/LinearOperators/PartialDerivatives.tpp"
+#include "Utilities/Kokkos/KokkosCore.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
 
 #define DIM(data) BOOST_PP_TUPLE_ELEM(0, data)
@@ -60,3 +62,32 @@ GENERATE_INSTANTIATIONS(INSTANTIATION, (1, 2, 3))
 
 #undef INSTANTIATION
 #undef DIM
+
+#ifdef SPECTRE_KOKKOS
+#define DIM(data) BOOST_PP_TUPLE_ELEM(0, data)
+
+#define INSTANTIATE_KOKKOS_PARTIAL_DERIVATIVES(r, data)                    \
+  template void partial_derivatives(                                        \
+      gsl::not_null<Variables<db::wrap_tags_in<                             \
+          ::Tags::deriv,                                                    \
+          db::wrap_tags_in<                                                 \
+              ::Tags::MirrorView,                                           \
+              typename ::ScalarWave::System<DIM(data)>::gradient_variables>, \
+          tmpl::size_t<DIM(data)>, Frame::Inertial>>*>                      \
+          du,                                                               \
+      const Variables<db::wrap_tags_in<                                     \
+          ::Tags::MirrorView,                                               \
+          typename ::ScalarWave::System<DIM(data)>::variables_tag::         \
+              tags_list>>&                                                  \
+          u,                                                                \
+      const Mesh<DIM(data)>& mesh,                                          \
+      const InverseJacobian<                                                \
+          Kokkos::View<double*, Kokkos::DefaultExecutionSpace::memory_space>, \
+          DIM(data), Frame::ElementLogical, Frame::Inertial>&                \
+          inverse_jacobian);
+
+GENERATE_INSTANTIATIONS(INSTANTIATE_KOKKOS_PARTIAL_DERIVATIVES, (1, 2, 3))
+
+#undef INSTANTIATE_KOKKOS_PARTIAL_DERIVATIVES
+#undef DIM
+#endif  // SPECTRE_KOKKOS

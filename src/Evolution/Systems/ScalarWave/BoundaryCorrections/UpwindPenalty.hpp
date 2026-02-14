@@ -172,7 +172,7 @@ namespace ScalarWave::BoundaryCorrections {
  */
 template <size_t Dim>
 class UpwindPenalty final : public BoundaryCorrection<Dim> {
- private:
+ public:
   struct NormalTimesVPlus : db::SimpleTag {
     using type = tnsr::i<DataVector, Dim, Frame::Inertial>;
   };
@@ -186,7 +186,6 @@ class UpwindPenalty final : public BoundaryCorrection<Dim> {
     using type = tnsr::i<DataVector, 3, Frame::Inertial>;
   };
 
- public:
   using options = tmpl::list<>;
   static constexpr Options::String help = {
       "Computes the UpwindPenalty boundary correction term for the scalar wave "

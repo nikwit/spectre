@@ -11,6 +11,7 @@ set(LIBRARY_SOURCES
   BoundaryCorrections/Test_UpwindPenalty.cpp
   Test_Characteristics.cpp
   Test_Constraints.cpp
+  Test_ComputeTimeDerivativeKokkos.cpp
   Test_EnergyDensity.cpp
   Test_Equations.cpp
   Test_KokkosTimeStepperActions.cpp
@@ -25,6 +26,11 @@ target_link_libraries(
   ${LIBRARY}
   PRIVATE
   DataStructures
+  DiscontinuousGalerkin
+  DomainCreators
+  Evolution
+  Initialization
+  LinearOperators
   MathFunctions
   ScalarWave
   Time

@@ -640,7 +640,11 @@ void partial_derivatives(
   }
 
 #ifdef SPECTRE_KOKKOS
-  if constexpr (std::is_same_v<DataType, Kokkos::View<double*>>) {
+  if constexpr (tt::is_a_v<Kokkos::View, DataType>) {
+    std::array<Kokkos::View<double*>, Dim * Dim> inverse_jacobian_data{};
+    for (size_t i = 0; i < Dim * Dim; ++i) {
+      gsl::at(inverse_jacobian_data, i) = gsl::at(inverse_jacobian.data(), i);
+    }
     // Select only the differentiated components of the input data
     const auto u_subview = Kokkos::subview(
         u.view(), Kokkos::ALL(),
@@ -653,16 +657,16 @@ void partial_derivatives(
       partial_derivatives_detail::apply_matrix_in_dim<0, Dim, false>(
           du->view(), u_subview,
           Spectral::differentiation_matrix_on_device(mesh.slice_through(0)),
-          mesh, inverse_jacobian.data());
+          mesh, inverse_jacobian_data);
     } else if constexpr (Dim == 2) {
       partial_derivatives_detail::apply_matrix_in_dim<0, Dim, false>(
           du->view(), u_subview,
           Spectral::differentiation_matrix_on_device(mesh.slice_through(0)),
-          mesh, inverse_jacobian.data());
+          mesh, inverse_jacobian_data);
       partial_derivatives_detail::apply_matrix_in_dim<1, Dim, true>(
           du->view(), u_subview,
           Spectral::differentiation_matrix_on_device(mesh.slice_through(1)),
-          mesh, inverse_jacobian.data());
+          mesh, inverse_jacobian_data);
     } else if constexpr (Dim == 3) {
       if (mesh.basis(1) == Spectral::Basis::SphericalHarmonic) {
         ERROR(
@@ -672,15 +676,15 @@ void partial_derivatives(
       partial_derivatives_detail::apply_matrix_in_dim<0, Dim, false>(
           du->view(), u_subview,
           Spectral::differentiation_matrix_on_device(mesh.slice_through(0)),
-          mesh, inverse_jacobian.data());
+          mesh, inverse_jacobian_data);
       partial_derivatives_detail::apply_matrix_in_dim<1, Dim, true>(
           du->view(), u_subview,
           Spectral::differentiation_matrix_on_device(mesh.slice_through(1)),
-          mesh, inverse_jacobian.data());
+          mesh, inverse_jacobian_data);
       partial_derivatives_detail::apply_matrix_in_dim<2, Dim, true>(
           du->view(), u_subview,
           Spectral::differentiation_matrix_on_device(mesh.slice_through(2)),
-          mesh, inverse_jacobian.data());
+          mesh, inverse_jacobian_data);
     }
   } else {
 #endif  // SPECTRE_KOKKOS
