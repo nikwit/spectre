@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <utility>
-
 #include "DataStructures/VariablesKokkos.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/KokkosTimeStepperTags.hpp"
 #include "Time/Tags/TimeStepId.hpp"
@@ -40,8 +38,9 @@ struct CleanHistoryKokkos {
            "CleanHistoryKokkos currently supports only Runge-Kutta steppers.");
 
     if (time_step_id.substep() == runge_kutta->number_of_substeps() - 1) {
-      using std::swap;
-      swap(*device_step_start, *device_vars);
+      // Preserve the updated solution in device_vars and advance the
+      // step-start state for the next full step.
+      Kokkos::deep_copy(device_step_start->view(), device_vars->view());
     }
   }
 };
