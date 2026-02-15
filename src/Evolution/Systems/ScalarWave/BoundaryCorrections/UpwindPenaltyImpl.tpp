@@ -88,7 +88,7 @@ KOKKOS_FUNCTION double dg_package_data_impl(
 }
 
 template <size_t Dim, typename DataType>
- void dg_boundary_terms_impl(
+KOKKOS_FUNCTION void dg_boundary_terms_impl(
     const gsl::not_null<Scalar<DataType>*> psi_boundary_correction,
     const gsl::not_null<Scalar<DataType>*> pi_boundary_correction,
     const gsl::not_null<tnsr::i<DataType, Dim, Frame::Inertial>*>
