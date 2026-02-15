@@ -4,10 +4,12 @@
 #pragma once
 
 #include <cstddef>
+#include <pup.h>
 
 #include "DataStructures/Tags/MirrorView.hpp"
 #include "DataStructures/Tensor/AtIndex.hpp"
 #include "DataStructures/Variables.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -97,6 +99,8 @@ class Variables<tmpl::list<Tags...>, Kokkos::View<DataType, Properties...>> {
     return Variables<tmpl::list<::Tags::MirrorView<Tags, Space>...>>(
         Kokkos::create_mirror_view_and_copy(space, storage_));
   }
+
+  void pup(PUP::er& p);  // NOLINT
 
  private:
   storage_type storage_{};
@@ -219,3 +223,21 @@ void copy_to_host(const gsl::not_null<Variables<HostTags>*> vars,
     std::copy_n(vars_on_host.view().data(), vars->size(), vars->data());
   }
 }
+
+template <typename... Tags, typename DataType, typename... Properties>
+void Variables<tmpl::list<Tags...>, Kokkos::View<DataType, Properties...>>::pup(
+    PUP::er& p) {  // NOLINT
+  (void)p;
+  ERROR("PUP for Variables<..., Kokkos::View<...>> is currently unsupported. "
+        "This executable currently assumes no migration/checkpointing with "
+        "device-resident DataBox items.");
+}
+
+namespace PUP {
+template <typename DataType, typename... Properties>
+void operator|(PUP::er& p, Kokkos::View<DataType, Properties...>& view) {  // NOLINT
+  (void)p;
+  (void)view;
+  ERROR("PUP for Kokkos::View is currently unsupported in this build.");
+}
+}  // namespace PUP
