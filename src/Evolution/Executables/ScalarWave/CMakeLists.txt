@@ -17,6 +17,7 @@ set(LIBS_TO_LINK
   LinearOperators
   MathFunctions
   ScalarWave
+  ScalarWaveKokkos
   Observer
   Options
   Parallel
@@ -46,3 +47,10 @@ endfunction(add_scalar_wave_executable)
 add_scalar_wave_executable(1)
 add_scalar_wave_executable(2)
 add_scalar_wave_executable(3)
+
+add_spectre_executable(
+  EvolveScalarWaveKokkos
+  EXCLUDE_FROM_ALL
+  EvolveScalarWaveKokkos.cpp
+  )
+target_link_libraries(EvolveScalarWaveKokkos PRIVATE ${LIBS_TO_LINK})
