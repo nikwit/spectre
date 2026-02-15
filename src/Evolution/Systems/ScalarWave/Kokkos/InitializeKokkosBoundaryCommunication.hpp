@@ -6,7 +6,8 @@
 #include <cstddef>
 
 #include "Domain/Structure/DirectionalIdMap.hpp"
-#include "Evolution/Executables/ScalarWave/KokkosBoundaryCommunication.hpp"
+#include "Evolution/Systems/ScalarWave/Kokkos/CudaDiagnostics.hpp"
+#include "Evolution/Systems/ScalarWave/Kokkos/KokkosBoundaryCommunication.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -30,6 +31,8 @@ struct InitializeKokkosBoundaryCommunication {
                         incoming_boundary_data) {
     outgoing_boundary_data->clear();
     incoming_boundary_data->clear();
+    detail::check_cuda_error_and_clear(
+        "InitializeKokkosBoundaryCommunication::apply");
   }
 };
 

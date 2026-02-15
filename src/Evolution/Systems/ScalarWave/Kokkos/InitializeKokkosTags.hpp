@@ -1,0 +1,181 @@
+// Distributed under the MIT License.
+// See LICENSE.txt for details.
+
+#pragma once
+
+#include <cmath>
+#include <cstddef>
+
+#include "DataStructures/SliceIterator.hpp"
+#include "DataStructures/VariablesKokkos.hpp"
+#include "Domain/Tags.hpp"
+#include "Evolution/Systems/ScalarWave/Kokkos/CudaDiagnostics.hpp"
+#include "Evolution/Systems/ScalarWave/Kokkos/KokkosTimeStepperTags.hpp"
+#include "Evolution/Systems/ScalarWave/Tags.hpp"
+#include "Utilities/Gsl.hpp"
+#include "Utilities/Kokkos/KokkosCore.hpp"
+#include "Utilities/TMPL.hpp"
+
+namespace ScalarWave::Actions {
+
+template <typename System>
+struct InitializeKokkosTags {
+ private:
+  static constexpr size_t volume_dim = System::volume_dim;
+  using host_inverse_jacobian_tag =
+      domain::Tags::InverseJacobian<volume_dim, Frame::ElementLogical,
+                                    Frame::Inertial>;
+  using device_inverse_jacobian_tag =
+      KokkosTags::DeviceInverseJacobian<volume_dim>;
+  using device_inverse_jacobian_space =
+      typename device_inverse_jacobian_tag::type::value_type::memory_space;
+  using device_constraint_gamma2_tag = KokkosTags::DeviceConstraintGamma2;
+  using device_constraint_gamma2_space =
+      typename device_constraint_gamma2_tag::type::value_type::memory_space;
+  using device_face_to_volume_index_map_tag =
+      KokkosTags::DeviceFaceToVolumeIndexMap<volume_dim>;
+  using device_face_unit_normal_covector_tag =
+      KokkosTags::DeviceFaceUnitNormalCovector<volume_dim>;
+  using device_face_normal_magnitude_tag =
+      KokkosTags::DeviceFaceNormalMagnitude<volume_dim>;
+
+ public:
+  using simple_tags = tmpl::list<device_inverse_jacobian_tag,
+                                 device_constraint_gamma2_tag,
+                                 device_face_to_volume_index_map_tag,
+                                 device_face_unit_normal_covector_tag,
+                                 device_face_normal_magnitude_tag>;
+  using return_tags = simple_tags;
+  using argument_tags =
+      tmpl::list<host_inverse_jacobian_tag, ScalarWave::Tags::ConstraintGamma2,
+                 domain::Tags::Mesh<volume_dim>>;
+
+  static void apply(
+      const gsl::not_null<typename device_inverse_jacobian_tag::type*>
+          device_inverse_jacobian,
+      const gsl::not_null<typename device_constraint_gamma2_tag::type*>
+          device_constraint_gamma2,
+      const gsl::not_null<typename device_face_to_volume_index_map_tag::type*>
+          device_face_to_volume_index_map,
+      const gsl::not_null<typename device_face_unit_normal_covector_tag::type*>
+          device_face_unit_normal_covector,
+      const gsl::not_null<typename device_face_normal_magnitude_tag::type*>
+          device_face_normal_magnitude,
+      const typename host_inverse_jacobian_tag::type& host_inverse_jacobian,
+      const ScalarWave::Tags::ConstraintGamma2::type& host_constraint_gamma2,
+      const Mesh<volume_dim>& mesh) {
+    *device_inverse_jacobian = copy_to_device(
+        host_inverse_jacobian, tmpl::type_<device_inverse_jacobian_space>{});
+    *device_constraint_gamma2 = copy_to_device(
+        host_constraint_gamma2, tmpl::type_<device_constraint_gamma2_space>{});
+
+    const auto [indices_buffer, volume_and_slice_index_map] =
+        volume_and_slice_indices(mesh.extents());
+    (void)indices_buffer;
+
+    for (size_t d = 0; d < volume_dim; ++d) {
+      const size_t num_face_points = mesh.extents().slice_away(d).product();
+      auto& lower_face_to_volume_index =
+          gsl::at(*device_face_to_volume_index_map, d).first;
+      auto& upper_face_to_volume_index =
+          gsl::at(*device_face_to_volume_index_map, d).second;
+      auto& lower_face_unit_normal_covector =
+          gsl::at(*device_face_unit_normal_covector, d).first;
+      auto& upper_face_unit_normal_covector =
+          gsl::at(*device_face_unit_normal_covector, d).second;
+      auto& lower_face_normal_magnitude =
+          gsl::at(*device_face_normal_magnitude, d).first;
+      auto& upper_face_normal_magnitude =
+          gsl::at(*device_face_normal_magnitude, d).second;
+      lower_face_to_volume_index =
+          Kokkos::View<size_t*>("KokkosLowerFaceToVolumeIndexMap",
+                                num_face_points);
+      upper_face_to_volume_index =
+          Kokkos::View<size_t*>("KokkosUpperFaceToVolumeIndexMap",
+                                num_face_points);
+      lower_face_unit_normal_covector = Kokkos::View<double**>(
+          "KokkosLowerFaceUnitNormalCovector", num_face_points, volume_dim);
+      upper_face_unit_normal_covector = Kokkos::View<double**>(
+          "KokkosUpperFaceUnitNormalCovector", num_face_points, volume_dim);
+      lower_face_normal_magnitude =
+          Kokkos::View<double*>("KokkosLowerFaceNormalMagnitude",
+                                num_face_points);
+      upper_face_normal_magnitude =
+          Kokkos::View<double*>("KokkosUpperFaceNormalMagnitude",
+                                num_face_points);
+
+      auto host_lower_face_to_volume_index =
+          Kokkos::create_mirror_view(lower_face_to_volume_index);
+      auto host_upper_face_to_volume_index =
+          Kokkos::create_mirror_view(upper_face_to_volume_index);
+      auto host_lower_face_unit_normal_covector =
+          Kokkos::create_mirror_view(lower_face_unit_normal_covector);
+      auto host_upper_face_unit_normal_covector =
+          Kokkos::create_mirror_view(upper_face_unit_normal_covector);
+      auto host_lower_face_normal_magnitude =
+          Kokkos::create_mirror_view(lower_face_normal_magnitude);
+      auto host_upper_face_normal_magnitude =
+          Kokkos::create_mirror_view(upper_face_normal_magnitude);
+      for (const auto& volume_and_slice_index :
+           gsl::at(volume_and_slice_index_map, d).first) {
+        host_lower_face_to_volume_index(volume_and_slice_index.second) =
+            volume_and_slice_index.first;
+      }
+      for (const auto& volume_and_slice_index :
+           gsl::at(volume_and_slice_index_map, d).second) {
+        host_upper_face_to_volume_index(volume_and_slice_index.second) =
+            volume_and_slice_index.first;
+      }
+
+      for (size_t face_index = 0; face_index < num_face_points; ++face_index) {
+        for (const bool upper_side : {false, true}) {
+          const auto& face_to_volume_index =
+              upper_side ? host_upper_face_to_volume_index
+                         : host_lower_face_to_volume_index;
+          auto& face_unit_normal_covector =
+              upper_side ? host_upper_face_unit_normal_covector
+                         : host_lower_face_unit_normal_covector;
+          auto& face_normal_magnitude =
+              upper_side ? host_upper_face_normal_magnitude
+                         : host_lower_face_normal_magnitude;
+          const double outward_sign = upper_side ? 1.0 : -1.0;
+          const size_t volume_index = face_to_volume_index(face_index);
+
+          double normal_magnitude_squared = 0.0;
+          for (size_t inertial_d = 0; inertial_d < volume_dim; ++inertial_d) {
+            const double unnormalized_normal_component =
+                outward_sign *
+                host_inverse_jacobian.get(d, inertial_d)[volume_index];
+            face_unit_normal_covector(face_index, inertial_d) =
+                unnormalized_normal_component;
+            normal_magnitude_squared +=
+                unnormalized_normal_component * unnormalized_normal_component;
+          }
+          const double normal_magnitude = std::sqrt(normal_magnitude_squared);
+          face_normal_magnitude(face_index) = normal_magnitude;
+          for (size_t inertial_d = 0; inertial_d < volume_dim; ++inertial_d) {
+            face_unit_normal_covector(face_index, inertial_d) /=
+                normal_magnitude;
+          }
+        }
+      }
+
+      Kokkos::deep_copy(lower_face_to_volume_index,
+                        host_lower_face_to_volume_index);
+      Kokkos::deep_copy(upper_face_to_volume_index,
+                        host_upper_face_to_volume_index);
+      Kokkos::deep_copy(lower_face_unit_normal_covector,
+                        host_lower_face_unit_normal_covector);
+      Kokkos::deep_copy(upper_face_unit_normal_covector,
+                        host_upper_face_unit_normal_covector);
+      Kokkos::deep_copy(lower_face_normal_magnitude,
+                        host_lower_face_normal_magnitude);
+      Kokkos::deep_copy(upper_face_normal_magnitude,
+                        host_upper_face_normal_magnitude);
+    }
+
+    detail::check_cuda_error_and_clear("InitializeKokkosTags::apply");
+  }
+};
+
+}  // namespace ScalarWave::Actions

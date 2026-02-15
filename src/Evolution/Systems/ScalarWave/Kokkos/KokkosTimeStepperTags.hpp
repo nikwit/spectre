@@ -74,4 +74,17 @@ struct DeviceFaceToVolumeIndexMap : db::SimpleTag {
       std::array<std::pair<Kokkos::View<size_t*>, Kokkos::View<size_t*>>, Dim>;
 };
 
+template <size_t Dim>
+struct DeviceFaceUnitNormalCovector : db::SimpleTag {
+  using type =
+      std::array<std::pair<Kokkos::View<double**>, Kokkos::View<double**>>,
+                 Dim>;
+};
+
+template <size_t Dim>
+struct DeviceFaceNormalMagnitude : db::SimpleTag {
+  using type =
+      std::array<std::pair<Kokkos::View<double*>, Kokkos::View<double*>>, Dim>;
+};
+
 }  // namespace ScalarWave::KokkosTags

@@ -1,0 +1,50 @@
+// Distributed under the MIT License.
+// See LICENSE.txt for details.
+
+#include "Evolution/Systems/ScalarWave/Kokkos/RecordTimeStepperDataKokkos3D.hpp"
+
+#include <cstddef>
+#ifdef KOKKOS_ENABLE_CUDA
+#include <cuda_runtime_api.h>
+#endif
+
+#include "Evolution/Systems/ScalarWave/Kokkos/CudaDiagnostics.hpp"
+#include "Utilities/ErrorHandling/Assert.hpp"
+#include "Utilities/Kokkos/KokkosCore.hpp"
+
+namespace ScalarWave::Actions {
+
+void RecordTimeStepperDataKokkos3D::apply(
+    const gsl::not_null<device_derivative_history_tag::type*>
+        device_derivative_history,
+    const TimeStepId& time_step_id,
+    const device_dt_variables_tag::type& device_dt) {
+  detail::check_cuda_error_and_clear("RecordTimeStepperDataKokkos3DEntry");
+
+  const size_t substep = time_step_id.substep();
+  ASSERT(substep < static_cast<size_t>(device_derivative_history->extent(0)),
+         "Substep " << substep << " exceeds derivative history size "
+                    << device_derivative_history->extent(0));
+
+  constexpr size_t number_of_components =
+      device_dt_variables_tag::type::number_of_independent_components;
+  const size_t num_points = device_dt.number_of_grid_points();
+  const auto dt_view = device_dt.view();
+  const auto deriv_history = *device_derivative_history;
+  Kokkos::parallel_for(
+      "RecordTimeStepperDataKokkos3D", num_points, KOKKOS_LAMBDA(const int i) {
+        for (size_t c = 0; c < number_of_components; ++c) {
+          deriv_history(substep, i, c) = dt_view(i, c);
+        }
+      });
+
+#ifdef KOKKOS_ENABLE_CUDA
+  Kokkos::fence("RecordTimeStepperDataKokkos3DFence");
+  const auto err = cudaPeekAtLastError();
+  ASSERT(err == cudaSuccess,
+         "CUDA error in RecordTimeStepperDataKokkos3D: "
+             << cudaGetErrorString(err));
+#endif
+}
+
+}  // namespace ScalarWave::Actions

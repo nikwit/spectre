@@ -19,6 +19,7 @@
 #include "Domain/Structure/DirectionalIdMap.hpp"
 #include "Evolution/Systems/ScalarWave/BoundaryCorrections/UpwindPenalty.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "Parallel/InboxInserters.hpp"
 #include "Time/TimeStepId.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Gsl.hpp"
@@ -68,31 +69,6 @@ struct BoundaryCorrectionData {
 };
 
 template <size_t Dim>
-struct InboxBoundaryCorrectionData {
-  using mapped_type =
-      DirectionalIdMap<Dim, ScalarWave::KokkosTags::BoundaryCorrectionData<Dim>>;
-
-  std::map<TimeStepId, mapped_type> messages;
-
-  int missing_messages = 0;
-
-  bool empty() const { return messages.empty(); }
-
-  void collect_messages() { missing_messages = 0; }
-
-  bool set_missing_messages(const size_t count) {
-    missing_messages += static_cast<int>(count);
-    return missing_messages <= 0;
-  }
-
-  // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er& p) {
-    p | messages;
-    p | missing_messages;
-  }
-};
-
-template <size_t Dim>
 struct OutgoingBoundaryCorrectionData : db::SimpleTag {
   using type =
       DirectionalIdMap<Dim, ScalarWave::KokkosTags::BoundaryCorrectionData<Dim>>;
@@ -106,24 +82,22 @@ struct IncomingBoundaryCorrectionData : db::SimpleTag {
 
 // Inbox tag used by the Kokkos-only scalar-wave DG communication path.
 template <size_t Dim, bool UseNodegroupDgElements>
-struct BoundaryCorrectionInbox {
+struct BoundaryCorrectionInbox
+    : Parallel::InboxInserters::Map<
+          BoundaryCorrectionInbox<Dim, UseNodegroupDgElements>> {
   using stored_type = ScalarWave::KokkosTags::BoundaryCorrectionData<Dim>;
 
  public:
   using temporal_id = TimeStepId;
-  using type = ScalarWave::KokkosTags::InboxBoundaryCorrectionData<Dim>;
-  using value_type = type;
+  using type = std::map<temporal_id, DirectionalIdMap<Dim, stored_type>>;
 
   static bool insert_into_inbox(
       const gsl::not_null<type*> inbox, const temporal_id& time_step_id,
       std::pair<DirectionalId<Dim>, stored_type> data) {
-    auto& current_inbox = inbox->messages[time_step_id];
-    if (not current_inbox.insert(std::move(data)).second) {
-      ERROR("Failed to insert Kokkos boundary data into inbox at temporal id "
-            << time_step_id << ".");
-    }
-    --inbox->missing_messages;
-    return inbox->missing_messages == 0;
+    Parallel::InboxInserters::Map<
+        BoundaryCorrectionInbox<Dim, UseNodegroupDgElements>>::
+        insert_into_inbox(inbox, time_step_id, std::move(data));
+    return false;
   }
 
   static std::string output_inbox(const type& inbox, const size_t padding_size) {
@@ -132,7 +106,7 @@ struct BoundaryCorrectionInbox {
     ss << std::scientific << std::setprecision(16);
     ss << pad << "KokkosBoundaryCorrectionInbox:\n";
 
-    for (const auto& [current_time_step_id, hash_map] : inbox.messages) {
+    for (const auto& [current_time_step_id, hash_map] : inbox) {
       ss << pad << " Current time: " << current_time_step_id << "\n";
       for (const auto& [key, boundary_data] : hash_map) {
         ss << pad << "  Key: " << key
