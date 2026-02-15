@@ -1,0 +1,93 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+Executable: EvolveScalarWaveKokkos
+Testing:
+  Check: parse;execute
+
+---
+
+Parallelization:
+  ElementDistribution: NumGridPoints
+
+ResourceInfo:
+  AvoidGlobalProc0: false
+
+InitialData:
+  PlaneWave:
+    WaveVector: [1.0, 1.0, 1.0]
+    Center: [0.0, 0.0, 0.0]
+    Profile:
+      Sinusoid:
+        Amplitude: 1.0
+        Wavenumber: 1.0
+        Phase: 0.0
+
+PhaseChangeAndTriggers:
+
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.001
+  MinimumTimeStep: 1e-7
+  TimeStepper: Rk5Tsitouras
+
+DomainCreator:
+  Brick:
+    LowerBound: [0.0, 0.0, 0.0]
+    UpperBound: [6.283185307179586, 6.283185307179586, 6.283185307179586]
+    Distribution: [Linear, Linear, Linear]
+    InitialRefinement: [0, 0, 0]
+    InitialGridPoints: [8, 8, 8]
+    TimeDependence: None
+    BoundaryConditions: [Periodic, Periodic, Periodic]
+
+SpatialDiscretization:
+  DiscontinuousGalerkin:
+    Quadrature: GaussLobatto
+
+# If filtering is enabled in the executable the filter can be controlled using:
+# Filtering:
+#   ExpFilter0:
+#     Alpha: 12
+#     HalfPower: 32
+#     Enable: false
+#     BlocksToFilter: All
+
+EventsAndTriggersAtSlabs:
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 100
+          Offset: 0
+    Events:
+      - SyncKokkosToHost
+      - ObserveFields:
+          SubfileName: FieldsFinal
+          VariablesToObserve: [Psi]
+          InterpolateToMesh: None
+          CoordinatesFloatingPointType: Double
+          FloatingPointTypes: [Double]
+          BlocksToObserve: All
+      - ObserveNorms:
+          SubfileName: Errors
+          TensorsToObserve:
+            - Name: Error(Psi)
+              NormType: L2Norm
+              Components: Sum
+            - Name: Error(Phi)
+              NormType: L2Norm
+              Components: Sum
+            - Name: Error(Pi)
+              NormType: L2Norm
+              Components: Sum
+  - Trigger:
+      Slabs:
+        Specified:
+          Values: [1000]
+    Events:
+      - Completion
+
+
+Observers:
+  VolumeFileName: "ScalarWavePlaneWave3DKokkosVolume"
+  ReductionFileName: "ScalarWavePlaneWave3DKokkosReductions"
