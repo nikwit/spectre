@@ -4,11 +4,7 @@
 #include "Evolution/Systems/ScalarWave/Kokkos/RecordTimeStepperDataKokkos3D.hpp"
 
 #include <cstddef>
-#ifdef KOKKOS_ENABLE_CUDA
-#include <cuda_runtime_api.h>
-#endif
 
-#include "Evolution/Systems/ScalarWave/Kokkos/CudaDiagnostics.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
 
@@ -19,8 +15,6 @@ void RecordTimeStepperDataKokkos3D::apply(
         device_derivative_history,
     const TimeStepId& time_step_id,
     const device_dt_variables_tag::type& device_dt) {
-  detail::check_cuda_error_and_clear("RecordTimeStepperDataKokkos3DEntry");
-
   const size_t substep = time_step_id.substep();
   ASSERT(substep < static_cast<size_t>(device_derivative_history->extent(0)),
          "Substep " << substep << " exceeds derivative history size "
@@ -37,14 +31,6 @@ void RecordTimeStepperDataKokkos3D::apply(
           deriv_history(substep, i, c) = dt_view(i, c);
         }
       });
-
-#ifdef KOKKOS_ENABLE_CUDA
-  Kokkos::fence("RecordTimeStepperDataKokkos3DFence");
-  const auto err = cudaPeekAtLastError();
-  ASSERT(err == cudaSuccess,
-         "CUDA error in RecordTimeStepperDataKokkos3D: "
-             << cudaGetErrorString(err));
-#endif
 }
 
 }  // namespace ScalarWave::Actions

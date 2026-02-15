@@ -7,9 +7,6 @@
 #include <cmath>
 #include <cstddef>
 #include <exception>
-#ifdef KOKKOS_ENABLE_CUDA
-#include <cuda_runtime_api.h>
-#endif
 
 #include "DataStructures/DataBox/PrefixHelpers.hpp"
 #include "DataStructures/DataBox/Prefixes.hpp"
@@ -40,14 +37,6 @@ void ComputeTimeDerivativeKokkos::
             device_face_unit_normal_covector,
         const Mesh<volume_dim>& mesh, const Element<volume_dim>& element,
         const TimeStepId& time_step_id) {
-#ifdef KOKKOS_ENABLE_CUDA
-  Kokkos::fence("ComputeTimeDerivativeKokkosActionEntry");
-  const auto action_entry_err = cudaPeekAtLastError();
-  ASSERT(action_entry_err == cudaSuccess,
-         "CUDA error on entry to ComputeTimeDerivativeKokkos action: "
-             << cudaGetErrorString(action_entry_err));
-#endif
-
   using device_gradient_tags =
       db::wrap_tags_in<::Tags::MirrorView, typename System::gradient_variables>;
   using device_derivative_tags =
@@ -60,29 +49,6 @@ void ComputeTimeDerivativeKokkos::
   if (device_dt->number_of_grid_points() != mesh.number_of_grid_points()) {
     device_dt->initialize(mesh.number_of_grid_points());
   }
-#ifdef KOKKOS_ENABLE_CUDA
-  Kokkos::fence("ComputeTimeDerivativeKokkosAfterDtInit");
-  const auto after_dt_init_err = cudaPeekAtLastError();
-  ASSERT(after_dt_init_err == cudaSuccess,
-         "CUDA error after DeviceDtVariables initialization: "
-             << cudaGetErrorString(after_dt_init_err));
-#endif
-
-#ifdef KOKKOS_ENABLE_CUDA
-  Kokkos::fence("ComputeTimeDerivativeKokkosBeforePartialDerivatives");
-  const auto before_partial_derivatives_err = cudaPeekAtLastError();
-  ASSERT(before_partial_derivatives_err == cudaSuccess,
-         "CUDA error before partial_derivatives: "
-             << cudaGetErrorString(before_partial_derivatives_err));
-
-  Kokkos::parallel_for("ComputeTimeDerivativeKokkosProbeBeforePartials", 1,
-                       KOKKOS_LAMBDA(const int /*unused*/){});
-  Kokkos::fence("ComputeTimeDerivativeKokkosAfterProbeBeforePartials");
-  const auto probe_before_partials_err = cudaPeekAtLastError();
-  ASSERT(probe_before_partials_err == cudaSuccess,
-         "Probe kernel failed right before partial_derivatives: "
-             << cudaGetErrorString(probe_before_partials_err));
-#endif
 
   try {
     partial_derivatives(make_not_null(&device_partial_derivatives), device_vars,
@@ -93,13 +59,6 @@ void ComputeTimeDerivativeKokkos::
         "ComputeTimeDerivativeKokkos: "
         << e.what());
   }
-#ifdef KOKKOS_ENABLE_CUDA
-  Kokkos::fence("ComputeTimeDerivativeKokkosAfterPartialDerivatives");
-  const auto after_partial_derivatives_err = cudaPeekAtLastError();
-  ASSERT(after_partial_derivatives_err == cudaSuccess,
-         "CUDA error after partial_derivatives: "
-             << cudaGetErrorString(after_partial_derivatives_err));
-#endif
 
   const auto dt_psi =
       get<::Tags::MirrorView<::Tags::dt<Tags::Psi>>>(*device_dt);
@@ -107,22 +66,6 @@ void ComputeTimeDerivativeKokkos::
   const auto dt_phi =
       get<::Tags::MirrorView<::Tags::dt<Tags::Phi<volume_dim>>>>(*device_dt);
   static constexpr size_t Dim = 3;
-
-#ifdef KOKKOS_ENABLE_CUDA
-  Kokkos::fence("ComputeTimeDerivativeKokkosPreVolumeTerms");
-  const auto pre_volume_terms_err = cudaPeekAtLastError();
-  ASSERT(pre_volume_terms_err == cudaSuccess,
-         "Pre-kernel CUDA error before ComputeTimeDerivativeKokkosVolumeTerms: "
-             << cudaGetErrorString(pre_volume_terms_err));
-
-  Kokkos::parallel_for("ComputeTimeDerivativeKokkosProbeKernel", 1,
-                       KOKKOS_LAMBDA(const int /*unused*/){});
-  Kokkos::fence("ComputeTimeDerivativeKokkosAfterProbeKernel");
-  const auto probe_kernel_err = cudaPeekAtLastError();
-  ASSERT(probe_kernel_err == cudaSuccess,
-         "Probe kernel failed before ComputeTimeDerivativeKokkosVolumeTerms: "
-             << cudaGetErrorString(probe_kernel_err));
-#endif
 
   Kokkos::parallel_for(
       "ComputeTimeDerivativeKokkosVolumeTerms", mesh.number_of_grid_points(),

@@ -5,14 +5,10 @@
 
 #include <cmath>
 #include <cstddef>
-#ifdef KOKKOS_ENABLE_CUDA
-#include <cuda_runtime_api.h>
-#endif
 
 #include "DataStructures/DataBox/PrefixHelpers.hpp"
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/Tensor/AtIndex.hpp"
-#include "Evolution/Systems/ScalarWave/Kokkos/CudaDiagnostics.hpp"
 #include "Evolution/Systems/ScalarWave/BoundaryCorrections/UpwindPenaltyImpl.tpp"
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
@@ -29,8 +25,6 @@ void ApplyBoundaryCorrectionsToTimeDerivativeKokkos::
             device_face_to_volume_index_map,
         const device_face_normal_magnitude_type& device_face_normal_magnitude,
         const Mesh<3>& mesh, const Element<3>& element) {
-  detail::check_cuda_error_and_clear("ApplyBoundaryCorrectionsKokkosActionEntry");
-
   ASSERT(mesh.quadrature(0) == Spectral::Quadrature::GaussLobatto,
          "ApplyBoundaryCorrectionsToTimeDerivativeKokkos currently supports "
          "Gauss-Lobatto quadrature only.");
@@ -87,22 +81,6 @@ void ApplyBoundaryCorrectionsToTimeDerivativeKokkos::
         direction.side() == Side::Upper
             ? gsl::at(device_face_normal_magnitude, sliced_dim).second
             : gsl::at(device_face_normal_magnitude, sliced_dim).first;
-
-#ifdef KOKKOS_ENABLE_CUDA
-    Kokkos::fence("ApplyBoundaryCorrectionsKokkosPreFaceKernel");
-    const auto pre_face_kernel_err = cudaPeekAtLastError();
-    ASSERT(pre_face_kernel_err == cudaSuccess,
-           "CUDA error before ApplyBoundaryCorrections face kernel: "
-               << cudaGetErrorString(pre_face_kernel_err));
-
-    Kokkos::parallel_for("ApplyBoundaryCorrectionsKokkosProbeKernel", 1,
-                         KOKKOS_LAMBDA(const int /*unused*/) {});
-    Kokkos::fence("ApplyBoundaryCorrectionsKokkosAfterProbeKernel");
-    const auto probe_face_kernel_err = cudaPeekAtLastError();
-    ASSERT(probe_face_kernel_err == cudaSuccess,
-           "Probe kernel failed before ApplyBoundaryCorrections face kernel: "
-               << cudaGetErrorString(probe_face_kernel_err));
-#endif
 
     Kokkos::parallel_for(
         "ApplyBoundaryCorrectionsToTimeDerivativeKokkosFace", num_face_points,
@@ -167,14 +145,6 @@ void ApplyBoundaryCorrectionsToTimeDerivativeKokkos::
                 lifted_factor * phi_boundary_correction.get(d);
           }
         });
-
-#ifdef KOKKOS_ENABLE_CUDA
-    Kokkos::fence("ApplyBoundaryCorrectionsKokkosPostFaceKernel");
-    const auto post_face_kernel_err = cudaPeekAtLastError();
-    ASSERT(post_face_kernel_err == cudaSuccess,
-           "CUDA error after ApplyBoundaryCorrections face kernel: "
-               << cudaGetErrorString(post_face_kernel_err));
-#endif
   }
 }
 
