@@ -9,7 +9,6 @@
 #include "Parallel/GlobalCache.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/Event.hpp"
 #include "Utilities/Gsl.hpp"
-#include "Utilities/Kokkos/KokkosCore.hpp"
 #include "Utilities/Serialization/CharmPupable.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -48,9 +47,7 @@ class SyncKokkosToHost : public Event {
       const ArrayIndex& /*array_index*/,
       const ParallelComponent* const /*meta*/,
       const ObservationValue& /*observation_value*/) const {
-    Kokkos::fence("SyncKokkosToHostBeforeCopy");
     copy_to_host(host_vars, device_vars);
-    Kokkos::fence("SyncKokkosToHostAfterCopy");
   }
 
   using is_ready_argument_tags = tmpl::list<>;
