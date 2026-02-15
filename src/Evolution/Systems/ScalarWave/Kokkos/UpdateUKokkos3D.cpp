@@ -4,11 +4,7 @@
 #include "Evolution/Systems/ScalarWave/Kokkos/UpdateUKokkos3D.hpp"
 
 #include <cstddef>
-#ifdef KOKKOS_ENABLE_CUDA
-#include <cuda_runtime_api.h>
-#endif
 
-#include "Evolution/Systems/ScalarWave/Kokkos/CudaDiagnostics.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
 
@@ -20,8 +16,6 @@ void UpdateUKokkos3D::apply(
     const TimeDelta& time_step,
     const device_step_start_tag::type& device_step_start,
     const device_derivative_history_tag::type& device_derivative_history) {
-  detail::check_cuda_error_and_clear("UpdateUKokkos3DEntry");
-
   const auto* runge_kutta =
       dynamic_cast<const TimeSteppers::RungeKutta*>(&time_stepper);
   ASSERT(runge_kutta != nullptr,
@@ -77,13 +71,6 @@ void UpdateUKokkos3D::apply(
           u_view(i, c) = u0_view(i, c) + dt * weighted_sum;
         }
       });
-
-#ifdef KOKKOS_ENABLE_CUDA
-  Kokkos::fence("UpdateUKokkos3DFence");
-  const auto err = cudaPeekAtLastError();
-  ASSERT(err == cudaSuccess,
-         "CUDA error in UpdateUKokkos3D: " << cudaGetErrorString(err));
-#endif
 }
 
 }  // namespace ScalarWave::Actions
