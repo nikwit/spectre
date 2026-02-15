@@ -173,7 +173,7 @@ SPECTRE_TEST_CASE(
       CHECK(get_component(cleaned_step_start, c, i) ==
             approx(get_component(updated_host_vars, c, i)));
       CHECK(get_component(cleaned_device_vars, c, i) ==
-            approx(get_component(host_vars, c, i)));
+            approx(get_component(updated_host_vars, c, i)));
     }
   }
 }
