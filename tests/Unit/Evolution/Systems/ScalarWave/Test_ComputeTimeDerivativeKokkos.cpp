@@ -12,11 +12,13 @@
 #include <utility>
 #include <vector>
 
+#include "DataStructures/DataBox/DataBox.hpp"
 #include "DataStructures/DataBox/PrefixHelpers.hpp"
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Variables.hpp"
 #include "DataStructures/VariablesKokkos.hpp"
+#include "Domain/InterfaceHelpers.hpp"
 #include "Domain/CoordinateMaps/CoordinateMap.hpp"
 #include "Domain/CoordinateMaps/Identity.hpp"
 #include "Domain/CreateInitialElement.hpp"
@@ -25,13 +27,14 @@
 #include "Domain/ElementMap.hpp"
 #include "Domain/Structure/ElementId.hpp"
 #include "Domain/Structure/InitialElementIds.hpp"
+#include "Domain/Structure/OrientationMapHelpers.hpp"
 #include "Domain/Tags.hpp"
 #include "Evolution/DiscontinuousGalerkin/Actions/InternalMortarDataImpl.hpp"
 #include "Evolution/DiscontinuousGalerkin/Initialization/Mortars.hpp"
-#include "Evolution/Executables/ScalarWave/ComputeTimeDerivativeKokkos.hpp"
-#include "Evolution/Executables/ScalarWave/InitializeKokkosTags.hpp"
-#include "Evolution/Executables/ScalarWave/KokkosBoundaryCommunication.hpp"
-#include "Evolution/Executables/ScalarWave/KokkosTimeStepperTags.hpp"
+#include "Evolution/Systems/ScalarWave/Kokkos/ComputeTimeDerivativeKokkos.hpp"
+#include "Evolution/Systems/ScalarWave/Kokkos/InitializeKokkosTags.hpp"
+#include "Evolution/Systems/ScalarWave/Kokkos/KokkosBoundaryCommunication.hpp"
+#include "Evolution/Systems/ScalarWave/Kokkos/KokkosTimeStepperTags.hpp"
 #include "Evolution/Systems/ScalarWave/BoundaryCorrections/UpwindPenalty.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
 #include "Evolution/Systems/ScalarWave/Tags.hpp"
@@ -250,7 +253,8 @@ void compute_host_reference(
   }
 }
 
-void check_compute_time_derivative_kokkos_matches_host_internal_reference_for_element(
+void
+check_compute_and_package_time_derivative_kokkos_matches_host_internal_reference_for_element(
     const SetupData& setup) {
   const size_t num_points = setup.mesh.number_of_grid_points();
 
@@ -264,20 +268,28 @@ void check_compute_time_derivative_kokkos_matches_host_internal_reference_for_el
       device_constraint_gamma2{};
   typename ScalarWave::KokkosTags::DeviceFaceToVolumeIndexMap<Dim>::type
       device_face_to_volume_index_map{};
+  typename ScalarWave::KokkosTags::DeviceFaceUnitNormalCovector<Dim>::type
+      device_face_unit_normal_covector{};
+  typename ScalarWave::KokkosTags::DeviceFaceNormalMagnitude<Dim>::type
+      device_face_normal_magnitude{};
   typename ScalarWave::KokkosTags::OutgoingBoundaryCorrectionData<Dim>::type
       outgoing_boundary_data{};
 
   ScalarWave::Actions::InitializeKokkosTags<system>::apply(
       make_not_null(&device_inverse_jacobian),
       make_not_null(&device_constraint_gamma2),
-      make_not_null(&device_face_to_volume_index_map), setup.inverse_jacobian,
+      make_not_null(&device_face_to_volume_index_map),
+      make_not_null(&device_face_unit_normal_covector),
+      make_not_null(&device_face_normal_magnitude), setup.inverse_jacobian,
       setup.constraint_gamma2, setup.mesh);
 
-  ScalarWave::Actions::ComputeTimeDerivativeKokkos<Dim, system>::apply(
+  // The fused iterable action computes, packages, and sends. This unit test
+  // exercises the shared compute+package path directly.
+  ScalarWave::Actions::ComputeTimeDerivativeKokkos::apply(
       make_not_null(&device_dt), make_not_null(&outgoing_boundary_data),
       device_vars, device_inverse_jacobian, device_constraint_gamma2,
-      device_face_to_volume_index_map, setup.mesh, setup.element,
-      setup.time_step_id);
+      device_face_to_volume_index_map, device_face_unit_normal_covector,
+      setup.mesh, setup.element, setup.time_step_id);
 
   Variables<dt_variables_tags> dt_kokkos{num_points, 0.0};
   copy_to_host(make_not_null(&dt_kokkos), device_dt);
@@ -326,15 +338,115 @@ void check_compute_time_derivative_kokkos_matches_host_internal_reference_for_el
   }
 }
 
-void test_compute_time_derivative_kokkos_matches_host_internal_reference() {
+void test_compute_and_package_time_derivative_kokkos_matches_host_internal_reference() {
   const DomainData domain_data = make_domain_data();
   for (const auto& element_id : domain_data.element_ids) {
     INFO("Checking element " << element_id);
     const SetupData setup = make_setup_data(
         element_id, domain_data.domain, domain_data.initial_refinement_levels,
         domain_data.mesh);
-    check_compute_time_derivative_kokkos_matches_host_internal_reference_for_element(
+    check_compute_and_package_time_derivative_kokkos_matches_host_internal_reference_for_element(
         setup);
+  }
+}
+
+void test_packaged_data_populates_boundary_correction_inboxes_with_oriented_metadata() {
+  using inbox_tag = ScalarWave::KokkosTags::BoundaryCorrectionInbox<Dim, false>;
+  using inbox_type = typename inbox_tag::type;
+
+  const DomainData domain_data = make_domain_data();
+
+  for (const auto& element_id : domain_data.element_ids) {
+    INFO("Checking sender element " << element_id);
+    const SetupData setup = make_setup_data(
+        element_id, domain_data.domain, domain_data.initial_refinement_levels,
+        domain_data.mesh);
+    typename ScalarWave::KokkosTags::DeviceVariables<system>::type device_vars =
+        copy_to_device(setup.vars);
+    typename ScalarWave::KokkosTags::DeviceDtVariables<system>::type device_dt{};
+    typename ScalarWave::KokkosTags::DeviceInverseJacobian<Dim>::type
+        device_inverse_jacobian{};
+    typename ScalarWave::KokkosTags::DeviceConstraintGamma2::type
+        device_constraint_gamma2{};
+    typename ScalarWave::KokkosTags::DeviceFaceToVolumeIndexMap<Dim>::type
+        device_face_to_volume_index_map{};
+    typename ScalarWave::KokkosTags::DeviceFaceUnitNormalCovector<Dim>::type
+        device_face_unit_normal_covector{};
+    typename ScalarWave::KokkosTags::DeviceFaceNormalMagnitude<Dim>::type
+        device_face_normal_magnitude{};
+
+    ScalarWave::Actions::InitializeKokkosTags<system>::apply(
+        make_not_null(&device_inverse_jacobian),
+        make_not_null(&device_constraint_gamma2),
+        make_not_null(&device_face_to_volume_index_map),
+        make_not_null(&device_face_unit_normal_covector),
+        make_not_null(&device_face_normal_magnitude), setup.inverse_jacobian,
+        setup.constraint_gamma2, setup.mesh);
+
+    typename ScalarWave::KokkosTags::OutgoingBoundaryCorrectionData<Dim>::type
+        outgoing_boundary_data{};
+    ScalarWave::Actions::ComputeTimeDerivativeKokkos::apply(
+        make_not_null(&device_dt), make_not_null(&outgoing_boundary_data),
+        device_vars, device_inverse_jacobian, device_constraint_gamma2,
+        device_face_to_volume_index_map, device_face_unit_normal_covector,
+        setup.mesh, setup.element, setup.time_step_id);
+
+    Variables<dt_variables_tags> unused_dt{domain_data.mesh.number_of_grid_points(),
+                                           0.0};
+    packaged_data_by_mortar_map host_packaged_data{};
+    compute_host_reference(setup, make_not_null(&unused_dt),
+                           make_not_null(&host_packaged_data));
+
+    for (const auto& [direction, neighbors] : setup.element.neighbors()) {
+      for (const auto& neighbor : neighbors) {
+        const auto& orientation = neighbors.orientation(neighbor);
+        const DirectionalId<Dim> sender_mortar_id{direction, neighbor};
+        const DirectionalId<Dim> expected_neighbor_inbox_key{
+            orientation(direction.opposite()), setup.element.id()};
+        REQUIRE(outgoing_boundary_data.count(sender_mortar_id) == 1);
+
+        auto data_for_neighbor = outgoing_boundary_data.at(sender_mortar_id);
+        data_for_neighbor.volume_mesh = orientation(data_for_neighbor.volume_mesh);
+        data_for_neighbor.boundary_correction_mesh = orient_mesh_on_slice(
+            data_for_neighbor.boundary_correction_mesh, direction.dimension(),
+            orientation);
+
+        inbox_type neighbor_inbox{};
+        const bool inbox_ready = inbox_tag::insert_into_inbox(
+            make_not_null(&neighbor_inbox), setup.time_step_id,
+            std::make_pair(expected_neighbor_inbox_key, std::move(data_for_neighbor)));
+        CHECK_FALSE(inbox_ready);
+
+        const auto inbox_record = neighbor_inbox.find(setup.time_step_id);
+        REQUIRE(inbox_record != neighbor_inbox.end());
+        REQUIRE(inbox_record->second.count(expected_neighbor_inbox_key) == 1);
+        REQUIRE(host_packaged_data.count(sender_mortar_id) == 1);
+
+        const auto& received_data =
+            inbox_record->second.at(expected_neighbor_inbox_key);
+        CHECK(received_data.validity_range == setup.time_step_id);
+        CHECK(received_data.integration_order == 0);
+        CHECK(received_data.volume_mesh == orientation(setup.mesh));
+        const Mesh<Dim - 1> expected_boundary_correction_mesh =
+            orient_mesh_on_slice(setup.mesh.slice_away(direction.dimension()),
+                                 direction.dimension(), orientation);
+        CHECK(received_data.boundary_correction_mesh ==
+              expected_boundary_correction_mesh);
+
+        Variables<dg_package_field_tags> received_packaged_data{
+            received_data.boundary_correction_mesh.number_of_grid_points(), 0.0};
+        copy_to_host(make_not_null(&received_packaged_data),
+                     received_data.boundary_correction_data);
+        const auto& expected_host_packaged_data =
+            host_packaged_data.at(sender_mortar_id);
+        CHECK(received_packaged_data.size() == expected_host_packaged_data.size());
+        CHECK_ITERABLE_APPROX(
+            gsl::make_span(received_packaged_data.data(),
+                           received_packaged_data.size()),
+            gsl::make_span(expected_host_packaged_data.data(),
+                           expected_host_packaged_data.size()));
+      }
+    }
   }
 }
 }  // namespace
@@ -342,5 +454,6 @@ void test_compute_time_derivative_kokkos_matches_host_internal_reference() {
 SPECTRE_TEST_CASE(
     "Unit.Evolution.Systems.ScalarWave.ComputeTimeDerivativeKokkos",
     "[Unit][Evolution]") {
-  test_compute_time_derivative_kokkos_matches_host_internal_reference();
+  test_compute_and_package_time_derivative_kokkos_matches_host_internal_reference();
+  test_packaged_data_populates_boundary_correction_inboxes_with_oriented_metadata();
 }

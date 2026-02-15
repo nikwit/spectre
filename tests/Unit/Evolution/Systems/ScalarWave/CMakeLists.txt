@@ -9,6 +9,7 @@ set(LIBRARY_SOURCES
   BoundaryConditions/Test_Periodic.cpp
   BoundaryConditions/Test_SphericalRadiation.cpp
   BoundaryCorrections/Test_UpwindPenalty.cpp
+  Test_ApplyBoundaryCorrectionsToTimeDerivativeKokkos.cpp
   Test_Characteristics.cpp
   Test_Constraints.cpp
   Test_ComputeTimeDerivativeKokkos.cpp
@@ -34,6 +35,7 @@ target_link_libraries(
   LinearOperators
   MathFunctions
   ScalarWave
+  ScalarWaveKokkos
   Time
   Utilities
   WaveEquationSolutions
