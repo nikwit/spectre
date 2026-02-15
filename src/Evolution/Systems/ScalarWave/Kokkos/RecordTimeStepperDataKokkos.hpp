@@ -6,7 +6,7 @@
 #include <cstddef>
 
 #include "DataStructures/VariablesKokkos.hpp"
-#include "Evolution/Executables/ScalarWave/KokkosTimeStepperTags.hpp"
+#include "Evolution/Systems/ScalarWave/Kokkos/KokkosTimeStepperTags.hpp"
 #include "Time/Tags/TimeStepId.hpp"
 #include "Time/TimeStepId.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
