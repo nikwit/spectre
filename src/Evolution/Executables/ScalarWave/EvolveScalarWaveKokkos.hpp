@@ -14,6 +14,14 @@
 #include "Evolution/Actions/RunEventsAndTriggers.hpp"
 #include "Evolution/ComputeTags.hpp"
 #include "Evolution/DiscontinuousGalerkin/DgElementArray.hpp"
+#include "Evolution/Initialization/DgDomain.hpp"
+#include "Evolution/Initialization/Evolution.hpp"
+#include "Evolution/Initialization/NonconservativeSystem.hpp"
+#include "Evolution/Initialization/SetVariables.hpp"
+#include "Evolution/Systems/ScalarWave/BoundaryConditions/Factory.hpp"
+#include "Evolution/Systems/ScalarWave/EnergyDensity.hpp"
+#include "Evolution/Systems/ScalarWave/Equations.hpp"
+#include "Evolution/Systems/ScalarWave/Initialize.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/ApplyBoundaryCorrectionsToTimeDerivativeKokkos.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/CleanHistoryKokkos.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/ComputeTimeDerivativeKokkos.hpp"
@@ -24,14 +32,6 @@
 #include "Evolution/Systems/ScalarWave/Kokkos/RecordTimeStepperDataKokkos3D.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/SyncKokkosToHost.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/UpdateUKokkos3D.hpp"
-#include "Evolution/Initialization/DgDomain.hpp"
-#include "Evolution/Initialization/Evolution.hpp"
-#include "Evolution/Initialization/NonconservativeSystem.hpp"
-#include "Evolution/Initialization/SetVariables.hpp"
-#include "Evolution/Systems/ScalarWave/BoundaryConditions/Factory.hpp"
-#include "Evolution/Systems/ScalarWave/EnergyDensity.hpp"
-#include "Evolution/Systems/ScalarWave/Equations.hpp"
-#include "Evolution/Systems/ScalarWave/Initialize.hpp"
 #include "Evolution/Systems/ScalarWave/MomentumDensity.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
 #include "IO/Observer/Actions/RegisterEvents.hpp"
@@ -43,8 +43,8 @@
 #include "Parallel/PhaseControl/ExecutePhaseChange.hpp"
 #include "Parallel/PhaseControl/Factory.hpp"
 #include "Parallel/PhaseDependentActionList.hpp"
-#include "ParallelAlgorithms/Actions/InitializeItems.hpp"
 #include "ParallelAlgorithms/Actions/AddComputeTags.hpp"
+#include "ParallelAlgorithms/Actions/InitializeItems.hpp"
 #include "ParallelAlgorithms/Actions/MutateApply.hpp"
 #include "ParallelAlgorithms/Actions/TerminatePhase.hpp"
 #include "ParallelAlgorithms/Events/Factory.hpp"
@@ -117,13 +117,12 @@ struct EvolutionMetavarsKokkos {
       ScalarWave::Tags::EnergyDensityCompute<volume_dim>,
       domain::Tags::Coordinates<volume_dim, Frame::Grid>,
       domain::Tags::Coordinates<volume_dim, Frame::Inertial>>;
-  using non_tensor_compute_tags =
-      tmpl::list<::Events::Tags::ObserverMeshCompute<volume_dim>,
-                 ::Events::Tags::ObserverCoordinatesCompute<volume_dim,
-                                                            Frame::Inertial>,
-                 ::Events::Tags::ObserverDetInvJacobianCompute<
-                     Frame::ElementLogical, Frame::Inertial>,
-                 deriv_compute, analytic_compute, error_compute>;
+  using non_tensor_compute_tags = tmpl::list<
+      ::Events::Tags::ObserverMeshCompute<volume_dim>,
+      ::Events::Tags::ObserverCoordinatesCompute<volume_dim, Frame::Inertial>,
+      ::Events::Tags::ObserverDetInvJacobianCompute<Frame::ElementLogical,
+                                                    Frame::Inertial>,
+      deriv_compute, analytic_compute, error_compute>;
 
   struct factory_creation
       : tt::ConformsTo<Options::protocols::FactoryCreation> {
@@ -172,6 +171,13 @@ struct EvolutionMetavarsKokkos {
       Actions::MutateApply<
           ScalarWave::Actions::CleanHistoryKokkos<ScalarWave::System<3>>>>>;
 
+#ifdef SPECTRE_DEBUG
+  using evolve_entry_cuda_diagnostics =
+      tmpl::list<ScalarWave::Actions::CheckCudaOnEvolveEntry>;
+#else
+  using evolve_entry_cuda_diagnostics = tmpl::list<>;
+#endif  // SPECTRE_DEBUG
+
   using const_global_cache_tags =
       tmpl::list<evolution::initial_data::Tags::InitialData>;
 
@@ -180,7 +186,8 @@ struct EvolutionMetavarsKokkos {
 
   using initialization_actions = tmpl::list<
       Initialization::Actions::InitializeItems<
-          Initialization::TimeStepping<EvolutionMetavarsKokkos, TimeStepperBase>,
+          Initialization::TimeStepping<EvolutionMetavarsKokkos,
+                                       TimeStepperBase>,
           evolution::dg::Initialization::Domain<EvolutionMetavarsKokkos>,
           Initialization::TimeStepperHistory<EvolutionMetavarsKokkos>>,
       Initialization::Actions::NonconservativeSystem<system>,
@@ -207,13 +214,11 @@ struct EvolutionMetavarsKokkos {
           Parallel::PhaseActions<
               Parallel::Phase::InitializeTimeStepperHistory,
               tmpl::append<
-                  tmpl::list<
-                      ScalarWave::Actions::
-                          CheckCudaOnInitializeTimeStepperHistoryEntry>,
+                  tmpl::list<ScalarWave::Actions::
+                                 CheckCudaOnInitializeTimeStepperHistoryEntry>,
                   SelfStart::self_start_procedure<step_actions, system>,
-                  tmpl::list<
-                      ScalarWave::Actions::
-                          CheckCudaOnInitializeTimeStepperHistoryExit>>>,
+                  tmpl::list<ScalarWave::Actions::
+                                 CheckCudaOnInitializeTimeStepperHistoryExit>>>,
           Parallel::PhaseActions<Parallel::Phase::Register,
                                  tmpl::list<dg_registration_list,
                                             Parallel::Actions::TerminatePhase>>,
@@ -223,14 +228,15 @@ struct EvolutionMetavarsKokkos {
           Parallel::PhaseActions<
               Parallel::Phase::Evolve,
               tmpl::list<
-                  ScalarWave::Actions::CheckCudaOnEvolveEntry,
+                  // ScalarWave::Actions::CheckCudaOnEvolveEntry,
                   evolution::Actions::RunEventsAndTriggers<local_time_stepping>,
                   Actions::ChangeSlabSize, step_actions, Actions::AdvanceTime,
                   PhaseControl::Actions::ExecutePhaseChange>>>>;
 
-  using component_list = tmpl::list<observers::Observer<EvolutionMetavarsKokkos>,
-                                    observers::ObserverWriter<EvolutionMetavarsKokkos>,
-                                    dg_element_array>;
+  using component_list =
+      tmpl::list<observers::Observer<EvolutionMetavarsKokkos>,
+                 observers::ObserverWriter<EvolutionMetavarsKokkos>,
+                 dg_element_array>;
 
   static constexpr Options::String help{
       "Minimal 3D ScalarWave Kokkos executable.\n"
