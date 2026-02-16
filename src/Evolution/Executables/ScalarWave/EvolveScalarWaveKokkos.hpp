@@ -14,6 +14,7 @@
 #include "Evolution/Actions/RunEventsAndTriggers.hpp"
 #include "Evolution/ComputeTags.hpp"
 #include "Evolution/DiscontinuousGalerkin/DgElementArray.hpp"
+#include "Evolution/DiscontinuousGalerkin/Initialization/Mortars.hpp"
 #include "Evolution/Initialization/DgDomain.hpp"
 #include "Evolution/Initialization/Evolution.hpp"
 #include "Evolution/Initialization/NonconservativeSystem.hpp"
@@ -25,7 +26,6 @@
 #include "Evolution/Systems/ScalarWave/Kokkos/ApplyBoundaryCorrectionsToTimeDerivativeKokkos.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/CleanHistoryKokkos.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/ComputeTimeDerivativeKokkos.hpp"
-#include "Evolution/Systems/ScalarWave/Kokkos/CudaDiagnostics.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/InitializeKokkosBoundaryCommunication.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/InitializeKokkosTags.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/InitializeKokkosTimeStepperState.hpp"
@@ -171,13 +171,6 @@ struct EvolutionMetavarsKokkos {
       Actions::MutateApply<
           ScalarWave::Actions::CleanHistoryKokkos<ScalarWave::System<3>>>>>;
 
-#ifdef SPECTRE_DEBUG
-  using evolve_entry_cuda_diagnostics =
-      tmpl::list<ScalarWave::Actions::CheckCudaOnEvolveEntry>;
-#else
-  using evolve_entry_cuda_diagnostics = tmpl::list<>;
-#endif  // SPECTRE_DEBUG
-
   using const_global_cache_tags =
       tmpl::list<evolution::initial_data::Tags::InitialData>;
 
@@ -191,6 +184,7 @@ struct EvolutionMetavarsKokkos {
           evolution::dg::Initialization::Domain<EvolutionMetavarsKokkos>,
           Initialization::TimeStepperHistory<EvolutionMetavarsKokkos>>,
       Initialization::Actions::NonconservativeSystem<system>,
+      evolution::dg::Initialization::Mortars<volume_dim, system>,
       evolution::Initialization::Actions::SetVariables<
           domain::Tags::Coordinates<volume_dim, Frame::ElementLogical>>,
       ScalarWave::Actions::InitializeConstraints<volume_dim>,
@@ -203,7 +197,6 @@ struct EvolutionMetavarsKokkos {
       Actions::MutateApply<
           ScalarWave::Actions::InitializeKokkosBoundaryCommunication<
               volume_dim>>,
-      ScalarWave::Actions::CheckCudaAfterInitialization,
       Parallel::Actions::TerminatePhase>;
 
   using dg_element_array = DgElementArray<
@@ -213,12 +206,7 @@ struct EvolutionMetavarsKokkos {
                                  initialization_actions>,
           Parallel::PhaseActions<
               Parallel::Phase::InitializeTimeStepperHistory,
-              tmpl::append<
-                  tmpl::list<ScalarWave::Actions::
-                                 CheckCudaOnInitializeTimeStepperHistoryEntry>,
-                  SelfStart::self_start_procedure<step_actions, system>,
-                  tmpl::list<ScalarWave::Actions::
-                                 CheckCudaOnInitializeTimeStepperHistoryExit>>>,
+              SelfStart::self_start_procedure<step_actions, system>>,
           Parallel::PhaseActions<Parallel::Phase::Register,
                                  tmpl::list<dg_registration_list,
                                             Parallel::Actions::TerminatePhase>>,
@@ -228,7 +216,6 @@ struct EvolutionMetavarsKokkos {
           Parallel::PhaseActions<
               Parallel::Phase::Evolve,
               tmpl::list<
-                  // ScalarWave::Actions::CheckCudaOnEvolveEntry,
                   evolution::Actions::RunEventsAndTriggers<local_time_stepping>,
                   Actions::ChangeSlabSize, step_actions, Actions::AdvanceTime,
                   PhaseControl::Actions::ExecutePhaseChange>>>>;
@@ -240,7 +227,8 @@ struct EvolutionMetavarsKokkos {
 
   static constexpr Options::String help{
       "Minimal 3D ScalarWave Kokkos executable.\n"
-      "Assumes global time stepping and periodic/internal-face communication."};
+      "Assumes global time stepping. Supports internal communication and "
+      "DirichletAnalytic external boundaries."};
 
   static constexpr auto default_phase_order = std::array<Parallel::Phase, 5>{
       Parallel::Phase::Initialization,
