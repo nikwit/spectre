@@ -50,7 +50,7 @@ struct DeviceDerivativeHistory : db::SimpleTag {
   using dt_vars_type = typename DeviceDtVariables<System>::type;
 
  public:
-  using type = Kokkos::View<typename dt_vars_type::value_type***>;
+  using type = ::Kokkos::View<typename dt_vars_type::value_type***>;
 };
 
 template <size_t Dim>
@@ -71,20 +71,22 @@ struct DeviceConstraintGamma2 : db::SimpleTag {
 template <size_t Dim>
 struct DeviceFaceToVolumeIndexMap : db::SimpleTag {
   using type =
-      std::array<std::pair<Kokkos::View<size_t*>, Kokkos::View<size_t*>>, Dim>;
+      std::array<std::pair<::Kokkos::View<size_t*>, ::Kokkos::View<size_t*>>,
+                 Dim>;
 };
 
 template <size_t Dim>
 struct DeviceFaceUnitNormalCovector : db::SimpleTag {
   using type =
-      std::array<std::pair<Kokkos::View<double**>, Kokkos::View<double**>>,
+      std::array<std::pair<::Kokkos::View<double**>, ::Kokkos::View<double**>>,
                  Dim>;
 };
 
 template <size_t Dim>
 struct DeviceFaceNormalMagnitude : db::SimpleTag {
   using type =
-      std::array<std::pair<Kokkos::View<double*>, Kokkos::View<double*>>, Dim>;
+      std::array<std::pair<::Kokkos::View<double*>, ::Kokkos::View<double*>>,
+                 Dim>;
 };
 
 }  // namespace ScalarWave::KokkosTags
