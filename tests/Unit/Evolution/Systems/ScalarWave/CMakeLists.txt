@@ -16,6 +16,7 @@ set(LIBRARY_SOURCES
   Test_EnergyDensity.cpp
   Test_Equations.cpp
   Test_KokkosTimeStepperActions.cpp
+  Test_MortarDataPrimitives.cpp
   Test_MomentumDensity.cpp
   Test_Tags.cpp
   Test_TimeDerivative.cpp

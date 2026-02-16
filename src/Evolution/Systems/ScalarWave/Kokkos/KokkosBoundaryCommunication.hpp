@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <iomanip>
 #include <limits>
@@ -18,7 +19,7 @@
 #include "Domain/Structure/DirectionalId.hpp"
 #include "Domain/Structure/DirectionalIdMap.hpp"
 #include "Evolution/Systems/ScalarWave/BoundaryCorrections/UpwindPenalty.hpp"
-#include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "NumericalAlgorithms/Spectral/SegmentSize.hpp"
 #include "Parallel/InboxInserters.hpp"
 #include "Time/TimeStepId.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
@@ -46,24 +47,22 @@ using BoundaryCorrectionDataBuffer = Variables<BoundaryCorrectionDataTags<Dim>>;
 // This type is intentionally same-node only for now.
 template <size_t Dim>
 struct BoundaryCorrectionData {
-  Mesh<Dim> volume_mesh{};
-  Mesh<Dim - 1> boundary_correction_mesh{};
   BoundaryCorrectionDataBuffer<Dim> boundary_correction_data{};
   TimeStepId validity_range{};
   size_t integration_order{std::numeric_limits<size_t>::max()};
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& p) {
-    p | volume_mesh;
-    p | boundary_correction_mesh;
     p | validity_range;
     p | integration_order;
-    size_t boundary_data_size = boundary_correction_data.number_of_grid_points();
+    size_t boundary_data_size =
+        boundary_correction_data.number_of_grid_points();
     p | boundary_data_size;
     if (boundary_data_size != 0) {
-      ERROR("PUP for non-empty Kokkos boundary-correction payloads is "
-            "currently unsupported. This path is intentionally same-node only "
-            "for now.");
+      ERROR(
+          "PUP for non-empty Kokkos boundary-correction payloads is "
+          "currently unsupported. This path is intentionally same-node only "
+          "for now.");
     }
   }
 };
@@ -71,13 +70,48 @@ struct BoundaryCorrectionData {
 template <size_t Dim>
 struct OutgoingBoundaryCorrectionData : db::SimpleTag {
   using type =
-      DirectionalIdMap<Dim, ScalarWave::KokkosTags::BoundaryCorrectionData<Dim>>;
+      DirectionalIdMap<Dim,
+                       ScalarWave::KokkosTags::BoundaryCorrectionData<Dim>>;
 };
 
 template <size_t Dim>
 struct IncomingBoundaryCorrectionData : db::SimpleTag {
   using type =
-      DirectionalIdMap<Dim, ScalarWave::KokkosTags::BoundaryCorrectionData<Dim>>;
+      DirectionalIdMap<Dim,
+                       ScalarWave::KokkosTags::BoundaryCorrectionData<Dim>>;
+};
+
+template <size_t Dim>
+struct ExternalBoundaryCorrectionData : db::SimpleTag {
+  using type =
+      DirectionalIdMap<Dim,
+                       ScalarWave::KokkosTags::BoundaryCorrectionData<Dim>>;
+};
+
+template <size_t Dim>
+struct MortarData {
+  bool needs_projection{false};
+  std::array<Spectral::SegmentSize, Dim - 1> mortar_size{};
+  // For each output mortar grid point index j: output[j] = input[indices(j)].
+  ::Kokkos::View<size_t*> oriented_mortar_grid_point_source_index{};
+
+  // NOLINTNEXTLINE(google-runtime-references)
+  void pup(PUP::er& p) {
+    p | needs_projection;
+    p | mortar_size;
+    size_t oriented_size = oriented_mortar_grid_point_source_index.extent(0);
+    p | oriented_size;
+    if (oriented_size != 0) {
+      ERROR(
+          "PUP for non-empty Kokkos mortar metadata is currently "
+          "unsupported. This path is intentionally same-node only for now.");
+    }
+  }
+};
+
+template <size_t Dim>
+struct DeviceMortarData : db::SimpleTag {
+  using type = DirectionalIdMap<Dim, ScalarWave::KokkosTags::MortarData<Dim>>;
 };
 
 // Inbox tag used by the Kokkos-only scalar-wave DG communication path.
@@ -94,13 +128,14 @@ struct BoundaryCorrectionInbox
   static bool insert_into_inbox(
       const gsl::not_null<type*> inbox, const temporal_id& time_step_id,
       std::pair<DirectionalId<Dim>, stored_type> data) {
-    Parallel::InboxInserters::Map<
-        BoundaryCorrectionInbox<Dim, UseNodegroupDgElements>>::
-        insert_into_inbox(inbox, time_step_id, std::move(data));
+    Parallel::InboxInserters::Map<BoundaryCorrectionInbox<
+        Dim, UseNodegroupDgElements>>::insert_into_inbox(inbox, time_step_id,
+                                                         std::move(data));
     return false;
   }
 
-  static std::string output_inbox(const type& inbox, const size_t padding_size) {
+  static std::string output_inbox(const type& inbox,
+                                  const size_t padding_size) {
     std::stringstream ss{};
     const std::string pad(padding_size, ' ');
     ss << std::scientific << std::setprecision(16);

@@ -8,7 +8,6 @@
 #include "DataStructures/DataBox/PrefixHelpers.hpp"
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/VariablesKokkos.hpp"
-#include "Evolution/Systems/ScalarWave/Kokkos/CudaDiagnostics.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/KokkosTimeStepperTags.hpp"
 #include "Time/History.hpp"
 #include "Utilities/Gsl.hpp"
@@ -56,11 +55,8 @@ struct InitializeKokkosTimeStepperState {
         device_vars->number_of_grid_points(),
         device_dt_variables_tag::type::number_of_independent_components);
     if (device_vars->number_of_grid_points() > 0) {
-      Kokkos::deep_copy(*device_derivative_history, 0.0);
+      ::Kokkos::deep_copy(*device_derivative_history, 0.0);
     }
-
-    detail::check_cuda_error_and_clear(
-        "InitializeKokkosTimeStepperState::apply");
   }
 };
 
