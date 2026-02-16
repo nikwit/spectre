@@ -29,6 +29,23 @@
 #include "Utilities/StaticCache.hpp"
 
 namespace Spectral {
+#ifdef SPECTRE_KOKKOS
+namespace {
+MatrixViewRO matrix_on_device(const Matrix& matrix, const char* const label) {
+  Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace> matrix_host(
+      label, matrix.rows(), matrix.columns());
+  for (size_t i = 0; i < matrix.rows(); ++i) {
+    for (size_t j = 0; j < matrix.columns(); ++j) {
+      matrix_host(i, j) = matrix(i, j);
+    }
+  }
+  Kokkos::View<double**, Kokkos::LayoutLeft> matrix_device(
+      label, matrix.rows(), matrix.columns());
+  Kokkos::deep_copy(matrix_device, matrix_host);
+  return MatrixViewRO(matrix_device);
+}
+}  // namespace
+#endif  // SPECTRE_KOKKOS
 
 template <size_t Dim>
 bool needs_projection(const Mesh<Dim>& mesh1, const Mesh<Dim>& mesh2,
@@ -257,6 +274,66 @@ const Matrix& projection_matrix_child_to_parent(const Mesh<1>& child_mesh,
   }
 }
 
+#ifdef SPECTRE_KOKKOS
+const MatrixViewRO& projection_matrix_child_to_parent_on_device(
+    const Mesh<1>& child_mesh, const Mesh<1>& parent_mesh,
+    const SegmentSize size, const bool operand_is_massive) {
+  constexpr size_t max_points = maximum_number_of_points<Basis::Legendre>;
+  ASSERT(parent_mesh.basis(0) == Basis::Legendre and
+             child_mesh.basis(0) == Basis::Legendre,
+         "Projections only implemented on Legendre basis");
+  ASSERT(parent_mesh.extents(0) <= max_points and
+             child_mesh.extents(0) <= max_points,
+         "Mesh has more points than supported by its quadrature.");
+
+  if (operand_is_massive) {
+    const static auto cache = make_static_cache<
+        CacheEnumeration<Quadrature, Quadrature::Gauss,
+                         Quadrature::GaussLobatto>,
+        CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
+        CacheEnumeration<Quadrature, Quadrature::Gauss,
+                         Quadrature::GaussLobatto>,
+        CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
+        CacheEnumeration<SegmentSize, SegmentSize::Full, SegmentSize::UpperHalf,
+                         SegmentSize::LowerHalf>>(
+        [](const Quadrature child_quadrature, const size_t child_extent,
+           const Quadrature parent_quadrature, const size_t parent_extent,
+           const SegmentSize local_child_size) -> MatrixViewRO {
+          return matrix_on_device(
+              projection_matrix_child_to_parent(
+                  {child_extent, Spectral::Basis::Legendre, child_quadrature},
+                  {parent_extent, Spectral::Basis::Legendre, parent_quadrature},
+                  local_child_size, true),
+              "ProjectionMatrixChildToParentMassiveOnDevice");
+        });
+    return cache(child_mesh.quadrature(0), child_mesh.extents(0),
+                 parent_mesh.quadrature(0), parent_mesh.extents(0), size);
+  }
+
+  const static auto cache = make_static_cache<
+      CacheEnumeration<Quadrature, Quadrature::Gauss,
+                       Quadrature::GaussLobatto>,
+      CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
+      CacheEnumeration<Quadrature, Quadrature::Gauss,
+                       Quadrature::GaussLobatto>,
+      CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
+      CacheEnumeration<SegmentSize, SegmentSize::Full, SegmentSize::UpperHalf,
+                       SegmentSize::LowerHalf>>(
+      [](const Quadrature child_quadrature, const size_t child_extent,
+         const Quadrature parent_quadrature, const size_t parent_extent,
+         const SegmentSize local_child_size) -> MatrixViewRO {
+        return matrix_on_device(
+            projection_matrix_child_to_parent(
+                {child_extent, Spectral::Basis::Legendre, child_quadrature},
+                {parent_extent, Spectral::Basis::Legendre, parent_quadrature},
+                local_child_size),
+            "ProjectionMatrixChildToParentOnDevice");
+      });
+  return cache(child_mesh.quadrature(0), child_mesh.extents(0),
+               parent_mesh.quadrature(0), parent_mesh.extents(0), size);
+}
+#endif  // SPECTRE_KOKKOS
+
 template <size_t Dim>
 std::array<std::reference_wrapper<const Matrix>, Dim>
 projection_matrix_child_to_parent(
@@ -281,6 +358,32 @@ projection_matrix_child_to_parent(
   }
   return projection_matrix;
 }
+
+#ifdef SPECTRE_KOKKOS
+template <size_t Dim>
+std::array<std::reference_wrapper<const MatrixViewRO>, Dim>
+projection_matrix_child_to_parent_on_device(
+    const Mesh<Dim>& child_mesh, const Mesh<Dim>& parent_mesh,
+    const std::array<SegmentSize, Dim>& child_sizes,
+    const bool operand_is_massive) {
+  static const MatrixViewRO identity{};
+  auto projection_matrix = make_array<Dim>(std::cref(identity));
+  const auto child_mesh_slices = child_mesh.slices();
+  const auto parent_mesh_slices = parent_mesh.slices();
+  for (size_t d = 0; d < Dim; ++d) {
+    const auto child_mesh_slice = gsl::at(child_mesh_slices, d);
+    const auto parent_mesh_slice = gsl::at(parent_mesh_slices, d);
+    const auto child_size = gsl::at(child_sizes, d);
+    if (child_size == SegmentSize::Full and
+        child_mesh_slice == parent_mesh_slice) {
+      continue;
+    }
+    gsl::at(projection_matrix, d) = projection_matrix_child_to_parent_on_device(
+        child_mesh_slice, parent_mesh_slice, child_size, operand_is_massive);
+  }
+  return projection_matrix;
+}
+#endif  // SPECTRE_KOKKOS
 
 const Matrix& projection_matrix_parent_to_child(const Mesh<1>& parent_mesh,
                                                 const Mesh<1>& child_mesh,
@@ -379,6 +482,42 @@ const Matrix& projection_matrix_parent_to_child(const Mesh<1>& parent_mesh,
   }
 }
 
+#ifdef SPECTRE_KOKKOS
+const MatrixViewRO& projection_matrix_parent_to_child_on_device(
+    const Mesh<1>& parent_mesh, const Mesh<1>& child_mesh,
+    const SegmentSize size) {
+  constexpr size_t max_points = maximum_number_of_points<Basis::Legendre>;
+  ASSERT(child_mesh.basis(0) == Basis::Legendre and
+             parent_mesh.basis(0) == Basis::Legendre,
+         "Projections only implemented on Legendre basis");
+  ASSERT(child_mesh.extents(0) <= max_points and
+             parent_mesh.extents(0) <= max_points,
+         "Mesh has more points than supported by its quadrature.");
+
+  const static auto cache = make_static_cache<
+      CacheEnumeration<Quadrature, Quadrature::Gauss,
+                       Quadrature::GaussLobatto>,
+      CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
+      CacheEnumeration<Quadrature, Quadrature::Gauss,
+                       Quadrature::GaussLobatto>,
+      CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
+      CacheEnumeration<SegmentSize, SegmentSize::Full, SegmentSize::UpperHalf,
+                       SegmentSize::LowerHalf>>(
+      [](const Quadrature child_quadrature, const size_t child_extent,
+         const Quadrature parent_quadrature, const size_t parent_extent,
+         const SegmentSize local_child_size) -> MatrixViewRO {
+        return matrix_on_device(
+            projection_matrix_parent_to_child(
+                {parent_extent, Spectral::Basis::Legendre, parent_quadrature},
+                {child_extent, Spectral::Basis::Legendre, child_quadrature},
+                local_child_size),
+            "ProjectionMatrixParentToChildOnDevice");
+      });
+  return cache(child_mesh.quadrature(0), child_mesh.extents(0),
+               parent_mesh.quadrature(0), parent_mesh.extents(0), size);
+}
+#endif  // SPECTRE_KOKKOS
+
 template <size_t Dim>
 std::array<std::reference_wrapper<const Matrix>, Dim>
 projection_matrix_parent_to_child(
@@ -402,6 +541,31 @@ projection_matrix_parent_to_child(
   }
   return projection_matrix;
 }
+
+#ifdef SPECTRE_KOKKOS
+template <size_t Dim>
+std::array<std::reference_wrapper<const MatrixViewRO>, Dim>
+projection_matrix_parent_to_child_on_device(
+    const Mesh<Dim>& parent_mesh, const Mesh<Dim>& child_mesh,
+    const std::array<SegmentSize, Dim>& child_sizes) {
+  static const MatrixViewRO identity{};
+  auto projection_matrix = make_array<Dim>(std::cref(identity));
+  const auto child_mesh_slices = child_mesh.slices();
+  const auto parent_mesh_slices = parent_mesh.slices();
+  for (size_t d = 0; d < Dim; ++d) {
+    const auto child_mesh_slice = gsl::at(child_mesh_slices, d);
+    const auto parent_mesh_slice = gsl::at(parent_mesh_slices, d);
+    const auto child_size = gsl::at(child_sizes, d);
+    if (child_size == SegmentSize::Full and
+        child_mesh_slice == parent_mesh_slice) {
+      continue;
+    }
+    gsl::at(projection_matrix, d) = projection_matrix_parent_to_child_on_device(
+        parent_mesh_slice, child_mesh_slice, child_size);
+  }
+  return projection_matrix;
+}
+#endif  // SPECTRE_KOKKOS
 
 template <size_t Dim>
 std::array<std::reference_wrapper<const Matrix>, Dim> projection_matrices(
@@ -497,6 +661,21 @@ size_t MortarSizeHash<Dim>::operator()(
 
 GENERATE_INSTANTIATIONS(INSTANTIATE, (0, 1, 2, 3))
 #undef INSTANTIATE
+
+#ifdef SPECTRE_KOKKOS
+#define INSTANTIATE(r, data)                                                   \
+  template std::array<std::reference_wrapper<const MatrixViewRO>, DIM(data)>   \
+  projection_matrix_child_to_parent_on_device(                                 \
+      const Mesh<DIM(data)>& child_mesh, const Mesh<DIM(data)>& parent_mesh,   \
+      const std::array<SegmentSize, DIM(data)>& child_sizes,                   \
+      bool operand_is_massive);                                                \
+  template std::array<std::reference_wrapper<const MatrixViewRO>, DIM(data)>   \
+  projection_matrix_parent_to_child_on_device(                                 \
+      const Mesh<DIM(data)>& parent_mesh, const Mesh<DIM(data)>& child_mesh,   \
+      const std::array<SegmentSize, DIM(data)>& child_sizes);
+GENERATE_INSTANTIATIONS(INSTANTIATE, (0, 1, 2, 3))
+#undef INSTANTIATE
+#endif  // SPECTRE_KOKKOS
 
 #define INSTANTIATE(r, data) template class MortarSizeHash<DIM(data)>;
 GENERATE_INSTANTIATIONS(INSTANTIATE, (1, 2, 3))

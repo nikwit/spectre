@@ -10,6 +10,7 @@
 
 #include "NumericalAlgorithms/Spectral/SegmentSize.hpp"
 #include "Utilities/ConstantExpressions.hpp"
+#include "Utilities/Kokkos/KokkosCore.hpp"
 
 /// \cond
 class Matrix;
@@ -71,6 +72,11 @@ bool needs_projection(const Mesh<Dim>& mesh1, const Mesh<Dim>& mesh2,
 const Matrix& projection_matrix_child_to_parent(
     const Mesh<1>& child_mesh, const Mesh<1>& parent_mesh, SegmentSize size,
     bool operand_is_massive = false);
+#ifdef SPECTRE_KOKKOS
+const MatrixViewRO& projection_matrix_child_to_parent_on_device(
+    const Mesh<1>& child_mesh, const Mesh<1>& parent_mesh, SegmentSize size,
+    bool operand_is_massive = false);
+#endif  // SPECTRE_KOKKOS
 
 /// The projection matrix from a child mesh to its parent, in `Dim` dimensions.
 template <size_t Dim>
@@ -79,6 +85,14 @@ projection_matrix_child_to_parent(
     const Mesh<Dim>& child_mesh, const Mesh<Dim>& parent_mesh,
     const std::array<SegmentSize, Dim>& child_sizes,
     bool operand_is_massive = false);
+#ifdef SPECTRE_KOKKOS
+template <size_t Dim>
+std::array<std::reference_wrapper<const MatrixViewRO>, Dim>
+projection_matrix_child_to_parent_on_device(
+    const Mesh<Dim>& child_mesh, const Mesh<Dim>& parent_mesh,
+    const std::array<SegmentSize, Dim>& child_sizes,
+    bool operand_is_massive = false);
+#endif  // SPECTRE_KOKKOS
 
 /// The projection matrix from a parent mesh to one of its children.
 ///
@@ -86,6 +100,10 @@ projection_matrix_child_to_parent(
 const Matrix& projection_matrix_parent_to_child(const Mesh<1>& parent_mesh,
                                                 const Mesh<1>& child_mesh,
                                                 SegmentSize size);
+#ifdef SPECTRE_KOKKOS
+const MatrixViewRO& projection_matrix_parent_to_child_on_device(
+    const Mesh<1>& parent_mesh, const Mesh<1>& child_mesh, SegmentSize size);
+#endif  // SPECTRE_KOKKOS
 
 /// The projection matrix from a parent mesh to one of its children, in `Dim`
 /// dimensions
@@ -94,6 +112,13 @@ std::array<std::reference_wrapper<const Matrix>, Dim>
 projection_matrix_parent_to_child(
     const Mesh<Dim>& parent_mesh, const Mesh<Dim>& child_mesh,
     const std::array<SegmentSize, Dim>& child_sizes);
+#ifdef SPECTRE_KOKKOS
+template <size_t Dim>
+std::array<std::reference_wrapper<const MatrixViewRO>, Dim>
+projection_matrix_parent_to_child_on_device(
+    const Mesh<Dim>& parent_mesh, const Mesh<Dim>& child_mesh,
+    const std::array<SegmentSize, Dim>& child_sizes);
+#endif  // SPECTRE_KOKKOS
 
 /// The projection matrices from a source mesh to a target mesh
 /// covering given portions of an element

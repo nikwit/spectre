@@ -21,6 +21,7 @@
 #include "Utilities/ConstantExpressions.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/GetOutput.hpp"
+#include "Utilities/Kokkos/KokkosCore.hpp"
 #include "Utilities/MakeArray.hpp"
 
 namespace Spectral {
@@ -38,6 +39,80 @@ DataVector apply_matrix(const Matrix& m, const DataVector& v) {
   }
   return result;
 }
+
+#ifdef SPECTRE_KOKKOS
+void check_matrix_on_device_matches_host(
+    const MatrixViewRO& matrix_on_device, const Matrix& matrix_host_expected) {
+  CHECK(matrix_on_device.extent(0) == matrix_host_expected.rows());
+  CHECK(matrix_on_device.extent(1) == matrix_host_expected.columns());
+  const auto matrix_on_host =
+      Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{},
+                                          matrix_on_device);
+  for (size_t i = 0; i < matrix_host_expected.rows(); ++i) {
+    for (size_t j = 0; j < matrix_host_expected.columns(); ++j) {
+      CHECK(matrix_on_host(i, j) == approx(matrix_host_expected(i, j)));
+    }
+  }
+}
+
+void test_projection_matrices_on_device() {
+  INFO("Projection matrices on device");
+  const Mesh<1> parent_mesh{4, Basis::Legendre, Quadrature::GaussLobatto};
+  const Mesh<1> child_mesh{6, Basis::Legendre, Quadrature::GaussLobatto};
+
+  {
+    const auto& host_matrix = projection_matrix_child_to_parent(
+        child_mesh, parent_mesh, SegmentSize::UpperHalf);
+    const auto& device_matrix = projection_matrix_child_to_parent_on_device(
+        child_mesh, parent_mesh, SegmentSize::UpperHalf);
+    const auto& device_matrix_again =
+        projection_matrix_child_to_parent_on_device(
+            child_mesh, parent_mesh, SegmentSize::UpperHalf);
+    CHECK(&device_matrix == &device_matrix_again);
+    check_matrix_on_device_matches_host(device_matrix, host_matrix);
+  }
+
+  {
+    const auto& host_matrix = projection_matrix_child_to_parent(
+        child_mesh, parent_mesh, SegmentSize::Full, true);
+    const auto& device_matrix = projection_matrix_child_to_parent_on_device(
+        child_mesh, parent_mesh, SegmentSize::Full, true);
+    const auto& device_matrix_again =
+        projection_matrix_child_to_parent_on_device(
+            child_mesh, parent_mesh, SegmentSize::Full, true);
+    CHECK(&device_matrix == &device_matrix_again);
+    check_matrix_on_device_matches_host(device_matrix, host_matrix);
+  }
+
+  {
+    const auto& host_matrix = projection_matrix_parent_to_child(
+        parent_mesh, child_mesh, SegmentSize::LowerHalf);
+    const auto& device_matrix = projection_matrix_parent_to_child_on_device(
+        parent_mesh, child_mesh, SegmentSize::LowerHalf);
+    const auto& device_matrix_again =
+        projection_matrix_parent_to_child_on_device(
+            parent_mesh, child_mesh, SegmentSize::LowerHalf);
+    CHECK(&device_matrix == &device_matrix_again);
+    check_matrix_on_device_matches_host(device_matrix, host_matrix);
+  }
+
+  {
+    const Mesh<2> parent_mesh_2d{{{4, 5}}, Basis::Legendre,
+                                 Quadrature::GaussLobatto};
+    const Mesh<2> child_mesh_2d{{{4, 6}}, Basis::Legendre,
+                                Quadrature::GaussLobatto};
+    const auto device_matrices = projection_matrix_parent_to_child_on_device(
+        parent_mesh_2d, child_mesh_2d,
+        std::array<SegmentSize, 2>{{
+            SegmentSize::Full, SegmentSize::UpperHalf}});
+    CHECK(gsl::at(device_matrices, 0).get().extent(0) == 0);
+    const auto& expected_dim_1 = projection_matrix_parent_to_child_on_device(
+        parent_mesh_2d.slice_through(1), child_mesh_2d.slice_through(1),
+        SegmentSize::UpperHalf);
+    CHECK(&gsl::at(device_matrices, 1).get() == &expected_dim_1);
+  }
+}
+#endif  // SPECTRE_KOKKOS
 
 void test_mortar_size() {
   CHECK(get_output(Spectral::SegmentSize::Full) == "Full");
@@ -655,6 +730,9 @@ SPECTRE_TEST_CASE("Unit.Numerical.Spectral.Projection",
   test_p_projection_matrices<1>();
   test_p_projection_matrices<2>();
   test_p_projection_matrices<3>();
+#ifdef SPECTRE_KOKKOS
+  test_projection_matrices_on_device();
+#endif  // SPECTRE_KOKKOS
   test_hash();
 }
 
