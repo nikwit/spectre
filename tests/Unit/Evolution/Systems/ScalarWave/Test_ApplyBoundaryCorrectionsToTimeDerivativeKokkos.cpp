@@ -21,20 +21,21 @@
 #include "Domain/CoordinateMaps/Identity.hpp"
 #include "Domain/CreateInitialElement.hpp"
 #include "Domain/Creators/Rectilinear.hpp"
+#include "Domain/Creators/Tags/ExternalBoundaryConditions.hpp"
 #include "Domain/Domain.hpp"
 #include "Domain/ElementMap.hpp"
 #include "Domain/Structure/DirectionalId.hpp"
 #include "Domain/Structure/ElementId.hpp"
 #include "Domain/Structure/InitialElementIds.hpp"
-#include "Domain/Structure/OrientationMapHelpers.hpp"
 #include "Domain/Tags.hpp"
+#include "Evolution/DiscontinuousGalerkin/Initialization/Mortars.hpp"
+#include "Evolution/Systems/ScalarWave/BoundaryCorrections/UpwindPenalty.hpp"
+#include "Evolution/Systems/ScalarWave/BoundaryCorrections/UpwindPenaltyImpl.tpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/ApplyBoundaryCorrectionsToTimeDerivativeKokkos.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/ComputeTimeDerivativeKokkos.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/InitializeKokkosTags.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/KokkosBoundaryCommunication.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/KokkosTimeStepperTags.hpp"
-#include "Evolution/Systems/ScalarWave/BoundaryCorrections/UpwindPenalty.hpp"
-#include "Evolution/Systems/ScalarWave/BoundaryCorrections/UpwindPenaltyImpl.tpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
 #include "Evolution/Systems/ScalarWave/Tags.hpp"
 #include "NumericalAlgorithms/Spectral/Basis.hpp"
@@ -67,6 +68,8 @@ using outgoing_boundary_data_map =
     typename ScalarWave::KokkosTags::OutgoingBoundaryCorrectionData<Dim>::type;
 using incoming_boundary_data_map =
     typename ScalarWave::KokkosTags::IncomingBoundaryCorrectionData<Dim>::type;
+using external_boundary_data_map =
+    typename ScalarWave::KokkosTags::ExternalBoundaryCorrectionData<Dim>::type;
 using device_face_to_volume_index_map_type =
     typename ScalarWave::KokkosTags::DeviceFaceToVolumeIndexMap<Dim>::type;
 using apply_action =
@@ -77,6 +80,7 @@ struct SetupData {
   Element<Dim> element{};
   Mesh<Dim> mesh{};
   typename system::variables_tag::type vars{};
+  tnsr::I<DataVector, Dim, Frame::Inertial> inertial_coords{};
   ScalarWave::Tags::ConstraintGamma2::type constraint_gamma2{};
   domain::Tags::InverseJacobian<Dim, Frame::ElementLogical,
                                 Frame::Inertial>::type inverse_jacobian{};
@@ -90,6 +94,11 @@ struct SetupData {
       device_face_unit_normal_covector{};
   typename ScalarWave::KokkosTags::DeviceFaceNormalMagnitude<Dim>::type
       device_face_normal_magnitude{};
+  typename ScalarWave::KokkosTags::DeviceMortarData<Dim>::type
+      device_mortar_data{};
+  dg::MortarMap<Dim, Mesh<Dim - 1>> mortar_meshes{};
+  dg::MortarMap<Dim, evolution::dg::MortarInfo<Dim>> mortar_infos{};
+  double time{};
 };
 
 struct DomainData {
@@ -135,6 +144,7 @@ SetupData make_setup_data(
       domain_object.blocks()[setup.element.id().block_id()]};
   const auto logical_coords = logical_coordinates(setup.mesh);
   const auto inertial_coords = element_map(logical_coords);
+  setup.inertial_coords = inertial_coords;
   setup.inverse_jacobian = element_map.inv_jacobian(logical_coords);
 
   const size_t num_points = setup.mesh.number_of_grid_points();
@@ -156,31 +166,60 @@ SetupData make_setup_data(
       ScalarWave::Tags::ConstraintGamma2::type{num_points, 0.0};
   get(setup.constraint_gamma2) = 0.6 - 0.05 * inertial_coords.get(2);
 
+  const Slab slab(0.0, 1.0);
+  setup.time_step_id = TimeStepId(true, 0, slab.start());
+  setup.time = slab.start().value();
+
+  dg::MortarMap<Dim, Mesh<Dim>> neighbor_mesh{};
+  for (const auto& [direction, neighbors] : setup.element.neighbors()) {
+    for (const auto& neighbor : neighbors) {
+      neighbor_mesh.insert(
+          {DirectionalId<Dim>{direction, neighbor}, setup.mesh});
+    }
+  }
+  setup.mortar_infos =
+      evolution::dg::Initialization::detail::mortar_infos<Dim>(setup.element);
+  auto [mortar_meshes, mortar_next_temporal_ids,
+        normal_covector_and_magnitude] =
+      evolution::dg::Initialization::detail::mortars_apply_impl<Dim>(
+          setup.element, setup.time_step_id, setup.mesh, neighbor_mesh);
+  setup.mortar_meshes = std::move(mortar_meshes);
+  (void)mortar_next_temporal_ids;
+  (void)normal_covector_and_magnitude;
+
   ScalarWave::Actions::InitializeKokkosTags<system>::apply(
       make_not_null(&setup.device_inverse_jacobian),
       make_not_null(&setup.device_constraint_gamma2),
       make_not_null(&setup.device_face_to_volume_index_map),
       make_not_null(&setup.device_face_unit_normal_covector),
       make_not_null(&setup.device_face_normal_magnitude),
-      setup.inverse_jacobian, setup.constraint_gamma2, setup.mesh);
-
-  const Slab slab(0.0, 1.0);
-  setup.time_step_id = TimeStepId(true, 0, slab.start());
+      make_not_null(&setup.device_mortar_data), setup.inverse_jacobian,
+      setup.constraint_gamma2, setup.mesh, setup.element, setup.mortar_meshes,
+      setup.mortar_infos);
   return setup;
 }
 
-outgoing_boundary_data_map compute_outgoing_boundary_data(const SetupData& setup) {
+outgoing_boundary_data_map compute_outgoing_boundary_data(
+    const SetupData& setup) {
   typename ScalarWave::KokkosTags::DeviceVariables<system>::type device_vars =
       copy_to_device(setup.vars);
   typename ScalarWave::KokkosTags::DeviceDtVariables<system>::type device_dt{};
   outgoing_boundary_data_map outgoing_boundary_data{};
+  external_boundary_data_map external_boundary_data{};
+  const auto external_boundary_conditions =
+      domain::Tags::ExternalBoundaryConditions<Dim>::type{
+          setup.element.id().block_id() + 1};
 
   ScalarWave::Actions::ComputeTimeDerivativeKokkos::apply(
       make_not_null(&device_dt), make_not_null(&outgoing_boundary_data),
-      device_vars, setup.device_inverse_jacobian, setup.device_constraint_gamma2,
+      make_not_null(&external_boundary_data), device_vars,
+      setup.device_inverse_jacobian, setup.device_constraint_gamma2,
       setup.device_face_to_volume_index_map,
-      setup.device_face_unit_normal_covector, setup.mesh, setup.element,
-      setup.time_step_id);
+      setup.device_face_unit_normal_covector, setup.device_mortar_data,
+      setup.mortar_meshes, setup.constraint_gamma2,
+      external_boundary_conditions, setup.inertial_coords, setup.time,
+      setup.mesh, setup.element, setup.time_step_id);
+  CHECK(external_boundary_data.empty());
   return outgoing_boundary_data;
 }
 
@@ -189,7 +228,8 @@ incoming_boundary_data_map build_incoming_boundary_data(
     const std::map<ElementId<Dim>, outgoing_boundary_data_map>&
         outgoing_by_element) {
   incoming_boundary_data_map incoming_boundary_data{};
-  for (const auto& [direction, neighbors] : receiver_setup.element.neighbors()) {
+  for (const auto& [direction, neighbors] :
+       receiver_setup.element.neighbors()) {
     REQUIRE(neighbors.size() == 1);
     const auto& sender_id = *neighbors.begin();
     const auto& orientation = neighbors.orientation(sender_id);
@@ -201,10 +241,6 @@ incoming_boundary_data_map build_incoming_boundary_data(
     REQUIRE(sender_outgoing.count(sender_mortar_id) == 1);
 
     auto data_for_receiver = sender_outgoing.at(sender_mortar_id);
-    data_for_receiver.volume_mesh = orientation(data_for_receiver.volume_mesh);
-    data_for_receiver.boundary_correction_mesh = orient_mesh_on_slice(
-        data_for_receiver.boundary_correction_mesh, direction.dimension(),
-        orientation);
     incoming_boundary_data.insert_or_assign(
         DirectionalId<Dim>{direction, sender_id}, std::move(data_for_receiver));
   }
@@ -215,12 +251,11 @@ void add_host_boundary_corrections(
     const gsl::not_null<Variables<dt_variables_tags>*> host_dt_reference,
     const outgoing_boundary_data_map& local_outgoing_boundary_data,
     const incoming_boundary_data_map& incoming_boundary_data,
-    const domain::Tags::InverseJacobian<Dim, Frame::ElementLogical,
-                                        Frame::Inertial>::type&
-        inverse_jacobian,
+    const dg::MortarMap<Dim, Mesh<Dim - 1>>& mortar_meshes,
+    const domain::Tags::InverseJacobian<
+        Dim, Frame::ElementLogical, Frame::Inertial>::type& inverse_jacobian,
     const device_face_to_volume_index_map_type& device_face_to_volume_index_map,
-    const Mesh<Dim>& mesh,
-    const Element<Dim>& element) {
+    const Mesh<Dim>& mesh, const Element<Dim>& element) {
   for (const auto& [direction, neighbors] : element.neighbors()) {
     REQUIRE(neighbors.size() == 1);
     const auto& neighbor = *neighbors.begin();
@@ -228,13 +263,18 @@ void add_host_boundary_corrections(
     REQUIRE(local_outgoing_boundary_data.count(mortar_id) == 1);
     REQUIRE(incoming_boundary_data.count(mortar_id) == 1);
 
-    const auto& local_boundary_data = local_outgoing_boundary_data.at(mortar_id);
+    const auto& local_boundary_data =
+        local_outgoing_boundary_data.at(mortar_id);
     const auto& remote_boundary_data = incoming_boundary_data.at(mortar_id);
-    REQUIRE(local_boundary_data.boundary_correction_mesh ==
-            remote_boundary_data.boundary_correction_mesh);
+    const auto& mortar_mesh = mortar_meshes.at(mortar_id);
+    REQUIRE(
+        local_boundary_data.boundary_correction_data.number_of_grid_points() ==
+        mortar_mesh.number_of_grid_points());
+    REQUIRE(
+        remote_boundary_data.boundary_correction_data.number_of_grid_points() ==
+        mortar_mesh.number_of_grid_points());
 
-    const size_t num_face_points =
-        local_boundary_data.boundary_correction_mesh.number_of_grid_points();
+    const size_t num_face_points = mortar_mesh.number_of_grid_points();
     Variables<dg_package_field_tags> local_packaged_data{num_face_points, 0.0};
     Variables<dg_package_field_tags> remote_packaged_data{num_face_points, 0.0};
     copy_to_host(make_not_null(&local_packaged_data),
@@ -282,9 +322,9 @@ void add_host_boundary_corrections(
         get<package_field_tag<7>>(remote_packaged_data));
 
     for (size_t face_index = 0; face_index < num_face_points; ++face_index) {
-      const size_t volume_index =
-          direction.side() == Side::Upper ? upper_face_to_volume_index(face_index)
-                                          : lower_face_to_volume_index(face_index);
+      const size_t volume_index = direction.side() == Side::Upper
+                                      ? upper_face_to_volume_index(face_index)
+                                      : lower_face_to_volume_index(face_index);
       double normal_magnitude = 0.0;
       for (size_t d = 0; d < Dim; ++d) {
         const double unnormalized_normal_component =
@@ -295,11 +335,11 @@ void add_host_boundary_corrections(
       normal_magnitude = std::sqrt(normal_magnitude);
       const double lifted_factor = lift_prefactor * normal_magnitude;
 
-      get(get<::Tags::dt<ScalarWave::Tags::Psi>>(*host_dt_reference))
-          [volume_index] +=
+      get(get<::Tags::dt<ScalarWave::Tags::Psi>>(
+          *host_dt_reference))[volume_index] +=
           lifted_factor * get(psi_boundary_correction)[face_index];
-      get(get<::Tags::dt<ScalarWave::Tags::Pi>>(*host_dt_reference))
-          [volume_index] +=
+      get(get<::Tags::dt<ScalarWave::Tags::Pi>>(
+          *host_dt_reference))[volume_index] +=
           lifted_factor * get(pi_boundary_correction)[face_index];
       for (size_t d = 0; d < Dim; ++d) {
         get<::Tags::dt<ScalarWave::Tags::Phi<Dim>>>(*host_dt_reference)
@@ -344,32 +384,30 @@ void test_apply_boundary_corrections_to_time_derivative_kokkos_matches_host() {
     ScalarWave::Actions::ApplyBoundaryCorrectionsToTimeDerivativeKokkos::apply(
         make_not_null(&device_dt), outgoing_by_element.at(setup.element.id()),
         incoming_by_element.at(setup.element.id()),
-        setup.device_face_to_volume_index_map,
-        setup.device_face_normal_magnitude, setup.mesh, setup.element);
+        external_boundary_data_map{}, setup.device_face_to_volume_index_map,
+        setup.device_face_normal_magnitude, setup.device_mortar_data,
+        setup.mortar_meshes, setup.mesh, setup.element);
 
     Variables<dt_variables_tags> host_dt_from_kokkos{num_points, 0.0};
     copy_to_host(make_not_null(&host_dt_from_kokkos), device_dt);
 
     Variables<dt_variables_tags> host_dt_reference{num_points, 0.0};
-    add_host_boundary_corrections(
-        make_not_null(&host_dt_reference),
-        outgoing_by_element.at(setup.element.id()),
-        incoming_by_element.at(setup.element.id()),
-        setup.inverse_jacobian, setup.device_face_to_volume_index_map,
-        setup.mesh, setup.element);
+    add_host_boundary_corrections(make_not_null(&host_dt_reference),
+                                  outgoing_by_element.at(setup.element.id()),
+                                  incoming_by_element.at(setup.element.id()),
+                                  setup.mortar_meshes, setup.inverse_jacobian,
+                                  setup.device_face_to_volume_index_map,
+                                  setup.mesh, setup.element);
 
-    CHECK_ITERABLE_APPROX(get<::Tags::dt<ScalarWave::Tags::Psi>>(
-                              host_dt_from_kokkos),
-                          get<::Tags::dt<ScalarWave::Tags::Psi>>(
-                              host_dt_reference));
-    CHECK_ITERABLE_APPROX(get<::Tags::dt<ScalarWave::Tags::Pi>>(
-                              host_dt_from_kokkos),
-                          get<::Tags::dt<ScalarWave::Tags::Pi>>(
-                              host_dt_reference));
-    CHECK_ITERABLE_APPROX(get<::Tags::dt<ScalarWave::Tags::Phi<Dim>>>(
-                              host_dt_from_kokkos),
-                          get<::Tags::dt<ScalarWave::Tags::Phi<Dim>>>(
-                              host_dt_reference));
+    CHECK_ITERABLE_APPROX(
+        get<::Tags::dt<ScalarWave::Tags::Psi>>(host_dt_from_kokkos),
+        get<::Tags::dt<ScalarWave::Tags::Psi>>(host_dt_reference));
+    CHECK_ITERABLE_APPROX(
+        get<::Tags::dt<ScalarWave::Tags::Pi>>(host_dt_from_kokkos),
+        get<::Tags::dt<ScalarWave::Tags::Pi>>(host_dt_reference));
+    CHECK_ITERABLE_APPROX(
+        get<::Tags::dt<ScalarWave::Tags::Phi<Dim>>>(host_dt_from_kokkos),
+        get<::Tags::dt<ScalarWave::Tags::Phi<Dim>>>(host_dt_reference));
   }
 }
 
@@ -407,14 +445,18 @@ void test_apply_boundary_corrections_iterable_action_matches_host() {
         ScalarWave::KokkosTags::DeviceDtVariables<system>,
         ScalarWave::KokkosTags::OutgoingBoundaryCorrectionData<Dim>,
         ScalarWave::KokkosTags::IncomingBoundaryCorrectionData<Dim>,
+        ScalarWave::KokkosTags::ExternalBoundaryCorrectionData<Dim>,
         ScalarWave::KokkosTags::DeviceFaceToVolumeIndexMap<Dim>,
         ScalarWave::KokkosTags::DeviceFaceNormalMagnitude<Dim>,
-        domain::Tags::Mesh<Dim>, domain::Tags::Element<Dim>,
-        ::Tags::TimeStepId>>(
-        std::move(device_dt_initial), outgoing_by_element.at(setup.element.id()),
-        incoming_boundary_data_map{}, setup.device_face_to_volume_index_map,
-        setup.device_face_normal_magnitude, setup.mesh, setup.element,
-        setup.time_step_id);
+        ScalarWave::KokkosTags::DeviceMortarData<Dim>,
+        evolution::dg::Tags::MortarMesh<Dim>, domain::Tags::Mesh<Dim>,
+        domain::Tags::Element<Dim>, ::Tags::TimeStepId>>(
+        std::move(device_dt_initial),
+        outgoing_by_element.at(setup.element.id()),
+        incoming_boundary_data_map{}, external_boundary_data_map{},
+        setup.device_face_to_volume_index_map,
+        setup.device_face_normal_magnitude, setup.device_mortar_data,
+        setup.mortar_meshes, setup.mesh, setup.element, setup.time_step_id);
 
     tuples::TaggedTuple<inbox_tag> inboxes{};
     const Parallel::GlobalCache<TestMetavariables> cache{
@@ -450,30 +492,29 @@ void test_apply_boundary_corrections_iterable_action_matches_host() {
           setup.element.number_of_neighbors());
 
     Variables<dt_variables_tags> host_dt_reference{num_points, 0.0};
-    add_host_boundary_corrections(
-        make_not_null(&host_dt_reference),
-        outgoing_by_element.at(setup.element.id()),
-        incoming_by_element.at(setup.element.id()), setup.inverse_jacobian,
-        setup.device_face_to_volume_index_map, setup.mesh, setup.element);
+    add_host_boundary_corrections(make_not_null(&host_dt_reference),
+                                  outgoing_by_element.at(setup.element.id()),
+                                  incoming_by_element.at(setup.element.id()),
+                                  setup.mortar_meshes, setup.inverse_jacobian,
+                                  setup.device_face_to_volume_index_map,
+                                  setup.mesh, setup.element);
 
-    CHECK_ITERABLE_APPROX(get<::Tags::dt<ScalarWave::Tags::Psi>>(
-                              host_dt_from_kokkos),
-                          get<::Tags::dt<ScalarWave::Tags::Psi>>(
-                              host_dt_reference));
-    CHECK_ITERABLE_APPROX(get<::Tags::dt<ScalarWave::Tags::Pi>>(
-                              host_dt_from_kokkos),
-                          get<::Tags::dt<ScalarWave::Tags::Pi>>(
-                              host_dt_reference));
-    CHECK_ITERABLE_APPROX(get<::Tags::dt<ScalarWave::Tags::Phi<Dim>>>(
-                              host_dt_from_kokkos),
-                          get<::Tags::dt<ScalarWave::Tags::Phi<Dim>>>(
-                              host_dt_reference));
+    CHECK_ITERABLE_APPROX(
+        get<::Tags::dt<ScalarWave::Tags::Psi>>(host_dt_from_kokkos),
+        get<::Tags::dt<ScalarWave::Tags::Psi>>(host_dt_reference));
+    CHECK_ITERABLE_APPROX(
+        get<::Tags::dt<ScalarWave::Tags::Pi>>(host_dt_from_kokkos),
+        get<::Tags::dt<ScalarWave::Tags::Pi>>(host_dt_reference));
+    CHECK_ITERABLE_APPROX(
+        get<::Tags::dt<ScalarWave::Tags::Phi<Dim>>>(host_dt_from_kokkos),
+        get<::Tags::dt<ScalarWave::Tags::Phi<Dim>>>(host_dt_reference));
   }
 }
 }  // namespace
 
 SPECTRE_TEST_CASE(
-    "Unit.Evolution.Systems.ScalarWave.ApplyBoundaryCorrectionsToTimeDerivativeKokkos",
+    "Unit.Evolution.Systems.ScalarWave."
+    "ApplyBoundaryCorrectionsToTimeDerivativeKokkos",
     "[Unit][Evolution]") {
   test_apply_boundary_corrections_to_time_derivative_kokkos_matches_host();
   test_apply_boundary_corrections_iterable_action_matches_host();
