@@ -27,19 +27,36 @@ PhaseChangeAndTriggers:
 
 Evolution:
   InitialTime: 0.0
-  InitialTimeStep: 0.001
+  InitialTimeStep: 0.0001
   MinimumTimeStep: 1e-7
   TimeStepper: Rk5Tsitouras
 
 DomainCreator:
-  Brick:
-    LowerBound: [0.0, 0.0, 0.0]
-    UpperBound: [6.283185307179586, 6.283185307179586, 6.283185307179586]
-    Distribution: [Linear, Linear, Linear]
-    InitialRefinement: [0, 0, 0]
-    InitialGridPoints: [8, 8, 8]
-    TimeDependence: None
-    BoundaryConditions: [Periodic, Periodic, Periodic]
+  Sphere:
+    InnerRadius: 3.
+    OuterRadius: 20.
+    Interior:
+      FillWithSphericity: 0.
+    InitialRefinement: 0
+    InitialGridPoints: 8
+    UseEquiangularMap: True
+    EquatorialCompression: None
+    RadialPartitioning: [10., 15.]
+    RadialDistribution: [Linear, Linear, Linear]
+    WhichWedges: All
+    TimeDependentMaps: None
+    OuterBoundaryCondition:
+      DirichletAnalytic:
+        AnalyticPrescription:
+          PlaneWave:
+            WaveVector: [1.0, 1.0, 1.0]
+            Center: [0.0, 0.0, 0.0]
+            Profile:
+              Sinusoid:
+                Amplitude: 1.0
+                Wavenumber: 1.0
+                Phase: 0.0
+
 
 SpatialDiscretization:
   DiscontinuousGalerkin:
