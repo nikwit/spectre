@@ -77,7 +77,7 @@ struct UpdateUKokkos {
 
     constexpr size_t number_of_components =
         device_variables_tag::type::number_of_independent_components;
-    Kokkos::Array<double, max_supported_coefficients> coefficients_array{};
+    ::Kokkos::Array<double, max_supported_coefficients> coefficients_array{};
     const size_t num_coefficients = coefficients->size();
     for (size_t coeff_index = 0; coeff_index < num_coefficients;
          ++coeff_index) {
@@ -89,7 +89,7 @@ struct UpdateUKokkos {
     auto u_view = device_vars->view();
     const auto u0_view = device_step_start.view();
     const auto deriv_history = device_derivative_history;
-    Kokkos::parallel_for(
+    ::Kokkos::parallel_for(
         "UpdateUKokkosFused", num_points, KOKKOS_LAMBDA(const int i) {
           for (size_t c = 0; c < number_of_components; ++c) {
             double weighted_sum = 0.0;

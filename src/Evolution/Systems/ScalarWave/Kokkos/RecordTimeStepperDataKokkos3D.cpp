@@ -4,8 +4,10 @@
 #include "Evolution/Systems/ScalarWave/Kokkos/RecordTimeStepperDataKokkos3D.hpp"
 
 #include <cstddef>
+#include <exception>
 
 #include "Utilities/ErrorHandling/Assert.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
 
 namespace ScalarWave::Actions {
@@ -23,14 +25,21 @@ void RecordTimeStepperDataKokkos3D::apply(
   constexpr size_t number_of_components =
       device_dt_variables_tag::type::number_of_independent_components;
   const size_t num_points = device_dt.number_of_grid_points();
-  const auto dt_view = device_dt.view();
-  const auto deriv_history = *device_derivative_history;
-  Kokkos::parallel_for(
-      "RecordTimeStepperDataKokkos3D", num_points, KOKKOS_LAMBDA(const int i) {
-        for (size_t c = 0; c < number_of_components; ++c) {
-          deriv_history(substep, i, c) = dt_view(i, c);
-        }
-      });
+  try {
+    const auto dt_view = device_dt.view();
+    const auto deriv_history = *device_derivative_history;
+    ::Kokkos::parallel_for(
+        "RecordTimeStepperDataKokkos3D", num_points,
+        KOKKOS_LAMBDA(const int i) {
+          for (size_t c = 0; c < number_of_components; ++c) {
+            deriv_history(substep, i, c) = dt_view(i, c);
+          }
+        });
+  } catch (const std::exception& e) {
+    ERROR_NO_TRACE("RecordTimeStepperDataKokkos3D failed at substep "
+                   << substep << " with " << num_points
+                   << " points: " << e.what());
+  }
 }
 
 }  // namespace ScalarWave::Actions
