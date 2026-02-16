@@ -42,7 +42,7 @@ struct RecordTimeStepperDataKokkos {
     const size_t num_points = device_dt.number_of_grid_points();
     const auto dt_view = device_dt.view();
     const auto deriv_history = *device_derivative_history;
-    Kokkos::parallel_for(
+    ::Kokkos::parallel_for(
         "RecordTimeStepperDataKokkos", num_points, KOKKOS_LAMBDA(const int i) {
           for (size_t c = 0; c < number_of_components; ++c) {
             deriv_history(substep, i, c) = dt_view(i, c);

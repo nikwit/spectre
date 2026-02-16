@@ -40,7 +40,7 @@ struct CleanHistoryKokkos {
     if (time_step_id.substep() == runge_kutta->number_of_substeps() - 1) {
       // Preserve the updated solution in device_vars and advance the
       // step-start state for the next full step.
-      Kokkos::deep_copy(device_step_start->view(), device_vars->view());
+      ::Kokkos::deep_copy(device_step_start->view(), device_vars->view());
     }
   }
 };

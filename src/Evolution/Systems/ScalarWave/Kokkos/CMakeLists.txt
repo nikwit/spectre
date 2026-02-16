@@ -21,11 +21,11 @@ spectre_target_headers(
   ApplyBoundaryCorrectionsToTimeDerivativeKokkos.hpp
   CleanHistoryKokkos.hpp
   ComputeTimeDerivativeKokkos.hpp
-  CudaDiagnostics.hpp
   InitializeKokkosBoundaryCommunication.hpp
   InitializeKokkosTags.hpp
   InitializeKokkosTimeStepperState.hpp
   KokkosBoundaryCommunication.hpp
+  MortarDataPrimitives.hpp
   KokkosTimeStepperTags.hpp
   RecordTimeStepperDataKokkos.hpp
   RecordTimeStepperDataKokkos3D.hpp
