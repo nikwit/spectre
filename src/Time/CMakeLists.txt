@@ -82,6 +82,7 @@ target_link_libraries(
 
 add_subdirectory(Actions)
 add_subdirectory(ChangeSlabSize)
+add_subdirectory(Kokkos)
 add_subdirectory(OptionTags)
 add_subdirectory(StepChoosers)
 add_subdirectory(Tags)
