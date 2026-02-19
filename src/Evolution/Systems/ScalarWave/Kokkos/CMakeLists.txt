@@ -47,6 +47,7 @@ target_link_libraries(
   ScalarWave
   Serialization
   Time
+  TimeKokkos
   Utilities
   PRIVATE
   LinearOperators
