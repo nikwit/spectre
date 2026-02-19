@@ -19,6 +19,7 @@
 #include "DataStructures/LinkedMessageId.hpp"
 #include "DataStructures/Tensor/Metafunctions.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
+#include "DataStructures/VariablesDeclaration.hpp"
 #include "DataStructures/VariablesTag.hpp"
 #include "Domain/BlockLogicalCoordinates.hpp"
 #include "Domain/CoordinateMaps/Composition.hpp"
@@ -86,8 +87,6 @@ struct Sphere;
 template <typename Id>
 struct LinkedMessageId;
 class TimeStepId;
-template <typename TagsList>
-struct Variables;
 /// \endcond
 
 namespace intrp::InterpolationTarget_detail {

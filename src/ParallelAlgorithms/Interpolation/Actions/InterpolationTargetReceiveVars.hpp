@@ -15,6 +15,7 @@
 
 #include "DataStructures/DataBox/DataBox.hpp"
 #include "DataStructures/LinkedMessageId.hpp"
+#include "DataStructures/VariablesDeclaration.hpp"
 #include "DataStructures/VariablesTag.hpp"
 #include "IO/Logging/Verbosity.hpp"
 #include "Parallel/GlobalCache.hpp"
@@ -45,8 +46,6 @@ struct PendingTemporalIds;
 template <typename TemporalId>
 struct TemporalIds;
 }  // namespace intrp::Tags
-template <typename TagsList>
-struct Variables;
 /// \endcond
 
 namespace intrp::Actions {
