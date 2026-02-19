@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <vector>
 
@@ -387,16 +388,16 @@ struct GeneralizedHarmonicTemplateBase {
 
   // Register needs to be before InitializeTimeStepperHistory so that CCE is
   // properly registered when the self-start happens
-  static constexpr auto default_phase_order =
-      std::array{Parallel::Phase::Initialization,
-                 Parallel::Phase::RegisterWithElementDataReader,
-                 Parallel::Phase::ImportInitialData,
-                 Parallel::Phase::InitializeInitialDataDependentQuantities,
-                 Parallel::Phase::Register,
-                 Parallel::Phase::InitializeTimeStepperHistory,
-                 Parallel::Phase::CheckDomain,
-                 Parallel::Phase::Evolve,
-                 Parallel::Phase::Exit};
+  static constexpr std::array<Parallel::Phase, 9> default_phase_order{
+      Parallel::Phase::Initialization,
+      Parallel::Phase::RegisterWithElementDataReader,
+      Parallel::Phase::ImportInitialData,
+      Parallel::Phase::InitializeInitialDataDependentQuantities,
+      Parallel::Phase::Register,
+      Parallel::Phase::InitializeTimeStepperHistory,
+      Parallel::Phase::CheckDomain,
+      Parallel::Phase::Evolve,
+      Parallel::Phase::Exit};
 
   template <typename DerivedMetavars, typename ControlSystems>
   using step_actions = tmpl::list<
