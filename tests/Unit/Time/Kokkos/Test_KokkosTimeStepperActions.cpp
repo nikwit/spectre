@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstddef>
+#include <type_traits>
 
 #include "DataStructures/DataBox/PrefixHelpers.hpp"
 #include "DataStructures/DataBox/Prefixes.hpp"
@@ -13,15 +14,13 @@
 #include "Evolution/Systems/ScalarWave/Kokkos/InitializeKokkosTimeStepperState.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/KokkosTimeStepperTags.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/RecordTimeStepperDataKokkos.hpp"
-#include "Evolution/Systems/ScalarWave/Kokkos/SyncKokkosToHost.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/UpdateUKokkos.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
 #include "Evolution/Systems/ScalarWave/Tags.hpp"
 #include "NumericalAlgorithms/OdeIntegration/OdeIntegration.hpp"
-#include "Options/Protocols/FactoryCreation.hpp"
-#include "Parallel/GlobalCache.hpp"
-#include "ParallelAlgorithms/EventsAndTriggers/Event.hpp"
-#include "Time/History.hpp"
+#include "Time/Kokkos/CleanHistory.hpp"
+#include "Time/Kokkos/RecordTimeStepperData.hpp"
+#include "Time/Kokkos/UpdateU.hpp"
 #include "Time/Slab.hpp"
 #include "Time/Time.hpp"
 #include "Time/TimeStepId.hpp"
@@ -29,8 +28,6 @@
 #include "Time/TimeSteppers/Rk5Tsitouras.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
-#include "Utilities/ProtocolHelpers.hpp"
-#include "Utilities/TMPL.hpp"
 
 namespace {
 template <typename Vars>
@@ -43,26 +40,31 @@ double get_component(const Vars& vars, const size_t component, const size_t i) {
   }
   return get<ScalarWave::Tags::Phi<1>>(vars).get(0)[i];
 }
-
-struct SyncEventMetavars {
-  struct factory_creation
-      : tt::ConformsTo<Options::protocols::FactoryCreation> {
-    using factory_classes = tmpl::map<tmpl::pair<Event, tmpl::list<>>>;
-  };
-  using component_list = tmpl::list<>;
-};
 }  // namespace
 
-SPECTRE_TEST_CASE(
-    "Unit.Evolution.Systems.ScalarWave.KokkosTimeStepperActions.Base",
-    "[Unit][Evolution]") {
+SPECTRE_TEST_CASE("Unit.Time.Kokkos.TimeStepperActions.Base",
+                  "[Unit][Time]") {
   using system = ScalarWave::System<1>;
   using initialize_action =
       ScalarWave::Actions::InitializeKokkosTimeStepperState<system>;
-  using record_action =
-      ScalarWave::Actions::RecordTimeStepperDataKokkos<system>;
-  using update_action = ScalarWave::Actions::UpdateUKokkos<system>;
-  using clean_action = ScalarWave::Actions::CleanHistoryKokkos<system>;
+  using record_action = ::Actions::Kokkos::RecordTimeStepperData<
+      system, ScalarWave::KokkosTags::DeviceDtVariables,
+      ScalarWave::KokkosTags::DeviceDerivativeHistory>;
+  using update_action = ::Actions::Kokkos::UpdateU<
+      system, ScalarWave::KokkosTags::DeviceVariables,
+      ScalarWave::KokkosTags::DeviceStepStart,
+      ScalarWave::KokkosTags::DeviceDerivativeHistory>;
+  using clean_action = ::Actions::Kokkos::CleanHistory<
+      system, ScalarWave::KokkosTags::DeviceVariables,
+      ScalarWave::KokkosTags::DeviceStepStart>;
+  static_assert(std::is_same_v<record_action,
+                               ScalarWave::Actions::RecordTimeStepperDataKokkos<
+                                   system>>);
+  static_assert(std::is_same_v<update_action,
+                               ScalarWave::Actions::UpdateUKokkos<system>>);
+  static_assert(std::is_same_v<clean_action,
+                               ScalarWave::Actions::CleanHistoryKokkos<
+                                   system>>);
 
   using device_vars_tag = ScalarWave::KokkosTags::DeviceVariables<system>;
   using device_dt_tag = ScalarWave::KokkosTags::DeviceDtVariables<system>;
@@ -144,7 +146,6 @@ SPECTRE_TEST_CASE(
   typename system::variables_tag::type updated_host_vars{num_points, 0.0};
   copy_to_host(make_not_null(&updated_host_vars), device_vars);
 
-  // RK4 result coefficients
   constexpr std::array<double, 4> b{
       {1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0}};
   for (size_t i = 0; i < num_points; ++i) {
@@ -178,16 +179,21 @@ SPECTRE_TEST_CASE(
   }
 }
 
-SPECTRE_TEST_CASE(
-    "Unit.Evolution.Systems.ScalarWave.KokkosTimeStepperActions.LinearOde",
-    "[Unit][Evolution]") {
+SPECTRE_TEST_CASE("Unit.Time.Kokkos.TimeStepperActions.LinearOde",
+                  "[Unit][Time]") {
   using system = ScalarWave::System<1>;
   using initialize_action =
       ScalarWave::Actions::InitializeKokkosTimeStepperState<system>;
-  using record_action =
-      ScalarWave::Actions::RecordTimeStepperDataKokkos<system>;
-  using update_action = ScalarWave::Actions::UpdateUKokkos<system>;
-  using clean_action = ScalarWave::Actions::CleanHistoryKokkos<system>;
+  using record_action = ::Actions::Kokkos::RecordTimeStepperData<
+      system, ScalarWave::KokkosTags::DeviceDtVariables,
+      ScalarWave::KokkosTags::DeviceDerivativeHistory>;
+  using update_action = ::Actions::Kokkos::UpdateU<
+      system, ScalarWave::KokkosTags::DeviceVariables,
+      ScalarWave::KokkosTags::DeviceStepStart,
+      ScalarWave::KokkosTags::DeviceDerivativeHistory>;
+  using clean_action = ::Actions::Kokkos::CleanHistory<
+      system, ScalarWave::KokkosTags::DeviceVariables,
+      ScalarWave::KokkosTags::DeviceStepStart>;
 
   using device_vars_tag = ScalarWave::KokkosTags::DeviceVariables<system>;
   using device_dt_tag = ScalarWave::KokkosTags::DeviceDtVariables<system>;
@@ -298,41 +304,4 @@ SPECTRE_TEST_CASE(
 
     step_start = step_start + step;
   }
-}
-
-SPECTRE_TEST_CASE("Unit.Evolution.Systems.ScalarWave.SyncKokkosToHostEvent",
-                  "[Unit][Evolution]") {
-  using system = ScalarWave::System<1>;
-  using event = ScalarWave::Events::SyncKokkosToHost<system>;
-
-  constexpr size_t num_points = 4;
-  typename system::variables_tag::type host_vars{num_points, 0.0};
-  get(get<ScalarWave::Tags::Psi>(host_vars)) = DataVector{{1.0, 2.0, 3.0, 4.0}};
-  get(get<ScalarWave::Tags::Pi>(host_vars)) = DataVector{{5.0, 6.0, 7.0, 8.0}};
-  get<ScalarWave::Tags::Phi<1>>(host_vars).get(0) =
-      DataVector{{9.0, 10.0, 11.0, 12.0}};
-
-  auto device_vars = copy_to_device(host_vars);
-
-  typename system::variables_tag::type host_copy_target{num_points, 0.0};
-  get(get<ScalarWave::Tags::Psi>(host_copy_target)) =
-      DataVector{{-1.0, -1.0, -1.0, -1.0}};
-  get(get<ScalarWave::Tags::Pi>(host_copy_target)) =
-      DataVector{{-1.0, -1.0, -1.0, -1.0}};
-  get<ScalarWave::Tags::Phi<1>>(host_copy_target).get(0) =
-      DataVector{{-1.0, -1.0, -1.0, -1.0}};
-
-  event sync_event{};
-  Parallel::GlobalCache<SyncEventMetavars> cache{
-      typename Parallel::GlobalCache<SyncEventMetavars>::ConstTagsTuple{}};
-  const Event::ObservationValue observation_value{"Time", 0.0};
-  sync_event(make_not_null(&host_copy_target), device_vars, cache, size_t{0},
-             static_cast<const void*>(nullptr), observation_value);
-
-  CHECK_ITERABLE_APPROX(get(get<ScalarWave::Tags::Psi>(host_copy_target)),
-                        get(get<ScalarWave::Tags::Psi>(host_vars)));
-  CHECK_ITERABLE_APPROX(get(get<ScalarWave::Tags::Pi>(host_copy_target)),
-                        get(get<ScalarWave::Tags::Pi>(host_vars)));
-  CHECK_ITERABLE_APPROX(get<ScalarWave::Tags::Phi<1>>(host_copy_target),
-                        get<ScalarWave::Tags::Phi<1>>(host_vars));
 }
