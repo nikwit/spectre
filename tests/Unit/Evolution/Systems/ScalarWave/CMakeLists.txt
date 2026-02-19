@@ -15,10 +15,10 @@ set(LIBRARY_SOURCES
   Test_ComputeTimeDerivativeKokkos.cpp
   Test_EnergyDensity.cpp
   Test_Equations.cpp
-  Test_KokkosTimeStepperActions.cpp
   Test_MortarDataPrimitives.cpp
   Test_MomentumDensity.cpp
   Test_System.cpp
+  Test_SyncKokkosToHostEvent.cpp
   Test_Tags.cpp
   Test_TimeDerivative.cpp
   )
