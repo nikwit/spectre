@@ -53,6 +53,19 @@ add_generalized_harmonic_executable_without_horizon(1)
 add_generalized_harmonic_executable_without_horizon(2)
 add_generalized_harmonic_executable_without_horizon(3)
 
+set(NO_BH_KOKKOS_EXECUTABLE EvolveGhNoBlackHoleKokkos)
+add_spectre_executable(
+  ${NO_BH_KOKKOS_EXECUTABLE}
+  EXCLUDE_FROM_ALL
+  EvolveGhNoBlackHoleKokkos.cpp
+  )
+target_link_libraries(
+  ${NO_BH_KOKKOS_EXECUTABLE}
+  PRIVATE
+  ${LIBS_TO_LINK}
+  GeneralizedHarmonicKokkos
+  )
+
 # Single BH
 set(SINGLE_BH_EXECUTABLE EvolveGhSingleBlackHole)
 add_spectre_executable(
