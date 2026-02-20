@@ -27,6 +27,7 @@ set(LIBRARY_SOURCES
   Test_DuDtTempTags.cpp
   Test_Fluxes.cpp
   Test_System.cpp
+  Test_SyncKokkosToHostEvent.cpp
   Test_Tags.cpp
   Test_TensorYlmTransforms.cpp
   )
