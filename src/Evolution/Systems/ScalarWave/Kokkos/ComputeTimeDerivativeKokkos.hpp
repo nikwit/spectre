@@ -4,7 +4,6 @@
 #pragma once
 
 #include <cstddef>
-#include <exception>
 #include <optional>
 #include <utility>
 
@@ -228,51 +227,43 @@ struct ComputeTimeDerivativeKokkos {
         Parallel::get<domain::Tags::ExternalBoundaryConditions<volume_dim>>(
             cache);
     const auto& time_step_id = db::get<::Tags::TimeStepId>(box);
-    try {
-      db::mutate<device_dt_variables_tag, outgoing_boundary_data_tag,
-                 external_boundary_data_tag>(
-          [&device_vars = db::get<device_variables_tag>(box),
-           &device_inverse_jacobian = db::get<device_inverse_jacobian_tag>(box),
-           &device_constraint_gamma2 =
-               db::get<device_constraint_gamma2_tag>(box),
-           &device_face_to_volume_index_map =
-               db::get<device_face_to_volume_index_map_tag>(box),
-           &device_face_unit_normal_covector =
-               db::get<device_face_unit_normal_covector_tag>(box),
-           &device_mortar_data = db::get<device_mortar_data_tag>(box),
-           &mortar_meshes = db::get<mortar_mesh_tag>(box),
-           &host_constraint_gamma2 =
-               db::get<ScalarWave::Tags::ConstraintGamma2>(box),
-           &external_boundary_conditions_by_block,
-           &inertial_coordinates =
-               db::get<domain::Tags::Coordinates<volume_dim, Frame::Inertial>>(
-                   box),
-           &time = db::get<::Tags::Time>(box),
-           &mesh = db::get<domain::Tags::Mesh<volume_dim>>(box), &time_step_id,
-           &element](gsl::not_null<device_dt_type*> device_dt,
-                     gsl::not_null<outgoing_boundary_data_type*>
-                         outgoing_boundary_data,
-                     gsl::not_null<external_boundary_data_type*>
-                         external_boundary_data) {
-            compute_volume_terms_and_package_boundary_data(
-                device_dt, outgoing_boundary_data, external_boundary_data,
-                device_vars, device_inverse_jacobian, device_constraint_gamma2,
-                device_face_to_volume_index_map,
-                device_face_unit_normal_covector, device_mortar_data,
-                mortar_meshes, host_constraint_gamma2,
-                external_boundary_conditions_by_block, inertial_coordinates,
-                time, mesh, element, time_step_id);
-          },
-          make_not_null(&box));
+    db::mutate<device_dt_variables_tag, outgoing_boundary_data_tag,
+               external_boundary_data_tag>(
+        [&device_vars = db::get<device_variables_tag>(box),
+         &device_inverse_jacobian = db::get<device_inverse_jacobian_tag>(box),
+         &device_constraint_gamma2 = db::get<device_constraint_gamma2_tag>(box),
+         &device_face_to_volume_index_map =
+             db::get<device_face_to_volume_index_map_tag>(box),
+         &device_face_unit_normal_covector =
+             db::get<device_face_unit_normal_covector_tag>(box),
+         &device_mortar_data = db::get<device_mortar_data_tag>(box),
+         &mortar_meshes = db::get<mortar_mesh_tag>(box),
+         &host_constraint_gamma2 =
+             db::get<ScalarWave::Tags::ConstraintGamma2>(box),
+         &external_boundary_conditions_by_block,
+         &inertial_coordinates =
+             db::get<domain::Tags::Coordinates<volume_dim, Frame::Inertial>>(
+                 box),
+         &time = db::get<::Tags::Time>(box),
+         &mesh = db::get<domain::Tags::Mesh<volume_dim>>(box), &time_step_id,
+         &element](
+            gsl::not_null<device_dt_type*> device_dt,
+            gsl::not_null<outgoing_boundary_data_type*> outgoing_boundary_data,
+            gsl::not_null<external_boundary_data_type*>
+                external_boundary_data) {
+          compute_volume_terms_and_package_boundary_data(
+              device_dt, outgoing_boundary_data, external_boundary_data,
+              device_vars, device_inverse_jacobian, device_constraint_gamma2,
+              device_face_to_volume_index_map, device_face_unit_normal_covector,
+              device_mortar_data, mortar_meshes, host_constraint_gamma2,
+              external_boundary_conditions_by_block, inertial_coordinates, time,
+              mesh, element, time_step_id);
+        },
+        make_not_null(&box));
 
-      send_packaged_boundary_data<ParallelComponent>(
-          db::get<outgoing_boundary_data_tag>(box),
-          db::get<device_mortar_data_tag>(box), element, time_step_id, cache);
-    } catch (const std::exception& e) {
-      ERROR_NO_TRACE("ComputeTimeDerivativeKokkos action failed on element "
-                     << element.id() << " at " << time_step_id << ": "
-                     << e.what());
-    }
+    send_packaged_boundary_data<ParallelComponent>(
+        db::get<outgoing_boundary_data_tag>(box),
+        db::get<device_mortar_data_tag>(box), element, time_step_id, cache);
 
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }

@@ -4,10 +4,8 @@
 #include "Evolution/Systems/ScalarWave/Kokkos/UpdateUKokkos3D.hpp"
 
 #include <cstddef>
-#include <exception>
 
 #include "Utilities/ErrorHandling/Assert.hpp"
-#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
 
 namespace ScalarWave::Actions {
@@ -59,27 +57,21 @@ void UpdateUKokkos3D::apply(
 
   const double dt = time_step.value();
   const size_t num_points = device_vars->number_of_grid_points();
-  try {
-    auto u_view = device_vars->view();
-    const auto u0_view = device_step_start.view();
-    const auto deriv_history = device_derivative_history;
-    ::Kokkos::parallel_for(
-        "UpdateUKokkos3DFused", num_points, KOKKOS_LAMBDA(const int i) {
-          for (size_t c = 0; c < number_of_components; ++c) {
-            double weighted_sum = 0.0;
-            for (size_t coeff_index = 0; coeff_index < num_coefficients;
-                 ++coeff_index) {
-              weighted_sum += coefficients_array[coeff_index] *
-                              deriv_history(coeff_index, i, c);
-            }
-            u_view(i, c) = u0_view(i, c) + dt * weighted_sum;
+  auto u_view = device_vars->view();
+  const auto u0_view = device_step_start.view();
+  const auto deriv_history = device_derivative_history;
+  ::Kokkos::parallel_for(
+      "UpdateUKokkos3DFused", num_points, KOKKOS_LAMBDA(const int i) {
+        for (size_t c = 0; c < number_of_components; ++c) {
+          double weighted_sum = 0.0;
+          for (size_t coeff_index = 0; coeff_index < num_coefficients;
+               ++coeff_index) {
+            weighted_sum += coefficients_array[coeff_index] *
+                            deriv_history(coeff_index, i, c);
           }
-        });
-  } catch (const std::exception& e) {
-    ERROR_NO_TRACE("UpdateUKokkos3D failed at substep "
-                   << substep << " with " << num_points
-                   << " points: " << e.what());
-  }
+          u_view(i, c) = u0_view(i, c) + dt * weighted_sum;
+        }
+      });
 }
 
 }  // namespace ScalarWave::Actions

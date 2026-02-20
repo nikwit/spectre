@@ -4,7 +4,6 @@
 #pragma once
 
 #include <cstddef>
-#include <exception>
 #include <optional>
 #include <utility>
 
@@ -165,36 +164,31 @@ struct ApplyBoundaryCorrectionsToTimeDerivativeKokkos {
     }
 
     const auto& element = db::get<domain::Tags::Element<3>>(box);
-    const auto& time_step_id = db::get<::Tags::TimeStepId>(box);
-    try {
-      db::mutate<device_dt_variables_tag>(
-          [&outgoing_boundary_data = db::get<
-               ScalarWave::KokkosTags::OutgoingBoundaryCorrectionData<3>>(box),
-           &incoming_boundary_data = db::get<
-               ScalarWave::KokkosTags::IncomingBoundaryCorrectionData<3>>(box),
-           &external_boundary_data = db::get<
-               ScalarWave::KokkosTags::ExternalBoundaryCorrectionData<3>>(box),
-           &device_face_to_volume_index_map =
-               db::get<device_face_to_volume_index_map_tag>(box),
-           &device_face_normal_magnitude =
-               db::get<device_face_normal_magnitude_tag>(box),
-           &device_mortar_data = db::get<device_mortar_data_tag>(box),
-           &mortar_meshes = db::get<mortar_mesh_tag>(box),
-           &mesh = db::get<domain::Tags::Mesh<3>>(box),
-           &element](gsl::not_null<device_dt_type*> device_dt) {
-            apply_boundary_corrections_on_device(
-                device_dt, outgoing_boundary_data, incoming_boundary_data,
-                external_boundary_data, device_face_to_volume_index_map,
-                device_face_normal_magnitude, device_mortar_data, mortar_meshes,
-                mesh, element);
-          },
-          make_not_null(&box));
-    } catch (const std::exception& e) {
-      ERROR_NO_TRACE(
-          "ApplyBoundaryCorrectionsToTimeDerivativeKokkos action failed on "
-          "element "
-          << element.id() << " at " << time_step_id << ": " << e.what());
-    }
+    db::mutate<device_dt_variables_tag>(
+        [&outgoing_boundary_data =
+             db::get<ScalarWave::KokkosTags::OutgoingBoundaryCorrectionData<3>>(
+                 box),
+         &incoming_boundary_data =
+             db::get<ScalarWave::KokkosTags::IncomingBoundaryCorrectionData<3>>(
+                 box),
+         &external_boundary_data =
+             db::get<ScalarWave::KokkosTags::ExternalBoundaryCorrectionData<3>>(
+                 box),
+         &device_face_to_volume_index_map =
+             db::get<device_face_to_volume_index_map_tag>(box),
+         &device_face_normal_magnitude =
+             db::get<device_face_normal_magnitude_tag>(box),
+         &device_mortar_data = db::get<device_mortar_data_tag>(box),
+         &mortar_meshes = db::get<mortar_mesh_tag>(box),
+         &mesh = db::get<domain::Tags::Mesh<3>>(box),
+         &element](gsl::not_null<device_dt_type*> device_dt) {
+          apply_boundary_corrections_on_device(
+              device_dt, outgoing_boundary_data, incoming_boundary_data,
+              external_boundary_data, device_face_to_volume_index_map,
+              device_face_normal_magnitude, device_mortar_data, mortar_meshes,
+              mesh, element);
+        },
+        make_not_null(&box));
 
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }
