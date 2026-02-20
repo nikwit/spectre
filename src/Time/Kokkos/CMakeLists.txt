@@ -9,6 +9,8 @@ spectre_target_sources(
   ${LIBRARY}
   PRIVATE
   KokkosModule.cpp
+  RecordTimeStepperData.cpp
+  UpdateU.cpp
   )
 
 spectre_target_headers(

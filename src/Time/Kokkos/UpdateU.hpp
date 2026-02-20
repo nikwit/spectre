@@ -20,6 +20,18 @@
 
 namespace Actions::Kokkos {
 
+namespace detail {
+
+void update_u_impl(double* u_data, size_t u_stride_0, size_t u_stride_1,
+                   const double* u0_data, size_t u0_stride_0,
+                   size_t u0_stride_1, const double* deriv_history_data,
+                   size_t deriv_history_stride_0, size_t deriv_history_stride_1,
+                   size_t deriv_history_stride_2, const double* coefficients,
+                   size_t num_coefficients, double dt, size_t num_points,
+                   size_t num_components);
+
+}  // namespace detail
+
 template <typename System, template <typename> class DeviceVariablesTag,
           template <typename> class DeviceStepStartTag,
           template <typename> class DeviceDerivativeHistoryTag>
@@ -75,9 +87,7 @@ struct UpdateU {
                << max_supported_coefficients << " RK coefficients, not "
                << coefficients->size());
 
-    constexpr size_t number_of_components =
-        device_variables_tag::type::number_of_independent_components;
-    ::Kokkos::Array<double, max_supported_coefficients> coefficients_array{};
+    ::Kokkos::Array<double, 8> coefficients_array{};
     const size_t num_coefficients = coefficients->size();
     for (size_t coeff_index = 0; coeff_index < num_coefficients;
          ++coeff_index) {
@@ -85,22 +95,36 @@ struct UpdateU {
     }
 
     const double dt = time_step.value();
-    const size_t num_points = device_vars->number_of_grid_points();
-    auto u_view = device_vars->view();
+    const auto u_view = device_vars->view();
     const auto u0_view = device_step_start.view();
     const auto deriv_history = device_derivative_history;
-    ::Kokkos::parallel_for(
-        "KokkosUpdateUFused", num_points, KOKKOS_LAMBDA(const int i) {
-          for (size_t c = 0; c < number_of_components; ++c) {
-            double weighted_sum = 0.0;
-            for (size_t coeff_index = 0; coeff_index < num_coefficients;
-                 ++coeff_index) {
-              weighted_sum += coefficients_array[coeff_index] *
-                              deriv_history(coeff_index, i, c);
-            }
-            u_view(i, c) = u0_view(i, c) + dt * weighted_sum;
-          }
-        });
+    const size_t num_points = u_view.extent(0);
+    const size_t num_components = u_view.extent(1);
+    ASSERT(u0_view.extent(0) == num_points,
+           "Step-start point extent mismatch: u0=" << u0_view.extent(0)
+                                                   << " u=" << num_points);
+    ASSERT(u0_view.extent(1) == num_components,
+           "Step-start component extent mismatch: u0="
+               << u0_view.extent(1) << " u=" << num_components);
+    ASSERT(deriv_history.extent(1) == num_points,
+           "Derivative history point extent mismatch: history="
+               << deriv_history.extent(1) << " u=" << num_points);
+    ASSERT(deriv_history.extent(2) == num_components,
+           "Derivative history component extent mismatch: history="
+               << deriv_history.extent(2) << " u=" << num_components);
+    std::array<size_t, 8> u_strides{};
+    u_view.stride(u_strides.data());
+    std::array<size_t, 8> u0_strides{};
+    u0_view.stride(u0_strides.data());
+    std::array<size_t, 8> deriv_history_strides{};
+    deriv_history.stride(deriv_history_strides.data());
+
+    detail::update_u_impl(u_view.data(), u_strides[0], u_strides[1],
+                          u0_view.data(), u0_strides[0], u0_strides[1],
+                          deriv_history.data(), deriv_history_strides[0],
+                          deriv_history_strides[1], deriv_history_strides[2],
+                          coefficients_array.data(), num_coefficients, dt,
+                          num_points, num_components);
   }
 };
 
