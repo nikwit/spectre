@@ -19,6 +19,7 @@ set(LIBRARY_SOURCES
   Test_BbhCheckpointAndExitIfCompletePhaseChange.cpp
   Test_BbhCompletionCriteria.cpp
   Test_BbhCompletionSingleton.cpp
+  Test_ApplyBoundaryCorrectionsToTimeDerivativeKokkos.cpp
   Test_Characteristics.cpp
   Test_ComputeTimeDerivativeKokkos.cpp
   Test_Constraints.cpp
@@ -41,7 +42,9 @@ target_link_libraries(
   DataStructuresHelpers
   DiscontinuousGalerkin
   Domain
+  DomainCreators
   DomainStructure
+  Evolution
   FunctionsOfTime
   GeneralRelativity
   GeneralRelativityHelpers
@@ -49,6 +52,7 @@ target_link_libraries(
   GeneralizedHarmonic
   GeneralizedHarmonicKokkos
   Importers
+  Initialization
   LinearOperators
   MathFunctions
   Options
