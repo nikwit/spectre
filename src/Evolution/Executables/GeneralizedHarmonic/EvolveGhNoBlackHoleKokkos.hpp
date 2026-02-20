@@ -14,6 +14,7 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/ApplyBoundaryCorrectionsToTimeDerivativeKokkos.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/CleanHistoryKokkos.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/ComputeTimeDerivativeKokkos.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/FilterKokkos.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/InitializeKokkosBoundaryCommunication.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/InitializeKokkosTags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/InitializeKokkosTimeStepperState.hpp"
@@ -79,16 +80,13 @@ struct EvolutionMetavarsKokkos {
       gh::Actions::ComputeTimeDerivativeKokkos,
       tmpl::list<
           gh::Actions::ApplyBoundaryCorrectionsToTimeDerivativeKokkos,
-          Actions::MutateApply<gh::Actions::RecordTimeStepperDataKokkos<system>>,
+          Actions::MutateApply<
+              gh::Actions::RecordTimeStepperDataKokkos<system>>,
           evolution::Actions::RunEventsAndDenseTriggers<tmpl::list<>>,
           control_system::Actions::LimitTimeStep<tmpl::list<>>,
           Actions::MutateApply<gh::Actions::UpdateUKokkos<system>>>,
       Actions::MutateApply<gh::Actions::CleanHistoryKokkos<system>>,
-      dg::Actions::Filter<
-          Filters::Exponential<0>,
-          tmpl::list<gr::Tags::SpacetimeMetric<DataVector, volume_dim>,
-                     gh::Tags::Pi<DataVector, volume_dim>,
-                     gh::Tags::Phi<DataVector, volume_dim>>>>;
+      gh::Actions::FilterKokkos<Filters::Exponential<0>>>;
 
   using initialization_actions = tmpl::list<
       Initialization::Actions::InitializeItems<

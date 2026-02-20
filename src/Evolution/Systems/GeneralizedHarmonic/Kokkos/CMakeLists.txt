@@ -19,6 +19,7 @@ spectre_target_headers(
   ApplyBoundaryCorrectionsToTimeDerivativeKokkos.hpp
   CleanHistoryKokkos.hpp
   ComputeTimeDerivativeKokkos.hpp
+  FilterKokkos.hpp
   InitializeKokkosBoundaryCommunication.hpp
   InitializeKokkosTags.hpp
   InitializeKokkosTimeStepperState.hpp
