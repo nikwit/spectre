@@ -18,6 +18,7 @@ spectre_target_headers(
   BoundaryCorrectionTags.hpp
   ComputeTags.hpp
   Evolution.hpp
+  Kokkos/SyncKokkosToHost.hpp
   NumericInitialData.hpp
   PassVariables.hpp
   Protocols.hpp
