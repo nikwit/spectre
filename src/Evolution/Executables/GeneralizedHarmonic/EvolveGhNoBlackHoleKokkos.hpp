@@ -19,7 +19,9 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/InitializeKokkosTags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/InitializeKokkosTimeStepperState.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/RecordTimeStepperDataKokkos.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/SyncKokkosToHost.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/UpdateUKokkos.hpp"
+#include "Options/FactoryHelpers.hpp"
 #include "Options/String.hpp"
 #include "Parallel/ArrayCollection/DgElementCollection.hpp"
 #include "Parallel/MemoryMonitor/MemoryMonitor.hpp"
@@ -44,8 +46,13 @@ struct EvolutionMetavarsKokkos {
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {}
 
-  using factory_creation =
-      detail::FactoryCreation<volume_dim, local_time_stepping>;
+  struct factory_creation
+      : tt::ConformsTo<Options::protocols::FactoryCreation> {
+    using factory_classes = Options::add_factory_classes<
+        typename detail::FactoryCreation<volume_dim,
+                                         local_time_stepping>::factory_classes,
+        tmpl::pair<Event, tmpl::list<gh::Events::SyncKokkosToHost<system>>>>;
+  };
 
   using observed_reduction_data_tags =
       observers::collect_reduction_data_tags<tmpl::push_back<
@@ -54,6 +61,8 @@ struct EvolutionMetavarsKokkos {
   using initialize_initial_data_dependent_quantities_actions =
       tmpl::list<gh::gauges::SetPiAndPhiFromConstraints<
                      gh::Solutions::all_solutions<volume_dim>, volume_dim>,
+                 Actions::MutateApply<
+                     gh::Actions::InitializeKokkosTimeStepperState<system>>,
                  Parallel::Actions::TerminatePhase>;
 
   using const_global_cache_tags =
@@ -78,13 +87,12 @@ struct EvolutionMetavarsKokkos {
 
   using step_actions = tmpl::list<
       gh::Actions::ComputeTimeDerivativeKokkos,
-      tmpl::list<
-          gh::Actions::ApplyBoundaryCorrectionsToTimeDerivativeKokkos,
-          Actions::MutateApply<
-              gh::Actions::RecordTimeStepperDataKokkos<system>>,
-          evolution::Actions::RunEventsAndDenseTriggers<tmpl::list<>>,
-          control_system::Actions::LimitTimeStep<tmpl::list<>>,
-          Actions::MutateApply<gh::Actions::UpdateUKokkos<system>>>,
+      tmpl::list<gh::Actions::ApplyBoundaryCorrectionsToTimeDerivativeKokkos,
+                 Actions::MutateApply<
+                     gh::Actions::RecordTimeStepperDataKokkos<system>>,
+                 evolution::Actions::RunEventsAndDenseTriggers<tmpl::list<>>,
+                 control_system::Actions::LimitTimeStep<tmpl::list<>>,
+                 Actions::MutateApply<gh::Actions::UpdateUKokkos<system>>>,
       Actions::MutateApply<gh::Actions::CleanHistoryKokkos<system>>,
       gh::Actions::FilterKokkos<Filters::Exponential<0>>>;
 
@@ -92,8 +100,7 @@ struct EvolutionMetavarsKokkos {
       Initialization::Actions::InitializeItems<
           Initialization::TimeStepping<EvolutionMetavarsKokkos,
                                        TimeStepperBase>,
-          evolution::dg::Initialization::Domain<EvolutionMetavarsKokkos,
-                                                false>,
+          evolution::dg::Initialization::Domain<EvolutionMetavarsKokkos, false>,
           Initialization::TimeStepperHistory<EvolutionMetavarsKokkos>>,
       Initialization::Actions::NonconservativeSystem<system>,
       Initialization::Actions::AddComputeTags<::Tags::DerivCompute<
@@ -107,8 +114,6 @@ struct EvolutionMetavarsKokkos {
               EvolutionMetavarsKokkos, local_time_stepping>>>,
       ::evolution::dg::Initialization::Mortars<volume_dim, system>,
       evolution::Actions::InitializeRunEventsAndDenseTriggers,
-      Actions::MutateApply<gh::Actions::InitializeKokkosTimeStepperState<
-          system>>,
       Actions::MutateApply<gh::Actions::InitializeKokkosTags<system>>,
       Actions::MutateApply<
           gh::Actions::InitializeKokkosBoundaryCommunication<volume_dim>>,
@@ -154,15 +159,12 @@ struct EvolutionMetavarsKokkos {
         tmpl::map<tmpl::pair<gh_dg_element_array, dg_registration_list>>;
   };
 
-  using component_list =
-      tmpl::flatten<tmpl::list<observers::Observer<EvolutionMetavarsKokkos>,
-                               observers::ObserverWriter<
-                                   EvolutionMetavarsKokkos>,
-                               mem_monitor::MemoryMonitor<
-                                   EvolutionMetavarsKokkos>,
-                               importers::ElementDataReader<
-                                   EvolutionMetavarsKokkos>,
-                               gh_dg_element_array>>;
+  using component_list = tmpl::flatten<
+      tmpl::list<observers::Observer<EvolutionMetavarsKokkos>,
+                 observers::ObserverWriter<EvolutionMetavarsKokkos>,
+                 mem_monitor::MemoryMonitor<EvolutionMetavarsKokkos>,
+                 importers::ElementDataReader<EvolutionMetavarsKokkos>,
+                 gh_dg_element_array>>;
 
   static constexpr Options::String help{
       "Generalized Harmonic Kokkos development executable (single-node, "
