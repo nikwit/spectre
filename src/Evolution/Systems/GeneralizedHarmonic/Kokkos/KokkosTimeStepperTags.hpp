@@ -63,6 +63,15 @@ struct DeviceInverseJacobian : db::SimpleTag {
   using type = typename ::Tags::MirrorView<host_tag>::type;
 };
 
+template <size_t Dim>
+struct DeviceInertialCoordinates : db::SimpleTag {
+ private:
+  using host_tag = domain::Tags::Coordinates<Dim, Frame::Inertial>;
+
+ public:
+  using type = typename ::Tags::MirrorView<host_tag>::type;
+};
+
 struct DeviceConstraintGamma0 : db::SimpleTag {
   using type = typename ::Tags::MirrorView<gh::Tags::ConstraintGamma0>::type;
 };

@@ -8,6 +8,7 @@
 #include "DataStructures/DataBox/DataBoxTag.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Helpers/DataStructures/DataBox/TestHelpers.hpp"
+#include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ConstraintDampingTags.hpp"
 
 namespace {

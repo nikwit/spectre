@@ -38,6 +38,10 @@ struct InitializeKokkosTags {
       KokkosTags::DeviceInverseJacobian<volume_dim>;
   using device_inverse_jacobian_space =
       typename device_inverse_jacobian_tag::type::value_type::memory_space;
+  using device_inertial_coordinates_tag =
+      KokkosTags::DeviceInertialCoordinates<volume_dim>;
+  using device_inertial_coordinates_space =
+      typename device_inertial_coordinates_tag::type::value_type::memory_space;
 
   using device_constraint_gamma0_tag = KokkosTags::DeviceConstraintGamma0;
   using device_constraint_gamma1_tag = KokkosTags::DeviceConstraintGamma1;
@@ -61,20 +65,24 @@ struct InitializeKokkosTags {
 
  public:
   using simple_tags = tmpl::list<
-      device_inverse_jacobian_tag, device_constraint_gamma0_tag,
-      device_constraint_gamma1_tag, device_constraint_gamma2_tag,
-      device_face_to_volume_index_map_tag, device_face_unit_normal_covector_tag,
-      device_face_normal_magnitude_tag, device_mortar_data_tag>;
+      device_inverse_jacobian_tag, device_inertial_coordinates_tag,
+      device_constraint_gamma0_tag, device_constraint_gamma1_tag,
+      device_constraint_gamma2_tag, device_face_to_volume_index_map_tag,
+      device_face_unit_normal_covector_tag, device_face_normal_magnitude_tag,
+      device_mortar_data_tag>;
   using return_tags = simple_tags;
   using argument_tags = tmpl::list<
       host_inverse_jacobian_tag, gh::Tags::ConstraintGamma0,
       gh::Tags::ConstraintGamma1, gh::Tags::ConstraintGamma2,
+      domain::Tags::Coordinates<volume_dim, Frame::Inertial>,
       domain::Tags::Mesh<volume_dim>, domain::Tags::Element<volume_dim>,
       mortar_mesh_tag, mortar_info_tag>;
 
   static void apply(
       const gsl::not_null<typename device_inverse_jacobian_tag::type*>
           device_inverse_jacobian,
+      const gsl::not_null<typename device_inertial_coordinates_tag::type*>
+          device_inertial_coordinates,
       const gsl::not_null<typename device_constraint_gamma0_tag::type*>
           device_constraint_gamma0,
       const gsl::not_null<typename device_constraint_gamma1_tag::type*>
@@ -94,11 +102,16 @@ struct InitializeKokkosTags {
       const gh::Tags::ConstraintGamma0::type& host_constraint_gamma0,
       const gh::Tags::ConstraintGamma1::type& host_constraint_gamma1,
       const gh::Tags::ConstraintGamma2::type& host_constraint_gamma2,
+      const typename domain::Tags::Coordinates<volume_dim, Frame::Inertial>::
+          type& host_inertial_coordinates,
       const Mesh<volume_dim>& mesh, const Element<volume_dim>& element,
       const typename mortar_mesh_tag::type& mortar_meshes,
       const typename mortar_info_tag::type& mortar_infos) {
     *device_inverse_jacobian = copy_to_device(
         host_inverse_jacobian, tmpl::type_<device_inverse_jacobian_space>{});
+    *device_inertial_coordinates = copy_to_device(
+        host_inertial_coordinates,
+        tmpl::type_<device_inertial_coordinates_space>{});
     *device_constraint_gamma0 = copy_to_device(
         host_constraint_gamma0, tmpl::type_<device_constraint_gamma0_space>{});
     *device_constraint_gamma1 = copy_to_device(
