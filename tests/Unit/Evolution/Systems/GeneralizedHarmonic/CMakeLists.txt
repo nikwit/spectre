@@ -14,6 +14,7 @@ set(LIBRARY_SOURCES
   BoundaryConditions/Test_DirichletMinkowski.cpp
   BoundaryConditions/Test_Periodic.cpp
   BoundaryCorrections/Test_UpwindPenalty.cpp
+  Test_ApplyBoundaryCorrectionsToTimeDerivativeKokkos.cpp
   Test_Characteristics.cpp
   Test_ComputeTimeDerivativeKokkos.cpp
   Test_Constraints.cpp
@@ -34,7 +35,9 @@ target_link_libraries(
   DataStructuresHelpers
   DiscontinuousGalerkin
   Domain
+  DomainCreators
   DomainStructure
+  Evolution
   FunctionsOfTime
   GeneralRelativity
   GeneralRelativityHelpers
@@ -42,6 +45,7 @@ target_link_libraries(
   GeneralizedHarmonic
   GeneralizedHarmonicKokkos
   Importers
+  Initialization
   LinearOperators
   MathFunctions
   Options
