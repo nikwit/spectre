@@ -58,6 +58,8 @@ struct ComputeTimeDerivativeKokkos {
       gh::KokkosTags::DeviceFaceToVolumeIndexMap<volume_dim>;
   using device_face_unit_normal_covector_tag =
       gh::KokkosTags::DeviceFaceUnitNormalCovector<volume_dim>;
+  using device_face_normal_magnitude_tag =
+      gh::KokkosTags::DeviceFaceNormalMagnitude<volume_dim>;
   using device_mortar_data_tag = gh::KokkosTags::DeviceMortarData<volume_dim>;
   using outgoing_boundary_data_tag =
       gh::KokkosTags::OutgoingBoundaryCorrectionData<volume_dim>;
@@ -81,6 +83,8 @@ struct ComputeTimeDerivativeKokkos {
       typename device_face_to_volume_index_map_tag::type;
   using device_face_unit_normal_covector_type =
       typename device_face_unit_normal_covector_tag::type;
+  using device_face_normal_magnitude_type =
+      typename device_face_normal_magnitude_tag::type;
   using device_mortar_data_type = typename device_mortar_data_tag::type;
   using outgoing_boundary_data_type = typename outgoing_boundary_data_tag::type;
   using external_boundary_data_type = typename external_boundary_data_tag::type;
@@ -105,6 +109,7 @@ struct ComputeTimeDerivativeKokkos {
           device_face_to_volume_index_map,
       const device_face_unit_normal_covector_type&
           device_face_unit_normal_covector,
+      const device_face_normal_magnitude_type& device_face_normal_magnitude,
       const device_mortar_data_type& device_mortar_data,
       const typename mortar_mesh_tag::type& mortar_meshes,
       const gh::Tags::ConstraintGamma0::type& host_constraint_gamma0,
@@ -183,7 +188,8 @@ struct ComputeTimeDerivativeKokkos {
                  device_inertial_coordinates_tag, device_constraint_gamma0_tag,
                  device_constraint_gamma1_tag, device_constraint_gamma2_tag,
                  device_face_to_volume_index_map_tag,
-                 device_face_unit_normal_covector_tag, device_mortar_data_tag,
+                 device_face_unit_normal_covector_tag,
+                 device_face_normal_magnitude_tag, device_mortar_data_tag,
                  mortar_mesh_tag, gh::Tags::ConstraintGamma0,
                  gh::Tags::ConstraintGamma1, gh::Tags::ConstraintGamma2,
                  ::Tags::Time, domain::Tags::Mesh<volume_dim>,
@@ -206,6 +212,7 @@ struct ComputeTimeDerivativeKokkos {
           device_face_to_volume_index_map,
       const device_face_unit_normal_covector_type&
           device_face_unit_normal_covector,
+      const device_face_normal_magnitude_type& device_face_normal_magnitude,
       const device_mortar_data_type& device_mortar_data,
       const typename mortar_mesh_tag::type& mortar_meshes,
       const gh::Tags::ConstraintGamma0::type& host_constraint_gamma0,
@@ -220,7 +227,8 @@ struct ComputeTimeDerivativeKokkos {
         device_inverse_jacobian, device_inertial_coordinates,
         device_constraint_gamma0, device_constraint_gamma1,
         device_constraint_gamma2, device_face_to_volume_index_map,
-        device_face_unit_normal_covector, device_mortar_data, mortar_meshes,
+        device_face_unit_normal_covector, device_face_normal_magnitude,
+        device_mortar_data, mortar_meshes,
         host_constraint_gamma0, host_constraint_gamma1, host_constraint_gamma2,
         external_boundary_conditions_by_block, time, mesh, element,
         time_step_id);
@@ -261,6 +269,8 @@ struct ComputeTimeDerivativeKokkos {
                db::get<device_face_to_volume_index_map_tag>(box),
            &device_face_unit_normal_covector =
                db::get<device_face_unit_normal_covector_tag>(box),
+           &device_face_normal_magnitude =
+               db::get<device_face_normal_magnitude_tag>(box),
            &device_mortar_data = db::get<device_mortar_data_tag>(box),
            &mortar_meshes = db::get<mortar_mesh_tag>(box),
            &host_constraint_gamma0 = db::get<gh::Tags::ConstraintGamma0>(box),
@@ -280,10 +290,11 @@ struct ComputeTimeDerivativeKokkos {
                 device_inertial_coordinates, device_constraint_gamma0,
                 device_constraint_gamma1, device_constraint_gamma2,
                 device_face_to_volume_index_map,
-                device_face_unit_normal_covector, device_mortar_data,
-                mortar_meshes, host_constraint_gamma0, host_constraint_gamma1,
-                host_constraint_gamma2, external_boundary_conditions_by_block,
-                time, mesh, element, time_step_id);
+                device_face_unit_normal_covector, device_face_normal_magnitude,
+                device_mortar_data, mortar_meshes, host_constraint_gamma0,
+                host_constraint_gamma1, host_constraint_gamma2,
+                external_boundary_conditions_by_block, time, mesh, element,
+                time_step_id);
           },
           make_not_null(&box));
 
