@@ -35,13 +35,14 @@ using device_face_normal_magnitude_type =
     gh::KokkosTags::DeviceFaceNormalMagnitude<volume_dim>::type;
 using boundary_data_buffer_type =
     gh::KokkosTags::BoundaryCorrectionDataBuffer<volume_dim>;
-using boundary_data_storage_type = typename boundary_data_buffer_type::storage_type;
+using boundary_data_storage_type =
+    typename boundary_data_buffer_type::storage_type;
 using spacetime_metric_tag =
     gr::Tags::SpacetimeMetric<DataVector, volume_dim, Frame::Inertial>;
-using dt_boundary_tags =
-    tmpl::list<::Tags::dt<spacetime_metric_tag>,
-               ::Tags::dt<gh::Tags::Pi<DataVector, volume_dim, Frame::Inertial>>,
-               ::Tags::dt<gh::Tags::Phi<DataVector, volume_dim, Frame::Inertial>>>;
+using dt_boundary_tags = tmpl::list<
+    ::Tags::dt<spacetime_metric_tag>,
+    ::Tags::dt<gh::Tags::Pi<DataVector, volume_dim, Frame::Inertial>>,
+    ::Tags::dt<gh::Tags::Phi<DataVector, volume_dim, Frame::Inertial>>>;
 using device_dt_boundary_tags =
     db::wrap_tags_in<::Tags::MirrorView, dt_boundary_tags>;
 using dt_boundary_storage_type =
@@ -56,7 +57,8 @@ constexpr size_t offset_v_spacetime_metric = 0;
 constexpr size_t offset_v_zero =
     offset_v_spacetime_metric + num_spacetime_metric_components;
 constexpr size_t offset_v_plus = offset_v_zero + num_phi_components;
-constexpr size_t offset_v_minus = offset_v_plus + num_spacetime_metric_components;
+constexpr size_t offset_v_minus =
+    offset_v_plus + num_spacetime_metric_components;
 constexpr size_t offset_normal_times_v_plus =
     offset_v_minus + num_spacetime_metric_components;
 constexpr size_t offset_normal_times_v_minus =
@@ -85,9 +87,9 @@ void apply_tensor_product_projection_2d(
                       << source_points_dim_0 << " * " << source_points_dim_1
                       << ".");
   ASSERT(result_num_points == target_points_dim_0 * target_points_dim_1,
-         "Result has " << result_num_points
-                       << " points, expected " << target_points_dim_0 << " * "
-                       << target_points_dim_1 << ".");
+         "Result has " << result_num_points << " points, expected "
+                       << target_points_dim_0 << " * " << target_points_dim_1
+                       << ".");
 
   ::Kokkos::View<double**> projected_dim_0(
       "GhKokkosProjectFromMortarDim0",
@@ -188,8 +190,7 @@ KOKKOS_INLINE_FUNCTION void inverse_spatial_metric_and_det(
 }
 
 KOKKOS_INLINE_FUNCTION void load_aa_from_boundary_data(
-    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*>
-        tensor,
+    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*> tensor,
     const boundary_data_storage_type& boundary_data_view, const size_t point,
     const size_t component_offset) {
   size_t component_index = 0;
@@ -203,8 +204,7 @@ KOKKOS_INLINE_FUNCTION void load_aa_from_boundary_data(
 }
 
 KOKKOS_INLINE_FUNCTION void load_iaa_from_boundary_data(
-    const gsl::not_null<tnsr::iaa<double, volume_dim, Frame::Inertial>*>
-        tensor,
+    const gsl::not_null<tnsr::iaa<double, volume_dim, Frame::Inertial>*> tensor,
     const boundary_data_storage_type& boundary_data_view, const size_t point,
     const size_t component_offset) {
   size_t component_index = 0;
@@ -263,14 +263,12 @@ void accumulate_mortar_pair_to_face_sum(
   const auto dt_spacetime_metric_on_mortar =
       get<::Tags::MirrorView<::Tags::dt<spacetime_metric_tag>>>(
           dt_boundary_correction_on_mortar);
-  const auto dt_pi_on_mortar =
-      get<::Tags::MirrorView<::Tags::dt<gh::Tags::Pi<DataVector, volume_dim,
-                                                     Frame::Inertial>>>>(
-          dt_boundary_correction_on_mortar);
-  const auto dt_phi_on_mortar =
-      get<::Tags::MirrorView<::Tags::dt<gh::Tags::Phi<DataVector, volume_dim,
-                                                      Frame::Inertial>>>>(
-          dt_boundary_correction_on_mortar);
+  const auto dt_pi_on_mortar = get<::Tags::MirrorView<
+      ::Tags::dt<gh::Tags::Pi<DataVector, volume_dim, Frame::Inertial>>>>(
+      dt_boundary_correction_on_mortar);
+  const auto dt_phi_on_mortar = get<::Tags::MirrorView<
+      ::Tags::dt<gh::Tags::Phi<DataVector, volume_dim, Frame::Inertial>>>>(
+      dt_boundary_correction_on_mortar);
 
   ::Kokkos::parallel_for(
       "GhABCTDComputeBoundaryCorrectionOnMortar",
@@ -278,16 +276,20 @@ void accumulate_mortar_pair_to_face_sum(
       KOKKOS_LAMBDA(const int mortar_index_int) {
         const size_t mortar_index = static_cast<size_t>(mortar_index_int);
 
-        tnsr::aa<double, volume_dim, Frame::Inertial> local_v_spacetime_metric{};
+        tnsr::aa<double, volume_dim, Frame::Inertial>
+            local_v_spacetime_metric{};
         tnsr::iaa<double, volume_dim, Frame::Inertial> local_v_zero{};
         tnsr::aa<double, volume_dim, Frame::Inertial> local_v_plus{};
         tnsr::aa<double, volume_dim, Frame::Inertial> local_v_minus{};
-        tnsr::iaa<double, volume_dim, Frame::Inertial> local_normal_times_v_plus{};
-        tnsr::iaa<double, volume_dim, Frame::Inertial> local_normal_times_v_minus{};
+        tnsr::iaa<double, volume_dim, Frame::Inertial>
+            local_normal_times_v_plus{};
+        tnsr::iaa<double, volume_dim, Frame::Inertial>
+            local_normal_times_v_minus{};
         tnsr::aa<double, volume_dim, Frame::Inertial>
             local_gamma2_v_spacetime_metric{};
         tnsr::a<double, volume_dim, Frame::Inertial> local_char_speeds{};
-        tnsr::aa<double, volume_dim, Frame::Inertial> remote_v_spacetime_metric{};
+        tnsr::aa<double, volume_dim, Frame::Inertial>
+            remote_v_spacetime_metric{};
         tnsr::iaa<double, volume_dim, Frame::Inertial> remote_v_zero{};
         tnsr::aa<double, volume_dim, Frame::Inertial> remote_v_plus{};
         tnsr::aa<double, volume_dim, Frame::Inertial> remote_v_minus{};
@@ -340,10 +342,9 @@ void accumulate_mortar_pair_to_face_sum(
         load_iaa_from_boundary_data(make_not_null(&remote_normal_times_v_plus),
                                     remote_boundary_data_view, mortar_index,
                                     offset_normal_times_v_plus);
-        load_iaa_from_boundary_data(
-            make_not_null(&remote_normal_times_v_minus),
-            remote_boundary_data_view, mortar_index,
-            offset_normal_times_v_minus);
+        load_iaa_from_boundary_data(make_not_null(&remote_normal_times_v_minus),
+                                    remote_boundary_data_view, mortar_index,
+                                    offset_normal_times_v_minus);
         load_aa_from_boundary_data(
             make_not_null(&remote_gamma2_v_spacetime_metric),
             remote_boundary_data_view, mortar_index,
@@ -378,16 +379,12 @@ void accumulate_mortar_pair_to_face_sum(
                     local_v_spacetime_metric.get(a, b);
 
             dt_pi_on_mortar.get(a, b)[mortar_index] =
-                0.5 * (weighted_lambda_plus_ext *
-                           remote_v_plus.get(a, b) +
-                       weighted_lambda_minus_ext *
-                           remote_v_minus.get(a, b)) +
+                0.5 * (weighted_lambda_plus_ext * remote_v_plus.get(a, b) +
+                       weighted_lambda_minus_ext * remote_v_minus.get(a, b)) +
                 weighted_lambda_spacetime_metric_ext *
                     remote_gamma2_v_spacetime_metric.get(a, b) -
-                0.5 * (weighted_lambda_plus_int *
-                           local_v_plus.get(a, b) +
-                       weighted_lambda_minus_int *
-                           local_v_minus.get(a, b)) -
+                0.5 * (weighted_lambda_plus_int * local_v_plus.get(a, b) +
+                       weighted_lambda_minus_int * local_v_minus.get(a, b)) -
                 weighted_lambda_spacetime_metric_int *
                     local_gamma2_v_spacetime_metric.get(a, b);
 
@@ -397,14 +394,12 @@ void accumulate_mortar_pair_to_face_sum(
                               remote_normal_times_v_minus.get(d, a, b) -
                           weighted_lambda_plus_ext *
                               remote_normal_times_v_plus.get(d, a, b)) +
-                  weighted_lambda_zero_ext *
-                      remote_v_zero.get(d, a, b) -
+                  weighted_lambda_zero_ext * remote_v_zero.get(d, a, b) -
                   0.5 * (weighted_lambda_plus_int *
                              local_normal_times_v_plus.get(d, a, b) -
                          weighted_lambda_minus_int *
                              local_normal_times_v_minus.get(d, a, b)) -
-                  weighted_lambda_zero_int *
-                      local_v_zero.get(d, a, b);
+                  weighted_lambda_zero_int * local_v_zero.get(d, a, b);
             }
           }
         }
@@ -428,25 +423,21 @@ void accumulate_mortar_pair_to_face_sum(
   const auto dt_spacetime_metric_on_face =
       get<::Tags::MirrorView<::Tags::dt<spacetime_metric_tag>>>(
           dt_boundary_correction_on_face);
-  const auto dt_pi_on_face =
-      get<::Tags::MirrorView<::Tags::dt<gh::Tags::Pi<DataVector, volume_dim,
-                                                     Frame::Inertial>>>>(
-          dt_boundary_correction_on_face);
-  const auto dt_phi_on_face =
-      get<::Tags::MirrorView<::Tags::dt<gh::Tags::Phi<DataVector, volume_dim,
-                                                      Frame::Inertial>>>>(
-          dt_boundary_correction_on_face);
+  const auto dt_pi_on_face = get<::Tags::MirrorView<
+      ::Tags::dt<gh::Tags::Pi<DataVector, volume_dim, Frame::Inertial>>>>(
+      dt_boundary_correction_on_face);
+  const auto dt_phi_on_face = get<::Tags::MirrorView<
+      ::Tags::dt<gh::Tags::Phi<DataVector, volume_dim, Frame::Inertial>>>>(
+      dt_boundary_correction_on_face);
   const auto dt_spacetime_metric_boundary_sum =
       get<::Tags::MirrorView<::Tags::dt<spacetime_metric_tag>>>(
           *dt_boundary_correction_on_face_sum);
-  const auto dt_pi_boundary_sum =
-      get<::Tags::MirrorView<::Tags::dt<gh::Tags::Pi<DataVector, volume_dim,
-                                                     Frame::Inertial>>>>(
-          *dt_boundary_correction_on_face_sum);
-  const auto dt_phi_boundary_sum =
-      get<::Tags::MirrorView<::Tags::dt<gh::Tags::Phi<DataVector, volume_dim,
-                                                      Frame::Inertial>>>>(
-          *dt_boundary_correction_on_face_sum);
+  const auto dt_pi_boundary_sum = get<::Tags::MirrorView<
+      ::Tags::dt<gh::Tags::Pi<DataVector, volume_dim, Frame::Inertial>>>>(
+      *dt_boundary_correction_on_face_sum);
+  const auto dt_phi_boundary_sum = get<::Tags::MirrorView<
+      ::Tags::dt<gh::Tags::Phi<DataVector, volume_dim, Frame::Inertial>>>>(
+      *dt_boundary_correction_on_face_sum);
 
   ::Kokkos::parallel_for(
       "GhABCTDAccumulateBoundaryCorrectionOnFace",
@@ -475,36 +466,34 @@ void lift_face_correction_to_volume(
     const Direction<volume_dim>& direction,
     const device_variables_type& device_vars,
     const device_face_to_volume_index_map_type& device_face_to_volume_index_map,
-    const device_face_unit_normal_covector_type& device_face_unit_normal_covector,
+    const device_face_unit_normal_covector_type&
+        device_face_unit_normal_covector,
     const device_face_normal_magnitude_type& device_face_normal_magnitude,
     const Mesh<volume_dim>& mesh) {
   const auto dt_spacetime_metric =
       get<::Tags::MirrorView<::Tags::dt<spacetime_metric_tag>>>(*device_dt);
-  const auto dt_pi =
-      get<::Tags::MirrorView<::Tags::dt<gh::Tags::Pi<DataVector, volume_dim,
-                                                     Frame::Inertial>>>>(
-          *device_dt);
-  const auto dt_phi =
-      get<::Tags::MirrorView<::Tags::dt<gh::Tags::Phi<DataVector, volume_dim,
-                                                      Frame::Inertial>>>>(
-          *device_dt);
+  const auto dt_pi = get<::Tags::MirrorView<
+      ::Tags::dt<gh::Tags::Pi<DataVector, volume_dim, Frame::Inertial>>>>(
+      *device_dt);
+  const auto dt_phi = get<::Tags::MirrorView<
+      ::Tags::dt<gh::Tags::Phi<DataVector, volume_dim, Frame::Inertial>>>>(
+      *device_dt);
   const auto dt_spacetime_metric_boundary_sum =
       get<::Tags::MirrorView<::Tags::dt<spacetime_metric_tag>>>(
           dt_boundary_correction_on_face_sum);
-  const auto dt_pi_boundary_sum =
-      get<::Tags::MirrorView<::Tags::dt<gh::Tags::Pi<DataVector, volume_dim,
-                                                     Frame::Inertial>>>>(
-          dt_boundary_correction_on_face_sum);
-  const auto dt_phi_boundary_sum =
-      get<::Tags::MirrorView<::Tags::dt<gh::Tags::Phi<DataVector, volume_dim,
-                                                      Frame::Inertial>>>>(
-          dt_boundary_correction_on_face_sum);
+  const auto dt_pi_boundary_sum = get<::Tags::MirrorView<
+      ::Tags::dt<gh::Tags::Pi<DataVector, volume_dim, Frame::Inertial>>>>(
+      dt_boundary_correction_on_face_sum);
+  const auto dt_phi_boundary_sum = get<::Tags::MirrorView<
+      ::Tags::dt<gh::Tags::Phi<DataVector, volume_dim, Frame::Inertial>>>>(
+      dt_boundary_correction_on_face_sum);
   const auto spacetime_metric =
       get<::Tags::MirrorView<spacetime_metric_tag>>(device_vars);
 
   const size_t num_face_points =
       dt_boundary_correction_on_face_sum.number_of_grid_points();
-  const size_t extent_perpendicular_to_boundary = mesh.extents(direction.dimension());
+  const size_t extent_perpendicular_to_boundary =
+      mesh.extents(direction.dimension());
   const double lift_prefactor =
       -0.5 * static_cast<double>(extent_perpendicular_to_boundary *
                                  (extent_perpendicular_to_boundary - 1));
@@ -529,7 +518,8 @@ void lift_face_correction_to_volume(
         const size_t face_index = static_cast<size_t>(face_index_int);
         const size_t volume_index = face_to_volume_index(face_index);
 
-        tnsr::aa<double, volume_dim, Frame::Inertial> spacetime_metric_at_point{};
+        tnsr::aa<double, volume_dim, Frame::Inertial>
+            spacetime_metric_at_point{};
         for (size_t a = 0; a < volume_dim + 1; ++a) {
           for (size_t b = a; b < volume_dim + 1; ++b) {
             spacetime_metric_at_point.get(a, b) =
@@ -543,14 +533,16 @@ void lift_face_correction_to_volume(
                                        spacetime_metric_at_point);
         (void)det_spatial_metric;
 
-        tnsr::i<double, volume_dim, Frame::Inertial> unnormalized_normal_covector{};
+        tnsr::i<double, volume_dim, Frame::Inertial>
+            unnormalized_normal_covector{};
         for (size_t d = 0; d < volume_dim; ++d) {
           unnormalized_normal_covector.get(d) =
               face_unit_normal_covector(face_index, d) *
               face_normal_magnitude(face_index);
         }
 
-        tnsr::I<double, volume_dim, Frame::Inertial> unnormalized_normal_vector{};
+        tnsr::I<double, volume_dim, Frame::Inertial>
+            unnormalized_normal_vector{};
         double normal_magnitude_squared = 0.0;
         for (size_t i = 0; i < volume_dim; ++i) {
           unnormalized_normal_vector.get(i) = 0.0;
@@ -562,7 +554,8 @@ void lift_face_correction_to_volume(
           normal_magnitude_squared += unnormalized_normal_vector.get(i) *
                                       unnormalized_normal_covector.get(i);
         }
-        const double lifted_factor = lift_prefactor * sqrt(normal_magnitude_squared);
+        const double lifted_factor =
+            lift_prefactor * sqrt(normal_magnitude_squared);
 
         for (size_t a = 0; a < volume_dim + 1; ++a) {
           for (size_t b = a; b < volume_dim + 1; ++b) {
@@ -589,13 +582,14 @@ void ApplyBoundaryCorrectionsToTimeDerivativeKokkos::
         const outgoing_boundary_data_type& outgoing_boundary_data,
         const incoming_boundary_data_type& incoming_boundary_data,
         const external_boundary_data_type& external_boundary_data,
-        const device_face_to_volume_index_map_type& device_face_to_volume_index_map,
+        const device_face_to_volume_index_map_type&
+            device_face_to_volume_index_map,
         const device_face_unit_normal_covector_type&
             device_face_unit_normal_covector,
         const device_face_normal_magnitude_type& device_face_normal_magnitude,
         const device_mortar_data_type& device_mortar_data,
-        const typename mortar_mesh_tag::type& mortar_meshes, const Mesh<3>& mesh,
-        const Element<3>& element) {
+        const typename mortar_mesh_tag::type& mortar_meshes,
+        const Mesh<3>& mesh, const Element<3>& element) {
   ASSERT(mesh.quadrature(0) == Spectral::Quadrature::GaussLobatto,
          "ApplyBoundaryCorrectionsToTimeDerivativeKokkos currently supports "
          "Gauss-Lobatto quadrature only.");
@@ -619,19 +613,21 @@ void ApplyBoundaryCorrectionsToTimeDerivativeKokkos::
       const auto& local_boundary_data = outgoing_boundary_data.at(mortar_id);
       const auto& remote_boundary_data = incoming_boundary_data.at(mortar_id);
       const Mesh<2>& mortar_mesh = mortar_meshes.at(mortar_id);
-      ASSERT(local_boundary_data.boundary_correction_data.number_of_grid_points() ==
+      ASSERT(local_boundary_data.boundary_correction_data
+                     .number_of_grid_points() ==
                  mortar_mesh.number_of_grid_points(),
              "Local packaged mortar data size does not match mortar mesh for "
                  << mortar_id << ".");
       ASSERT(remote_boundary_data.boundary_correction_data
-                     .number_of_grid_points() == mortar_mesh.number_of_grid_points(),
+                     .number_of_grid_points() ==
+                 mortar_mesh.number_of_grid_points(),
              "Remote packaged mortar data size does not match mortar mesh for "
                  << mortar_id << ".");
       const auto& mortar_data = device_mortar_data.at(mortar_id);
       accumulate_mortar_pair_to_face_sum(
-          make_not_null(&dt_boundary_correction_on_face_sum), local_boundary_data,
-          remote_boundary_data, face_mesh, mortar_mesh, mortar_data.needs_projection,
-          mortar_data.mortar_size);
+          make_not_null(&dt_boundary_correction_on_face_sum),
+          local_boundary_data, remote_boundary_data, face_mesh, mortar_mesh,
+          mortar_data.needs_projection, mortar_data.mortar_size);
     }
     lift_face_correction_to_volume(
         device_dt, dt_boundary_correction_on_face_sum, direction, device_vars,
@@ -659,8 +655,8 @@ void ApplyBoundaryCorrectionsToTimeDerivativeKokkos::
     accumulate_mortar_pair_to_face_sum(
         make_not_null(&dt_boundary_correction_on_face_sum),
         outgoing_boundary_data.at(external_mortar_id),
-        external_boundary_data.at(external_mortar_id), face_mesh, face_mesh, false,
-        full_mortar_size);
+        external_boundary_data.at(external_mortar_id), face_mesh, face_mesh,
+        false, full_mortar_size);
     lift_face_correction_to_volume(
         device_dt, dt_boundary_correction_on_face_sum, direction, device_vars,
         device_face_to_volume_index_map, device_face_unit_normal_covector,
