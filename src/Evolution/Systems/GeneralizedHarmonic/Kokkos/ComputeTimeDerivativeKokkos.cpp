@@ -36,29 +36,31 @@ using package_field_tags =
 using device_package_field_tags =
     db::wrap_tags_in<::Tags::MirrorView, package_field_tags>;
 using device_package_data_type = Variables<device_package_field_tags>;
-using device_package_storage_type = typename device_package_data_type::storage_type;
+using device_package_storage_type =
+    typename device_package_data_type::storage_type;
 
 namespace detail {
 
 void apply_tensor_product_projection_2d(
-    const device_package_storage_type& result_view, const size_t result_num_points,
-    const device_package_storage_type& input_view, const size_t input_num_points,
-    const MatrixViewRO& matrix_dim_0, const MatrixViewRO& matrix_dim_1) {
+    const device_package_storage_type& result_view,
+    const size_t result_num_points,
+    const device_package_storage_type& input_view,
+    const size_t input_num_points, const MatrixViewRO& matrix_dim_0,
+    const MatrixViewRO& matrix_dim_1) {
   const size_t source_points_dim_0 = matrix_dim_0.extent(1);
   const size_t source_points_dim_1 = matrix_dim_1.extent(1);
   const size_t target_points_dim_0 = matrix_dim_0.extent(0);
   const size_t target_points_dim_1 = matrix_dim_1.extent(0);
   const size_t num_components = input_view.extent(1);
 
-  ASSERT(input_num_points ==
-             source_points_dim_0 * source_points_dim_1,
+  ASSERT(input_num_points == source_points_dim_0 * source_points_dim_1,
          "Input has " << input_num_points << " points, expected "
-                      << source_points_dim_0 << " * " << source_points_dim_1 << ".");
-  ASSERT(result_num_points ==
-             target_points_dim_0 * target_points_dim_1,
-         "Result has " << result_num_points
-                       << " points, expected " << target_points_dim_0 << " * "
-                       << target_points_dim_1 << ".");
+                      << source_points_dim_0 << " * " << source_points_dim_1
+                      << ".");
+  ASSERT(result_num_points == target_points_dim_0 * target_points_dim_1,
+         "Result has " << result_num_points << " points, expected "
+                       << target_points_dim_0 << " * " << target_points_dim_1
+                       << ".");
 
   ::Kokkos::View<double**> projected_dim_0(
       "GhKokkosProjectedDim0", target_points_dim_0 * source_points_dim_1,
@@ -126,16 +128,15 @@ void project_to_mortar_device(
       Spectral::projection_matrix_parent_to_child_on_device(
           face_mesh.slice_through(1), mortar_mesh.slice_through(1),
           gsl::at(mortar_size, 1));
-  apply_tensor_product_projection_2d(result->view(), result->number_of_grid_points(),
-                                     vars.view(), vars.number_of_grid_points(),
-                                     matrix_dim_0, matrix_dim_1);
+  apply_tensor_product_projection_2d(
+      result->view(), result->number_of_grid_points(), vars.view(),
+      vars.number_of_grid_points(), matrix_dim_0, matrix_dim_1);
 }
 
 void orient_each_component_device(
     const device_package_storage_type& oriented_view,
     const device_package_storage_type& variables_view,
-    const ::Kokkos::View<size_t*>& oriented_offset,
-    const size_t num_points) {
+    const ::Kokkos::View<size_t*>& oriented_offset, const size_t num_points) {
   ASSERT(oriented_view.extent(0) == num_points,
          "Oriented result has " << oriented_view.extent(0)
                                 << " points, expected " << num_points << ".");
@@ -512,11 +513,10 @@ KOKKOS_INLINE_FUNCTION void compute_hardcoded_schwarzschild_gh_fields(
 
   compute_phi_from_3plus1(phi, lapse, deriv_lapse, shift, deriv_shift,
                           spatial_metric, deriv_spatial_metric);
-  compute_pi_from_3plus1(pi, lapse, dt_lapse, shift,
-                         dt_shift, spatial_metric, dt_spatial_metric,
-                         *phi);
-  compute_spacetime_metric_from_3plus1(
-      spacetime_metric, lapse, shift, spatial_metric);
+  compute_pi_from_3plus1(pi, lapse, dt_lapse, shift, dt_shift, spatial_metric,
+                         dt_spatial_metric, *phi);
+  compute_spacetime_metric_from_3plus1(spacetime_metric, lapse, shift,
+                                       spatial_metric);
 }
 
 KOKKOS_INLINE_FUNCTION void compute_rhs_at_point(
@@ -969,10 +969,10 @@ void ComputeTimeDerivativeKokkos::orient_boundary_data_for_send(
         oriented_boundary_data,
     const Variables<device_package_field_tags>& boundary_data,
     const ::Kokkos::View<size_t*>& oriented_mortar_grid_point_source_index) {
-  detail::orient_each_component_device(
-      oriented_boundary_data->view(), boundary_data.view(),
-      oriented_mortar_grid_point_source_index,
-      boundary_data.number_of_grid_points());
+  detail::orient_each_component_device(oriented_boundary_data->view(),
+                                       boundary_data.view(),
+                                       oriented_mortar_grid_point_source_index,
+                                       boundary_data.number_of_grid_points());
 }
 
 void compute_hardcoded_analytic_gauge_and_spacetime_derivative(
@@ -1075,7 +1075,6 @@ void ComputeTimeDerivativeKokkos::
   (void)host_constraint_gamma1;
   (void)host_constraint_gamma2;
   (void)time;
-
   const size_t number_of_points = mesh.number_of_grid_points();
   if (device_dt->number_of_grid_points() != number_of_points) {
     device_dt->initialize(number_of_points);
@@ -1166,133 +1165,130 @@ void ComputeTimeDerivativeKokkos::
          "ComputeTimeDerivativeKokkos currently supports Gauss-Lobatto "
          "quadrature only.");
 
-  const auto package_boundary_data_on_face =
-      [&](const Direction<volume_dim>& direction) {
-        const size_t sliced_dim = direction.dimension();
-        const size_t num_face_points =
-            mesh.slice_away(sliced_dim).number_of_grid_points();
-        auto face_to_volume_index =
-            direction.side() == Side::Upper
-                ? gsl::at(device_face_to_volume_index_map, sliced_dim).second
-                : gsl::at(device_face_to_volume_index_map, sliced_dim).first;
-        auto face_unit_normal_covector =
-            direction.side() == Side::Upper
-                ? gsl::at(device_face_unit_normal_covector, sliced_dim).second
-                : gsl::at(device_face_unit_normal_covector, sliced_dim).first;
-        auto face_normal_magnitude =
-            direction.side() == Side::Upper
-                ? gsl::at(device_face_normal_magnitude, sliced_dim).second
-                : gsl::at(device_face_normal_magnitude, sliced_dim).first;
+  const auto package_boundary_data_on_face = [&](const Direction<volume_dim>&
+                                                     direction) {
+    const size_t sliced_dim = direction.dimension();
+    const size_t num_face_points =
+        mesh.slice_away(sliced_dim).number_of_grid_points();
+    auto face_to_volume_index =
+        direction.side() == Side::Upper
+            ? gsl::at(device_face_to_volume_index_map, sliced_dim).second
+            : gsl::at(device_face_to_volume_index_map, sliced_dim).first;
+    auto face_unit_normal_covector =
+        direction.side() == Side::Upper
+            ? gsl::at(device_face_unit_normal_covector, sliced_dim).second
+            : gsl::at(device_face_unit_normal_covector, sliced_dim).first;
+    auto face_normal_magnitude =
+        direction.side() == Side::Upper
+            ? gsl::at(device_face_normal_magnitude, sliced_dim).second
+            : gsl::at(device_face_normal_magnitude, sliced_dim).first;
 
-        Variables<device_package_field_tags> packaged_face_data{
-            num_face_points};
-        if (num_face_points > 0) {
-          const auto packaged_face_data_view = packaged_face_data.view();
+    Variables<device_package_field_tags> packaged_face_data{num_face_points};
+    if (num_face_points > 0) {
+      const auto packaged_face_data_view = packaged_face_data.view();
 
-          ::Kokkos::parallel_for(
-              "GhPackageBoundaryCorrectionDataOnFace", num_face_points,
-              KOKKOS_LAMBDA(const int face_index_int) {
-                const size_t face_index = static_cast<size_t>(face_index_int);
-                const size_t volume_index = face_to_volume_index(face_index);
+      ::Kokkos::parallel_for(
+          "GhPackageBoundaryCorrectionDataOnFace", num_face_points,
+          KOKKOS_LAMBDA(const int face_index_int) {
+            const size_t face_index = static_cast<size_t>(face_index_int);
+            const size_t volume_index = face_to_volume_index(face_index);
 
-                tnsr::i<double, volume_dim, Frame::Inertial> normal_covector{};
-                for (size_t d = 0; d < volume_dim; ++d) {
-                  normal_covector.get(d) =
-                      face_unit_normal_covector(face_index, d) *
-                      face_normal_magnitude(face_index);
-                }
+            tnsr::i<double, volume_dim, Frame::Inertial> normal_covector{};
+            for (size_t d = 0; d < volume_dim; ++d) {
+              normal_covector.get(d) =
+                  face_unit_normal_covector(face_index, d) *
+                  face_normal_magnitude(face_index);
+            }
 
-                tnsr::aa<double, volume_dim, Frame::Inertial>
-                    char_speed_v_spacetime_metric_at_face{};
-                tnsr::iaa<double, volume_dim, Frame::Inertial>
-                    char_speed_v_zero_at_face{};
-                tnsr::aa<double, volume_dim, Frame::Inertial>
-                    char_speed_v_plus_at_face{};
-                tnsr::aa<double, volume_dim, Frame::Inertial>
-                    char_speed_v_minus_at_face{};
-                tnsr::iaa<double, volume_dim, Frame::Inertial>
-                    char_speed_n_times_v_plus_at_face{};
-                tnsr::iaa<double, volume_dim, Frame::Inertial>
-                    char_speed_n_times_v_minus_at_face{};
-                tnsr::aa<double, volume_dim, Frame::Inertial>
-                    char_speed_gamma2_v_spacetime_metric_at_face{};
-                tnsr::a<double, volume_dim, Frame::Inertial>
-                    char_speeds_at_face{};
+            tnsr::aa<double, volume_dim, Frame::Inertial>
+                char_speed_v_spacetime_metric_at_face{};
+            tnsr::iaa<double, volume_dim, Frame::Inertial>
+                char_speed_v_zero_at_face{};
+            tnsr::aa<double, volume_dim, Frame::Inertial>
+                char_speed_v_plus_at_face{};
+            tnsr::aa<double, volume_dim, Frame::Inertial>
+                char_speed_v_minus_at_face{};
+            tnsr::iaa<double, volume_dim, Frame::Inertial>
+                char_speed_n_times_v_plus_at_face{};
+            tnsr::iaa<double, volume_dim, Frame::Inertial>
+                char_speed_n_times_v_minus_at_face{};
+            tnsr::aa<double, volume_dim, Frame::Inertial>
+                char_speed_gamma2_v_spacetime_metric_at_face{};
+            tnsr::a<double, volume_dim, Frame::Inertial> char_speeds_at_face{};
 
-                compute_packaged_boundary_data_at_point(
-                    make_not_null(&char_speed_v_spacetime_metric_at_face),
-                    make_not_null(&char_speed_v_zero_at_face),
-                    make_not_null(&char_speed_v_plus_at_face),
-                    make_not_null(&char_speed_v_minus_at_face),
-                    make_not_null(&char_speed_n_times_v_plus_at_face),
-                    make_not_null(&char_speed_n_times_v_minus_at_face),
-                    make_not_null(&char_speed_gamma2_v_spacetime_metric_at_face),
-                    make_not_null(&char_speeds_at_face),
-                    make_at_index(spacetime_metric, volume_index),
-                    make_at_index(pi, volume_index),
-                    make_at_index(phi, volume_index),
-                    get(make_at_index(device_constraint_gamma1, volume_index)),
-                    get(make_at_index(device_constraint_gamma2, volume_index)),
-                    normal_covector);
+            compute_packaged_boundary_data_at_point(
+                make_not_null(&char_speed_v_spacetime_metric_at_face),
+                make_not_null(&char_speed_v_zero_at_face),
+                make_not_null(&char_speed_v_plus_at_face),
+                make_not_null(&char_speed_v_minus_at_face),
+                make_not_null(&char_speed_n_times_v_plus_at_face),
+                make_not_null(&char_speed_n_times_v_minus_at_face),
+                make_not_null(&char_speed_gamma2_v_spacetime_metric_at_face),
+                make_not_null(&char_speeds_at_face),
+                make_at_index(spacetime_metric, volume_index),
+                make_at_index(pi, volume_index),
+                make_at_index(phi, volume_index),
+                get(make_at_index(device_constraint_gamma1, volume_index)),
+                get(make_at_index(device_constraint_gamma2, volume_index)),
+                normal_covector);
 
-                size_t component_offset = 0;
-                for (size_t c = 0;
-                     c < char_speed_v_spacetime_metric_at_face.size(); ++c) {
-                  packaged_face_data_view(face_index, component_offset + c) =
-                      char_speed_v_spacetime_metric_at_face[c];
-                }
-                component_offset += char_speed_v_spacetime_metric_at_face.size();
+            size_t component_offset = 0;
+            for (size_t c = 0; c < char_speed_v_spacetime_metric_at_face.size();
+                 ++c) {
+              packaged_face_data_view(face_index, component_offset + c) =
+                  char_speed_v_spacetime_metric_at_face[c];
+            }
+            component_offset += char_speed_v_spacetime_metric_at_face.size();
 
-                for (size_t c = 0; c < char_speed_v_zero_at_face.size(); ++c) {
-                  packaged_face_data_view(face_index, component_offset + c) =
-                      char_speed_v_zero_at_face[c];
-                }
-                component_offset += char_speed_v_zero_at_face.size();
+            for (size_t c = 0; c < char_speed_v_zero_at_face.size(); ++c) {
+              packaged_face_data_view(face_index, component_offset + c) =
+                  char_speed_v_zero_at_face[c];
+            }
+            component_offset += char_speed_v_zero_at_face.size();
 
-                for (size_t c = 0; c < char_speed_v_plus_at_face.size(); ++c) {
-                  packaged_face_data_view(face_index, component_offset + c) =
-                      char_speed_v_plus_at_face[c];
-                }
-                component_offset += char_speed_v_plus_at_face.size();
+            for (size_t c = 0; c < char_speed_v_plus_at_face.size(); ++c) {
+              packaged_face_data_view(face_index, component_offset + c) =
+                  char_speed_v_plus_at_face[c];
+            }
+            component_offset += char_speed_v_plus_at_face.size();
 
-                for (size_t c = 0; c < char_speed_v_minus_at_face.size(); ++c) {
-                  packaged_face_data_view(face_index, component_offset + c) =
-                      char_speed_v_minus_at_face[c];
-                }
-                component_offset += char_speed_v_minus_at_face.size();
+            for (size_t c = 0; c < char_speed_v_minus_at_face.size(); ++c) {
+              packaged_face_data_view(face_index, component_offset + c) =
+                  char_speed_v_minus_at_face[c];
+            }
+            component_offset += char_speed_v_minus_at_face.size();
 
-                for (size_t c = 0;
-                     c < char_speed_n_times_v_plus_at_face.size(); ++c) {
-                  packaged_face_data_view(face_index, component_offset + c) =
-                      char_speed_n_times_v_plus_at_face[c];
-                }
-                component_offset += char_speed_n_times_v_plus_at_face.size();
+            for (size_t c = 0; c < char_speed_n_times_v_plus_at_face.size();
+                 ++c) {
+              packaged_face_data_view(face_index, component_offset + c) =
+                  char_speed_n_times_v_plus_at_face[c];
+            }
+            component_offset += char_speed_n_times_v_plus_at_face.size();
 
-                for (size_t c = 0;
-                     c < char_speed_n_times_v_minus_at_face.size(); ++c) {
-                  packaged_face_data_view(face_index, component_offset + c) =
-                      char_speed_n_times_v_minus_at_face[c];
-                }
-                component_offset += char_speed_n_times_v_minus_at_face.size();
+            for (size_t c = 0; c < char_speed_n_times_v_minus_at_face.size();
+                 ++c) {
+              packaged_face_data_view(face_index, component_offset + c) =
+                  char_speed_n_times_v_minus_at_face[c];
+            }
+            component_offset += char_speed_n_times_v_minus_at_face.size();
 
-                for (size_t c = 0;
-                     c < char_speed_gamma2_v_spacetime_metric_at_face.size();
-                     ++c) {
-                  packaged_face_data_view(face_index, component_offset + c) =
-                      char_speed_gamma2_v_spacetime_metric_at_face[c];
-                }
-                component_offset +=
-                    char_speed_gamma2_v_spacetime_metric_at_face.size();
+            for (size_t c = 0;
+                 c < char_speed_gamma2_v_spacetime_metric_at_face.size(); ++c) {
+              packaged_face_data_view(face_index, component_offset + c) =
+                  char_speed_gamma2_v_spacetime_metric_at_face[c];
+            }
+            component_offset +=
+                char_speed_gamma2_v_spacetime_metric_at_face.size();
 
-                for (size_t c = 0; c < char_speeds_at_face.size(); ++c) {
-                  packaged_face_data_view(face_index, component_offset + c) =
-                      char_speeds_at_face[c];
-                }
-              });
-        }
+            for (size_t c = 0; c < char_speeds_at_face.size(); ++c) {
+              packaged_face_data_view(face_index, component_offset + c) =
+                  char_speeds_at_face[c];
+            }
+          });
+    }
 
-        return packaged_face_data;
-      };
+    return packaged_face_data;
+  };
 
   outgoing_boundary_data->clear();
   external_boundary_data->clear();
@@ -1309,9 +1305,9 @@ void ComputeTimeDerivativeKokkos::
       Variables<device_package_field_tags> packaged_mortar_data{
           mortar_mesh.number_of_grid_points()};
       if (mortar_data.needs_projection) {
-        detail::project_to_mortar_device(
-            make_not_null(&packaged_mortar_data), packaged_face_data, face_mesh,
-            mortar_mesh, mortar_data.mortar_size);
+        detail::project_to_mortar_device(make_not_null(&packaged_mortar_data),
+                                         packaged_face_data, face_mesh,
+                                         mortar_mesh, mortar_data.mortar_size);
       } else {
         ASSERT(
             packaged_mortar_data.number_of_grid_points() ==
@@ -1398,7 +1394,8 @@ void ComputeTimeDerivativeKokkos::
             tnsr::aa<double, volume_dim, Frame::Inertial>
                 exterior_spacetime_metric_at_face{};
             tnsr::aa<double, volume_dim, Frame::Inertial> exterior_pi_at_face{};
-            tnsr::iaa<double, volume_dim, Frame::Inertial> exterior_phi_at_face{};
+            tnsr::iaa<double, volume_dim, Frame::Inertial>
+                exterior_phi_at_face{};
             compute_hardcoded_schwarzschild_gh_fields(
                 make_not_null(&exterior_spacetime_metric_at_face),
                 make_not_null(&exterior_pi_at_face),
@@ -1437,54 +1434,61 @@ void ComputeTimeDerivativeKokkos::
             size_t component_offset = 0;
             for (size_t c = 0; c < char_speed_v_spacetime_metric_at_face.size();
                  ++c) {
-              packaged_exterior_face_data_view(face_index, component_offset + c) =
+              packaged_exterior_face_data_view(face_index,
+                                               component_offset + c) =
                   char_speed_v_spacetime_metric_at_face[c];
             }
             component_offset += char_speed_v_spacetime_metric_at_face.size();
 
             for (size_t c = 0; c < char_speed_v_zero_at_face.size(); ++c) {
-              packaged_exterior_face_data_view(face_index, component_offset + c) =
+              packaged_exterior_face_data_view(face_index,
+                                               component_offset + c) =
                   char_speed_v_zero_at_face[c];
             }
             component_offset += char_speed_v_zero_at_face.size();
 
             for (size_t c = 0; c < char_speed_v_plus_at_face.size(); ++c) {
-              packaged_exterior_face_data_view(face_index, component_offset + c) =
+              packaged_exterior_face_data_view(face_index,
+                                               component_offset + c) =
                   char_speed_v_plus_at_face[c];
             }
             component_offset += char_speed_v_plus_at_face.size();
 
             for (size_t c = 0; c < char_speed_v_minus_at_face.size(); ++c) {
-              packaged_exterior_face_data_view(face_index, component_offset + c) =
+              packaged_exterior_face_data_view(face_index,
+                                               component_offset + c) =
                   char_speed_v_minus_at_face[c];
             }
             component_offset += char_speed_v_minus_at_face.size();
 
             for (size_t c = 0; c < char_speed_n_times_v_plus_at_face.size();
                  ++c) {
-              packaged_exterior_face_data_view(face_index, component_offset + c) =
+              packaged_exterior_face_data_view(face_index,
+                                               component_offset + c) =
                   char_speed_n_times_v_plus_at_face[c];
             }
             component_offset += char_speed_n_times_v_plus_at_face.size();
 
             for (size_t c = 0; c < char_speed_n_times_v_minus_at_face.size();
                  ++c) {
-              packaged_exterior_face_data_view(face_index, component_offset + c) =
+              packaged_exterior_face_data_view(face_index,
+                                               component_offset + c) =
                   char_speed_n_times_v_minus_at_face[c];
             }
             component_offset += char_speed_n_times_v_minus_at_face.size();
 
             for (size_t c = 0;
                  c < char_speed_gamma2_v_spacetime_metric_at_face.size(); ++c) {
-              packaged_exterior_face_data_view(face_index, component_offset + c) =
+              packaged_exterior_face_data_view(face_index,
+                                               component_offset + c) =
                   char_speed_gamma2_v_spacetime_metric_at_face[c];
             }
             component_offset +=
                 char_speed_gamma2_v_spacetime_metric_at_face.size();
 
             for (size_t c = 0; c < char_speeds_at_face.size(); ++c) {
-              packaged_exterior_face_data_view(face_index, component_offset + c) =
-                  char_speeds_at_face[c];
+              packaged_exterior_face_data_view(
+                  face_index, component_offset + c) = char_speeds_at_face[c];
             }
           });
     }

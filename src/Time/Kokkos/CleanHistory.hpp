@@ -34,7 +34,8 @@ struct CleanHistory {
     const auto* runge_kutta =
         dynamic_cast<const TimeSteppers::RungeKutta*>(&time_stepper);
     ASSERT(runge_kutta != nullptr,
-           "Kokkos CleanHistory currently supports only Runge-Kutta steppers.");
+           "Kokkos CleanHistory currently supports only Runge-Kutta "
+           "steppers.");
 
     if (time_step_id.substep() == runge_kutta->number_of_substeps() - 1) {
       // Preserve the updated solution in device_vars and advance the
