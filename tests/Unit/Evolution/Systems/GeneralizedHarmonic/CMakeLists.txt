@@ -15,6 +15,7 @@ set(LIBRARY_SOURCES
   BoundaryConditions/Test_Periodic.cpp
   BoundaryCorrections/Test_UpwindPenalty.cpp
   Test_Characteristics.cpp
+  Test_ComputeTimeDerivativeKokkos.cpp
   Test_Constraints.cpp
   Test_DuDt.cpp
   Test_DuDtTempTags.cpp
@@ -39,10 +40,12 @@ target_link_libraries(
   GeneralRelativityHelpers
   GeneralRelativitySolutions
   GeneralizedHarmonic
+  GeneralizedHarmonicKokkos
   Importers
   LinearOperators
   MathFunctions
   Options
   Spectral
+  Time
   Utilities
 )
