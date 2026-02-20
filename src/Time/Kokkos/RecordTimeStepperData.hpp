@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 
 #include "Time/Tags/TimeStepId.hpp"
@@ -13,6 +14,18 @@
 #include "Utilities/TMPL.hpp"
 
 namespace Actions::Kokkos {
+
+namespace detail {
+
+void record_time_stepper_data_impl(double* deriv_history_data,
+                                   size_t deriv_history_stride_0,
+                                   size_t deriv_history_stride_1,
+                                   size_t deriv_history_stride_2,
+                                   const double* dt_data, size_t dt_stride_0,
+                                   size_t dt_stride_1, size_t substep,
+                                   size_t num_points, size_t num_components);
+
+}  // namespace detail
 
 template <typename System, template <typename> class DeviceDtVariablesTag,
           template <typename> class DeviceDerivativeHistoryTag>
@@ -35,18 +48,25 @@ struct RecordTimeStepperData {
            "Substep " << substep << " exceeds derivative history size "
                       << device_derivative_history->extent(0));
 
-    constexpr size_t number_of_components =
-        device_dt_variables_tag::type::number_of_independent_components;
-    const size_t num_points = device_dt.number_of_grid_points();
-    const auto dt_view = device_dt.view();
     const auto deriv_history = *device_derivative_history;
-    ::Kokkos::parallel_for(
-        "KokkosRecordTimeStepperData", num_points,
-        KOKKOS_LAMBDA(const int i) {
-          for (size_t c = 0; c < number_of_components; ++c) {
-            deriv_history(substep, i, c) = dt_view(i, c);
-          }
-        });
+    const auto dt_view = device_dt.view();
+    const size_t num_points = dt_view.extent(0);
+    const size_t num_components = dt_view.extent(1);
+    ASSERT(deriv_history.extent(1) == num_points,
+           "Derivative history point extent mismatch: history="
+               << deriv_history.extent(1) << " dt=" << num_points);
+    ASSERT(deriv_history.extent(2) == num_components,
+           "Derivative history component extent mismatch: history="
+               << deriv_history.extent(2) << " dt=" << num_components);
+    std::array<size_t, 8> deriv_history_strides{};
+    deriv_history.stride(deriv_history_strides.data());
+    std::array<size_t, 8> dt_strides{};
+    dt_view.stride(dt_strides.data());
+
+    detail::record_time_stepper_data_impl(
+        deriv_history.data(), deriv_history_strides[0],
+        deriv_history_strides[1], deriv_history_strides[2], dt_view.data(),
+        dt_strides[0], dt_strides[1], substep, num_points, num_components);
   }
 };
 
