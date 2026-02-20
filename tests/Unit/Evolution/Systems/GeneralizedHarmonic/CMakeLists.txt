@@ -20,6 +20,7 @@ set(LIBRARY_SOURCES
   Test_Constraints.cpp
   Test_DuDt.cpp
   Test_DuDtTempTags.cpp
+  Test_FilterKokkos.cpp
   Test_Fluxes.cpp
   Test_SyncKokkosToHostEvent.cpp
   Test_Tags.cpp
