@@ -11,7 +11,9 @@
 #include "Evolution/Actions/RunEventsAndTriggers.hpp"
 #include "Evolution/DiscontinuousGalerkin/InboxTags.hpp"
 #include "Evolution/Executables/GeneralizedHarmonic/GeneralizedHarmonicBase.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/ApplyBoundaryCorrectionsToTimeDerivativeKokkos.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/CleanHistoryKokkos.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/ComputeTimeDerivativeKokkos.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/InitializeKokkosBoundaryCommunication.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/InitializeKokkosTags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/InitializeKokkosTimeStepperState.hpp"
@@ -74,14 +76,10 @@ struct EvolutionMetavarsKokkos {
       Parallel::Phase::Exit};
 
   using step_actions = tmpl::list<
-      evolution::dg::Actions::ComputeTimeDerivative<
-          volume_dim, system, AllStepChoosers, local_time_stepping,
-          use_dg_element_collection>,
+      gh::Actions::ComputeTimeDerivativeKokkos,
       tmpl::list<
-          evolution::dg::Actions::ApplyBoundaryCorrectionsToTimeDerivative<
-              system, volume_dim, false, use_dg_element_collection>,
-          Actions::MutateApply<gh::Actions::RecordTimeStepperDataKokkos<
-              system>>,
+          gh::Actions::ApplyBoundaryCorrectionsToTimeDerivativeKokkos,
+          Actions::MutateApply<gh::Actions::RecordTimeStepperDataKokkos<system>>,
           evolution::Actions::RunEventsAndDenseTriggers<tmpl::list<>>,
           control_system::Actions::LimitTimeStep<tmpl::list<>>,
           Actions::MutateApply<gh::Actions::UpdateUKokkos<system>>>,
