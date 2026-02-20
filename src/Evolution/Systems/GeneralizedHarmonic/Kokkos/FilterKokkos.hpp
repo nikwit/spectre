@@ -36,8 +36,8 @@ namespace gh::Actions {
 
 namespace detail {
 
-inline MatrixViewRO matrix_on_device(
-    const Matrix& matrix, const char* const label) {
+inline MatrixViewRO matrix_on_device(const Matrix& matrix,
+                                     const char* const label) {
   Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace>
       host_matrix_view("GhFilterKokkosHostMatrix", matrix.rows(),
                        matrix.columns());
@@ -222,12 +222,11 @@ struct FilterKokkos {
     db::mutate<device_variables_tag>(
         [&mesh, &matrix_view_0, &matrix_view_1, &matrix_view_2](
             const gsl::not_null<device_variables_type*> device_variables) {
-          detail::apply_filter_matrices_on_device(
-              device_variables->view(), mesh, matrix_view_0, matrix_view_1,
-              matrix_view_2);
+          detail::apply_filter_matrices_on_device(device_variables->view(),
+                                                  mesh, matrix_view_0,
+                                                  matrix_view_1, matrix_view_2);
         },
         make_not_null(&box));
-    Kokkos::fence("GhFilterKokkosComplete");
 
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }
