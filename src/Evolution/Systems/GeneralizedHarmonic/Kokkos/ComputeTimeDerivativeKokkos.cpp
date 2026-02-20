@@ -6,13 +6,18 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <optional>
 
 #include "DataStructures/DataBox/PrefixHelpers.hpp"
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/Tensor/AtIndex.hpp"
 #include "NumericalAlgorithms/LinearOperators/PartialDerivatives.hpp"
+#include "NumericalAlgorithms/Spectral/Projection.hpp"
+#include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
+#include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
+#include "Utilities/Gsl.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
 
 namespace gh::Actions {
@@ -24,6 +29,133 @@ using device_spacetime_deriv_gauge_h_tag =
     ::Tags::MirrorView<gh::Tags::SpacetimeDerivGaugeH<DataVector, dim>>;
 using device_gauge_data_type = Variables<
     tmpl::list<device_gauge_h_tag, device_spacetime_deriv_gauge_h_tag>>;
+using package_field_tags =
+    typename gh::BoundaryCorrections::UpwindPenalty<dim>::dg_package_field_tags;
+using device_package_field_tags =
+    db::wrap_tags_in<::Tags::MirrorView, package_field_tags>;
+using device_package_data_type = Variables<device_package_field_tags>;
+using device_package_storage_type = typename device_package_data_type::storage_type;
+
+namespace detail {
+
+void apply_tensor_product_projection_2d(
+    const device_package_storage_type& result_view, const size_t result_num_points,
+    const device_package_storage_type& input_view, const size_t input_num_points,
+    const MatrixViewRO& matrix_dim_0, const MatrixViewRO& matrix_dim_1) {
+  const size_t source_points_dim_0 = matrix_dim_0.extent(1);
+  const size_t source_points_dim_1 = matrix_dim_1.extent(1);
+  const size_t target_points_dim_0 = matrix_dim_0.extent(0);
+  const size_t target_points_dim_1 = matrix_dim_1.extent(0);
+  const size_t num_components = input_view.extent(1);
+
+  ASSERT(input_num_points ==
+             source_points_dim_0 * source_points_dim_1,
+         "Input has " << input_num_points << " points, expected "
+                      << source_points_dim_0 << " * " << source_points_dim_1 << ".");
+  ASSERT(result_num_points ==
+             target_points_dim_0 * target_points_dim_1,
+         "Result has " << result_num_points
+                       << " points, expected " << target_points_dim_0 << " * "
+                       << target_points_dim_1 << ".");
+
+  ::Kokkos::View<double**> projected_dim_0(
+      "GhKokkosProjectedDim0", target_points_dim_0 * source_points_dim_1,
+      num_components);
+  ::Kokkos::parallel_for(
+      "GhKokkosProjectDim0",
+      ::Kokkos::RangePolicy<size_t>{
+          0, target_points_dim_0 * source_points_dim_1 * num_components},
+      KOKKOS_LAMBDA(const size_t linear_index) {
+        size_t remaining = linear_index;
+        const size_t component = remaining % num_components;
+        remaining /= num_components;
+        const size_t i0 = remaining % target_points_dim_0;
+        const size_t i1 = remaining / target_points_dim_0;
+
+        double sum = 0.0;
+        for (size_t k0 = 0; k0 < source_points_dim_0; ++k0) {
+          sum += matrix_dim_0(i0, k0) *
+                 input_view(k0 + source_points_dim_0 * i1, component);
+        }
+        projected_dim_0(i0 + target_points_dim_0 * i1, component) = sum;
+      });
+
+  ::Kokkos::parallel_for(
+      "GhKokkosProjectDim1",
+      ::Kokkos::RangePolicy<size_t>{
+          0, target_points_dim_0 * target_points_dim_1 * num_components},
+      KOKKOS_LAMBDA(const size_t linear_index) {
+        size_t remaining = linear_index;
+        const size_t component = remaining % num_components;
+        remaining /= num_components;
+        const size_t i0 = remaining % target_points_dim_0;
+        const size_t i1 = remaining / target_points_dim_0;
+
+        double sum = 0.0;
+        for (size_t k1 = 0; k1 < source_points_dim_1; ++k1) {
+          sum += matrix_dim_1(i1, k1) *
+                 projected_dim_0(i0 + target_points_dim_0 * k1, component);
+        }
+        result_view(i0 + target_points_dim_0 * i1, component) = sum;
+      });
+}
+
+void project_to_mortar_device(
+    const gsl::not_null<device_package_data_type*> result,
+    const device_package_data_type& vars, const Mesh<2>& face_mesh,
+    const Mesh<2>& mortar_mesh,
+    const std::array<Spectral::SegmentSize, 2>& mortar_size) {
+  if (not Spectral::needs_projection(face_mesh, mortar_mesh, mortar_size)) {
+    ASSERT(result->number_of_grid_points() == vars.number_of_grid_points(),
+           "Cannot skip projection for incompatible result size.");
+    ::Kokkos::deep_copy(result->view(), vars.view());
+    return;
+  }
+
+  ASSERT(result->number_of_grid_points() == mortar_mesh.number_of_grid_points(),
+         "Result has " << result->number_of_grid_points()
+                       << " points, expected "
+                       << mortar_mesh.number_of_grid_points() << ".");
+  const auto& matrix_dim_0 =
+      Spectral::projection_matrix_parent_to_child_on_device(
+          face_mesh.slice_through(0), mortar_mesh.slice_through(0),
+          gsl::at(mortar_size, 0));
+  const auto& matrix_dim_1 =
+      Spectral::projection_matrix_parent_to_child_on_device(
+          face_mesh.slice_through(1), mortar_mesh.slice_through(1),
+          gsl::at(mortar_size, 1));
+  apply_tensor_product_projection_2d(result->view(), result->number_of_grid_points(),
+                                     vars.view(), vars.number_of_grid_points(),
+                                     matrix_dim_0, matrix_dim_1);
+}
+
+void orient_each_component_device(
+    const device_package_storage_type& oriented_view,
+    const device_package_storage_type& variables_view,
+    const ::Kokkos::View<size_t*>& oriented_offset,
+    const size_t num_points) {
+  ASSERT(oriented_view.extent(0) == num_points,
+         "Oriented result has " << oriented_view.extent(0)
+                                << " points, expected " << num_points << ".");
+  ASSERT(oriented_offset.extent(0) == num_points,
+         "Orientation map has " << oriented_offset.extent(0)
+                                << " points, expected " << num_points << ".");
+
+  const auto oriented_offset_view = oriented_offset;
+  const size_t num_components = variables_view.extent(1);
+  ::Kokkos::parallel_for(
+      "GhKokkosOrientEachComponentOnDevice",
+      ::Kokkos::RangePolicy<size_t>{0, num_points * num_components},
+      KOKKOS_LAMBDA(const size_t linear_index) {
+        const size_t component = linear_index % num_components;
+        const size_t source_point = linear_index / num_components;
+        const size_t target_point = oriented_offset_view(source_point);
+        oriented_view(target_point, component) =
+            variables_view(source_point, component);
+      });
+}
+
+}  // namespace detail
 
 KOKKOS_INLINE_FUNCTION void inverse_spatial_metric_and_det(
     const gsl::not_null<tnsr::II<double, dim, Frame::Inertial>*>
@@ -372,6 +504,7 @@ KOKKOS_INLINE_FUNCTION void compute_rhs_at_point(
   inverse_spatial_metric_and_det(make_not_null(&inverse_spatial_metric),
                                  make_not_null(&det_spatial_metric),
                                  spacetime_metric);
+  (void)det_spatial_metric;
 
   tnsr::I<double, dim, Frame::Inertial> shift{};
   for (size_t i = 0; i < dim; ++i) {
@@ -671,6 +804,130 @@ KOKKOS_INLINE_FUNCTION void compute_rhs_at_point(
     }
   }
 }
+
+KOKKOS_INLINE_FUNCTION void compute_packaged_boundary_data_at_point(
+    const gsl::not_null<tnsr::aa<double, dim, Frame::Inertial>*>
+        char_speed_v_spacetime_metric,
+    const gsl::not_null<tnsr::iaa<double, dim, Frame::Inertial>*>
+        char_speed_v_zero,
+    const gsl::not_null<tnsr::aa<double, dim, Frame::Inertial>*>
+        char_speed_v_plus,
+    const gsl::not_null<tnsr::aa<double, dim, Frame::Inertial>*>
+        char_speed_v_minus,
+    const gsl::not_null<tnsr::iaa<double, dim, Frame::Inertial>*>
+        char_speed_n_times_v_plus,
+    const gsl::not_null<tnsr::iaa<double, dim, Frame::Inertial>*>
+        char_speed_n_times_v_minus,
+    const gsl::not_null<tnsr::aa<double, dim, Frame::Inertial>*>
+        char_speed_gamma2_v_spacetime_metric,
+    const gsl::not_null<tnsr::a<double, dim, Frame::Inertial>*> char_speeds,
+    const tnsr::aa<double, dim, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<double, dim, Frame::Inertial>& pi,
+    const tnsr::iaa<double, dim, Frame::Inertial>& phi, const double gamma1,
+    const double gamma2,
+    const tnsr::i<double, dim, Frame::Inertial>& unnormalized_normal_covector) {
+  tnsr::II<double, dim, Frame::Inertial> inverse_spatial_metric{};
+  double det_spatial_metric = 0.0;
+  inverse_spatial_metric_and_det(make_not_null(&inverse_spatial_metric),
+                                 make_not_null(&det_spatial_metric),
+                                 spacetime_metric);
+  (void)det_spatial_metric;
+
+  tnsr::I<double, dim, Frame::Inertial> shift{};
+  for (size_t i = 0; i < dim; ++i) {
+    shift.get(i) = 0.0;
+    for (size_t j = 0; j < dim; ++j) {
+      shift.get(i) +=
+          inverse_spatial_metric.get(i, j) * spacetime_metric.get(0, j + 1);
+    }
+  }
+  double lapse_squared = -spacetime_metric.get(0, 0);
+  for (size_t i = 0; i < dim; ++i) {
+    lapse_squared += shift.get(i) * spacetime_metric.get(0, i + 1);
+  }
+  const double lapse = sqrt(lapse_squared);
+
+  tnsr::I<double, dim, Frame::Inertial> normal_vector{};
+  double normal_magnitude_squared = 0.0;
+  for (size_t i = 0; i < dim; ++i) {
+    normal_vector.get(i) = 0.0;
+    for (size_t j = 0; j < dim; ++j) {
+      normal_vector.get(i) += inverse_spatial_metric.get(i, j) *
+                              unnormalized_normal_covector.get(j);
+    }
+    normal_magnitude_squared +=
+        normal_vector.get(i) * unnormalized_normal_covector.get(i);
+  }
+  const double one_over_normal_magnitude = 1.0 / sqrt(normal_magnitude_squared);
+  tnsr::i<double, dim, Frame::Inertial> normal_covector{};
+  for (size_t i = 0; i < dim; ++i) {
+    normal_vector.get(i) *= one_over_normal_magnitude;
+    normal_covector.get(i) =
+        unnormalized_normal_covector.get(i) * one_over_normal_magnitude;
+  }
+
+  double shift_dot_normal = 0.0;
+  for (size_t i = 0; i < dim; ++i) {
+    shift_dot_normal += shift.get(i) * normal_covector.get(i);
+  }
+  shift_dot_normal *= -1.0;
+
+  char_speeds->get(0) = (1.0 + gamma1) * shift_dot_normal;
+  char_speeds->get(1) = shift_dot_normal;
+  char_speeds->get(2) = lapse + shift_dot_normal;
+  char_speeds->get(3) = -lapse + shift_dot_normal;
+
+  for (size_t a = 0; a < dim + 1; ++a) {
+    for (size_t b = a; b < dim + 1; ++b) {
+      char_speed_gamma2_v_spacetime_metric->get(a, b) =
+          gamma2 * spacetime_metric.get(a, b);
+    }
+  }
+
+  tnsr::aa<double, dim, Frame::Inertial> normal_dot_phi{};
+  for (size_t a = 0; a < dim + 1; ++a) {
+    for (size_t b = a; b < dim + 1; ++b) {
+      normal_dot_phi.get(a, b) = normal_vector.get(0) * phi.get(0, a, b);
+      for (size_t i = 1; i < dim; ++i) {
+        normal_dot_phi.get(a, b) += normal_vector.get(i) * phi.get(i, a, b);
+      }
+    }
+  }
+
+  for (size_t a = 0; a < dim + 1; ++a) {
+    for (size_t b = a; b < dim + 1; ++b) {
+      char_speed_v_plus->get(a, b) =
+          char_speeds->get(2) *
+          (pi.get(a, b) + normal_dot_phi.get(a, b) -
+           char_speed_gamma2_v_spacetime_metric->get(a, b));
+      char_speed_v_minus->get(a, b) =
+          char_speeds->get(3) *
+          (pi.get(a, b) - normal_dot_phi.get(a, b) -
+           char_speed_gamma2_v_spacetime_metric->get(a, b));
+
+      for (size_t i = 0; i < dim; ++i) {
+        char_speed_v_zero->get(i, a, b) =
+            char_speeds->get(1) *
+            (phi.get(i, a, b) -
+             normal_covector.get(i) * normal_dot_phi.get(a, b));
+      }
+    }
+  }
+
+  for (size_t a = 0; a < dim + 1; ++a) {
+    for (size_t b = a; b < dim + 1; ++b) {
+      for (size_t i = 0; i < dim; ++i) {
+        char_speed_n_times_v_plus->get(i, a, b) =
+            char_speed_v_plus->get(a, b) * normal_covector.get(i);
+        char_speed_n_times_v_minus->get(i, a, b) =
+            char_speed_v_minus->get(a, b) * normal_covector.get(i);
+      }
+      char_speed_v_spacetime_metric->get(a, b) =
+          char_speeds->get(0) * spacetime_metric.get(a, b);
+      char_speed_gamma2_v_spacetime_metric->get(a, b) *= char_speeds->get(0);
+    }
+  }
+}
 }  // namespace
 
 void ComputeTimeDerivativeKokkos::orient_boundary_data_for_send(
@@ -678,10 +935,10 @@ void ComputeTimeDerivativeKokkos::orient_boundary_data_for_send(
         oriented_boundary_data,
     const Variables<device_package_field_tags>& boundary_data,
     const ::Kokkos::View<size_t*>& oriented_mortar_grid_point_source_index) {
-  (void)oriented_boundary_data;
-  (void)boundary_data;
-  (void)oriented_mortar_grid_point_source_index;
-  ERROR("TODO: Implement GH Kokkos boundary-data orientation for send.");
+  detail::orient_each_component_device(
+      oriented_boundary_data->view(), boundary_data.view(),
+      oriented_mortar_grid_point_source_index,
+      boundary_data.number_of_grid_points());
 }
 
 void compute_hardcoded_analytic_gauge_and_spacetime_derivative(
@@ -770,6 +1027,7 @@ void ComputeTimeDerivativeKokkos::
             device_face_to_volume_index_map,
         const device_face_unit_normal_covector_type&
             device_face_unit_normal_covector,
+        const device_face_normal_magnitude_type& device_face_normal_magnitude,
         const device_mortar_data_type& device_mortar_data,
         const typename mortar_mesh_tag::type& mortar_meshes,
         const gh::Tags::ConstraintGamma0::type& host_constraint_gamma0,
@@ -779,17 +1037,11 @@ void ComputeTimeDerivativeKokkos::
             volume_dim>::type& external_boundary_conditions_by_block,
         const double time, const Mesh<volume_dim>& mesh,
         const Element<volume_dim>& element, const TimeStepId& time_step_id) {
-  (void)device_face_to_volume_index_map;
-  (void)device_face_unit_normal_covector;
-  (void)device_mortar_data;
-  (void)mortar_meshes;
   (void)host_constraint_gamma0;
   (void)host_constraint_gamma1;
   (void)host_constraint_gamma2;
   (void)external_boundary_conditions_by_block;
   (void)time;
-  (void)element;
-  (void)time_step_id;
 
   const size_t number_of_points = mesh.number_of_grid_points();
   if (device_dt->number_of_grid_points() != number_of_points) {
@@ -820,6 +1072,10 @@ void ComputeTimeDerivativeKokkos::
       get<::Tags::MirrorView<::Tags::dt<spacetime_metric_tag>>>(*device_dt);
   const auto dt_pi = get<::Tags::MirrorView<::Tags::dt<pi_tag>>>(*device_dt);
   const auto dt_phi = get<::Tags::MirrorView<::Tags::dt<phi_tag>>>(*device_dt);
+  const auto spacetime_metric =
+      get<::Tags::MirrorView<spacetime_metric_tag>>(device_vars);
+  const auto pi = get<::Tags::MirrorView<pi_tag>>(device_vars);
+  const auto phi = get<::Tags::MirrorView<phi_tag>>(device_vars);
 
   ::Kokkos::parallel_for(
       "GhComputeTimeDerivativeKokkosVolumeTerms", number_of_points,
@@ -873,10 +1129,175 @@ void ComputeTimeDerivativeKokkos::
         }
       });
 
-  // Boundary packaging is not wired yet for GH Kokkos. Keep boundary maps
-  // empty so this action can be exercised in volume-only mode.
+  ASSERT(mesh.quadrature(0) == Spectral::Quadrature::GaussLobatto,
+         "ComputeTimeDerivativeKokkos currently supports Gauss-Lobatto "
+         "quadrature only.");
+
+  const auto package_boundary_data_on_face =
+      [&](const Direction<volume_dim>& direction) {
+        const size_t sliced_dim = direction.dimension();
+        const size_t num_face_points =
+            mesh.slice_away(sliced_dim).number_of_grid_points();
+        auto face_to_volume_index =
+            direction.side() == Side::Upper
+                ? gsl::at(device_face_to_volume_index_map, sliced_dim).second
+                : gsl::at(device_face_to_volume_index_map, sliced_dim).first;
+        auto face_unit_normal_covector =
+            direction.side() == Side::Upper
+                ? gsl::at(device_face_unit_normal_covector, sliced_dim).second
+                : gsl::at(device_face_unit_normal_covector, sliced_dim).first;
+        auto face_normal_magnitude =
+            direction.side() == Side::Upper
+                ? gsl::at(device_face_normal_magnitude, sliced_dim).second
+                : gsl::at(device_face_normal_magnitude, sliced_dim).first;
+
+        Variables<device_package_field_tags> packaged_face_data{
+            num_face_points};
+        if (num_face_points > 0) {
+          const auto packaged_face_data_view = packaged_face_data.view();
+
+          ::Kokkos::parallel_for(
+              "GhPackageBoundaryCorrectionDataOnFace", num_face_points,
+              KOKKOS_LAMBDA(const int face_index_int) {
+                const size_t face_index = static_cast<size_t>(face_index_int);
+                const size_t volume_index = face_to_volume_index(face_index);
+
+                tnsr::i<double, volume_dim, Frame::Inertial> normal_covector{};
+                for (size_t d = 0; d < volume_dim; ++d) {
+                  normal_covector.get(d) =
+                      face_unit_normal_covector(face_index, d) *
+                      face_normal_magnitude(face_index);
+                }
+
+                tnsr::aa<double, volume_dim, Frame::Inertial>
+                    char_speed_v_spacetime_metric_at_face{};
+                tnsr::iaa<double, volume_dim, Frame::Inertial>
+                    char_speed_v_zero_at_face{};
+                tnsr::aa<double, volume_dim, Frame::Inertial>
+                    char_speed_v_plus_at_face{};
+                tnsr::aa<double, volume_dim, Frame::Inertial>
+                    char_speed_v_minus_at_face{};
+                tnsr::iaa<double, volume_dim, Frame::Inertial>
+                    char_speed_n_times_v_plus_at_face{};
+                tnsr::iaa<double, volume_dim, Frame::Inertial>
+                    char_speed_n_times_v_minus_at_face{};
+                tnsr::aa<double, volume_dim, Frame::Inertial>
+                    char_speed_gamma2_v_spacetime_metric_at_face{};
+                tnsr::a<double, volume_dim, Frame::Inertial>
+                    char_speeds_at_face{};
+
+                compute_packaged_boundary_data_at_point(
+                    make_not_null(&char_speed_v_spacetime_metric_at_face),
+                    make_not_null(&char_speed_v_zero_at_face),
+                    make_not_null(&char_speed_v_plus_at_face),
+                    make_not_null(&char_speed_v_minus_at_face),
+                    make_not_null(&char_speed_n_times_v_plus_at_face),
+                    make_not_null(&char_speed_n_times_v_minus_at_face),
+                    make_not_null(&char_speed_gamma2_v_spacetime_metric_at_face),
+                    make_not_null(&char_speeds_at_face),
+                    make_at_index(spacetime_metric, volume_index),
+                    make_at_index(pi, volume_index),
+                    make_at_index(phi, volume_index),
+                    get(make_at_index(device_constraint_gamma1, volume_index)),
+                    get(make_at_index(device_constraint_gamma2, volume_index)),
+                    normal_covector);
+
+                size_t component_offset = 0;
+                for (size_t c = 0;
+                     c < char_speed_v_spacetime_metric_at_face.size(); ++c) {
+                  packaged_face_data_view(face_index, component_offset + c) =
+                      char_speed_v_spacetime_metric_at_face[c];
+                }
+                component_offset += char_speed_v_spacetime_metric_at_face.size();
+
+                for (size_t c = 0; c < char_speed_v_zero_at_face.size(); ++c) {
+                  packaged_face_data_view(face_index, component_offset + c) =
+                      char_speed_v_zero_at_face[c];
+                }
+                component_offset += char_speed_v_zero_at_face.size();
+
+                for (size_t c = 0; c < char_speed_v_plus_at_face.size(); ++c) {
+                  packaged_face_data_view(face_index, component_offset + c) =
+                      char_speed_v_plus_at_face[c];
+                }
+                component_offset += char_speed_v_plus_at_face.size();
+
+                for (size_t c = 0; c < char_speed_v_minus_at_face.size(); ++c) {
+                  packaged_face_data_view(face_index, component_offset + c) =
+                      char_speed_v_minus_at_face[c];
+                }
+                component_offset += char_speed_v_minus_at_face.size();
+
+                for (size_t c = 0;
+                     c < char_speed_n_times_v_plus_at_face.size(); ++c) {
+                  packaged_face_data_view(face_index, component_offset + c) =
+                      char_speed_n_times_v_plus_at_face[c];
+                }
+                component_offset += char_speed_n_times_v_plus_at_face.size();
+
+                for (size_t c = 0;
+                     c < char_speed_n_times_v_minus_at_face.size(); ++c) {
+                  packaged_face_data_view(face_index, component_offset + c) =
+                      char_speed_n_times_v_minus_at_face[c];
+                }
+                component_offset += char_speed_n_times_v_minus_at_face.size();
+
+                for (size_t c = 0;
+                     c < char_speed_gamma2_v_spacetime_metric_at_face.size();
+                     ++c) {
+                  packaged_face_data_view(face_index, component_offset + c) =
+                      char_speed_gamma2_v_spacetime_metric_at_face[c];
+                }
+                component_offset +=
+                    char_speed_gamma2_v_spacetime_metric_at_face.size();
+
+                for (size_t c = 0; c < char_speeds_at_face.size(); ++c) {
+                  packaged_face_data_view(face_index, component_offset + c) =
+                      char_speeds_at_face[c];
+                }
+              });
+        }
+
+        return packaged_face_data;
+      };
+
   outgoing_boundary_data->clear();
   external_boundary_data->clear();
+
+  for (const auto& [direction, neighbors] : element.neighbors()) {
+    const size_t sliced_dim = direction.dimension();
+    const Mesh<volume_dim - 1> face_mesh = mesh.slice_away(sliced_dim);
+    auto packaged_face_data = package_boundary_data_on_face(direction);
+
+    for (const auto& neighbor : neighbors) {
+      const DirectionalId<volume_dim> mortar_id{direction, neighbor};
+      const auto& mortar_mesh = mortar_meshes.at(mortar_id);
+      const auto& mortar_data = device_mortar_data.at(mortar_id);
+      Variables<device_package_field_tags> packaged_mortar_data{
+          mortar_mesh.number_of_grid_points()};
+      if (mortar_data.needs_projection) {
+        detail::project_to_mortar_device(
+            make_not_null(&packaged_mortar_data), packaged_face_data, face_mesh,
+            mortar_mesh, mortar_data.mortar_size);
+      } else {
+        ASSERT(
+            packaged_mortar_data.number_of_grid_points() ==
+                packaged_face_data.number_of_grid_points(),
+            "Expected identical face and mortar point counts when projection "
+            "is not needed.");
+        ::Kokkos::deep_copy(packaged_mortar_data.view(),
+                            packaged_face_data.view());
+      }
+
+      gh::KokkosTags::BoundaryCorrectionData<volume_dim> boundary_data{};
+      boundary_data.boundary_correction_data = std::move(packaged_mortar_data);
+      boundary_data.validity_range = time_step_id;
+      boundary_data.integration_order = 0;
+      outgoing_boundary_data->insert_or_assign(mortar_id,
+                                               std::move(boundary_data));
+    }
+  }
+
 }
 
 }  // namespace gh::Actions
