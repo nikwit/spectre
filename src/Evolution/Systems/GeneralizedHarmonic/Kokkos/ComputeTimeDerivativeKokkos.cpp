@@ -11,6 +11,8 @@
 #include "DataStructures/DataBox/PrefixHelpers.hpp"
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/Tensor/AtIndex.hpp"
+#include "Domain/Structure/ElementId.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/DirichletAnalytic.hpp"
 #include "NumericalAlgorithms/LinearOperators/PartialDerivatives.hpp"
 #include "NumericalAlgorithms/Spectral/Projection.hpp"
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
@@ -483,6 +485,38 @@ KOKKOS_INLINE_FUNCTION void compute_hardcoded_analytic_gauge(
       make_not_null(&analytic_spacetime_metric), lapse, shift, spatial_metric);
   compute_gauge_from_gh_vars(gauge_h, analytic_spacetime_metric, analytic_pi,
                              analytic_phi);
+}
+
+KOKKOS_INLINE_FUNCTION void compute_hardcoded_schwarzschild_gh_fields(
+    const gsl::not_null<tnsr::aa<double, dim, Frame::Inertial>*>
+        spacetime_metric,
+    const gsl::not_null<tnsr::aa<double, dim, Frame::Inertial>*> pi,
+    const gsl::not_null<tnsr::iaa<double, dim, Frame::Inertial>*> phi,
+    const tnsr::I<double, dim, Frame::Inertial>& inertial_coordinates) {
+  Scalar<double> lapse{};
+  Scalar<double> dt_lapse{};
+  tnsr::i<double, dim, Frame::Inertial> deriv_lapse{};
+  tnsr::I<double, dim, Frame::Inertial> shift{};
+  tnsr::I<double, dim, Frame::Inertial> dt_shift{};
+  tnsr::iJ<double, dim, Frame::Inertial> deriv_shift{};
+  tnsr::ii<double, dim, Frame::Inertial> spatial_metric{};
+  tnsr::ii<double, dim, Frame::Inertial> dt_spatial_metric{};
+  tnsr::ijj<double, dim, Frame::Inertial> deriv_spatial_metric{};
+
+  compute_hardcoded_schwarzschild_3plus1(
+      make_not_null(&lapse), make_not_null(&dt_lapse),
+      make_not_null(&deriv_lapse), make_not_null(&shift),
+      make_not_null(&dt_shift), make_not_null(&deriv_shift),
+      make_not_null(&spatial_metric), make_not_null(&dt_spatial_metric),
+      make_not_null(&deriv_spatial_metric), inertial_coordinates);
+
+  compute_phi_from_3plus1(phi, lapse, deriv_lapse, shift, deriv_shift,
+                          spatial_metric, deriv_spatial_metric);
+  compute_pi_from_3plus1(pi, lapse, dt_lapse, shift,
+                         dt_shift, spatial_metric, dt_spatial_metric,
+                         *phi);
+  compute_spacetime_metric_from_3plus1(
+      spacetime_metric, lapse, shift, spatial_metric);
 }
 
 KOKKOS_INLINE_FUNCTION void compute_rhs_at_point(
@@ -1040,7 +1074,6 @@ void ComputeTimeDerivativeKokkos::
   (void)host_constraint_gamma0;
   (void)host_constraint_gamma1;
   (void)host_constraint_gamma2;
-  (void)external_boundary_conditions_by_block;
   (void)time;
 
   const size_t number_of_points = mesh.number_of_grid_points();
@@ -1298,6 +1331,184 @@ void ComputeTimeDerivativeKokkos::
     }
   }
 
+  if (element.external_boundaries().empty()) {
+    return;
+  }
+
+  const auto& external_boundary_conditions =
+      external_boundary_conditions_by_block.at(element.id().block_id());
+
+  for (const Direction<volume_dim>& direction : element.external_boundaries()) {
+    const auto& boundary_condition_base =
+        *external_boundary_conditions.at(direction);
+    const auto* const dirichlet_analytic = dynamic_cast<
+        const gh::BoundaryConditions::DirichletAnalytic<volume_dim>*>(
+        &boundary_condition_base);
+    if (dirichlet_analytic == nullptr) {
+      ERROR(
+          "ComputeTimeDerivativeKokkos currently supports only "
+          "DirichletAnalytic for external boundaries. Unsupported boundary "
+          "condition on direction "
+          << direction << ".");
+    }
+
+    const size_t sliced_dim = direction.dimension();
+    const Mesh<volume_dim - 1> face_mesh = mesh.slice_away(sliced_dim);
+    const size_t num_face_points = face_mesh.number_of_grid_points();
+
+    auto face_to_volume_index =
+        direction.side() == Side::Upper
+            ? gsl::at(device_face_to_volume_index_map, sliced_dim).second
+            : gsl::at(device_face_to_volume_index_map, sliced_dim).first;
+    auto face_unit_normal_covector =
+        direction.side() == Side::Upper
+            ? gsl::at(device_face_unit_normal_covector, sliced_dim).second
+            : gsl::at(device_face_unit_normal_covector, sliced_dim).first;
+    auto face_normal_magnitude =
+        direction.side() == Side::Upper
+            ? gsl::at(device_face_normal_magnitude, sliced_dim).second
+            : gsl::at(device_face_normal_magnitude, sliced_dim).first;
+
+    Variables<device_package_field_tags> packaged_exterior_face_data{
+        num_face_points};
+    if (num_face_points > 0) {
+      const auto packaged_exterior_face_data_view =
+          packaged_exterior_face_data.view();
+      ::Kokkos::parallel_for(
+          "GhPackageExternalDirichletAnalyticDataOnFace", num_face_points,
+          KOKKOS_LAMBDA(const int face_index_int) {
+            const size_t face_index = static_cast<size_t>(face_index_int);
+            const size_t volume_index = face_to_volume_index(face_index);
+
+            tnsr::I<double, volume_dim, Frame::Inertial>
+                inertial_coords_at_face{};
+            for (size_t d = 0; d < volume_dim; ++d) {
+              inertial_coords_at_face.get(d) =
+                  device_inertial_coordinates.get(d)[volume_index];
+            }
+
+            tnsr::i<double, volume_dim, Frame::Inertial>
+                exterior_unnormalized_normal_covector{};
+            for (size_t d = 0; d < volume_dim; ++d) {
+              exterior_unnormalized_normal_covector.get(d) =
+                  -face_unit_normal_covector(face_index, d) *
+                  face_normal_magnitude(face_index);
+            }
+
+            tnsr::aa<double, volume_dim, Frame::Inertial>
+                exterior_spacetime_metric_at_face{};
+            tnsr::aa<double, volume_dim, Frame::Inertial> exterior_pi_at_face{};
+            tnsr::iaa<double, volume_dim, Frame::Inertial> exterior_phi_at_face{};
+            compute_hardcoded_schwarzschild_gh_fields(
+                make_not_null(&exterior_spacetime_metric_at_face),
+                make_not_null(&exterior_pi_at_face),
+                make_not_null(&exterior_phi_at_face), inertial_coords_at_face);
+
+            tnsr::aa<double, volume_dim, Frame::Inertial>
+                char_speed_v_spacetime_metric_at_face{};
+            tnsr::iaa<double, volume_dim, Frame::Inertial>
+                char_speed_v_zero_at_face{};
+            tnsr::aa<double, volume_dim, Frame::Inertial>
+                char_speed_v_plus_at_face{};
+            tnsr::aa<double, volume_dim, Frame::Inertial>
+                char_speed_v_minus_at_face{};
+            tnsr::iaa<double, volume_dim, Frame::Inertial>
+                char_speed_n_times_v_plus_at_face{};
+            tnsr::iaa<double, volume_dim, Frame::Inertial>
+                char_speed_n_times_v_minus_at_face{};
+            tnsr::aa<double, volume_dim, Frame::Inertial>
+                char_speed_gamma2_v_spacetime_metric_at_face{};
+            tnsr::a<double, volume_dim, Frame::Inertial> char_speeds_at_face{};
+            compute_packaged_boundary_data_at_point(
+                make_not_null(&char_speed_v_spacetime_metric_at_face),
+                make_not_null(&char_speed_v_zero_at_face),
+                make_not_null(&char_speed_v_plus_at_face),
+                make_not_null(&char_speed_v_minus_at_face),
+                make_not_null(&char_speed_n_times_v_plus_at_face),
+                make_not_null(&char_speed_n_times_v_minus_at_face),
+                make_not_null(&char_speed_gamma2_v_spacetime_metric_at_face),
+                make_not_null(&char_speeds_at_face),
+                exterior_spacetime_metric_at_face, exterior_pi_at_face,
+                exterior_phi_at_face,
+                get(make_at_index(device_constraint_gamma1, volume_index)),
+                get(make_at_index(device_constraint_gamma2, volume_index)),
+                exterior_unnormalized_normal_covector);
+
+            size_t component_offset = 0;
+            for (size_t c = 0; c < char_speed_v_spacetime_metric_at_face.size();
+                 ++c) {
+              packaged_exterior_face_data_view(face_index, component_offset + c) =
+                  char_speed_v_spacetime_metric_at_face[c];
+            }
+            component_offset += char_speed_v_spacetime_metric_at_face.size();
+
+            for (size_t c = 0; c < char_speed_v_zero_at_face.size(); ++c) {
+              packaged_exterior_face_data_view(face_index, component_offset + c) =
+                  char_speed_v_zero_at_face[c];
+            }
+            component_offset += char_speed_v_zero_at_face.size();
+
+            for (size_t c = 0; c < char_speed_v_plus_at_face.size(); ++c) {
+              packaged_exterior_face_data_view(face_index, component_offset + c) =
+                  char_speed_v_plus_at_face[c];
+            }
+            component_offset += char_speed_v_plus_at_face.size();
+
+            for (size_t c = 0; c < char_speed_v_minus_at_face.size(); ++c) {
+              packaged_exterior_face_data_view(face_index, component_offset + c) =
+                  char_speed_v_minus_at_face[c];
+            }
+            component_offset += char_speed_v_minus_at_face.size();
+
+            for (size_t c = 0; c < char_speed_n_times_v_plus_at_face.size();
+                 ++c) {
+              packaged_exterior_face_data_view(face_index, component_offset + c) =
+                  char_speed_n_times_v_plus_at_face[c];
+            }
+            component_offset += char_speed_n_times_v_plus_at_face.size();
+
+            for (size_t c = 0; c < char_speed_n_times_v_minus_at_face.size();
+                 ++c) {
+              packaged_exterior_face_data_view(face_index, component_offset + c) =
+                  char_speed_n_times_v_minus_at_face[c];
+            }
+            component_offset += char_speed_n_times_v_minus_at_face.size();
+
+            for (size_t c = 0;
+                 c < char_speed_gamma2_v_spacetime_metric_at_face.size(); ++c) {
+              packaged_exterior_face_data_view(face_index, component_offset + c) =
+                  char_speed_gamma2_v_spacetime_metric_at_face[c];
+            }
+            component_offset +=
+                char_speed_gamma2_v_spacetime_metric_at_face.size();
+
+            for (size_t c = 0; c < char_speeds_at_face.size(); ++c) {
+              packaged_exterior_face_data_view(face_index, component_offset + c) =
+                  char_speeds_at_face[c];
+            }
+          });
+    }
+
+    auto packaged_interior_face_data = package_boundary_data_on_face(direction);
+    const DirectionalId<volume_dim> external_mortar_id{
+        direction, ElementId<volume_dim>::external_boundary_id()};
+
+    gh::KokkosTags::BoundaryCorrectionData<volume_dim> local_boundary_data{};
+    local_boundary_data.boundary_correction_data =
+        std::move(packaged_interior_face_data);
+    local_boundary_data.validity_range = time_step_id;
+    local_boundary_data.integration_order = 0;
+    outgoing_boundary_data->insert_or_assign(external_mortar_id,
+                                             std::move(local_boundary_data));
+
+    gh::KokkosTags::BoundaryCorrectionData<volume_dim> external_face_data{};
+    external_face_data.boundary_correction_data =
+        std::move(packaged_exterior_face_data);
+    external_face_data.validity_range = time_step_id;
+    external_face_data.integration_order = 0;
+    external_boundary_data->insert_or_assign(external_mortar_id,
+                                             std::move(external_face_data));
+  }
 }
 
 }  // namespace gh::Actions

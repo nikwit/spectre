@@ -483,6 +483,12 @@ void test_volume_terms_match_host_time_derivative() {
   typename gh::KokkosTags::ExternalBoundaryCorrectionData<Dim>::type
       external_boundary_data{};
   external_boundary_conditions_type external_boundary_conditions_by_block{1};
+  for (const auto& direction : Direction<Dim>::all_directions()) {
+    external_boundary_conditions_by_block[0].insert_or_assign(
+        direction,
+        std::make_unique<gh::BoundaryConditions::DirichletAnalytic<Dim>>(
+            std::make_unique<hardcoded_solution>(1.0, zero_spin, zero_center)));
+  }
 
   gh::Actions::ComputeTimeDerivativeKokkos::apply(
       make_not_null(&device_dt), make_not_null(&outgoing_boundary_data),
@@ -504,8 +510,8 @@ void test_volume_terms_match_host_time_derivative() {
   CHECK_ITERABLE_CUSTOM_APPROX(get<::Tags::dt<phi_tag>>(dt_kokkos), host_dt_phi,
                                approx);
 
-  CHECK(outgoing_boundary_data.empty());
-  CHECK(external_boundary_data.empty());
+  CHECK(outgoing_boundary_data.size() == element.external_boundaries().size());
+  CHECK(external_boundary_data.size() == element.external_boundaries().size());
 }
 
 void test_compute_and_package_matches_host_internal_reference() {
