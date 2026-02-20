@@ -4,7 +4,6 @@
 #pragma once
 
 #include <cstddef>
-#include <exception>
 #include <optional>
 #include <utility>
 
@@ -41,8 +40,8 @@ bool receive_boundary_data_global_time_stepping_kokkos(
 
   if (number_of_neighbors == 0) {
     db::mutate<gh::KokkosTags::IncomingBoundaryCorrectionData<3>>(
-        [](const gsl::not_null<typename gh::KokkosTags::
-                                   IncomingBoundaryCorrectionData<3>::type*>
+        [](const gsl::not_null<
+            typename gh::KokkosTags::IncomingBoundaryCorrectionData<3>::type*>
                incoming_boundary_data) { incoming_boundary_data->clear(); },
         box);
     return true;
@@ -65,8 +64,8 @@ bool receive_boundary_data_global_time_stepping_kokkos(
 
   db::mutate<gh::KokkosTags::IncomingBoundaryCorrectionData<3>>(
       [&received_neighbor_data](
-          const gsl::not_null<typename gh::KokkosTags::
-                                  IncomingBoundaryCorrectionData<3>::type*>
+          const gsl::not_null<
+              typename gh::KokkosTags::IncomingBoundaryCorrectionData<3>::type*>
               incoming_boundary_data) {
         *incoming_boundary_data = std::move(received_neighbor_data);
       },
@@ -83,7 +82,8 @@ struct ApplyBoundaryCorrectionsToTimeDerivativeKokkos {
   using system = gh::System<3>;
   using device_variables_tag = gh::KokkosTags::DeviceVariables<system>;
   using device_dt_variables_tag = gh::KokkosTags::DeviceDtVariables<system>;
-  using boundary_correction_data_type = gh::KokkosTags::BoundaryCorrectionData<3>;
+  using boundary_correction_data_type =
+      gh::KokkosTags::BoundaryCorrectionData<3>;
   using outgoing_boundary_data_type =
       DirectionalIdMap<3, boundary_correction_data_type>;
   using incoming_boundary_data_type =
@@ -115,7 +115,8 @@ struct ApplyBoundaryCorrectionsToTimeDerivativeKokkos {
       const outgoing_boundary_data_type& outgoing_boundary_data,
       const incoming_boundary_data_type& incoming_boundary_data,
       const external_boundary_data_type& external_boundary_data,
-      const device_face_to_volume_index_map_type& device_face_to_volume_index_map,
+      const device_face_to_volume_index_map_type&
+          device_face_to_volume_index_map,
       const device_face_unit_normal_covector_type&
           device_face_unit_normal_covector,
       const device_face_normal_magnitude_type& device_face_normal_magnitude,
@@ -123,7 +124,8 @@ struct ApplyBoundaryCorrectionsToTimeDerivativeKokkos {
       const typename mortar_mesh_tag::type& mortar_meshes, const Mesh<3>& mesh,
       const Element<3>& element);
 
-  using inbox_tags = tmpl::list<gh::KokkosTags::BoundaryCorrectionInbox<3, false>>;
+  using inbox_tags =
+      tmpl::list<gh::KokkosTags::BoundaryCorrectionInbox<3, false>>;
   using const_global_cache_tags = tmpl::list<>;
 
   static void apply(
@@ -132,7 +134,8 @@ struct ApplyBoundaryCorrectionsToTimeDerivativeKokkos {
       const outgoing_boundary_data_type& outgoing_boundary_data,
       const incoming_boundary_data_type& incoming_boundary_data,
       const external_boundary_data_type& external_boundary_data,
-      const device_face_to_volume_index_map_type& device_face_to_volume_index_map,
+      const device_face_to_volume_index_map_type&
+          device_face_to_volume_index_map,
       const device_face_unit_normal_covector_type&
           device_face_unit_normal_covector,
       const device_face_normal_magnitude_type& device_face_normal_magnitude,
@@ -163,40 +166,32 @@ struct ApplyBoundaryCorrectionsToTimeDerivativeKokkos {
     }
 
     const auto& element = db::get<domain::Tags::Element<3>>(box);
-    const auto& time_step_id = db::get<::Tags::TimeStepId>(box);
-    try {
-      db::mutate<device_dt_variables_tag>(
-          [&device_vars = db::get<device_variables_tag>(box),
-           &outgoing_boundary_data =
-               db::get<gh::KokkosTags::OutgoingBoundaryCorrectionData<3>>(box),
-           &incoming_boundary_data =
-               db::get<gh::KokkosTags::IncomingBoundaryCorrectionData<3>>(box),
-           &external_boundary_data =
-               db::get<gh::KokkosTags::ExternalBoundaryCorrectionData<3>>(box),
-           &device_face_to_volume_index_map =
-               db::get<device_face_to_volume_index_map_tag>(box),
-           &device_face_unit_normal_covector =
-               db::get<device_face_unit_normal_covector_tag>(box),
-           &device_face_normal_magnitude =
-               db::get<device_face_normal_magnitude_tag>(box),
-           &device_mortar_data = db::get<device_mortar_data_tag>(box),
-           &mortar_meshes = db::get<mortar_mesh_tag>(box),
-           &mesh = db::get<domain::Tags::Mesh<3>>(box),
-           &element](const gsl::not_null<device_dt_type*> device_dt) {
-            apply_boundary_corrections_on_device(
-                device_dt, device_vars, outgoing_boundary_data,
-                incoming_boundary_data, external_boundary_data,
-                device_face_to_volume_index_map, device_face_unit_normal_covector,
-                device_face_normal_magnitude, device_mortar_data, mortar_meshes,
-                mesh, element);
-          },
-          make_not_null(&box));
-    } catch (const std::exception& e) {
-      ERROR_NO_TRACE(
-          "ApplyBoundaryCorrectionsToTimeDerivativeKokkos action failed on "
-          "element "
-          << element.id() << " at " << time_step_id << ": " << e.what());
-    }
+    db::mutate<device_dt_variables_tag>(
+        [&device_vars = db::get<device_variables_tag>(box),
+         &outgoing_boundary_data =
+             db::get<gh::KokkosTags::OutgoingBoundaryCorrectionData<3>>(box),
+         &incoming_boundary_data =
+             db::get<gh::KokkosTags::IncomingBoundaryCorrectionData<3>>(box),
+         &external_boundary_data =
+             db::get<gh::KokkosTags::ExternalBoundaryCorrectionData<3>>(box),
+         &device_face_to_volume_index_map =
+             db::get<device_face_to_volume_index_map_tag>(box),
+         &device_face_unit_normal_covector =
+             db::get<device_face_unit_normal_covector_tag>(box),
+         &device_face_normal_magnitude =
+             db::get<device_face_normal_magnitude_tag>(box),
+         &device_mortar_data = db::get<device_mortar_data_tag>(box),
+         &mortar_meshes = db::get<mortar_mesh_tag>(box),
+         &mesh = db::get<domain::Tags::Mesh<3>>(box),
+         &element](const gsl::not_null<device_dt_type*> device_dt) {
+          apply_boundary_corrections_on_device(
+              device_dt, device_vars, outgoing_boundary_data,
+              incoming_boundary_data, external_boundary_data,
+              device_face_to_volume_index_map, device_face_unit_normal_covector,
+              device_face_normal_magnitude, device_mortar_data, mortar_meshes,
+              mesh, element);
+        },
+        make_not_null(&box));
 
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }
