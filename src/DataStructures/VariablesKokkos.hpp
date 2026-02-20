@@ -9,6 +9,7 @@
 #include "DataStructures/Tags/MirrorView.hpp"
 #include "DataStructures/Tensor/AtIndex.hpp"
 #include "DataStructures/Variables.hpp"
+#include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
 #include "Utilities/TMPL.hpp"
@@ -84,7 +85,8 @@ class Variables<tmpl::list<Tags...>, Kokkos::View<DataType, Properties...>> {
                 Kokkos::View<FriendDataType, FriendProperties...>>& v);
   template <typename Tag, typename... FriendTags, typename FriendDataType,
             typename... FriendProperties>
-  friend KOKKOS_INLINE_FUNCTION constexpr const typename Tag::type& get(  // NOLINT
+  friend KOKKOS_INLINE_FUNCTION constexpr const typename Tag::type&
+  get(  // NOLINT
       const Variables<tmpl::list<FriendTags...>,
                       Kokkos::View<FriendDataType, FriendProperties...>>& v);
 
@@ -152,8 +154,8 @@ KOKKOS_INLINE_FUNCTION constexpr typename Tag::type& get(
 template <typename Tag, typename... Tags, typename DataType,
           typename... Properties>
 KOKKOS_INLINE_FUNCTION constexpr const typename Tag::type& get(
-    const Variables<tmpl::list<Tags...>,
-                    Kokkos::View<DataType, Properties...>>& v) {
+    const Variables<tmpl::list<Tags...>, Kokkos::View<DataType, Properties...>>&
+        v) {
   static_assert(tmpl::list_contains_v<tmpl::list<Tags...>, Tag>,
                 "Could not retrieve Tag from Variables. See the first "
                 "template parameter of the instantiation for what Tag is "
@@ -176,9 +178,21 @@ auto copy_to_device(const Variables<tmpl::list<Tags...>>& vars) {
   Variables<tmpl::list<::Tags::MirrorView<Tags>...>> vars_on_device{
       vars.number_of_grid_points()};
   if constexpr (sizeof...(Tags) > 0) {
-    // First copy to a Kokkos::View on the host
+    const auto num_points = vars.number_of_grid_points();
+    const auto num_components = vars_on_device.view().extent(1);
+    ASSERT(vars.size() == num_points * num_components,
+           "Host Variables size mismatch in copy_to_device: size="
+               << vars.size() << " points=" << num_points
+               << " components=" << num_components);
+
     auto vars_on_host = vars_on_device.create_mirror_view(Kokkos::HostSpace{});
-    std::copy_n(vars.data(), vars.size(), vars_on_host.view().data());
+    auto host_view = vars_on_host.view();
+    const auto* const host_data = vars.data();
+    for (size_t component = 0; component < num_components; ++component) {
+      for (size_t point = 0; point < num_points; ++point) {
+        host_view(point, component) = host_data[component * num_points + point];
+      }
+    }
     // Then copy to device
     Kokkos::deep_copy(vars_on_device.view(), vars_on_host.view());
   }
@@ -218,9 +232,25 @@ template <typename HostTags, typename DeviceTags>
 void copy_to_host(const gsl::not_null<Variables<HostTags>*> vars,
                   const Variables<DeviceTags>& vars_on_device) {
   if constexpr (tmpl::size<DeviceTags>::value > 0) {
+    const auto num_points = vars_on_device.number_of_grid_points();
+    const auto num_components = vars_on_device.view().extent(1);
+    ASSERT(vars->number_of_grid_points() == num_points,
+           "Host/device point count mismatch in copy_to_host: host="
+               << vars->number_of_grid_points() << " device=" << num_points);
+    ASSERT(vars->size() == num_points * num_components,
+           "Host Variables size mismatch in copy_to_host: host size="
+               << vars->size() << " points=" << num_points
+               << " components=" << num_components);
+
     auto vars_on_host =
         vars_on_device.create_mirror_view_and_copy(Kokkos::HostSpace{});
-    std::copy_n(vars_on_host.view().data(), vars->size(), vars->data());
+    const auto host_view = vars_on_host.view();
+    auto* const host_data = vars->data();
+    for (size_t component = 0; component < num_components; ++component) {
+      for (size_t point = 0; point < num_points; ++point) {
+        host_data[component * num_points + point] = host_view(point, component);
+      }
+    }
   }
 }
 
@@ -228,14 +258,16 @@ template <typename... Tags, typename DataType, typename... Properties>
 void Variables<tmpl::list<Tags...>, Kokkos::View<DataType, Properties...>>::pup(
     PUP::er& p) {  // NOLINT
   (void)p;
-  ERROR("PUP for Variables<..., Kokkos::View<...>> is currently unsupported. "
-        "This executable currently assumes no migration/checkpointing with "
-        "device-resident DataBox items.");
+  ERROR(
+      "PUP for Variables<..., Kokkos::View<...>> is currently unsupported. "
+      "This executable currently assumes no migration/checkpointing with "
+      "device-resident DataBox items.");
 }
 
 namespace PUP {
 template <typename DataType, typename... Properties>
-void operator|(PUP::er& p, Kokkos::View<DataType, Properties...>& view) {  // NOLINT
+void operator|(PUP::er& p,
+               Kokkos::View<DataType, Properties...>& view) {  // NOLINT
   (void)p;
   (void)view;
   ERROR("PUP for Kokkos::View is currently unsupported in this build.");
