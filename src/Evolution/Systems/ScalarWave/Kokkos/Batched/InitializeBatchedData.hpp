@@ -27,6 +27,7 @@
 #include "NumericalAlgorithms/Spectral/LogicalCoordinates.hpp"
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "PointwiseFunctions/InitialDataUtilities/Tags/InitialData.hpp"
+#include "Time/History.hpp"
 #include "Time/Tags/Time.hpp"
 #include "Utilities/CallWithDynamicType.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
@@ -42,13 +43,18 @@ struct InitializeBatchedData {
  private:
   static constexpr size_t volume_dim = 3;
   using system = ScalarWave::System<volume_dim>;
-  using variables_tag = typename system::variables_tag;
-  using host_variables_type = typename variables_tag::type;
-  using host_dt_tag = db::add_tag_prefix<::Tags::dt, variables_tag>;
+  using host_variables_type = typename system::variables_tag::type;
+  using host_dt_tag =
+      db::add_tag_prefix<::Tags::dt, typename system::variables_tag>;
   using host_dt_variables_type = typename host_dt_tag::type;
+  using packed_evolution_state_type =
+      ScalarWave::Batched::Tags::PackedEvolutionState::type;
 
  public:
-  using return_tags = tmpl::list<ScalarWave::Batched::Tags::DeviceData>;
+  using return_tags =
+      tmpl::list<ScalarWave::Batched::Tags::PackedTopology,
+                 ScalarWave::Batched::Tags::PackedGeometry,
+                 ScalarWave::Batched::Tags::PackedEvolutionState>;
   using argument_tags =
       tmpl::list<::domain::Tags::Domain<volume_dim>,
                  evolution::initial_data::Tags::InitialData,
@@ -60,22 +66,71 @@ struct InitializeBatchedData {
                  evolution::initial_data::Tags::InitialData>;
 
   static void apply(
-      const gsl::not_null<ScalarWave::Batched::Tags::DeviceData::type*>
-          device_data,
+      const gsl::not_null<ScalarWave::Batched::Tags::PackedTopology::type*>
+          packed_topology,
+      const gsl::not_null<ScalarWave::Batched::Tags::PackedGeometry::type*>
+          packed_geometry,
+      const gsl::not_null<
+          ScalarWave::Batched::Tags::PackedEvolutionState::type*>
+          packed_evolution_state,
       const Domain<volume_dim>& domain,
       const evolution::initial_data::InitialData& initial_data,
       const std::vector<std::array<size_t, volume_dim>>&
           initial_refinement_levels,
       const std::vector<std::array<size_t, volume_dim>>& initial_extents,
       const Spectral::Quadrature& quadrature, const double initial_time) {
-    host_variables_type host_vars{device_data->total_points()};
-    host_dt_variables_type host_dt_vars{device_data->total_points()};
+    using device_variables_type =
+        typename packed_evolution_state_type::device_variables_type;
+    using device_dt_variables_type =
+        typename packed_evolution_state_type::device_dt_variables_type;
+    using device_step_start_type =
+        typename packed_evolution_state_type::device_step_start_type;
+    using device_derivative_history_type =
+        typename packed_evolution_state_type::device_derivative_history_type;
+    using device_constraint_gamma2_type =
+        typename packed_evolution_state_type::device_constraint_gamma2_type;
+
+    packed_evolution_state->device_variables =
+        device_variables_type(packed_topology->total_points);
+    packed_evolution_state->device_dt_variables =
+        device_dt_variables_type(packed_topology->total_points);
+    packed_evolution_state->device_step_start =
+        device_step_start_type(packed_topology->total_points);
+    packed_evolution_state->device_constraint_gamma2 =
+        device_constraint_gamma2_type("BatchedConstraintGamma2",
+                                      packed_topology->total_points);
+    packed_evolution_state->device_derivative_history =
+        device_derivative_history_type(
+            "BatchedDerivativeHistory", TimeSteppers::history_max_substeps,
+            packed_topology->total_points,
+            device_dt_variables_type::number_of_independent_components);
+    packed_geometry->element_inverse_jacobian_device =
+        ::Kokkos::View<double***>("BatchedElementInverseJacobian",
+                                  packed_topology->local_element_ids.size(),
+                                  packed_topology->points_per_element, 9);
+
+    if (packed_topology->total_points > 0) {
+      ::Kokkos::deep_copy(packed_evolution_state->device_variables.view(), 0.0);
+      ::Kokkos::deep_copy(packed_evolution_state->device_dt_variables.view(),
+                          0.0);
+      ::Kokkos::deep_copy(packed_evolution_state->device_step_start.view(),
+                          0.0);
+      ::Kokkos::deep_copy(get(packed_evolution_state->device_constraint_gamma2),
+                          0.0);
+      ::Kokkos::deep_copy(packed_evolution_state->device_derivative_history,
+                          0.0);
+      ::Kokkos::deep_copy(packed_geometry->element_inverse_jacobian_device,
+                          0.0);
+    }
+
+    host_variables_type host_vars{packed_topology->total_points};
+    host_dt_variables_type host_dt_vars{packed_topology->total_points};
     std::array<DataVector, volume_dim> host_inertial_coordinates{
-        {DataVector{device_data->total_points()},
-         DataVector{device_data->total_points()},
-         DataVector{device_data->total_points()}}};
+        {DataVector{packed_topology->total_points},
+         DataVector{packed_topology->total_points},
+         DataVector{packed_topology->total_points}}};
     auto host_inverse_jacobian = ::Kokkos::create_mirror_view(
-        device_data->element_inverse_jacobian_device());
+        packed_geometry->element_inverse_jacobian_device);
     if (host_dt_vars.size() > 0) {
       std::fill(host_dt_vars.data(), host_dt_vars.data() + host_dt_vars.size(),
                 0.0);
@@ -93,13 +148,13 @@ struct InitializeBatchedData {
          initial_time, &host_vars, &host_inverse_jacobian, &uniform_basis,
          &uniform_quadrature, &have_uniform_mesh_metadata,
          &host_inertial_coordinates,
-         total_points = device_data->total_points(),
-         &element_ids = device_data->local_element_ids(),
-         &device_data](const auto* const data_or_solution) {
+         &packed_topology](const auto* const data_or_solution) {
           using initial_data_subclass =
               std::decay_t<decltype(*data_or_solution)>;
           if constexpr (is_analytic_data_v<initial_data_subclass> or
                         is_analytic_solution_v<initial_data_subclass>) {
+            const size_t total_points = packed_topology->total_points;
+            const auto& element_ids = packed_topology->local_element_ids;
             for (size_t e = 0; e < element_ids.size(); ++e) {
               const auto& element_id = element_ids[e];
               const auto& block = domain.blocks()[element_id.block_id()];
@@ -146,15 +201,21 @@ struct InitializeBatchedData {
                       *data_or_solution, inertial_coords, initial_time,
                       typename host_variables_type::tags_list{}));
 
-              const auto [point_begin, point_end] =
-                  device_data->element_point_range(e);
+              ASSERT(e + 1 < packed_topology->element_point_offsets_host.size(),
+                     "Element point-offset metadata out of range for packed "
+                     "element "
+                         << e << ".");
+              const size_t point_begin =
+                  packed_topology->element_point_offsets_host[e];
+              const size_t point_end =
+                  packed_topology->element_point_offsets_host[e + 1];
               const size_t element_points = point_end - point_begin;
               ASSERT(element_points == mesh.number_of_grid_points(),
                      "Packed element point range mismatch for "
                          << element_id << ": packed points=" << element_points
                          << " mesh points=" << mesh.number_of_grid_points()
                          << ".");
-              ASSERT(element_points == device_data->points_per_element(),
+              ASSERT(element_points == packed_topology->points_per_element,
                      "EvolveScalarWaveKokkosBatched currently requires "
                      "uniform points per element.");
 
@@ -194,17 +255,23 @@ struct InitializeBatchedData {
 
     ASSERT(have_uniform_mesh_metadata,
            "Failed to gather uniform mesh metadata for packed elements.");
-    device_data->set_uniform_mesh_metadata(device_data->uniform_extents_host(),
-                                           uniform_basis, uniform_quadrature);
-    device_data->set_inertial_coordinates_host(
-        std::move(host_inertial_coordinates));
-    device_data->device_variables() = copy_to_device(host_vars);
-    device_data->device_step_start() = copy_to_device(host_vars);
-    device_data->device_dt_variables() = copy_to_device(host_dt_vars);
-    ::Kokkos::deep_copy(device_data->element_inverse_jacobian_device(),
+    ASSERT(packed_topology->uniform_extents_host[0] > 0 and
+               packed_topology->uniform_extents_host[1] > 0 and
+               packed_topology->uniform_extents_host[2] > 0,
+           "Cannot initialize batched data with empty uniform extents.");
+    packed_topology->uniform_basis_host = uniform_basis;
+    packed_topology->uniform_quadrature_host = uniform_quadrature;
+
+    packed_geometry->inertial_coordinates_host =
+        std::move(host_inertial_coordinates);
+    packed_evolution_state->device_variables = copy_to_device(host_vars);
+    packed_evolution_state->device_step_start = copy_to_device(host_vars);
+    packed_evolution_state->device_dt_variables = copy_to_device(host_dt_vars);
+    ::Kokkos::deep_copy(packed_geometry->element_inverse_jacobian_device,
                         host_inverse_jacobian);
-    if (device_data->total_points() > 0) {
-      ::Kokkos::deep_copy(device_data->device_derivative_history(), 0.0);
+    if (packed_topology->total_points > 0) {
+      ::Kokkos::deep_copy(packed_evolution_state->device_derivative_history,
+                          0.0);
     }
   }
 };
