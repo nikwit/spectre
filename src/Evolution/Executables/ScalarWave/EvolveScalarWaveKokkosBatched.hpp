@@ -12,6 +12,9 @@
 #include "Evolution/Actions/RunEventsAndTriggers.hpp"
 #include "Evolution/Executables/ScalarWave/Batched/Actions.hpp"
 #include "Evolution/Initialization/Evolution.hpp"
+#include "Evolution/Kokkos/CleanHistory.hpp"
+#include "Evolution/Kokkos/RecordTimeStepperData.hpp"
+#include "Evolution/Kokkos/UpdateU.hpp"
 #include "Evolution/Systems/ScalarWave/BoundaryConditions/Factory.hpp"
 #include "Evolution/Systems/ScalarWave/Kokkos/Batched/ObserveTimeStepBatchedEvent.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
@@ -96,11 +99,12 @@ struct ScalarWaveKokkosBatchedDriver {
                   ScalarWave::Batched::Actions::
                       ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched>,
               Actions::MutateApply<
-                  ScalarWave::Batched::Actions::RecordTimeStepperDataBatched>,
-              Actions::MutateApply<
-                  ScalarWave::Batched::Actions::UpdateUBatched>,
-              Actions::MutateApply<
-                  ScalarWave::Batched::Actions::CleanHistoryBatched>,
+                  evolution::Actions::Kokkos::RecordTimeStepperData<
+                      typename Metavariables::system>>,
+              Actions::MutateApply<evolution::Actions::Kokkos::UpdateU<
+                  typename Metavariables::system>>,
+              Actions::MutateApply<evolution::Actions::Kokkos::CleanHistory<
+                  typename Metavariables::system>>,
               Actions::AdvanceTime>>>;
 
   using simple_tags_from_options = Parallel::get_simple_tags_from_options<

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Evolution/Systems/ScalarWave/Kokkos/Batched/Actions.hpp"
+#include "Evolution/Systems/ScalarWave/System.hpp"
 
 namespace ScalarWave::Batched::Actions {
 
@@ -21,9 +22,5 @@ using LiftInternalBoundaryTermsBatched =
     ScalarWave::Actions::LiftInternalBoundaryTermsBatched;
 using ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched = ScalarWave::
     Actions::ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched;
-using RecordTimeStepperDataBatched =
-    ScalarWave::Actions::RecordTimeStepperDataBatched;
-using UpdateUBatched = ScalarWave::Actions::UpdateUBatched;
-using CleanHistoryBatched = ScalarWave::Actions::CleanHistoryBatched;
 
 }  // namespace ScalarWave::Batched::Actions

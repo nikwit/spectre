@@ -8,6 +8,9 @@ add_spectre_library(${LIBRARY})
 spectre_target_sources(
   ${LIBRARY}
   PRIVATE
+  Kokkos/CleanHistory.cpp
+  Kokkos/RecordTimeStepperData.cpp
+  Kokkos/UpdateU.cpp
   TagsDomain.cpp
   )
 
@@ -18,7 +21,14 @@ spectre_target_headers(
   BoundaryCorrectionTags.hpp
   ComputeTags.hpp
   Evolution.hpp
+  Kokkos/CleanHistory.hpp
+  Kokkos/KokkosTimeStepperTags.hpp
+  Kokkos/PackedDataBundles.hpp
+  Kokkos/PackedTags.hpp
+  Kokkos/RecordTimeStepperData.hpp
+  Kokkos/SystemTraits.hpp
   Kokkos/SyncKokkosToHost.hpp
+  Kokkos/UpdateU.hpp
   NumericInitialData.hpp
   PassVariables.hpp
   Protocols.hpp
