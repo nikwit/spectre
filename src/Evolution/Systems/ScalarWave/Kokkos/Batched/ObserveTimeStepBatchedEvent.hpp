@@ -88,21 +88,27 @@ class ObserveNormsBatched : public Event {
   ObserveNormsBatched() = default;
   ObserveNormsBatched(const std::string& subfile_name,
                       const std::vector<ObserveTensor>& tensors_to_observe)
-      : subfile_path_("/" + subfile_name), tensors_to_observe_(tensors_to_observe) {}
+      : subfile_path_("/" + subfile_name),
+        tensors_to_observe_(tensors_to_observe) {}
 
   using compute_tags_for_observation_box = tmpl::list<>;
   using return_tags = tmpl::list<>;
-  using argument_tags = tmpl::list<ScalarWave::Batched::Tags::DeviceData>;
+  using argument_tags =
+      tmpl::list<ScalarWave::Batched::Tags::PackedTopology,
+                 ScalarWave::Batched::Tags::PackedEvolutionState>;
 
   template <typename ArrayIndex, typename ParallelComponent,
             typename Metavariables>
-  void operator()(const ScalarWave::Batched::DeviceData& device_data,
-                  Parallel::GlobalCache<Metavariables>& cache,
-                  const ArrayIndex& /*array_index*/,
-                  const ParallelComponent* const /*meta*/,
-                  const ObservationValue& observation_value) const {
-    host_variables_type host_vars{device_data.total_points()};
-    copy_to_host(make_not_null(&host_vars), device_data.device_variables());
+  void operator()(
+      const ScalarWave::Batched::PackedTopology& packed_topology,
+      const ScalarWave::Batched::PackedEvolutionState& packed_evolution_state,
+      Parallel::GlobalCache<Metavariables>& cache,
+      const ArrayIndex& /*array_index*/,
+      const ParallelComponent* const /*meta*/,
+      const ObservationValue& observation_value) const {
+    host_variables_type host_vars{packed_topology.total_points};
+    copy_to_host(make_not_null(&host_vars),
+                 packed_evolution_state.device_variables);
     const auto& psi = get(get<ScalarWave::Tags::Psi>(host_vars));
     const auto& pi = get(get<ScalarWave::Tags::Pi>(host_vars));
 
@@ -188,19 +194,20 @@ class ObserveNormsBatched : public Event {
             const double l2_phi =
                 phi.get(0).size() == 0
                     ? 0.0
-                    : std::sqrt(sum_sq / static_cast<double>(phi.get(0).size()));
+                    : std::sqrt(sum_sq /
+                                static_cast<double>(phi.get(0).size()));
             legend.push_back("Phi_" + norm_type);
             values.push_back(l2_phi);
           } else if (norm_type == "Max") {
             legend.push_back("Phi_" + norm_type);
-            values.push_back(
-                std::max({max_abs(phi.get(0)), max_abs(phi.get(1)),
-                          max_abs(phi.get(2))}));
+            values.push_back(std::max({max_abs(phi.get(0)), max_abs(phi.get(1)),
+                                       max_abs(phi.get(2))}));
           } else if (norm_type == "Min") {
             double min_phi = std::numeric_limits<double>::infinity();
             for (size_t s = 0; s < phi.get(0).size(); ++s) {
-              min_phi =
-                  std::min(min_phi, std::min({phi.get(0)[s], phi.get(1)[s], phi.get(2)[s]}));
+              min_phi = std::min(
+                  min_phi,
+                  std::min({phi.get(0)[s], phi.get(1)[s], phi.get(2)[s]}));
             }
             if (phi.get(0).size() == 0) {
               min_phi = 0.0;
@@ -214,14 +221,15 @@ class ObserveNormsBatched : public Event {
           ERROR("ObserveNormsBatched components must be Individual or Sum.");
         }
       } else {
-        ERROR("ObserveNormsBatched tensor '" << name
-                                             << "' is unsupported. Use Psi, Pi, Phi.");
+        ERROR("ObserveNormsBatched tensor '"
+              << name << "' is unsupported. Use Psi, Pi, Phi.");
       }
     }
 
     auto& reduction_writer = Parallel::get_parallel_component<
         observers::ObserverWriter<Metavariables>>(cache);
-    Parallel::threaded_action<observers::ThreadedActions::WriteReductionDataRow>(
+    Parallel::threaded_action<
+        observers::ThreadedActions::WriteReductionDataRow>(
         reduction_writer[0], subfile_path_, std::move(legend),
         std::make_tuple(std::move(values)));
   }

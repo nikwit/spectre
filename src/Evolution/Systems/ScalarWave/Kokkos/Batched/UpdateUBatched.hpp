@@ -16,20 +16,22 @@
 namespace ScalarWave::Actions {
 
 struct UpdateUBatched {
-  using return_tags = tmpl::list<ScalarWave::Batched::Tags::DeviceData>;
+  using return_tags =
+      tmpl::list<ScalarWave::Batched::Tags::PackedEvolutionState>;
   using argument_tags = tmpl::list<::Tags::TimeStepper<TimeStepper>,
                                    ::Tags::TimeStepId, ::Tags::TimeStep>;
 
-  static void apply(
-      const gsl::not_null<ScalarWave::Batched::Tags::DeviceData::type*>
-          device_data,
-      const TimeStepper& time_stepper, const TimeStepId& time_step_id,
-      const TimeDelta& time_step) {
-    auto& device_vars = device_data->device_variables();
+  static void apply(const gsl::not_null<
+                        ScalarWave::Batched::Tags::PackedEvolutionState::type*>
+                        packed_evolution_state,
+                    const TimeStepper& time_stepper,
+                    const TimeStepId& time_step_id,
+                    const TimeDelta& time_step) {
+    auto& device_vars = packed_evolution_state->device_variables;
     ScalarWave::Actions::UpdateUKokkos3D::apply(
         make_not_null(&device_vars), time_stepper, time_step_id, time_step,
-        device_data->device_step_start(),
-        device_data->device_derivative_history());
+        packed_evolution_state->device_step_start,
+        packed_evolution_state->device_derivative_history);
   }
 };
 

@@ -15,16 +15,18 @@
 namespace ScalarWave::Actions {
 
 struct CleanHistoryBatched {
-  using return_tags = tmpl::list<ScalarWave::Batched::Tags::DeviceData>;
+  using return_tags =
+      tmpl::list<ScalarWave::Batched::Tags::PackedEvolutionState>;
   using argument_tags =
       tmpl::list<::Tags::TimeStepper<TimeStepper>, ::Tags::TimeStepId>;
 
-  static void apply(
-      const gsl::not_null<ScalarWave::Batched::Tags::DeviceData::type*>
-          device_data,
-      const TimeStepper& time_stepper, const TimeStepId& time_step_id) {
-    auto& device_step_start = device_data->device_step_start();
-    auto& device_vars = device_data->device_variables();
+  static void apply(const gsl::not_null<
+                        ScalarWave::Batched::Tags::PackedEvolutionState::type*>
+                        packed_evolution_state,
+                    const TimeStepper& time_stepper,
+                    const TimeStepId& time_step_id) {
+    auto& device_step_start = packed_evolution_state->device_step_start;
+    auto& device_vars = packed_evolution_state->device_variables;
     ScalarWave::Actions::CleanHistoryKokkos<ScalarWave::System<3>>::apply(
         make_not_null(&device_step_start), make_not_null(&device_vars),
         time_stepper, time_step_id);

@@ -12,17 +12,18 @@
 namespace ScalarWave::Actions {
 
 struct RecordTimeStepperDataBatched {
-  using return_tags = tmpl::list<ScalarWave::Batched::Tags::DeviceData>;
+  using return_tags =
+      tmpl::list<ScalarWave::Batched::Tags::PackedEvolutionState>;
   using argument_tags = tmpl::list<::Tags::TimeStepId>;
 
-  static void apply(
-      const gsl::not_null<ScalarWave::Batched::Tags::DeviceData::type*>
-          device_data,
-      const TimeStepId& time_step_id) {
-    auto& deriv_history = device_data->device_derivative_history();
+  static void apply(const gsl::not_null<
+                        ScalarWave::Batched::Tags::PackedEvolutionState::type*>
+                        packed_evolution_state,
+                    const TimeStepId& time_step_id) {
+    auto& deriv_history = packed_evolution_state->device_derivative_history;
     ScalarWave::Actions::RecordTimeStepperDataKokkos3D::apply(
         make_not_null(&deriv_history), time_step_id,
-        device_data->device_dt_variables());
+        packed_evolution_state->device_dt_variables);
   }
 };
 
