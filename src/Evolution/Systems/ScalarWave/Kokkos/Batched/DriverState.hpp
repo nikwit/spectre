@@ -16,7 +16,7 @@
 #include "Domain/Domain.hpp"
 #include "Domain/Structure/InitialElementIds.hpp"
 #include "Evolution/DiscontinuousGalerkin/Initialization/QuadratureTag.hpp"
-#include "Evolution/Executables/ScalarWave/Batched/Tags.hpp"
+#include "Evolution/Kokkos/PackedTags.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
@@ -25,6 +25,18 @@
 namespace ScalarWave::Batched::Initialization {
 
 struct DriverState {
+  using packed_system = ScalarWave::System<3>;
+  using packed_topology_tag =
+      evolution::Kokkos::Tags::PackedTopology<packed_system>;
+  using packed_geometry_tag =
+      evolution::Kokkos::Tags::PackedGeometry<packed_system>;
+  using packed_boundary_metadata_tag =
+      evolution::Kokkos::Tags::PackedBoundaryMetadata<packed_system>;
+  using packed_evolution_state_tag =
+      evolution::Kokkos::Tags::PackedEvolutionState<packed_system>;
+  using packed_boundary_scratch_tag =
+      evolution::Kokkos::Tags::PackedBoundaryScratch<packed_system>;
+
   using const_global_cache_tags = tmpl::list<::domain::Tags::Domain<3>>;
   using mutable_global_cache_tags = tmpl::list<>;
   using simple_tags_from_options =
@@ -32,18 +44,18 @@ struct DriverState {
                  domain::Tags::InitialExtents<3>,
                  evolution::dg::Tags::Quadrature>;
   using simple_tags =
-      tmpl::list<Tags::PackedTopology, Tags::PackedGeometry,
-                 Tags::PackedBoundaryMetadata, Tags::PackedEvolutionState,
-                 Tags::PackedBoundaryScratch>;
+      tmpl::list<packed_topology_tag, packed_geometry_tag,
+                 packed_boundary_metadata_tag, packed_evolution_state_tag,
+                 packed_boundary_scratch_tag>;
   using compute_tags = tmpl::list<>;
 
-  using return_tags = tmpl::list<Tags::PackedTopology>;
+  using return_tags = tmpl::list<packed_topology_tag>;
   using argument_tags = tmpl::list<
       ::domain::Tags::Domain<3>, ::domain::Tags::InitialRefinementLevels<3>,
       ::domain::Tags::InitialExtents<3>, evolution::dg::Tags::Quadrature>;
 
   static void apply(
-      const gsl::not_null<typename Tags::PackedTopology::type*> packed_topology,
+      const gsl::not_null<typename packed_topology_tag::type*> packed_topology,
       const ::Domain<3>& domain,
       const std::vector<std::array<size_t, 3>>& initial_refinement_levels,
       const std::vector<std::array<size_t, 3>>& initial_extents,

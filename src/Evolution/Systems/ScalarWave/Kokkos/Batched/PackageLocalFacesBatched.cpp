@@ -24,12 +24,12 @@ namespace ScalarWave::Actions {
 namespace {
 
 static constexpr size_t volume_dim = 3;
-using package_field_tags =
-    ScalarWave::Batched::PackedBoundaryScratch::package_field_tags;
+using package_field_tags = evolution::Kokkos::PackedBoundaryScratch<
+    ScalarWave::System<3>>::package_field_tags;
 template <size_t I>
 using package_field_tag = tmpl::at<package_field_tags, tmpl::size_t<I>>;
-using device_package_field_tags =
-    ScalarWave::Batched::PackedBoundaryScratch::device_package_field_tags;
+using device_package_field_tags = evolution::Kokkos::PackedBoundaryScratch<
+    ScalarWave::System<3>>::device_package_field_tags;
 
 double outward_sign(const Side side) {
   return side == Side::Upper ? 1.0 : -1.0;
@@ -43,12 +43,15 @@ constexpr size_t local_face_index(const size_t sliced_dim,
 }  // namespace
 
 void PackageLocalFacesBatched::apply(
-    const gsl::not_null<ScalarWave::Batched::Tags::PackedBoundaryScratch::type*>
+    const gsl::not_null<evolution::Kokkos::Tags::PackedBoundaryScratch<
+        ScalarWave::System<3>>::type*>
         packed_boundary_scratch,
-    const ScalarWave::Batched::Tags::PackedTopology::type& packed_topology,
-    const ScalarWave::Batched::Tags::PackedGeometry::type& packed_geometry,
-    const ScalarWave::Batched::Tags::PackedEvolutionState::type&
-        packed_evolution_state) {
+    const evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>::type&
+        packed_topology,
+    const evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>::type&
+        packed_geometry,
+    const evolution::Kokkos::Tags::PackedEvolutionState<
+        ScalarWave::System<3>>::type& packed_evolution_state) {
   if (packed_topology.total_points == 0) {
     return;
   }

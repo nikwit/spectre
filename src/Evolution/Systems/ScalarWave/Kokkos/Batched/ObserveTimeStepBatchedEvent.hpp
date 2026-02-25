@@ -14,7 +14,7 @@
 #include <pup.h>
 
 #include "DataStructures/VariablesKokkos.hpp"
-#include "Evolution/Executables/ScalarWave/Batched/Tags.hpp"
+#include "Evolution/Kokkos/PackedTags.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
 #include "Evolution/Systems/ScalarWave/Tags.hpp"
 #include "IO/Observer/ObserverComponent.hpp"
@@ -93,15 +93,17 @@ class ObserveNormsBatched : public Event {
 
   using compute_tags_for_observation_box = tmpl::list<>;
   using return_tags = tmpl::list<>;
-  using argument_tags =
-      tmpl::list<ScalarWave::Batched::Tags::PackedTopology,
-                 ScalarWave::Batched::Tags::PackedEvolutionState>;
+  using argument_tags = tmpl::list<
+      evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>,
+      evolution::Kokkos::Tags::PackedEvolutionState<ScalarWave::System<3>>>;
 
   template <typename ArrayIndex, typename ParallelComponent,
             typename Metavariables>
   void operator()(
-      const ScalarWave::Batched::PackedTopology& packed_topology,
-      const ScalarWave::Batched::PackedEvolutionState& packed_evolution_state,
+      const evolution::Kokkos::PackedTopology<ScalarWave::System<3>>&
+          packed_topology,
+      const evolution::Kokkos::PackedEvolutionState<ScalarWave::System<3>>&
+          packed_evolution_state,
       Parallel::GlobalCache<Metavariables>& cache,
       const ArrayIndex& /*array_index*/,
       const ParallelComponent* const /*meta*/,

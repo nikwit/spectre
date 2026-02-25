@@ -6,7 +6,7 @@
 #include <cstddef>
 
 #include "Domain/Creators/Tags/ExternalBoundaryConditions.hpp"
-#include "Evolution/Executables/ScalarWave/Batched/Tags.hpp"
+#include "Evolution/Kokkos/PackedTags.hpp"
 #include "Time/Tags/Time.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
@@ -15,19 +15,22 @@ namespace ScalarWave::Actions {
 
 struct ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched {
   static constexpr size_t volume_dim = 3;
-  using return_tags =
-      tmpl::list<ScalarWave::Batched::Tags::PackedEvolutionState>;
+  using return_tags = tmpl::list<
+      evolution::Kokkos::Tags::PackedEvolutionState<ScalarWave::System<3>>>;
   using argument_tags =
-      tmpl::list<ScalarWave::Batched::Tags::PackedTopology,
-                 ScalarWave::Batched::Tags::PackedGeometry, ::Tags::Time,
+      tmpl::list<evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>,
+                 evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>,
+                 ::Tags::Time,
                  domain::Tags::ExternalBoundaryConditions<volume_dim>>;
 
   static void apply(
-      const gsl::not_null<
-          ScalarWave::Batched::Tags::PackedEvolutionState::type*>
+      const gsl::not_null<evolution::Kokkos::Tags::PackedEvolutionState<
+          ScalarWave::System<3>>::type*>
           packed_evolution_state,
-      const ScalarWave::Batched::Tags::PackedTopology::type& packed_topology,
-      const ScalarWave::Batched::Tags::PackedGeometry::type& packed_geometry,
+      const evolution::Kokkos::Tags::PackedTopology<
+          ScalarWave::System<3>>::type& packed_topology,
+      const evolution::Kokkos::Tags::PackedGeometry<
+          ScalarWave::System<3>>::type& packed_geometry,
       const double time,
       const typename domain::Tags::ExternalBoundaryConditions<volume_dim>::type&
           external_boundary_conditions_by_block);

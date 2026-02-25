@@ -46,10 +46,13 @@ double outward_sign(const Side side) {
 }  // namespace
 
 void ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
-    const gsl::not_null<ScalarWave::Batched::Tags::PackedEvolutionState::type*>
+    const gsl::not_null<evolution::Kokkos::Tags::PackedEvolutionState<
+        ScalarWave::System<3>>::type*>
         packed_evolution_state,
-    const ScalarWave::Batched::Tags::PackedTopology::type& packed_topology,
-    const ScalarWave::Batched::Tags::PackedGeometry::type& packed_geometry,
+    const evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>::type&
+        packed_topology,
+    const evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>::type&
+        packed_geometry,
     const double time,
     const typename domain::Tags::ExternalBoundaryConditions<volume_dim>::type&
         external_boundary_conditions_by_block) {

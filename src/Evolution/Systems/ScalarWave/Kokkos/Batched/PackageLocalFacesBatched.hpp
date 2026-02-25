@@ -3,28 +3,30 @@
 
 #pragma once
 
-#include "Evolution/Executables/ScalarWave/Batched/Tags.hpp"
+#include "Evolution/Kokkos/PackedTags.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
 
 namespace ScalarWave::Actions {
 
 struct PackageLocalFacesBatched {
-  using return_tags =
-      tmpl::list<ScalarWave::Batched::Tags::PackedBoundaryScratch>;
-  using argument_tags =
-      tmpl::list<ScalarWave::Batched::Tags::PackedTopology,
-                 ScalarWave::Batched::Tags::PackedGeometry,
-                 ScalarWave::Batched::Tags::PackedEvolutionState>;
+  using return_tags = tmpl::list<
+      evolution::Kokkos::Tags::PackedBoundaryScratch<ScalarWave::System<3>>>;
+  using argument_tags = tmpl::list<
+      evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>,
+      evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>,
+      evolution::Kokkos::Tags::PackedEvolutionState<ScalarWave::System<3>>>;
 
   static void apply(
-      const gsl::not_null<
-          ScalarWave::Batched::Tags::PackedBoundaryScratch::type*>
+      const gsl::not_null<evolution::Kokkos::Tags::PackedBoundaryScratch<
+          ScalarWave::System<3>>::type*>
           packed_boundary_scratch,
-      const ScalarWave::Batched::Tags::PackedTopology::type& packed_topology,
-      const ScalarWave::Batched::Tags::PackedGeometry::type& packed_geometry,
-      const ScalarWave::Batched::Tags::PackedEvolutionState::type&
-          packed_evolution_state);
+      const evolution::Kokkos::Tags::PackedTopology<
+          ScalarWave::System<3>>::type& packed_topology,
+      const evolution::Kokkos::Tags::PackedGeometry<
+          ScalarWave::System<3>>::type& packed_geometry,
+      const evolution::Kokkos::Tags::PackedEvolutionState<
+          ScalarWave::System<3>>::type& packed_evolution_state);
 };
 
 }  // namespace ScalarWave::Actions

@@ -19,8 +19,8 @@
 #include "Domain/ElementMap.hpp"
 #include "Domain/Structure/CreateInitialMesh.hpp"
 #include "Evolution/DiscontinuousGalerkin/Initialization/QuadratureTag.hpp"
-#include "Evolution/Executables/ScalarWave/Batched/Tags.hpp"
 #include "Evolution/Initialization/InitialData.hpp"
+#include "Evolution/Kokkos/PackedTags.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
 #include "Evolution/TypeTraits.hpp"
 #include "NumericalAlgorithms/Spectral/Basis.hpp"
@@ -48,13 +48,14 @@ struct InitializeBatchedData {
       db::add_tag_prefix<::Tags::dt, typename system::variables_tag>;
   using host_dt_variables_type = typename host_dt_tag::type;
   using packed_evolution_state_type =
-      ScalarWave::Batched::Tags::PackedEvolutionState::type;
+      evolution::Kokkos::Tags::PackedEvolutionState<
+          ScalarWave::System<3>>::type;
 
  public:
-  using return_tags =
-      tmpl::list<ScalarWave::Batched::Tags::PackedTopology,
-                 ScalarWave::Batched::Tags::PackedGeometry,
-                 ScalarWave::Batched::Tags::PackedEvolutionState>;
+  using return_tags = tmpl::list<
+      evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>,
+      evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>,
+      evolution::Kokkos::Tags::PackedEvolutionState<ScalarWave::System<3>>>;
   using argument_tags =
       tmpl::list<::domain::Tags::Domain<volume_dim>,
                  evolution::initial_data::Tags::InitialData,
@@ -66,12 +67,14 @@ struct InitializeBatchedData {
                  evolution::initial_data::Tags::InitialData>;
 
   static void apply(
-      const gsl::not_null<ScalarWave::Batched::Tags::PackedTopology::type*>
-          packed_topology,
-      const gsl::not_null<ScalarWave::Batched::Tags::PackedGeometry::type*>
-          packed_geometry,
       const gsl::not_null<
-          ScalarWave::Batched::Tags::PackedEvolutionState::type*>
+          evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>::type*>
+          packed_topology,
+      const gsl::not_null<
+          evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>::type*>
+          packed_geometry,
+      const gsl::not_null<evolution::Kokkos::Tags::PackedEvolutionState<
+          ScalarWave::System<3>>::type*>
           packed_evolution_state,
       const Domain<volume_dim>& domain,
       const evolution::initial_data::InitialData& initial_data,
