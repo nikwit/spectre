@@ -641,9 +641,15 @@ void partial_derivatives(
 
 #ifdef SPECTRE_KOKKOS
   if constexpr (tt::is_a_v<Kokkos::View, DataType>) {
-    std::array<Kokkos::View<double*>, Dim * Dim> inverse_jacobian_data{};
+    std::array<const double*, Dim * Dim> inverse_jacobian_data{};
+    std::array<size_t, Dim * Dim> inverse_jacobian_strides{};
     for (size_t i = 0; i < Dim * Dim; ++i) {
-      gsl::at(inverse_jacobian_data, i) = gsl::at(inverse_jacobian.data(), i);
+      const auto& inverse_jacobian_component =
+          gsl::at(inverse_jacobian.data(), i);
+      gsl::at(inverse_jacobian_data, i) = inverse_jacobian_component.data();
+      std::array<size_t, 1> strides{};
+      inverse_jacobian_component.stride(strides.data());
+      gsl::at(inverse_jacobian_strides, i) = strides[0];
     }
     // Select only the differentiated components of the input data
     const auto u_subview = Kokkos::subview(
@@ -657,16 +663,16 @@ void partial_derivatives(
       partial_derivatives_detail::apply_matrix_in_dim<0, Dim, false>(
           du->view(), u_subview,
           Spectral::differentiation_matrix_on_device(mesh.slice_through(0)),
-          mesh, inverse_jacobian_data);
+          mesh, inverse_jacobian_data, inverse_jacobian_strides);
     } else if constexpr (Dim == 2) {
       partial_derivatives_detail::apply_matrix_in_dim<0, Dim, false>(
           du->view(), u_subview,
           Spectral::differentiation_matrix_on_device(mesh.slice_through(0)),
-          mesh, inverse_jacobian_data);
+          mesh, inverse_jacobian_data, inverse_jacobian_strides);
       partial_derivatives_detail::apply_matrix_in_dim<1, Dim, true>(
           du->view(), u_subview,
           Spectral::differentiation_matrix_on_device(mesh.slice_through(1)),
-          mesh, inverse_jacobian_data);
+          mesh, inverse_jacobian_data, inverse_jacobian_strides);
     } else if constexpr (Dim == 3) {
       if (mesh.basis(1) == Spectral::Basis::SphericalHarmonic) {
         ERROR(
@@ -676,15 +682,15 @@ void partial_derivatives(
       partial_derivatives_detail::apply_matrix_in_dim<0, Dim, false>(
           du->view(), u_subview,
           Spectral::differentiation_matrix_on_device(mesh.slice_through(0)),
-          mesh, inverse_jacobian_data);
+          mesh, inverse_jacobian_data, inverse_jacobian_strides);
       partial_derivatives_detail::apply_matrix_in_dim<1, Dim, true>(
           du->view(), u_subview,
           Spectral::differentiation_matrix_on_device(mesh.slice_through(1)),
-          mesh, inverse_jacobian_data);
+          mesh, inverse_jacobian_data, inverse_jacobian_strides);
       partial_derivatives_detail::apply_matrix_in_dim<2, Dim, true>(
           du->view(), u_subview,
           Spectral::differentiation_matrix_on_device(mesh.slice_through(2)),
-          mesh, inverse_jacobian_data);
+          mesh, inverse_jacobian_data, inverse_jacobian_strides);
     }
   } else {
 #endif  // SPECTRE_KOKKOS
@@ -718,6 +724,93 @@ void partial_derivatives(
   }
 #endif  // SPECTRE_KOKKOS
 }
+
+#ifdef SPECTRE_KOKKOS
+template <typename ResultTags, typename VariableTags, size_t Dim>
+void partial_derivatives_batched(
+    const gsl::not_null<Variables<ResultTags>*> du,
+    const Variables<VariableTags>& u, const Mesh<Dim>& mesh,
+    const Kokkos::View<double***>& inverse_jacobian) {
+  using DerivativeTags =
+      tmpl::front<tmpl::split_at<VariableTags, tmpl::size<ResultTags>>>;
+  using InputVectorType = typename Variables<VariableTags>::vector_type;
+  using ResultVectorType = typename Variables<ResultTags>::vector_type;
+  static_assert(tt::is_a_v<Kokkos::View, InputVectorType>,
+                "Kokkos batched derivatives require Kokkos-backed input data.");
+  static_assert(
+      tt::is_a_v<Kokkos::View, ResultVectorType>,
+      "Kokkos batched derivatives require Kokkos-backed output data.");
+
+  auto& partial_derivatives_of_u = *du;
+  const size_t total_num_points = u.number_of_grid_points();
+  if (UNLIKELY(partial_derivatives_of_u.number_of_grid_points() !=
+               total_num_points)) {
+    partial_derivatives_of_u.initialize(total_num_points);
+  }
+
+  const size_t points_per_element = mesh.number_of_grid_points();
+  ASSERT(points_per_element > 0, "Mesh must have at least one grid point.");
+  ASSERT(total_num_points % points_per_element == 0,
+         "Input has " << total_num_points
+                      << " points, not divisible by points-per-element "
+                      << points_per_element << ".");
+  const size_t num_elements = total_num_points / points_per_element;
+  ASSERT(inverse_jacobian.extent(0) == num_elements,
+         "Inverse Jacobian has " << inverse_jacobian.extent(0)
+                                 << " elements, expected " << num_elements
+                                 << ".");
+  ASSERT(inverse_jacobian.extent(1) == points_per_element,
+         "Inverse Jacobian has " << inverse_jacobian.extent(1)
+                                 << " points per element, expected "
+                                 << points_per_element << ".");
+  ASSERT(inverse_jacobian.extent(2) == Dim * Dim,
+         "Inverse Jacobian has " << inverse_jacobian.extent(2)
+                                 << " components, expected " << Dim * Dim
+                                 << ".");
+
+  // Select only the differentiated components of the input data.
+  const auto u_subview = Kokkos::subview(
+      u.view(), Kokkos::ALL(),
+      std::make_pair(
+          0_st, Variables<DerivativeTags>::number_of_independent_components));
+
+  // Sweep over logical derivatives and accumulate:
+  //   \partial_i u = J^\hat{j}_i \partial_\hat{j} u
+  if constexpr (Dim == 1) {
+    partial_derivatives_detail::apply_matrix_in_dim_batched<0, Dim, false>(
+        du->view(), u_subview,
+        Spectral::differentiation_matrix_on_device(mesh.slice_through(0)), mesh,
+        inverse_jacobian);
+  } else if constexpr (Dim == 2) {
+    partial_derivatives_detail::apply_matrix_in_dim_batched<0, Dim, false>(
+        du->view(), u_subview,
+        Spectral::differentiation_matrix_on_device(mesh.slice_through(0)), mesh,
+        inverse_jacobian);
+    partial_derivatives_detail::apply_matrix_in_dim_batched<1, Dim, true>(
+        du->view(), u_subview,
+        Spectral::differentiation_matrix_on_device(mesh.slice_through(1)), mesh,
+        inverse_jacobian);
+  } else if constexpr (Dim == 3) {
+    if (mesh.basis(1) == Spectral::Basis::SphericalHarmonic) {
+      ERROR(
+          "Spherical harmonic differentiation on GPUs is not yet "
+          "implemented.");
+    }
+    partial_derivatives_detail::apply_matrix_in_dim_batched<0, Dim, false>(
+        du->view(), u_subview,
+        Spectral::differentiation_matrix_on_device(mesh.slice_through(0)), mesh,
+        inverse_jacobian);
+    partial_derivatives_detail::apply_matrix_in_dim_batched<1, Dim, true>(
+        du->view(), u_subview,
+        Spectral::differentiation_matrix_on_device(mesh.slice_through(1)), mesh,
+        inverse_jacobian);
+    partial_derivatives_detail::apply_matrix_in_dim_batched<2, Dim, true>(
+        du->view(), u_subview,
+        Spectral::differentiation_matrix_on_device(mesh.slice_through(2)), mesh,
+        inverse_jacobian);
+  }
+}
+#endif  // SPECTRE_KOKKOS
 
 template <typename DerivativeTags, typename VariableTags, size_t Dim,
           typename DerivativeFrame, typename DataType>

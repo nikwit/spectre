@@ -87,8 +87,8 @@ void apply_matrix_in_dim(
     const Kokkos::View<double**>& input,  // [total_num_points, num_components]
     const MatrixViewRO& matrix,           // [num_points_this_dim^2]
     const Mesh<Dim>& mesh,
-    const std::array<Kokkos::View<double*>,  // [total_num_points]
-                     Dim * Dim>& inv_jacobian) {
+    const std::array<const double*, Dim * Dim>& inv_jacobian,
+    const std::array<size_t, Dim * Dim>& inv_jacobian_strides) {
   const size_t num_components = input.extent(1);
   const std::array<size_t, Dim> extents = mesh.extents().indices();
   const std::array<size_t, Dim - 1> extents_transverse =
@@ -127,9 +127,12 @@ void apply_matrix_in_dim(
       Tensor_detail::TensorIndexType<Dim, UpLo::Lo, Frame::NoFrame,
                                      IndexType::Spatial>>;
   std::array<const double*, Dim> inv_jac_components{};
+  std::array<size_t, Dim> inv_jac_component_strides{};
   for (size_t d = 0; d < Dim; ++d) {
-    gsl::at(inv_jac_components, d) =
-        inv_jacobian[JacobianStructure::get_storage_index(DerivDim, d)].data();
+    const size_t storage_index =
+        JacobianStructure::get_storage_index(DerivDim, d);
+    gsl::at(inv_jac_components, d) = inv_jacobian[storage_index];
+    gsl::at(inv_jac_component_strides, d) = inv_jacobian_strides[storage_index];
   }
 
   // Parallelization strategy on GPU hardware:
@@ -223,7 +226,9 @@ void apply_matrix_in_dim(
                   base_offset + static_cast<size_t>(j) * stride;
               input_stripe[j] = input(point_index, component_index);
               for (size_t d = 0; d < Dim; ++d) {
-                inv_jac_stripe(j, d) = inv_jac_components[d][point_index];
+                inv_jac_stripe(j, d) =
+                    inv_jac_components[d][point_index *
+                                          inv_jac_component_strides[d]];
               }
             });
 
@@ -257,12 +262,158 @@ void apply_matrix_in_dim(
             });
       });
 }
+
+template <size_t DerivDim, size_t Dim, bool AddToResult>
+void apply_matrix_in_dim_batched(
+    Kokkos::View<double**> result,        // [total_num_points, num_components]
+    const Kokkos::View<double**>& input,  // [total_num_points, num_components]
+    const MatrixViewRO& matrix,           // [num_points_this_dim^2]
+    const Mesh<Dim>& mesh,
+    const Kokkos::View<double***>&
+        inverse_jacobian) {  // [num_elements, points_per_element, Dim*Dim]
+  const size_t num_components = input.extent(1);
+  const std::array<size_t, Dim> extents = mesh.extents().indices();
+  const std::array<size_t, Dim - 1> extents_transverse =
+      all_but_specified_element_of(extents, DerivDim);
+  const size_t points_per_element = mesh.extents().product();
+  const size_t total_num_points = input.extent(0);
+  const size_t num_points_this_dim = extents[DerivDim];
+  const size_t num_points_transverse = points_per_element / num_points_this_dim;
+  ASSERT(points_per_element > 0, "Points per element must be positive.");
+  ASSERT(total_num_points == result.extent(0),
+         "Input and result point extents do not match.");
+  ASSERT(total_num_points % points_per_element == 0,
+         "Input has " << total_num_points
+                      << " points, not divisible by points-per-element "
+                      << points_per_element << ".");
+  const size_t num_elements = total_num_points / points_per_element;
+  ASSERT(inverse_jacobian.extent(0) == num_elements,
+         "Inverse Jacobian has " << inverse_jacobian.extent(0)
+                                 << " elements, expected " << num_elements
+                                 << ".");
+  ASSERT(inverse_jacobian.extent(1) == points_per_element,
+         "Inverse Jacobian has " << inverse_jacobian.extent(1)
+                                 << " points per element, expected "
+                                 << points_per_element << ".");
+  ASSERT(inverse_jacobian.extent(2) == Dim * Dim,
+         "Inverse Jacobian has " << inverse_jacobian.extent(2)
+                                 << " components, expected " << Dim * Dim
+                                 << ".");
+  ASSERT(matrix.extent(0) == matrix.extent(1), "Matrix must be square, but has "
+                                                   << matrix.extent(0) << "x"
+                                                   << matrix.extent(1));
+  ASSERT(matrix.extent(0) == num_points_this_dim,
+         "Matrix has " << matrix.extent(0) << " rows, but mesh has "
+                       << num_points_this_dim << " points in dim " << DerivDim
+                       << '.');
+
+  // Precompute strides for column-major flattening
+  std::array<size_t, Dim> strides;
+  {
+    size_t s = 1;
+    for (size_t d = 0; d < Dim; ++d) {
+      strides[d] = s;
+      s *= extents[d];
+    }
+  }
+
+  const size_t num_teams =
+      num_elements * num_components * num_points_transverse;
+  const size_t shmem_size = num_points_this_dim * (1 + Dim) * sizeof(double);
+  using TeamPolicy = Kokkos::TeamPolicy<>;
+  TeamPolicy team_policy(num_teams, Kokkos::AUTO);
+  team_policy = team_policy.set_scratch_size(0, Kokkos::PerTeam(shmem_size));
+
+  Kokkos::parallel_for(
+      "apply_matrix_in_dim_batched", team_policy,
+      KOKKOS_LAMBDA(const TeamPolicy::member_type& team_member) {
+        const size_t team_rank = team_member.league_rank();
+        const size_t teams_per_element = num_components * num_points_transverse;
+        const size_t element_index = team_rank / teams_per_element;
+        const size_t element_offset = element_index * points_per_element;
+        const size_t element_rank = team_rank % teams_per_element;
+        const size_t component_index = element_rank / num_points_transverse;
+        size_t remaining = element_rank % num_points_transverse;
+
+        // Decode stripe index in the transverse dims
+        std::array<size_t, Dim - 1> stripe_index{};
+        for (size_t t = 0; t < Dim - 1; ++t) {
+          stripe_index[t] = remaining % extents_transverse[t];
+          remaining /= extents_transverse[t];
+        }
+        // Map stripe to an offset and stride into the element-local data layout
+        size_t base_offset = 0;
+        {
+          size_t t = 0;
+          for (size_t d = 0; d < Dim; ++d) {
+            if (d == DerivDim) {
+              continue;
+            }
+            base_offset += stripe_index[t++] * strides[d];
+          }
+        }
+        const size_t stride = strides[DerivDim];
+
+        // Preload the input data for this component and stripe
+        double* shmem = (double*)team_member.team_shmem().get_shmem(shmem_size);
+        Kokkos::View<double*, Kokkos::MemoryUnmanaged> input_stripe(
+            shmem, num_points_this_dim);
+        Kokkos::View<double* [Dim], Kokkos::MemoryUnmanaged> inv_jac_stripe(
+            shmem + num_points_this_dim, num_points_this_dim);
+
+        Kokkos::parallel_for(
+            Kokkos::TeamThreadRange(team_member, num_points_this_dim),
+            [=](int j) {
+              const size_t local_point_index =
+                  base_offset + static_cast<size_t>(j) * stride;
+              const size_t point_index = element_offset + local_point_index;
+              input_stripe[j] = input(point_index, component_index);
+              for (size_t d = 0; d < Dim; ++d) {
+                // Packed inverse Jacobian ordering:
+                // [element, point, logical_dim * Dim + inertial_dim]
+                inv_jac_stripe(j, d) = inverse_jacobian(
+                    element_index, local_point_index, DerivDim * Dim + d);
+              }
+            });
+
+        team_member.team_barrier();
+
+        // Apply the differentiation matrix and the Jacobian
+        Kokkos::parallel_for(
+            Kokkos::TeamThreadRange(team_member, num_points_this_dim),
+            [=](int i) {
+              // Dense matrix-vector product along DerivDim
+              double sum = 0.0;
+              Kokkos::parallel_reduce(
+                  Kokkos::ThreadVectorRange(team_member, num_points_this_dim),
+                  [=](int j, double& local_sum) {
+                    local_sum += matrix(i, j) * input_stripe[j];
+                  },
+                  sum);
+              // Contract with Jacobian and write out to result
+              const size_t local_point_index =
+                  base_offset + static_cast<size_t>(i) * stride;
+              const size_t point_index = element_offset + local_point_index;
+              for (size_t d = 0; d < Dim; ++d) {
+                const double contracted = inv_jac_stripe(i, d) * sum;
+                const size_t deriv_component_index = component_index * Dim + d;
+                (void)result;  // capture `result` for `if constexpr`
+                if constexpr (AddToResult) {
+                  result(point_index, deriv_component_index) += contracted;
+                } else {
+                  result(point_index, deriv_component_index) = contracted;
+                }
+              }
+            });
+      });
+}
 // generate instantations
 #define INSTANTIATE_APPLY_MATRIX_IN_DIM(DerivDim, Dim, AddToResult)       \
   template void apply_matrix_in_dim<DerivDim, Dim, AddToResult>(          \
       Kokkos::View<double**> result, const Kokkos::View<double**>& input, \
       const MatrixViewRO& matrix, const Mesh<Dim>& mesh,                  \
-      const std::array<Kokkos::View<double*>, Dim * Dim>& inv_jacobian);
+      const std::array<const double*, Dim * Dim>& inv_jacobian,           \
+      const std::array<size_t, Dim * Dim>& inv_jacobian_strides);
 INSTANTIATE_APPLY_MATRIX_IN_DIM(0, 1, false)
 INSTANTIATE_APPLY_MATRIX_IN_DIM(0, 2, false)
 INSTANTIATE_APPLY_MATRIX_IN_DIM(0, 3, false)
@@ -270,6 +421,19 @@ INSTANTIATE_APPLY_MATRIX_IN_DIM(1, 2, true)
 INSTANTIATE_APPLY_MATRIX_IN_DIM(1, 3, true)
 INSTANTIATE_APPLY_MATRIX_IN_DIM(2, 3, true)
 #undef INSTANTIATE_APPLY_MATRIX_IN_DIM
+
+#define INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(DerivDim, Dim, AddToResult) \
+  template void apply_matrix_in_dim_batched<DerivDim, Dim, AddToResult>(    \
+      Kokkos::View<double**> result, const Kokkos::View<double**>& input,   \
+      const MatrixViewRO& matrix, const Mesh<Dim>& mesh,                    \
+      const Kokkos::View<double***>& inverse_jacobian);
+INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(0, 1, false)
+INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(0, 2, false)
+INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(0, 3, false)
+INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(1, 2, true)
+INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(1, 3, true)
+INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(2, 3, true)
+#undef INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED
 #endif  // SPECTRE_KOKKOS
 }  // namespace partial_derivatives_detail
 

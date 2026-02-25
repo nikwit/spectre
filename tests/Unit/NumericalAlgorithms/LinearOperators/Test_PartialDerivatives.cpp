@@ -625,6 +625,109 @@ void test_partial_derivatives_3d(const Mesh<3>& mesh) {
   }
 }
 
+#ifdef SPECTRE_KOKKOS
+void test_partial_derivatives_batched_matches_elementwise(
+    const Mesh<3>& mesh, const size_t num_elements) {
+  using host_variable_tags = two_vars<DataVector, 3>;
+  using device_variable_tags =
+      db::wrap_tags_in<::Tags::MirrorView, host_variable_tags>;
+  using host_derivative_tags =
+      db::wrap_tags_in<Tags::deriv, host_variable_tags, tmpl::size_t<3>,
+                       Frame::Inertial>;
+  using device_derivative_tags =
+      db::wrap_tags_in<::Tags::deriv, device_variable_tags, tmpl::size_t<3>,
+                       Frame::Inertial>;
+  using device_inverse_jacobian_data_type =
+      Kokkos::View<double*, Kokkos::LayoutStride,
+                   Kokkos::DefaultExecutionSpace::memory_space>;
+
+  const size_t points_per_element = mesh.number_of_grid_points();
+  const size_t total_points = num_elements * points_per_element;
+  Variables<host_variable_tags> host_u(total_points);
+  for (size_t component = 0;
+       component <
+       Variables<host_variable_tags>::number_of_independent_components;
+       ++component) {
+    for (size_t global_point = 0; global_point < total_points; ++global_point) {
+      const size_t element = global_point / points_per_element;
+      const size_t local_point = global_point % points_per_element;
+      host_u.data()[component * total_points + global_point] =
+          0.25 * static_cast<double>(component + 1) +
+          0.05 * static_cast<double>(element) +
+          0.005 * static_cast<double>(local_point + 1);
+    }
+  }
+  const auto u_device = copy_to_device(host_u);
+
+  Kokkos::View<double***> batched_inverse_jacobian(
+      "BatchedInverseJacobian", num_elements, points_per_element, 9);
+  auto host_inverse_jacobian =
+      Kokkos::create_mirror_view(batched_inverse_jacobian);
+  for (size_t element = 0; element < num_elements; ++element) {
+    for (size_t point = 0; point < points_per_element; ++point) {
+      for (size_t logical_d = 0; logical_d < 3; ++logical_d) {
+        for (size_t inertial_d = 0; inertial_d < 3; ++inertial_d) {
+          const double diagonal =
+              logical_d == inertial_d
+                  ? 1.0 + 0.01 * static_cast<double>(logical_d + 1) +
+                        0.001 * static_cast<double>(element + 1)
+                  : 0.0;
+          const double off_diagonal =
+              logical_d != inertial_d
+                  ? 1.0e-2 *
+                        static_cast<double>((logical_d + 1) *
+                                            (inertial_d + 1)) /
+                        static_cast<double>(element + 1)
+                  : 0.0;
+          host_inverse_jacobian(element, point, logical_d * 3 + inertial_d) =
+              diagonal + off_diagonal +
+              1.0e-5 * static_cast<double>((point % 7) + 1);
+        }
+      }
+    }
+  }
+  Kokkos::deep_copy(batched_inverse_jacobian, host_inverse_jacobian);
+
+  Variables<device_derivative_tags> du_batched(total_points);
+  Variables<device_derivative_tags> du_elementwise(total_points);
+  partial_derivatives_batched(make_not_null(&du_batched), u_device, mesh,
+                              batched_inverse_jacobian);
+
+  for (size_t element = 0; element < num_elements; ++element) {
+    const size_t point_begin = element * points_per_element;
+    const size_t point_end = point_begin + points_per_element;
+    const auto element_u_subview = Kokkos::subview(
+        u_device.view(), Kokkos::pair<size_t, size_t>{point_begin, point_end},
+        Kokkos::ALL());
+    const auto element_du_subview = Kokkos::subview(
+        du_elementwise.view(),
+        Kokkos::pair<size_t, size_t>{point_begin, point_end}, Kokkos::ALL());
+    Variables<device_variable_tags> element_u{element_u_subview};
+    Variables<device_derivative_tags> element_du{element_du_subview};
+    InverseJacobian<device_inverse_jacobian_data_type, 3, Frame::ElementLogical,
+                    Frame::Inertial>
+        element_inverse_jacobian{};
+    for (size_t logical_d = 0; logical_d < 3; ++logical_d) {
+      for (size_t inertial_d = 0; inertial_d < 3; ++inertial_d) {
+        element_inverse_jacobian.get(logical_d, inertial_d) =
+            Kokkos::subview(batched_inverse_jacobian, element, Kokkos::ALL(),
+                            logical_d * 3 + inertial_d);
+      }
+    }
+    partial_derivatives(make_not_null(&element_du), element_u, mesh,
+                        element_inverse_jacobian);
+  }
+
+  Variables<host_derivative_tags> host_du_batched(total_points);
+  Variables<host_derivative_tags> host_du_elementwise(total_points);
+  copy_to_host(make_not_null(&host_du_batched), du_batched);
+  copy_to_host(make_not_null(&host_du_elementwise), du_elementwise);
+  Approx local_approx = Approx::custom().epsilon(1e-12).scale(1.0);
+  CHECK_VARIABLES_CUSTOM_APPROX(host_du_batched, host_du_elementwise,
+                                local_approx);
+}
+#endif  // SPECTRE_KOKKOS
+
 template <typename VariableTags, typename GradientTags = VariableTags>
 void benchmark_partial_derivatives_3d(const Mesh<3>& mesh) {
   const size_t num_points = mesh.number_of_grid_points();
@@ -649,7 +752,7 @@ void benchmark_partial_derivatives_3d(const Mesh<3>& mesh) {
       partial_derivatives(make_not_null(&du), u, mesh, inv_jacobian);
     });
   };
-  // Compute derivatives on device
+    // Compute derivatives on device
 #ifdef SPECTRE_KOKKOS
   if constexpr (std::is_same_v<typename Variables<VariableTags>::value_type,
                                double>) {
@@ -1209,6 +1312,9 @@ SPECTRE_TEST_CASE("Unit.Numerical.LinearOperators.PartialDerivs",
                         Spectral::Basis::Legendre,
                         Spectral::Quadrature::GaussLobatto};
   test_partial_derivatives_3d<two_vars<DataVector, 3>>(mesh_3d);
+#ifdef SPECTRE_KOKKOS
+  test_partial_derivatives_batched_matches_elementwise(mesh_3d, 4);
+#endif  // SPECTRE_KOKKOS
   benchmark_partial_derivatives_3d<
       tmpl::list<::Tags::TempTensor<0, tnsr::ii<DataVector, 3>>,
                  ::Tags::TempTensor<1, tnsr::I<DataVector, 3>>,
