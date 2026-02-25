@@ -54,3 +54,10 @@ add_spectre_executable(
   EvolveScalarWaveKokkos.cpp
   )
 target_link_libraries(EvolveScalarWaveKokkos PRIVATE ${LIBS_TO_LINK})
+
+add_spectre_executable(
+  EvolveScalarWaveKokkosBatched
+  EXCLUDE_FROM_ALL
+  EvolveScalarWaveKokkosBatched.cpp
+  )
+target_link_libraries(EvolveScalarWaveKokkosBatched PRIVATE ${LIBS_TO_LINK})

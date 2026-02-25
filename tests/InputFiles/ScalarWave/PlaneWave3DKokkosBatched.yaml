@@ -1,0 +1,89 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+Executable: EvolveScalarWaveKokkosBatched
+Testing:
+  Check: parse;execute
+
+---
+
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons:
+    ScalarWaveKokkosBatchedDriver:
+      Exclusive: true
+      Proc: Auto
+
+InitialData:
+  PlaneWave:
+    WaveVector: [1.0, 1.0, 1.0]
+    Center: [0.0, 0.0, 0.0]
+    Profile:
+      Sinusoid:
+        Amplitude: 1.0
+        Wavenumber: 1.0
+        Phase: 0.0
+
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.0001
+  TimeStepper: Rk5Tsitouras
+
+DomainCreator:
+  Sphere:
+    InnerRadius: 3.
+    OuterRadius: 20.
+    Interior:
+      FillWithSphericity: 0.
+    InitialRefinement: 0
+    InitialGridPoints: 8
+    UseEquiangularMap: True
+    EquatorialCompression: None
+    RadialPartitioning: [10., 15.]
+    RadialDistribution: [Linear, Linear, Linear]
+    WhichWedges: All
+    TimeDependentMaps: None
+    OuterBoundaryCondition:
+      DirichletAnalytic:
+        AnalyticPrescription:
+          PlaneWave:
+            WaveVector: [1.0, 1.0, 1.0]
+            Center: [0.0, 0.0, 0.0]
+            Profile:
+              Sinusoid:
+                Amplitude: 1.0
+                Wavenumber: 1.0
+                Phase: 0.0
+
+SpatialDiscretization:
+  DiscontinuousGalerkin:
+    Quadrature: GaussLobatto
+
+EventsAndTriggersAtSlabs:
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 100
+          Offset: 0
+    Events:
+      - ObserveNormsBatched:
+          SubfileName: Norms
+          TensorsToObserve:
+            - Name: Psi
+              NormType: L2Norm
+              Components: Sum
+            - Name: Pi
+              NormType: L2Norm
+              Components: Sum
+            - Name: Phi
+              NormType: L2Norm
+              Components: Sum
+  - Trigger:
+      Slabs:
+        Specified:
+          Values: [1000]
+    Events:
+      - CompletionBatched
+Observers:
+  VolumeFileName: "ScalarWavePlaneWave3DKokkosBatchedVolume"
+  ReductionFileName: "ScalarWavePlaneWave3DKokkosBatchedReductions"
