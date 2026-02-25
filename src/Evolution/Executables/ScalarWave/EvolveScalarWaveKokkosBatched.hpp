@@ -74,6 +74,8 @@ struct ScalarWaveKokkosBatchedDriver {
                   ScalarWave::Batched::Initialization::DriverState>,
               Actions::MutateApply<ScalarWave::Batched::Actions::
                                        InitializeDriver<Metavariables>>,
+              Actions::MutateApply<ScalarWave::Batched::Actions::
+                                       InitializeBoundaryBatchMetadata>,
               Parallel::Actions::TerminatePhase>>,
       Parallel::PhaseActions<Parallel::Phase::Register,
                              tmpl::list<Parallel::Actions::TerminatePhase>>,
@@ -82,17 +84,24 @@ struct ScalarWaveKokkosBatchedDriver {
           tmpl::list<
               evolution::Actions::RunEventsAndTriggers<
                   Metavariables::local_time_stepping>,
-                     Actions::MutateApply<ScalarWave::Batched::Actions::
-                                              ComputeTimeDerivativeBatched>,
-                     Actions::MutateApply<ScalarWave::Batched::Actions::
-                                              ApplyBoundaryCorrectionsToTimeDerivativeBatched>,
-                     Actions::MutateApply<ScalarWave::Batched::Actions::
-                                              RecordTimeStepperDataBatched>,
-                     Actions::MutateApply<
-                         ScalarWave::Batched::Actions::UpdateUBatched>,
-                     Actions::MutateApply<
-                         ScalarWave::Batched::Actions::CleanHistoryBatched>,
-                     Actions::AdvanceTime>>>;
+              Actions::MutateApply<
+                  ScalarWave::Batched::Actions::ComputeTimeDerivativeBatched>,
+              Actions::MutateApply<
+                  ScalarWave::Batched::Actions::PackageLocalFacesBatched>,
+              Actions::MutateApply<ScalarWave::Batched::Actions::
+                                       ComputeInternalBoundaryTermsBatched>,
+              Actions::MutateApply<ScalarWave::Batched::Actions::
+                                       LiftInternalBoundaryTermsBatched>,
+              Actions::MutateApply<
+                  ScalarWave::Batched::Actions::
+                      ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched>,
+              Actions::MutateApply<
+                  ScalarWave::Batched::Actions::RecordTimeStepperDataBatched>,
+              Actions::MutateApply<
+                  ScalarWave::Batched::Actions::UpdateUBatched>,
+              Actions::MutateApply<
+                  ScalarWave::Batched::Actions::CleanHistoryBatched>,
+              Actions::AdvanceTime>>>;
 
   using simple_tags_from_options = Parallel::get_simple_tags_from_options<
       Parallel::get_initialization_actions_list<phase_dependent_action_list>>;
@@ -121,10 +130,9 @@ struct EvolutionMetavarsKokkosBatched {
       : tt::ConformsTo<Options::protocols::FactoryCreation> {
     using factory_classes = tmpl::map<
         tmpl::pair<DomainCreator<volume_dim>, domain_creators<volume_dim>>,
-        tmpl::pair<Event,
-                   tmpl::flatten<tmpl::list<
-                       ScalarWave::Events::CompletionBatched,
-                       ScalarWave::Events::ObserveNormsBatched>>>,
+        tmpl::pair<Event, tmpl::flatten<tmpl::list<
+                              ScalarWave::Events::CompletionBatched,
+                              ScalarWave::Events::ObserveNormsBatched>>>,
         tmpl::pair<evolution::initial_data::InitialData,
                    tmpl::push_back<initial_data_list,
                                    evolution::initial_data::NumericData>>,
@@ -154,9 +162,9 @@ struct EvolutionMetavarsKokkosBatched {
   using batched_driver_component =
       ScalarWaveKokkosBatchedDriver<EvolutionMetavarsKokkosBatched>;
 
-  using component_list = tmpl::list<
-      observers::ObserverWriter<EvolutionMetavarsKokkosBatched>,
-      batched_driver_component>;
+  using component_list =
+      tmpl::list<observers::ObserverWriter<EvolutionMetavarsKokkosBatched>,
+                 batched_driver_component>;
 
   static constexpr Options::String help{
       "ScalarWave Kokkos batched single-node scaffold executable.\n"
