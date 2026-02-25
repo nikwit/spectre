@@ -6,10 +6,13 @@
 namespace ScalarWave::Actions {
 
 void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
-    const gsl::not_null<ScalarWave::Batched::Tags::PackedEvolutionState::type*>
+    const gsl::not_null<evolution::Kokkos::Tags::PackedEvolutionState<
+        ScalarWave::System<3>>::type*>
         packed_evolution_state,
-    const ScalarWave::Batched::Tags::PackedTopology::type& packed_topology,
-    const ScalarWave::Batched::Tags::PackedGeometry::type& packed_geometry) {
+    const evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>::type&
+        packed_topology,
+    const evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>::type&
+        packed_geometry) {
   const size_t total_points = packed_topology.total_points;
   if (total_points == 0) {
     return;
@@ -87,10 +90,13 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
 }
 
 void ComputeTimeDerivativeBatched::apply(
-    const gsl::not_null<ScalarWave::Batched::Tags::PackedEvolutionState::type*>
+    const gsl::not_null<evolution::Kokkos::Tags::PackedEvolutionState<
+        ScalarWave::System<3>>::type*>
         packed_evolution_state,
-    const ScalarWave::Batched::Tags::PackedTopology::type& packed_topology,
-    const ScalarWave::Batched::Tags::PackedGeometry::type& packed_geometry) {
+    const evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>::type&
+        packed_topology,
+    const evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>::type&
+        packed_geometry) {
   compute_time_derivative_batched_volume_impl(packed_evolution_state,
                                               packed_topology, packed_geometry);
 }

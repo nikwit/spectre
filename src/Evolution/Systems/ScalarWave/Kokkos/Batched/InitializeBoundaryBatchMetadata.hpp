@@ -12,7 +12,7 @@
 #include "Domain/Structure/Direction.hpp"
 #include "Domain/Structure/DirectionalId.hpp"
 #include "Domain/Structure/OrientationMapHelpers.hpp"
-#include "Evolution/Executables/ScalarWave/Batched/Tags.hpp"
+#include "Evolution/Kokkos/PackedTags.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/MortarHelpers.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/Spectral/Projection.hpp"
@@ -31,10 +31,11 @@ struct InitializeBoundaryBatchMetadata {
   static constexpr size_t projection_group_count =
       ScalarWave::Batched::boundary_projection_group_count;
 
-  using return_tags =
-      tmpl::list<ScalarWave::Batched::Tags::PackedBoundaryMetadata,
-                 ScalarWave::Batched::Tags::PackedBoundaryScratch>;
-  using argument_tags = tmpl::list<ScalarWave::Batched::Tags::PackedTopology>;
+  using return_tags = tmpl::list<
+      evolution::Kokkos::Tags::PackedBoundaryMetadata<ScalarWave::System<3>>,
+      evolution::Kokkos::Tags::PackedBoundaryScratch<ScalarWave::System<3>>>;
+  using argument_tags = tmpl::list<
+      evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>>;
 
   static constexpr size_t side_index(const Side side) {
     return side == Side::Upper ? static_cast<size_t>(1)
@@ -49,23 +50,26 @@ struct InitializeBoundaryBatchMetadata {
   }
 
   static void apply(
-      const gsl::not_null<
-          ScalarWave::Batched::Tags::PackedBoundaryMetadata::type*>
+      const gsl::not_null<evolution::Kokkos::Tags::PackedBoundaryMetadata<
+          ScalarWave::System<3>>::type*>
           packed_boundary_metadata,
-      const gsl::not_null<
-          ScalarWave::Batched::Tags::PackedBoundaryScratch::type*>
+      const gsl::not_null<evolution::Kokkos::Tags::PackedBoundaryScratch<
+          ScalarWave::System<3>>::type*>
           packed_boundary_scratch,
-      const ScalarWave::Batched::Tags::PackedTopology::type& packed_topology) {
+      const evolution::Kokkos::Tags::PackedTopology<
+          ScalarWave::System<3>>::type& packed_topology) {
     using BoundaryCorrectionWorkItem =
         ScalarWave::Batched::BoundaryCorrectionWorkItem;
     using MortarMetadata = ScalarWave::Batched::MortarMetadata;
     using ProjectionGroupMetadata =
         ScalarWave::Batched::ProjectionGroupMetadata;
     using FaceBoundaryMetadata = ScalarWave::Batched::FaceBoundaryMetadata;
-    using device_package_field_tags = typename ScalarWave::Batched::
-        PackedBoundaryScratch::device_package_field_tags;
-    using device_dt_boundary_tags = typename ScalarWave::Batched::
-        PackedBoundaryScratch::device_dt_boundary_tags;
+    using packed_boundary_scratch_type =
+        evolution::Kokkos::PackedBoundaryScratch<ScalarWave::System<3>>;
+    using device_package_field_tags =
+        typename packed_boundary_scratch_type::device_package_field_tags;
+    using device_dt_boundary_tags =
+        typename packed_boundary_scratch_type::device_dt_boundary_tags;
 
     struct ProjectionGroupHostData {
       std::array<Spectral::SegmentSize, volume_dim - 1> mortar_size{

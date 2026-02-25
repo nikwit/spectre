@@ -27,14 +27,14 @@ namespace {
 
 static constexpr size_t volume_dim = 3;
 static constexpr size_t number_of_faces = 2 * volume_dim;
-using package_field_tags =
-    ScalarWave::Batched::PackedBoundaryScratch::package_field_tags;
+using package_field_tags = evolution::Kokkos::PackedBoundaryScratch<
+    ScalarWave::System<3>>::package_field_tags;
 template <size_t I>
 using package_field_tag = tmpl::at<package_field_tags, tmpl::size_t<I>>;
-using device_package_field_tags =
-    ScalarWave::Batched::PackedBoundaryScratch::device_package_field_tags;
-using device_dt_boundary_tags =
-    ScalarWave::Batched::PackedBoundaryScratch::device_dt_boundary_tags;
+using device_package_field_tags = evolution::Kokkos::PackedBoundaryScratch<
+    ScalarWave::System<3>>::device_package_field_tags;
+using device_dt_boundary_tags = evolution::Kokkos::PackedBoundaryScratch<
+    ScalarWave::System<3>>::device_dt_boundary_tags;
 using face_boundary_metadata = ScalarWave::Batched::FaceBoundaryMetadata;
 using projection_group_metadata = ScalarWave::Batched::ProjectionGroupMetadata;
 
@@ -181,11 +181,13 @@ void project_from_mortar_device_batched(
 }  // namespace
 
 void ComputeInternalBoundaryTermsBatched::apply(
-    const gsl::not_null<ScalarWave::Batched::Tags::PackedBoundaryScratch::type*>
+    const gsl::not_null<evolution::Kokkos::Tags::PackedBoundaryScratch<
+        ScalarWave::System<3>>::type*>
         packed_boundary_scratch,
-    const ScalarWave::Batched::Tags::PackedTopology::type& packed_topology,
-    const ScalarWave::Batched::Tags::PackedBoundaryMetadata::type&
-        packed_boundary_metadata) {
+    const evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>::type&
+        packed_topology,
+    const evolution::Kokkos::Tags::PackedBoundaryMetadata<
+        ScalarWave::System<3>>::type& packed_boundary_metadata) {
   if (packed_topology.total_points == 0) {
     return;
   }

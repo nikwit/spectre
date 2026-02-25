@@ -20,8 +20,8 @@ namespace {
 
 static constexpr size_t volume_dim = 3;
 static constexpr size_t number_of_faces = 2 * volume_dim;
-using device_dt_boundary_tags =
-    ScalarWave::Batched::PackedBoundaryScratch::device_dt_boundary_tags;
+using device_dt_boundary_tags = evolution::Kokkos::PackedBoundaryScratch<
+    ScalarWave::System<3>>::device_dt_boundary_tags;
 
 double outward_sign(const Side side) {
   return side == Side::Upper ? 1.0 : -1.0;
@@ -34,12 +34,15 @@ constexpr size_t face_index(const size_t sliced_dim, const size_t side_i) {
 }  // namespace
 
 void LiftInternalBoundaryTermsBatched::apply(
-    const gsl::not_null<ScalarWave::Batched::Tags::PackedEvolutionState::type*>
+    const gsl::not_null<evolution::Kokkos::Tags::PackedEvolutionState<
+        ScalarWave::System<3>>::type*>
         packed_evolution_state,
-    const ScalarWave::Batched::Tags::PackedTopology::type& packed_topology,
-    const ScalarWave::Batched::Tags::PackedGeometry::type& packed_geometry,
-    const ScalarWave::Batched::Tags::PackedBoundaryScratch::type&
-        packed_boundary_scratch) {
+    const evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>::type&
+        packed_topology,
+    const evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>::type&
+        packed_geometry,
+    const evolution::Kokkos::Tags::PackedBoundaryScratch<
+        ScalarWave::System<3>>::type& packed_boundary_scratch) {
   if (packed_topology.total_points == 0) {
     return;
   }
