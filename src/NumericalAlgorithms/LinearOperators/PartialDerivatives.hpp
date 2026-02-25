@@ -51,7 +51,14 @@ template <size_t DerivDim, size_t Dim, bool AddToResult = false>
 void apply_matrix_in_dim(
     Kokkos::View<double**> result, const Kokkos::View<double**>& input,
     const MatrixViewRO& matrix, const Mesh<Dim>& mesh,
-    const std::array<Kokkos::View<double*>, Dim * Dim>& inv_jacobian);
+    const std::array<const double*, Dim * Dim>& inv_jacobian,
+    const std::array<size_t, Dim * Dim>& inv_jacobian_strides);
+
+template <size_t DerivDim, size_t Dim, bool AddToResult = false>
+void apply_matrix_in_dim_batched(
+    Kokkos::View<double**> result, const Kokkos::View<double**>& input,
+    const MatrixViewRO& matrix, const Mesh<Dim>& mesh,
+    const Kokkos::View<double***>& inverse_jacobian);
 #endif  // SPECTRE_KOKKOS
 }  // namespace partial_derivatives_detail
 
@@ -233,6 +240,22 @@ auto partial_derivatives(
                           DerivativeFrame>& inverse_jacobian)
     -> Variables<db::wrap_tags_in<Tags::deriv, DerivativeTags,
                                   tmpl::size_t<Dim>, DerivativeFrame>>;
+#ifdef SPECTRE_KOKKOS
+
+/*!
+ * \ingroup NumericalAlgorithmsGroup
+ * \brief Compute partial derivatives for packed elements on device.
+ *
+ * This function assumes all packed elements share the same `mesh`. Input and
+ * output data are packed contiguously in the grid-point dimension with
+ * `mesh.number_of_grid_points()` points per element. The `inverse_jacobian`
+ * view must have shape `[num_elements, points_per_element, Dim * Dim]`.
+ */
+template <typename ResultTags, typename VariableTags, size_t Dim>
+void partial_derivatives_batched(
+    gsl::not_null<Variables<ResultTags>*> du, const Variables<VariableTags>& u,
+    const Mesh<Dim>& mesh, const Kokkos::View<double***>& inverse_jacobian);
+#endif  // SPECTRE_KOKKOS
 /// @}
 
 /// @{
