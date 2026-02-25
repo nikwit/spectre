@@ -9,6 +9,7 @@ spectre_target_sources(
   ${LIBRARY}
   PRIVATE
   ApplyBoundaryCorrectionsToTimeDerivativeKokkos.cpp
+  Batched/ObserveTimeStepBatchedEvent.cpp
   ComputeTimeDerivativeKokkos.cpp
   RecordTimeStepperDataKokkos3D.cpp
   UpdateUKokkos3D.cpp
@@ -19,6 +20,15 @@ spectre_target_headers(
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
   ApplyBoundaryCorrectionsToTimeDerivativeKokkos.hpp
+  Batched/Actions.hpp
+  Batched/ApplyBoundaryCorrectionsToTimeDerivativeBatched.hpp
+  Batched/CleanHistoryBatched.hpp
+  Batched/ComputeTimeDerivativeBatched.hpp
+  Batched/DriverState.hpp
+  Batched/InitializeBatchedData.hpp
+  Batched/ObserveTimeStepBatchedEvent.hpp
+  Batched/RecordTimeStepperDataBatched.hpp
+  Batched/UpdateUBatched.hpp
   CleanHistoryKokkos.hpp
   ComputeTimeDerivativeKokkos.hpp
   InitializeKokkosBoundaryCommunication.hpp
