@@ -53,6 +53,8 @@ void ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
         packed_topology,
     const evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>::type&
         packed_geometry,
+    const typename ::Tags::MirrorView<ScalarWave::Tags::ConstraintGamma2>::type&
+        device_constraint_gamma2,
     const double time,
     const typename domain::Tags::ExternalBoundaryConditions<volume_dim>::type&
         external_boundary_conditions_by_block) {
@@ -85,7 +87,7 @@ void ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
       packed_topology.element_point_offsets_host;
   auto& dt_vars = packed_evolution_state->device_dt_variables;
   const auto& vars = packed_evolution_state->device_variables;
-  const auto& gamma2 = packed_evolution_state->device_constraint_gamma2;
+  const auto& gamma2 = device_constraint_gamma2;
   const auto& inverse_jacobian =
       packed_geometry.element_inverse_jacobian_device;
   const auto& element_point_offsets_device =

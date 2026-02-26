@@ -17,6 +17,9 @@
 #include "Domain/Structure/InitialElementIds.hpp"
 #include "Evolution/DiscontinuousGalerkin/Initialization/QuadratureTag.hpp"
 #include "Evolution/Kokkos/PackedTags.hpp"
+#include "Evolution/Systems/ScalarWave/Kokkos/KokkosTimeStepperTags.hpp"
+#include "Evolution/Systems/ScalarWave/System.hpp"
+#include "Evolution/Systems/ScalarWave/Tags.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
@@ -36,6 +39,8 @@ struct DriverState {
       evolution::Kokkos::Tags::PackedEvolutionState<packed_system>;
   using packed_boundary_scratch_tag =
       evolution::Kokkos::Tags::PackedBoundaryScratch<packed_system>;
+  using device_constraint_gamma2_tag =
+      ScalarWave::KokkosTags::DeviceConstraintGamma2;
 
   using const_global_cache_tags = tmpl::list<::domain::Tags::Domain<3>>;
   using mutable_global_cache_tags = tmpl::list<>;
@@ -46,7 +51,7 @@ struct DriverState {
   using simple_tags =
       tmpl::list<packed_topology_tag, packed_geometry_tag,
                  packed_boundary_metadata_tag, packed_evolution_state_tag,
-                 packed_boundary_scratch_tag>;
+                 packed_boundary_scratch_tag, device_constraint_gamma2_tag>;
   using compute_tags = tmpl::list<>;
 
   using return_tags = tmpl::list<packed_topology_tag>;

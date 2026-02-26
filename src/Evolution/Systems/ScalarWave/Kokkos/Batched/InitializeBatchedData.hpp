@@ -21,7 +21,9 @@
 #include "Evolution/DiscontinuousGalerkin/Initialization/QuadratureTag.hpp"
 #include "Evolution/Initialization/InitialData.hpp"
 #include "Evolution/Kokkos/PackedTags.hpp"
+#include "Evolution/Systems/ScalarWave/Kokkos/KokkosTimeStepperTags.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
+#include "Evolution/Systems/ScalarWave/Tags.hpp"
 #include "Evolution/TypeTraits.hpp"
 #include "NumericalAlgorithms/Spectral/Basis.hpp"
 #include "NumericalAlgorithms/Spectral/LogicalCoordinates.hpp"
@@ -47,6 +49,9 @@ struct InitializeBatchedData {
   using host_dt_tag =
       db::add_tag_prefix<::Tags::dt, typename system::variables_tag>;
   using host_dt_variables_type = typename host_dt_tag::type;
+  using device_constraint_gamma2_tag =
+      ScalarWave::KokkosTags::DeviceConstraintGamma2;
+  using device_constraint_gamma2_type = device_constraint_gamma2_tag::type;
   using packed_evolution_state_type =
       evolution::Kokkos::Tags::PackedEvolutionState<
           ScalarWave::System<3>>::type;
@@ -55,7 +60,8 @@ struct InitializeBatchedData {
   using return_tags = tmpl::list<
       evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>,
       evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>,
-      evolution::Kokkos::Tags::PackedEvolutionState<ScalarWave::System<3>>>;
+      evolution::Kokkos::Tags::PackedEvolutionState<ScalarWave::System<3>>,
+      device_constraint_gamma2_tag>;
   using argument_tags =
       tmpl::list<::domain::Tags::Domain<volume_dim>,
                  evolution::initial_data::Tags::InitialData,
@@ -76,6 +82,8 @@ struct InitializeBatchedData {
       const gsl::not_null<evolution::Kokkos::Tags::PackedEvolutionState<
           ScalarWave::System<3>>::type*>
           packed_evolution_state,
+      const gsl::not_null<device_constraint_gamma2_type*>
+          device_constraint_gamma2,
       const Domain<volume_dim>& domain,
       const evolution::initial_data::InitialData& initial_data,
       const std::vector<std::array<size_t, volume_dim>>&
@@ -90,8 +98,6 @@ struct InitializeBatchedData {
         typename packed_evolution_state_type::device_step_start_type;
     using device_derivative_history_type =
         typename packed_evolution_state_type::device_derivative_history_type;
-    using device_constraint_gamma2_type =
-        typename packed_evolution_state_type::device_constraint_gamma2_type;
 
     packed_evolution_state->device_variables =
         device_variables_type(packed_topology->total_points);
@@ -99,7 +105,7 @@ struct InitializeBatchedData {
         device_dt_variables_type(packed_topology->total_points);
     packed_evolution_state->device_step_start =
         device_step_start_type(packed_topology->total_points);
-    packed_evolution_state->device_constraint_gamma2 =
+    *device_constraint_gamma2 =
         device_constraint_gamma2_type("BatchedConstraintGamma2",
                                       packed_topology->total_points);
     packed_evolution_state->device_derivative_history =
@@ -118,8 +124,7 @@ struct InitializeBatchedData {
                           0.0);
       ::Kokkos::deep_copy(packed_evolution_state->device_step_start.view(),
                           0.0);
-      ::Kokkos::deep_copy(get(packed_evolution_state->device_constraint_gamma2),
-                          0.0);
+      ::Kokkos::deep_copy(get(*device_constraint_gamma2), 0.0);
       ::Kokkos::deep_copy(packed_evolution_state->device_derivative_history,
                           0.0);
       ::Kokkos::deep_copy(packed_geometry->element_inverse_jacobian_device,
