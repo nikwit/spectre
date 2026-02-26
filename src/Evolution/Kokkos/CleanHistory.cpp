@@ -3,6 +3,7 @@
 
 #include "Evolution/Kokkos/CleanHistory.hpp"
 
+#include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 
@@ -26,5 +27,6 @@ void CleanHistory<System>::apply(
 }
 
 template struct CleanHistory<ScalarWave::System<3>>;
+template struct CleanHistory<gh::System<3>>;
 
 }  // namespace evolution::Actions::Kokkos

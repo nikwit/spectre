@@ -13,6 +13,8 @@
 #include "DataStructures/Tags/MirrorView.hpp"
 #include "DataStructures/VariablesKokkos.hpp"
 #include "Evolution/Kokkos/BoundaryBatchMetadata.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryCorrections/UpwindPenalty.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/ScalarWave/BoundaryCorrections/UpwindPenalty.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
@@ -99,6 +101,15 @@ struct PackedSystemTraits<ScalarWave::System<Dim>> {
   using boundary_scratch_storage = PackedBoundaryScratchStorage<
       ScalarWave::System<Dim>,
       ScalarWave::BoundaryCorrections::UpwindPenalty<Dim>>;
+};
+
+template <size_t Dim>
+struct PackedSystemTraits<gh::System<Dim>> {
+  using boundary_metadata_storage =
+      PackedBoundaryMetadataStorage<gh::System<Dim>>;
+  using boundary_scratch_storage =
+      PackedBoundaryScratchStorage<gh::System<Dim>,
+                                   gh::BoundaryCorrections::UpwindPenalty<Dim>>;
 };
 
 }  // namespace evolution::Kokkos
