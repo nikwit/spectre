@@ -7,6 +7,7 @@
 #include "Options/String.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/Event.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Serialization/CharmPupable.hpp"
 #include "Utilities/TMPL.hpp"
@@ -59,7 +60,10 @@ class SyncKokkosToHost : public Event {
   bool needs_evolved_variables() const override { return true; }
 
   // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er& p) override { Event::pup(p); }
+  void pup(PUP::er& /*p*/) override {
+    ERROR("Tried to call pup for Events::Kokkos::SyncKokkosToHost, but pup is "
+          "not supported with kokkos");
+  }
 };
 
 template <typename System, typename DeviceVariablesTag>
