@@ -35,8 +35,9 @@ using device_package_field_tags = evolution::Kokkos::PackedBoundaryScratch<
     ScalarWave::System<3>>::device_package_field_tags;
 using device_dt_boundary_tags = evolution::Kokkos::PackedBoundaryScratch<
     ScalarWave::System<3>>::device_dt_boundary_tags;
-using face_boundary_metadata = ScalarWave::Batched::FaceBoundaryMetadata;
-using projection_group_metadata = ScalarWave::Batched::ProjectionGroupMetadata;
+using face_boundary_metadata = evolution::Kokkos::Batched::FaceBoundaryMetadata;
+using projection_group_metadata =
+    evolution::Kokkos::Batched::ProjectionGroupMetadata;
 
 constexpr size_t side_index(const Side side) {
   return side == Side::Upper ? static_cast<size_t>(1) : static_cast<size_t>(0);

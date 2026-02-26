@@ -15,7 +15,7 @@
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
 
-namespace ScalarWave::Batched {
+namespace evolution::Kokkos::Batched {
 
 static constexpr size_t boundary_volume_dim = 3;
 static constexpr size_t boundary_number_of_faces = 2 * boundary_volume_dim;
@@ -28,11 +28,10 @@ struct BoundaryCorrectionWorkItem {
   size_t oriented_remote_face_index_offset{0};
 
   // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er& p) {
-    p | local_element_index;
-    p | remote_element_index;
-    p | remote_face_id;
-    p | oriented_remote_face_index_offset;
+  void pup(PUP::er& /*p*/) {
+    ERROR(
+        "Tried to call pup for evolution::Kokkos::Batched::"
+        "BoundaryCorrectionWorkItem, but pup is not supported with kokkos");
   }
 };
 
@@ -42,10 +41,9 @@ struct MortarMetadata {
   bool needs_projection{false};
 
   // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er& p) {
-    p | mortar_mesh;
-    p | mortar_size;
-    p | needs_projection;
+  void pup(PUP::er& /*p*/) {
+    ERROR("Tried to call pup for evolution::Kokkos::Batched::MortarMetadata, "
+          "but pup is not supported with kokkos");
   }
 };
 
@@ -58,18 +56,10 @@ struct ProjectionGroupMetadata {
   ::Kokkos::View<size_t*> oriented_remote_face_indices{};
 
   // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er& p) {
-    p | mortar_size;
-    p | mortar_mesh;
-    size_t work_items_size = work_items.extent(0);
-    size_t oriented_indices_size = oriented_remote_face_indices.extent(0);
-    p | work_items_size;
-    p | oriented_indices_size;
-    if (work_items_size != 0 or oriented_indices_size != 0) {
-      ERROR(
-          "PUP for non-empty ScalarWave::Batched::ProjectionGroupMetadata is "
-          "currently unsupported.");
-    }
+  void pup(PUP::er& /*p*/) {
+    ERROR(
+        "Tried to call pup for evolution::Kokkos::Batched::"
+        "ProjectionGroupMetadata, but pup is not supported with kokkos");
   }
 };
 
@@ -80,19 +70,9 @@ struct FaceBoundaryMetadata {
       projection_groups{};
 
   // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er& p) {
-    size_t no_projection_work_items_size = no_projection_work_items.extent(0);
-    size_t no_projection_oriented_indices_size =
-        no_projection_oriented_remote_face_indices.extent(0);
-    p | no_projection_work_items_size;
-    p | no_projection_oriented_indices_size;
-    p | projection_groups;
-    if (no_projection_work_items_size != 0 or
-        no_projection_oriented_indices_size != 0) {
-      ERROR(
-          "PUP for non-empty ScalarWave::Batched::FaceBoundaryMetadata is "
-          "currently unsupported.");
-    }
+  void pup(PUP::er& /*p*/) {
+    ERROR("Tried to call pup for evolution::Kokkos::Batched::"
+          "FaceBoundaryMetadata, but pup is not supported with kokkos");
   }
 };
 
@@ -104,4 +84,4 @@ using MortarMetadataMaps = std::vector<MortarMetadataMap>;
 using FaceBoundaryMetadataArray =
     std::array<FaceBoundaryMetadata, boundary_number_of_faces>;
 
-}  // namespace ScalarWave::Batched
+}  // namespace evolution::Kokkos::Batched

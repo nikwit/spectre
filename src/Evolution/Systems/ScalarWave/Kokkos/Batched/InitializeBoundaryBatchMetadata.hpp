@@ -27,9 +27,9 @@ namespace ScalarWave::Actions {
 struct InitializeBoundaryBatchMetadata {
   static constexpr size_t volume_dim = 3;
   static constexpr size_t number_of_faces =
-      ScalarWave::Batched::boundary_number_of_faces;
+      evolution::Kokkos::Batched::boundary_number_of_faces;
   static constexpr size_t projection_group_count =
-      ScalarWave::Batched::boundary_projection_group_count;
+      evolution::Kokkos::Batched::boundary_projection_group_count;
 
   using return_tags = tmpl::list<
       evolution::Kokkos::Tags::PackedBoundaryMetadata<ScalarWave::System<3>>,
@@ -59,11 +59,12 @@ struct InitializeBoundaryBatchMetadata {
       const evolution::Kokkos::Tags::PackedTopology<
           ScalarWave::System<3>>::type& packed_topology) {
     using BoundaryCorrectionWorkItem =
-        ScalarWave::Batched::BoundaryCorrectionWorkItem;
-    using MortarMetadata = ScalarWave::Batched::MortarMetadata;
+        evolution::Kokkos::Batched::BoundaryCorrectionWorkItem;
+    using MortarMetadata = evolution::Kokkos::Batched::MortarMetadata;
     using ProjectionGroupMetadata =
-        ScalarWave::Batched::ProjectionGroupMetadata;
-    using FaceBoundaryMetadata = ScalarWave::Batched::FaceBoundaryMetadata;
+        evolution::Kokkos::Batched::ProjectionGroupMetadata;
+    using FaceBoundaryMetadata =
+        evolution::Kokkos::Batched::FaceBoundaryMetadata;
     using packed_boundary_scratch_type =
         evolution::Kokkos::PackedBoundaryScratch<ScalarWave::System<3>>;
     using device_package_field_tags =
@@ -313,12 +314,12 @@ struct InitializeBoundaryBatchMetadata {
   }
 
  private:
-  static ::Kokkos::View<ScalarWave::Batched::BoundaryCorrectionWorkItem*>
+  static ::Kokkos::View<evolution::Kokkos::Batched::BoundaryCorrectionWorkItem*>
   copy_work_items_to_device(
-      const std::vector<ScalarWave::Batched::BoundaryCorrectionWorkItem>&
+      const std::vector<evolution::Kokkos::Batched::BoundaryCorrectionWorkItem>&
           host_data,
       const char* label) {
-    ::Kokkos::View<ScalarWave::Batched::BoundaryCorrectionWorkItem*>
+    ::Kokkos::View<evolution::Kokkos::Batched::BoundaryCorrectionWorkItem*>
         device_data{label, host_data.size()};
     auto host_view = ::Kokkos::create_mirror_view(device_data);
     for (size_t i = 0; i < host_data.size(); ++i) {
