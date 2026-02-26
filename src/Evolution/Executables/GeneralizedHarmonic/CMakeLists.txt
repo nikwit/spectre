@@ -67,6 +67,19 @@ target_link_libraries(
   GeneralizedHarmonicKokkos
   )
 
+set(NO_BH_KOKKOS_BATCHED_EXECUTABLE EvolveGhNoBlackHoleKokkosBatched)
+add_spectre_executable(
+  ${NO_BH_KOKKOS_BATCHED_EXECUTABLE}
+  EXCLUDE_FROM_ALL
+  EvolveGhNoBlackHoleKokkosBatched.cpp
+  )
+target_link_libraries(
+  ${NO_BH_KOKKOS_BATCHED_EXECUTABLE}
+  PRIVATE
+  ${LIBS_TO_LINK}
+  GeneralizedHarmonicKokkos
+  )
+
 # Single BH
 set(SINGLE_BH_EXECUTABLE EvolveGhSingleBlackHole)
 add_spectre_executable(
@@ -89,7 +102,6 @@ target_compile_definitions(
   PRIVATE
   USE_LTS=true
   )
-
 
 # BBH
 set(BBH_EXECUTABLE EvolveGhBinaryBlackHole)
