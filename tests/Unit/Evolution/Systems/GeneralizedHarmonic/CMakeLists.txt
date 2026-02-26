@@ -21,6 +21,7 @@ set(LIBRARY_SOURCES
   Test_BbhCompletionSingleton.cpp
   Test_ApplyBoundaryCorrectionsToTimeDerivativeKokkos.cpp
   Test_Characteristics.cpp
+  Test_ComputeTimeDerivativeBatched.cpp
   Test_ComputeTimeDerivativeKokkos.cpp
   Test_Constraints.cpp
   Test_DuDt.cpp
@@ -61,4 +62,4 @@ target_link_libraries(
   Spectral
   Time
   Utilities
-)
+  )
