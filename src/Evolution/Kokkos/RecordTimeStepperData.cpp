@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 
+#include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 
@@ -47,5 +48,6 @@ void RecordTimeStepperData<System>::apply(
 }
 
 template struct RecordTimeStepperData<ScalarWave::System<3>>;
+template struct RecordTimeStepperData<gh::System<3>>;
 
 }  // namespace evolution::Actions::Kokkos

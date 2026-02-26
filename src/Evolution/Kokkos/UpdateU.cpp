@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <vector>
 
+#include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 
@@ -92,5 +93,6 @@ void UpdateU<System>::apply(
 }
 
 template struct UpdateU<ScalarWave::System<3>>;
+template struct UpdateU<gh::System<3>>;
 
 }  // namespace evolution::Actions::Kokkos
