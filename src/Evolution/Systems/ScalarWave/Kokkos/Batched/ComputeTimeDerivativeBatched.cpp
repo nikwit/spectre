@@ -9,6 +9,8 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
     const gsl::not_null<evolution::Kokkos::Tags::PackedEvolutionState<
         ScalarWave::System<3>>::type*>
         packed_evolution_state,
+    const typename ::Tags::MirrorView<ScalarWave::Tags::ConstraintGamma2>::type&
+        device_constraint_gamma2,
     const evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>::type&
         packed_topology,
     const evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>::type&
@@ -30,7 +32,7 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
 
   auto& device_vars = packed_evolution_state->device_variables;
   auto& device_dt = packed_evolution_state->device_dt_variables;
-  const auto& gamma2_full = packed_evolution_state->device_constraint_gamma2;
+  const auto& gamma2_full = device_constraint_gamma2;
   Variables<device_derivative_tags> partial_derivatives_all_elements{
       total_points};
 
@@ -93,11 +95,14 @@ void ComputeTimeDerivativeBatched::apply(
     const gsl::not_null<evolution::Kokkos::Tags::PackedEvolutionState<
         ScalarWave::System<3>>::type*>
         packed_evolution_state,
+    const typename ::Tags::MirrorView<ScalarWave::Tags::ConstraintGamma2>::type&
+        device_constraint_gamma2,
     const evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>::type&
         packed_topology,
     const evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>::type&
         packed_geometry) {
   compute_time_derivative_batched_volume_impl(packed_evolution_state,
+                                              device_constraint_gamma2,
                                               packed_topology, packed_geometry);
 }
 

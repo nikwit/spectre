@@ -50,6 +50,8 @@ void PackageLocalFacesBatched::apply(
         packed_topology,
     const evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>::type&
         packed_geometry,
+    const typename ::Tags::MirrorView<ScalarWave::Tags::ConstraintGamma2>::type&
+        device_constraint_gamma2,
     const evolution::Kokkos::Tags::PackedEvolutionState<
         ScalarWave::System<3>>::type& packed_evolution_state) {
   if (packed_topology.total_points == 0) {
@@ -81,7 +83,7 @@ void PackageLocalFacesBatched::apply(
   const auto& face_to_volume_index_map =
       packed_topology.device_face_to_volume_index_map;
   const auto& vars = packed_evolution_state.device_variables;
-  const auto& gamma2 = packed_evolution_state.device_constraint_gamma2;
+  const auto& gamma2 = device_constraint_gamma2;
   const auto& inverse_jacobian =
       packed_geometry.element_inverse_jacobian_device;
   const auto& element_point_offsets_device =

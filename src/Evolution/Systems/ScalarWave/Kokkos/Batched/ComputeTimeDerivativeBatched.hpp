@@ -11,6 +11,7 @@
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "DataStructures/Variables.hpp"
 #include "Evolution/Kokkos/PackedTags.hpp"
+#include "Evolution/Systems/ScalarWave/Kokkos/KokkosTimeStepperTags.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
 #include "Evolution/Systems/ScalarWave/Tags.hpp"
 #include "Evolution/Systems/ScalarWave/TimeDerivative.hpp"
@@ -34,12 +35,16 @@ struct ComputeTimeDerivativeBatched {
   using device_derivative_tags =
       db::wrap_tags_in<::Tags::deriv, device_gradient_tags,
                        tmpl::size_t<volume_dim>, Frame::Inertial>;
+  using device_constraint_gamma2_tag =
+      ScalarWave::KokkosTags::DeviceConstraintGamma2;
 
  public:
   static void compute_time_derivative_batched_volume_impl(
       const gsl::not_null<evolution::Kokkos::Tags::PackedEvolutionState<
           ScalarWave::System<3>>::type*>
           packed_evolution_state,
+      const typename device_constraint_gamma2_tag::type&
+          device_constraint_gamma2,
       const evolution::Kokkos::Tags::PackedTopology<
           ScalarWave::System<3>>::type& packed_topology,
       const evolution::Kokkos::Tags::PackedGeometry<
@@ -48,6 +53,7 @@ struct ComputeTimeDerivativeBatched {
   using return_tags = tmpl::list<
       evolution::Kokkos::Tags::PackedEvolutionState<ScalarWave::System<3>>>;
   using argument_tags = tmpl::list<
+      device_constraint_gamma2_tag,
       evolution::Kokkos::Tags::PackedTopology<ScalarWave::System<3>>,
       evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>>;
 
@@ -55,6 +61,8 @@ struct ComputeTimeDerivativeBatched {
       const gsl::not_null<evolution::Kokkos::Tags::PackedEvolutionState<
           ScalarWave::System<3>>::type*>
           packed_evolution_state,
+      const typename device_constraint_gamma2_tag::type&
+          device_constraint_gamma2,
       const evolution::Kokkos::Tags::PackedTopology<
           ScalarWave::System<3>>::type& packed_topology,
       const evolution::Kokkos::Tags::PackedGeometry<
