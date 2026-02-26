@@ -1,0 +1,112 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+Executable: EvolveGhNoBlackHoleKokkosBatched
+Testing:
+  Check: parse;execute
+
+---
+
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons:
+    GhKokkosBatchedDriver:
+      Exclusive: false
+      Proc: Auto
+
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.0002
+  TimeStepper: Rk5Tsitouras
+
+InitialData: &InitialData
+  GeneralizedHarmonic(KerrSchild):
+    Mass: 1.0
+    Spin: [0.0, 0.0, 0.0]
+    Center: [0.0, 0.0, 0.0]
+    Velocity: [0.0, 0.0, 0.0]
+
+DomainCreator:
+  Sphere:
+    InnerRadius: 1.9
+    OuterRadius: 100.
+    Interior:
+      ExciseWithBoundaryCondition:
+        DirichletAnalytic:
+          AnalyticPrescription: *InitialData
+    InitialRefinement: 0
+    InitialGridPoints: 8
+    UseEquiangularMap: true
+    EquatorialCompression: None
+    RadialPartitioning: [10., 30., 60.]
+    RadialDistribution: [Linear, Linear, Linear, Linear]
+    WhichWedges: All
+    TimeDependentMaps: None
+    OuterBoundaryCondition:
+      DirichletAnalytic:
+        AnalyticPrescription: *InitialData
+
+EvolutionSystem:
+  GeneralizedHarmonic:
+    GaugeCondition:
+      AnalyticChristoffel:
+        AnalyticPrescription: *InitialData
+    DampingFunctionGamma0:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 3.0
+        Width: 11.313708499
+        Center: [0.0, 0.0, 0.0]
+    DampingFunctionGamma1:
+      GaussianPlusConstant:
+        Constant: -1.0
+        Amplitude: 0.0
+        Width: 11.313708499
+        Center: [0.0, 0.0, 0.0]
+    DampingFunctionGamma2:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 1.0
+        Width: 11.313708499
+        Center: [0.0, 0.0, 0.0]
+
+#Filtering:
+#  ExpFilter0:
+#    Alpha: 36.0
+#    HalfPower: 64
+#    Enable: false
+#    BlocksToFilter: All
+
+SpatialDiscretization:
+  DiscontinuousGalerkin:
+    Quadrature: GaussLobatto
+
+EventsAndTriggersAtSlabs:
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 100
+          Offset: 0
+    Events:
+      - ObserveNormsBatched:
+          SubfileName: Norms
+          TensorsToObserve:
+            - Name: SpacetimeMetric
+              NormType: L2Norm
+              Components: Sum
+            - Name: Pi
+              NormType: L2Norm
+              Components: Sum
+            - Name: Phi
+              NormType: L2Norm
+              Components: Sum
+  - Trigger:
+      Slabs:
+        Specified:
+          Values: [3]
+    Events:
+      - CompletionBatched
+
+Observers:
+  VolumeFileName: "GhKerrSchildKokkosBatchedVolume"
+  ReductionFileName: "GhKerrSchildKokkosBatchedReductions"
