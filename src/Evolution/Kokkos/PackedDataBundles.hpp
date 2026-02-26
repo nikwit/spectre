@@ -29,10 +29,6 @@ using packed_boundary_metadata_storage_t =
     typename PackedSystemTraits<System>::boundary_metadata_storage;
 
 template <typename System>
-using packed_evolution_state_extras_t =
-    typename PackedSystemTraits<System>::evolution_state_extras;
-
-template <typename System>
 using packed_boundary_scratch_storage_t =
     typename PackedSystemTraits<System>::boundary_scratch_storage;
 
@@ -58,36 +54,9 @@ struct PackedTopology {
   device_face_to_volume_index_map_type device_face_to_volume_index_map{};
 
   // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er& p) {
-    p | local_element_ids;
-    p | local_elements;
-    p | element_index_by_id;
-    p | element_extents_host;
-    p | element_point_offsets_host;
-    p | total_points;
-    p | points_per_element;
-    p | uniform_extents_host;
-    p | uniform_basis_host;
-    p | uniform_quadrature_host;
-
-    size_t point_offsets_size = element_point_offsets_device.extent(0);
-    size_t extents_size = element_extents_device.extent(0);
-    size_t face_to_volume_points = 0;
-    for (size_t d = 0; d < volume_dim; ++d) {
-      face_to_volume_points +=
-          gsl::at(device_face_to_volume_index_map, d).first.extent(0);
-      face_to_volume_points +=
-          gsl::at(device_face_to_volume_index_map, d).second.extent(0);
-    }
-    p | point_offsets_size;
-    p | extents_size;
-    p | face_to_volume_points;
-    if (point_offsets_size != 0 or extents_size != 0 or
-        face_to_volume_points != 0) {
-      ERROR(
-          "PUP for non-empty evolution::Kokkos::PackedTopology device "
-          "metadata is currently unsupported.");
-    }
+  void pup(PUP::er& /*p*/) {
+    ERROR("Tried to call pup for evolution::Kokkos::PackedTopology, but pup "
+          "is not supported with kokkos");
   }
 };
 
@@ -98,16 +67,9 @@ struct PackedGeometry {
   ::Kokkos::View<double***> element_inverse_jacobian_device{};
 
   // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er& p) {
-    p | inertial_coordinates_host;
-    size_t inverse_jacobian_num_elements =
-        element_inverse_jacobian_device.extent(0);
-    p | inverse_jacobian_num_elements;
-    if (inverse_jacobian_num_elements != 0) {
-      ERROR(
-          "PUP for non-empty evolution::Kokkos::PackedGeometry device "
-          "metadata is currently unsupported.");
-    }
+  void pup(PUP::er& /*p*/) {
+    ERROR("Tried to call pup for evolution::Kokkos::PackedGeometry, but pup "
+          "is not supported with kokkos");
   }
 };
 
@@ -118,15 +80,14 @@ struct PackedBoundaryMetadata : packed_boundary_metadata_storage_t<System> {
 
  public:
   // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er& p) { boundary_metadata_storage::pup(p); }
+  void pup(PUP::er& /*p*/) {
+    ERROR("Tried to call pup for evolution::Kokkos::PackedBoundaryMetadata, "
+          "but pup is not supported with kokkos");
+  }
 };
 
 template <typename System>
-struct PackedEvolutionState : packed_evolution_state_extras_t<System> {
- private:
-  using evolution_state_extras = packed_evolution_state_extras_t<System>;
-
- public:
+struct PackedEvolutionState {
   using device_variables_type =
       typename evolution::Kokkos::Tags::DeviceVariables<System>::type;
   using device_dt_variables_type =
@@ -142,15 +103,9 @@ struct PackedEvolutionState : packed_evolution_state_extras_t<System> {
   device_derivative_history_type device_derivative_history{};
 
   // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er& p) {
-    size_t device_points = device_variables.number_of_grid_points();
-    p | device_points;
-    if (device_points != 0) {
-      ERROR(
-          "PUP for non-empty evolution::Kokkos::PackedEvolutionState is "
-          "currently unsupported.");
-    }
-    evolution_state_extras::pup(p);
+  void pup(PUP::er& /*p*/) {
+    ERROR("Tried to call pup for evolution::Kokkos::PackedEvolutionState, but "
+          "pup is not supported with kokkos");
   }
 };
 
@@ -161,7 +116,10 @@ struct PackedBoundaryScratch : packed_boundary_scratch_storage_t<System> {
 
  public:
   // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er& p) { boundary_scratch_storage::pup(p); }
+  void pup(PUP::er& /*p*/) {
+    ERROR("Tried to call pup for evolution::Kokkos::PackedBoundaryScratch, "
+          "but pup is not supported with kokkos");
+  }
 };
 
 }  // namespace evolution::Kokkos
