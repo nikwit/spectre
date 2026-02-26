@@ -22,6 +22,7 @@ spectre_target_headers(
   BoundaryCorrectionTags.hpp
   ComputeTags.hpp
   Evolution.hpp
+  Kokkos/BoundaryBatchMetadata.hpp
   Kokkos/CleanHistory.hpp
   Kokkos/KokkosTimeStepperTags.hpp
   Kokkos/PackedDataBundles.hpp
