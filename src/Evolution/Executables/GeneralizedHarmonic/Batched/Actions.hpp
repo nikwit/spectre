@@ -9,7 +9,7 @@
 namespace gh::Batched::Actions {
 
 template <typename Metavariables>
-using InitializeDriver = gh::Actions::InitializeBatchedData<Metavariables>;
+using InitializeDriver = gh::Actions::InitializeBatchedData;
 using InitializeBoundaryBatchMetadata =
     gh::Actions::InitializeBoundaryBatchMetadata;
 using ComputeTimeDerivativeBatched = gh::Actions::ComputeTimeDerivativeBatched;

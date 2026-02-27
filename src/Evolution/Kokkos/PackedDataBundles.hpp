@@ -50,26 +50,32 @@ struct PackedTopology {
   std::array<Spectral::Basis, volume_dim> uniform_basis_host{};
   std::array<Spectral::Quadrature, volume_dim> uniform_quadrature_host{};
   ::Kokkos::View<size_t*> element_point_offsets_device{};
-  ::Kokkos::View<size_t* [volume_dim]> element_extents_device{};
+  ::Kokkos::View<size_t* [volume_dim]> element_extents_device {};
   device_face_to_volume_index_map_type device_face_to_volume_index_map{};
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {
-    ERROR("Tried to call pup for evolution::Kokkos::PackedTopology, but pup "
-          "is not supported with kokkos");
+    ERROR(
+        "Tried to call pup for evolution::Kokkos::PackedTopology, but pup "
+        "is not supported with kokkos");
   }
 };
 
 template <typename System>
 struct PackedGeometry {
   static constexpr size_t volume_dim = System::volume_dim;
+  using device_inertial_coordinates_type =
+      typename evolution::Kokkos::Tags::DeviceInertialCoordinates<
+          volume_dim>::type;
   std::array<DataVector, volume_dim> inertial_coordinates_host{};
+  device_inertial_coordinates_type inertial_coordinates_device{};
   ::Kokkos::View<double***> element_inverse_jacobian_device{};
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {
-    ERROR("Tried to call pup for evolution::Kokkos::PackedGeometry, but pup "
-          "is not supported with kokkos");
+    ERROR(
+        "Tried to call pup for evolution::Kokkos::PackedGeometry, but pup "
+        "is not supported with kokkos");
   }
 };
 
@@ -81,8 +87,9 @@ struct PackedBoundaryMetadata : packed_boundary_metadata_storage_t<System> {
  public:
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {
-    ERROR("Tried to call pup for evolution::Kokkos::PackedBoundaryMetadata, "
-          "but pup is not supported with kokkos");
+    ERROR(
+        "Tried to call pup for evolution::Kokkos::PackedBoundaryMetadata, "
+        "but pup is not supported with kokkos");
   }
 };
 
@@ -104,8 +111,9 @@ struct PackedEvolutionState {
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {
-    ERROR("Tried to call pup for evolution::Kokkos::PackedEvolutionState, but "
-          "pup is not supported with kokkos");
+    ERROR(
+        "Tried to call pup for evolution::Kokkos::PackedEvolutionState, but "
+        "pup is not supported with kokkos");
   }
 };
 
@@ -117,8 +125,9 @@ struct PackedBoundaryScratch : packed_boundary_scratch_storage_t<System> {
  public:
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {
-    ERROR("Tried to call pup for evolution::Kokkos::PackedBoundaryScratch, "
-          "but pup is not supported with kokkos");
+    ERROR(
+        "Tried to call pup for evolution::Kokkos::PackedBoundaryScratch, "
+        "but pup is not supported with kokkos");
   }
 };
 
