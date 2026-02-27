@@ -1,68 +1,114 @@
 #Distributed under the MIT License.
 #See LICENSE.txt for details.
 
-set(LIBS_TO_LINK Actions Charmxx::main CoordinateMaps DiscontinuousGalerkin
-        Domain DomainCreators EventsAndDenseTriggers EventsAndTriggers Evolution
-            GeneralRelativity GeneralRelativityAnalyticData
-                GeneralRelativitySolutions GeneralizedHarmonic Importers
-                    Informer Interpolation LinearOperators MathFunctions
-                        Observer Options Parallel ParallelAmr
-                            ParallelInterpolation PhaseControl Printf
-                                Serialization Time Utilities)
+set(LIBS_TO_LINK
+    Actions
+    Charmxx::main
+    CoordinateMaps
+    DiscontinuousGalerkin
+    Domain
+    DomainCreators
+    EventsAndDenseTriggers
+    EventsAndTriggers
+    Evolution
+    GeneralRelativity
+    GeneralRelativityAnalyticData
+    GeneralRelativitySolutions
+    GeneralizedHarmonic
+    Importers
+    Informer
+    Interpolation
+    LinearOperators
+    MathFunctions
+    Observer
+    Options
+    Parallel
+    ParallelAmr
+    ParallelInterpolation
+    PhaseControl
+    Printf
+    Serialization
+    Time
+    Utilities
+)
 
 #GH without horizons
-    function(add_generalized_harmonic_executable_without_horizon DIM) set(
-        EXECUTABLE "EvolveGhNoBlackHole${DIM}D") add_spectre_executable(${
-        EXECUTABLE} EXCLUDE_FROM_ALL EvolveGhNoBlackHole.cpp)
-        target_compile_definitions(${EXECUTABLE} PRIVATE DIM = ${DIM} USE_LTS =
-                                       false) target_link_libraries(${
-            EXECUTABLE} PRIVATE ${LIBS_TO_LINK}) endfunction()
+function(add_generalized_harmonic_executable_without_horizon DIM)
+  set(EXECUTABLE "EvolveGhNoBlackHole${DIM}D")
+  add_spectre_executable(
+    ${EXECUTABLE}
+    EXCLUDE_FROM_ALL
+    EvolveGhNoBlackHole.cpp
+  )
+  target_compile_definitions(${EXECUTABLE} PRIVATE DIM=${DIM} USE_LTS=false)
+  target_link_libraries(${EXECUTABLE} PRIVATE ${LIBS_TO_LINK})
+endfunction()
 
-            add_generalized_harmonic_executable_without_horizon(
-                1) add_generalized_harmonic_executable_without_horizon(2)
-                add_generalized_harmonic_executable_without_horizon(3)
+add_generalized_harmonic_executable_without_horizon(1)
+add_generalized_harmonic_executable_without_horizon(2)
+add_generalized_harmonic_executable_without_horizon(3)
 
-                    set(NO_BH_KOKKOS_EXECUTABLE EvolveGhNoBlackHoleKokkos) add_spectre_executable(
-                        ${NO_BH_KOKKOS_EXECUTABLE} EXCLUDE_FROM_ALL
-                            EvolveGhNoBlackHoleKokkos
-                                .cpp) target_link_libraries(${
-                        NO_BH_KOKKOS_EXECUTABLE} PRIVATE ${
-                        LIBS_TO_LINK} GeneralizedHarmonicKokkos)
+set(NO_BH_KOKKOS_EXECUTABLE EvolveGhNoBlackHoleKokkos)
+add_spectre_executable(
+  ${NO_BH_KOKKOS_EXECUTABLE}
+  EXCLUDE_FROM_ALL
+  EvolveGhNoBlackHoleKokkos.cpp
+)
+target_link_libraries(
+  ${NO_BH_KOKKOS_EXECUTABLE}
+  PRIVATE
+  ${LIBS_TO_LINK}
+  GeneralizedHarmonicKokkos
+)
 
-                        set(NO_BH_KOKKOS_BATCHED_EXECUTABLE
-                                EvolveGhNoBlackHoleKokkosBatched)
-                            add_spectre_executable(
-                                ${NO_BH_KOKKOS_BATCHED_EXECUTABLE} EXCLUDE_FROM_ALL
-                                    EvolveGhNoBlackHoleKokkosBatched
-                                        .cpp) target_link_libraries(${
-                                NO_BH_KOKKOS_BATCHED_EXECUTABLE} PRIVATE ${
-                                LIBS_TO_LINK} GeneralizedHarmonicKokkos)
+set(NO_BH_KOKKOS_BATCHED_EXECUTABLE EvolveGhNoBlackHoleKokkosBatched)
+add_spectre_executable(
+  ${NO_BH_KOKKOS_BATCHED_EXECUTABLE}
+  EXCLUDE_FROM_ALL
+  EvolveGhNoBlackHoleKokkosBatched.cpp
+)
+target_link_libraries(
+  ${NO_BH_KOKKOS_BATCHED_EXECUTABLE}
+  PRIVATE
+  ${LIBS_TO_LINK}
+  GeneralizedHarmonicKokkos
+)
 
 #Single BH
-                                set(SINGLE_BH_EXECUTABLE EvolveGhSingleBlackHole) add_spectre_executable(
-                                    ${SINGLE_BH_EXECUTABLE} EXCLUDE_FROM_ALL
-                                        EvolveGhSingleBlackHole
-                                            .cpp) target_link_libraries(${
-                                    SINGLE_BH_EXECUTABLE} PRIVATE ${
-                                    LIBS_TO_LINK} ApparentHorizonFinder Cce ControlSystem
-                                                                            Deadlock)
-                                    target_compile_definitions(
-                                        ${SINGLE_BH_EXECUTABLE} PRIVATE
-                                            USE_LTS = true)
+set(SINGLE_BH_EXECUTABLE EvolveGhSingleBlackHole)
+add_spectre_executable(
+  ${SINGLE_BH_EXECUTABLE}
+  EXCLUDE_FROM_ALL
+  EvolveGhSingleBlackHole.cpp
+)
+target_link_libraries(
+  ${SINGLE_BH_EXECUTABLE}
+  PRIVATE
+  ${LIBS_TO_LINK}
+  ApparentHorizonFinder
+  Cce
+  ControlSystem
+  Deadlock
+)
+target_compile_definitions(${SINGLE_BH_EXECUTABLE} PRIVATE USE_LTS=true)
 
 #BBH
-                                        set(BBH_EXECUTABLE
-                                                EvolveGhBinaryBlackHole)
-                                            add_spectre_executable(
-                                                ${BBH_EXECUTABLE} EXCLUDE_FROM_ALL
-                                                    EvolveGhBinaryBlackHole.cpp)
-                                                target_link_libraries(
-                                                    ${BBH_EXECUTABLE} PRIVATE ${
-                                                        LIBS_TO_LINK} ApparentHorizonFinder
-                                                        Cce ControlSystem Deadlock
-                                                            EvolutionTriggers) if (TARGET SpEC::
-                                                                                       Exporter)
-                                                    target_compile_definitions(
-                                                        ${BBH_EXECUTABLE} PRIVATE
-                                                            HAS_SPEC_EXPORTER)
-                                                        endif()
+set(BBH_EXECUTABLE EvolveGhBinaryBlackHole)
+add_spectre_executable(
+  ${BBH_EXECUTABLE}
+  EXCLUDE_FROM_ALL
+  EvolveGhBinaryBlackHole.cpp
+)
+target_link_libraries(
+  ${BBH_EXECUTABLE}
+  PRIVATE
+  ${LIBS_TO_LINK}
+  ApparentHorizonFinder
+  Cce
+  ControlSystem
+  Deadlock
+  EvolutionTriggers
+)
+if(TARGET SpEC::Exporter)
+  target_compile_definitions(${BBH_EXECUTABLE} PRIVATE HAS_SPEC_EXPORTER)
+endif()
