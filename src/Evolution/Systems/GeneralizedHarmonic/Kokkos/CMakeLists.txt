@@ -9,8 +9,10 @@ spectre_target_sources(
   ${LIBRARY}
   PRIVATE
   ApplyBoundaryCorrectionsToTimeDerivativeKokkos.cpp
+  Batched/ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched.cpp
   Batched/ComputeInternalBoundaryTermsBatched.cpp
   Batched/ComputeTimeDerivativeBatched.cpp
+  Batched/InitializeBatchedData.cpp
   Batched/LiftInternalBoundaryTermsBatched.cpp
   Batched/ObserveTimeStepBatchedEvent.cpp
   Batched/PackageLocalFacesBatched.cpp
@@ -27,6 +29,7 @@ spectre_target_headers(
   Batched/ComputeInternalBoundaryTermsBatched.hpp
   Batched/ComputeTimeDerivativeBatched.hpp
   Batched/DriverState.hpp
+  Batched/FilterKokkosBatched.hpp
   Batched/InitializeBatchedData.hpp
   Batched/InitializeBoundaryBatchMetadata.hpp
   Batched/LiftInternalBoundaryTermsBatched.hpp

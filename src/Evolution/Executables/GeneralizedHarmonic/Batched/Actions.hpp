@@ -20,5 +20,7 @@ using LiftInternalBoundaryTermsBatched =
     gh::Actions::LiftInternalBoundaryTermsBatched;
 using ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched =
     gh::Actions::ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched;
+template <typename FilterType>
+using FilterKokkosBatched = gh::Actions::FilterKokkosBatched<FilterType>;
 
 }  // namespace gh::Batched::Actions

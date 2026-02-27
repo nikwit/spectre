@@ -93,8 +93,8 @@ struct EvolutionMetavarsKokkos {
                  evolution::Actions::RunEventsAndDenseTriggers<tmpl::list<>>,
                  control_system::Actions::LimitTimeStep<tmpl::list<>>,
                  Actions::MutateApply<gh::Actions::UpdateUKokkos<system>>>,
-      Actions::MutateApply<gh::Actions::CleanHistoryKokkos<system>>,
-      gh::Actions::FilterKokkos<Filters::Exponential<0>>>;
+      gh::Actions::FilterKokkos<Filters::Exponential<0>>,
+      Actions::MutateApply<gh::Actions::CleanHistoryKokkos<system>>>;
 
   using initialization_actions = tmpl::list<
       Initialization::Actions::InitializeItems<

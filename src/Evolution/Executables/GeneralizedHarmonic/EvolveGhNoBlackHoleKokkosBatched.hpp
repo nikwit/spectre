@@ -16,7 +16,9 @@
 #include "Evolution/Kokkos/RecordTimeStepperData.hpp"
 #include "Evolution/Kokkos/UpdateU.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/ObserveTimeStepBatchedEvent.hpp"
+#include "Evolution/Tags/Filter.hpp"
 #include "IO/Observer/ObserverComponent.hpp"
+#include "NumericalAlgorithms/LinearOperators/ExponentialFilter.hpp"
 #include "Options/String.hpp"
 #include "Parallel/Algorithms/AlgorithmSingleton.hpp"
 #include "Parallel/GlobalCache.hpp"
@@ -87,6 +89,8 @@ struct GhKokkosBatchedDriver {
                       typename Metavariables::system>>,
               Actions::MutateApply<evolution::Actions::Kokkos::UpdateU<
                   typename Metavariables::system>>,
+              Actions::MutateApply<gh::Batched::Actions::FilterKokkosBatched<
+                  Filters::Exponential<0>>>,
               Actions::MutateApply<evolution::Actions::Kokkos::CleanHistory<
                   typename Metavariables::system>>,
               Actions::AdvanceTime>>>;
@@ -147,7 +151,7 @@ struct EvolutionMetavarsKokkosBatched {
                  gh::Tags::DampingFunctionGamma0<volume_dim, Frame::Grid>,
                  gh::Tags::DampingFunctionGamma1<volume_dim, Frame::Grid>,
                  gh::Tags::DampingFunctionGamma2<volume_dim, Frame::Grid>,
-                 domain::Tags::ExternalBoundaryConditions<volume_dim>,
+                 Filters::Tags::Filter<Filters::Exponential<0>>,
                  ::Tags::EventsAndTriggers<Triggers::WhenToCheck::AtSlabs>>;
 
   using batched_driver_component =
