@@ -23,9 +23,14 @@ namespace gh::Actions {
 namespace {
 
 constexpr size_t dim = 3;
+constexpr size_t spacetime_dim = dim + 1;
+constexpr size_t spacetime_symmetric_size =
+    spacetime_dim * (spacetime_dim + 1) / 2;
 using system = gh::System<dim>;
 using packed_evolution_state_type =
     evolution::Kokkos::Tags::PackedEvolutionState<system>::type;
+using packed_boundary_scratch_type =
+    evolution::Kokkos::Tags::PackedBoundaryScratch<system>::type;
 using packed_topology_type =
     evolution::Kokkos::Tags::PackedTopology<system>::type;
 using packed_geometry_type =
@@ -43,6 +48,9 @@ using spacetime_metric_tag =
     gr::Tags::SpacetimeMetric<DataVector, dim, Frame::Inertial>;
 using pi_tag = gh::Tags::Pi<DataVector, dim, Frame::Inertial>;
 using phi_tag = gh::Tags::Phi<DataVector, dim, Frame::Inertial>;
+using device_spacetime_metric_tag = ::Tags::MirrorView<spacetime_metric_tag>;
+using device_pi_tag = ::Tags::MirrorView<pi_tag>;
+using device_phi_tag = ::Tags::MirrorView<phi_tag>;
 using device_gauge_h_tag =
     ::Tags::MirrorView<gh::Tags::GaugeH<DataVector, dim>>;
 using device_spacetime_deriv_gauge_h_tag =
@@ -54,6 +62,17 @@ using device_gradient_tags =
 using device_derivative_tags =
     db::wrap_tags_in<::Tags::deriv, device_gradient_tags, tmpl::size_t<dim>,
                      Frame::Inertial>;
+using device_spatial_deriv_gauge_h_tag =
+    ::Tags::deriv<device_gauge_h_tag, tmpl::size_t<dim>, Frame::Inertial>;
+using device_spatial_deriv_gauge_data_type =
+    Variables<tmpl::list<device_spatial_deriv_gauge_h_tag>>;
+using device_d_spacetime_metric_tag =
+    ::Tags::deriv<device_spacetime_metric_tag, tmpl::size_t<dim>,
+                  Frame::Inertial>;
+using device_d_pi_tag =
+    ::Tags::deriv<device_pi_tag, tmpl::size_t<dim>, Frame::Inertial>;
+using device_d_phi_tag =
+    ::Tags::deriv<device_phi_tag, tmpl::size_t<dim>, Frame::Inertial>;
 
 KOKKOS_INLINE_FUNCTION void inverse_spatial_metric_and_det(
     const gsl::not_null<tnsr::II<double, dim, Frame::Inertial>*>
@@ -78,6 +97,138 @@ KOKKOS_INLINE_FUNCTION void inverse_spatial_metric_and_det(
   inverse_spatial_metric->get(1, 1) = (g00 * g22 - g02 * g02) * inv_det;
   inverse_spatial_metric->get(1, 2) = (g02 * g01 - g00 * g12) * inv_det;
   inverse_spatial_metric->get(2, 2) = (g00 * g11 - g01 * g01) * inv_det;
+}
+
+KOKKOS_INLINE_FUNCTION void compute_inverse_spatial_metric_shift_lapse(
+    const gsl::not_null<tnsr::II<double, dim, Frame::Inertial>*>
+        inverse_spatial_metric,
+    const gsl::not_null<tnsr::I<double, dim, Frame::Inertial>*> shift,
+    const gsl::not_null<double*> lapse,
+    const gsl::not_null<double*> inv_lapse_squared,
+    const tnsr::aa<double, dim, Frame::Inertial>& spacetime_metric) {
+  double det_spatial_metric = 0.0;
+  inverse_spatial_metric_and_det(inverse_spatial_metric,
+                                 make_not_null(&det_spatial_metric),
+                                 spacetime_metric);
+  (void)det_spatial_metric;
+
+  for (size_t i = 0; i < dim; ++i) {
+    shift->get(i) = 0.0;
+    for (size_t j = 0; j < dim; ++j) {
+      shift->get(i) +=
+          inverse_spatial_metric->get(i, j) * spacetime_metric.get(0, j + 1);
+    }
+  }
+
+  double lapse_squared = -spacetime_metric.get(0, 0);
+  for (size_t i = 0; i < dim; ++i) {
+    lapse_squared += shift->get(i) * spacetime_metric.get(0, i + 1);
+  }
+  *lapse = sqrt(lapse_squared);
+  *inv_lapse_squared = 1.0 / lapse_squared;
+}
+
+KOKKOS_INLINE_FUNCTION void compute_inverse_spacetime_metric(
+    const gsl::not_null<tnsr::AA<double, dim, Frame::Inertial>*>
+        inverse_spacetime_metric,
+    const tnsr::II<double, dim, Frame::Inertial>& inverse_spatial_metric,
+    const tnsr::I<double, dim, Frame::Inertial>& shift,
+    const double inv_lapse_squared) {
+  inverse_spacetime_metric->get(0, 0) = -inv_lapse_squared;
+  for (size_t i = 0; i < dim; ++i) {
+    inverse_spacetime_metric->get(0, i + 1) = shift.get(i) * inv_lapse_squared;
+    for (size_t j = i; j < dim; ++j) {
+      inverse_spacetime_metric->get(i + 1, j + 1) =
+          inverse_spatial_metric.get(i, j) -
+          shift.get(i) * shift.get(j) * inv_lapse_squared;
+    }
+  }
+}
+
+KOKKOS_INLINE_FUNCTION double spacetime_metric_deriv_component(
+    const size_t a, const size_t mu, const size_t nu, const double lapse,
+    const tnsr::I<double, dim, Frame::Inertial>& shift,
+    const tnsr::aa<double, dim, Frame::Inertial>& pi,
+    const tnsr::iaa<double, dim, Frame::Inertial>& phi) {
+  if (a == 0) {
+    double dt_spacetime_metric_mu_nu = -lapse * pi.get(mu, nu);
+    for (size_t m = 0; m < dim; ++m) {
+      dt_spacetime_metric_mu_nu += shift.get(m) * phi.get(m, mu, nu);
+    }
+    return dt_spacetime_metric_mu_nu;
+  }
+  return phi.get(a - 1, mu, nu);
+}
+
+KOKKOS_INLINE_FUNCTION double christoffel_first_kind_component(
+    const size_t k, const size_t i, const size_t j, const double lapse,
+    const tnsr::I<double, dim, Frame::Inertial>& shift,
+    const tnsr::aa<double, dim, Frame::Inertial>& pi,
+    const tnsr::iaa<double, dim, Frame::Inertial>& phi) {
+  return 0.5 *
+         (spacetime_metric_deriv_component(i, j, k, lapse, shift, pi, phi) +
+          spacetime_metric_deriv_component(j, i, k, lapse, shift, pi, phi) -
+          spacetime_metric_deriv_component(k, i, j, lapse, shift, pi, phi));
+}
+
+KOKKOS_INLINE_FUNCTION size_t symmetric_spacetime_index(const size_t a,
+                                                        const size_t b) {
+  const size_t mu = a < b ? a : b;
+  const size_t nu = a < b ? b : a;
+  return mu * (2 * spacetime_dim - mu + 1) / 2 + (nu - mu);
+}
+
+KOKKOS_INLINE_FUNCTION std::array<size_t, 2> symmetric_spacetime_indices(
+    const size_t symmetric_index) {
+  size_t mu = 0;
+  size_t remaining = symmetric_index;
+  size_t row_width = spacetime_dim;
+  while (remaining >= row_width) {
+    remaining -= row_width;
+    ++mu;
+    --row_width;
+  }
+  return {{mu, mu + remaining}};
+}
+
+KOKKOS_INLINE_FUNCTION double get_symmetric_spacetime_component(
+    const double* symmetric_components, const size_t a, const size_t b) {
+  return symmetric_components[symmetric_spacetime_index(a, b)];
+}
+
+KOKKOS_INLINE_FUNCTION double get_phi_component(const double* phi_components,
+                                                const size_t i, const size_t a,
+                                                const size_t b) {
+  return phi_components[i * spacetime_symmetric_size +
+                        symmetric_spacetime_index(a, b)];
+}
+
+KOKKOS_INLINE_FUNCTION double spacetime_metric_deriv_component_from_scratch(
+    const size_t a, const size_t mu, const size_t nu, const double lapse,
+    const double* shift, const double* pi_components,
+    const double* phi_components) {
+  if (a == 0) {
+    double dt_spacetime_metric_mu_nu =
+        -lapse * get_symmetric_spacetime_component(pi_components, mu, nu);
+    for (size_t m = 0; m < dim; ++m) {
+      dt_spacetime_metric_mu_nu +=
+          shift[m] * get_phi_component(phi_components, m, mu, nu);
+    }
+    return dt_spacetime_metric_mu_nu;
+  }
+  return get_phi_component(phi_components, a - 1, mu, nu);
+}
+
+KOKKOS_INLINE_FUNCTION double christoffel_first_kind_component_from_scratch(
+    const size_t k, const size_t i, const size_t j, const double lapse,
+    const double* shift, const double* pi_components,
+    const double* phi_components) {
+  return 0.5 * (spacetime_metric_deriv_component_from_scratch(
+                    i, j, k, lapse, shift, pi_components, phi_components) +
+                spacetime_metric_deriv_component_from_scratch(
+                    j, i, k, lapse, shift, pi_components, phi_components) -
+                spacetime_metric_deriv_component_from_scratch(
+                    k, i, j, lapse, shift, pi_components, phi_components));
 }
 
 KOKKOS_INLINE_FUNCTION void compute_gauge_from_gh_vars(
@@ -382,324 +533,10 @@ KOKKOS_INLINE_FUNCTION void compute_hardcoded_analytic_gauge(
                              analytic_phi);
 }
 
-KOKKOS_INLINE_FUNCTION void compute_rhs_at_point(
-    const gsl::not_null<tnsr::aa<double, dim, Frame::Inertial>*>
-        dt_spacetime_metric,
-    const gsl::not_null<tnsr::aa<double, dim, Frame::Inertial>*> dt_pi,
-    const gsl::not_null<tnsr::iaa<double, dim, Frame::Inertial>*> dt_phi,
-    const tnsr::aa<double, dim, Frame::Inertial>& spacetime_metric,
-    const tnsr::aa<double, dim, Frame::Inertial>& pi,
-    const tnsr::iaa<double, dim, Frame::Inertial>& phi,
-    const tnsr::iaa<double, dim, Frame::Inertial>& d_spacetime_metric,
-    const tnsr::iaa<double, dim, Frame::Inertial>& d_pi,
-    const tnsr::ijaa<double, dim, Frame::Inertial>& d_phi,
-    const tnsr::a<double, dim, Frame::Inertial>& gauge_h,
-    const tnsr::ab<double, dim, Frame::Inertial>& spacetime_deriv_gauge_h,
-    const double gamma0, const double gamma1, const double gamma2) {
-  tnsr::II<double, dim, Frame::Inertial> inverse_spatial_metric{};
-  double det_spatial_metric = 0.0;
-  inverse_spatial_metric_and_det(make_not_null(&inverse_spatial_metric),
-                                 make_not_null(&det_spatial_metric),
-                                 spacetime_metric);
-  (void)det_spatial_metric;
-
-  tnsr::I<double, dim, Frame::Inertial> shift{};
-  for (size_t i = 0; i < dim; ++i) {
-    shift.get(i) = 0.0;
-    for (size_t j = 0; j < dim; ++j) {
-      shift.get(i) +=
-          inverse_spatial_metric.get(i, j) * spacetime_metric.get(0, j + 1);
-    }
-  }
-
-  double lapse_squared = -spacetime_metric.get(0, 0);
-  for (size_t i = 0; i < dim; ++i) {
-    lapse_squared += shift.get(i) * spacetime_metric.get(0, i + 1);
-  }
-  const double lapse = sqrt(lapse_squared);
-  const double inv_lapse_squared = 1.0 / lapse_squared;
-
-  tnsr::AA<double, dim, Frame::Inertial> inverse_spacetime_metric{};
-  inverse_spacetime_metric.get(0, 0) = -inv_lapse_squared;
-  for (size_t i = 0; i < dim; ++i) {
-    inverse_spacetime_metric.get(0, i + 1) = shift.get(i) * inv_lapse_squared;
-    for (size_t j = i; j < dim; ++j) {
-      inverse_spacetime_metric.get(i + 1, j + 1) =
-          inverse_spatial_metric.get(i, j) -
-          shift.get(i) * shift.get(j) * inv_lapse_squared;
-    }
-  }
-
-  for (size_t mu = 0; mu < dim + 1; ++mu) {
-    for (size_t nu = mu; nu < dim + 1; ++nu) {
-      dt_spacetime_metric->get(mu, nu) = -lapse * pi.get(mu, nu);
-      for (size_t m = 0; m < dim; ++m) {
-        dt_spacetime_metric->get(mu, nu) += shift.get(m) * phi.get(m, mu, nu);
-      }
-    }
-  }
-
-  tnsr::abb<double, dim, Frame::Inertial> da_spacetime_metric{};
-  for (size_t a = 0; a < dim + 1; ++a) {
-    for (size_t b = a; b < dim + 1; ++b) {
-      da_spacetime_metric.get(0, a, b) = dt_spacetime_metric->get(a, b);
-      for (size_t i = 0; i < dim; ++i) {
-        da_spacetime_metric.get(i + 1, a, b) = phi.get(i, a, b);
-      }
-    }
-  }
-
-  tnsr::abb<double, dim, Frame::Inertial> christoffel_first_kind{};
-  for (size_t k = 0; k < dim + 1; ++k) {
-    for (size_t i = 0; i < dim + 1; ++i) {
-      for (size_t j = i; j < dim + 1; ++j) {
-        christoffel_first_kind.get(k, i, j) =
-            0.5 * (da_spacetime_metric.get(i, j, k) +
-                   da_spacetime_metric.get(j, i, k) -
-                   da_spacetime_metric.get(k, i, j));
-      }
-    }
-  }
-
-  tnsr::a<double, dim, Frame::Inertial> trace_christoffel{};
-  for (size_t a = 0; a < dim + 1; ++a) {
-    trace_christoffel.get(a) = 0.0;
-    for (size_t b = 0; b < dim + 1; ++b) {
-      for (size_t c = 0; c < dim + 1; ++c) {
-        trace_christoffel.get(a) += christoffel_first_kind.get(a, b, c) *
-                                    inverse_spacetime_metric.get(b, c);
-      }
-    }
-  }
-
-  tnsr::A<double, dim, Frame::Inertial> normal_spacetime_vector{};
-  normal_spacetime_vector.get(0) = 1.0 / lapse;
-  for (size_t i = 0; i < dim; ++i) {
-    normal_spacetime_vector.get(i + 1) = -shift.get(i) / lapse;
-  }
-
-  const double gamma1gamma2 = gamma1 * gamma2;
-  const double gamma1_plus_1 = 1.0 + gamma1;
-
-  tnsr::Iaa<double, dim, Frame::Inertial> phi_1_up{};
-  for (size_t m = 0; m < dim; ++m) {
-    for (size_t mu = 0; mu < dim + 1; ++mu) {
-      for (size_t nu = mu; nu < dim + 1; ++nu) {
-        phi_1_up.get(m, mu, nu) = 0.0;
-        for (size_t n = 0; n < dim; ++n) {
-          phi_1_up.get(m, mu, nu) +=
-              inverse_spatial_metric.get(m, n) * phi.get(n, mu, nu);
-        }
-      }
-    }
-  }
-
-  tnsr::iaB<double, dim, Frame::Inertial> phi_3_up{};
-  for (size_t m = 0; m < dim; ++m) {
-    for (size_t nu = 0; nu < dim + 1; ++nu) {
-      for (size_t alpha = 0; alpha < dim + 1; ++alpha) {
-        phi_3_up.get(m, nu, alpha) = 0.0;
-        for (size_t beta = 0; beta < dim + 1; ++beta) {
-          phi_3_up.get(m, nu, alpha) +=
-              inverse_spacetime_metric.get(alpha, beta) * phi.get(m, nu, beta);
-        }
-      }
-    }
-  }
-
-  tnsr::aB<double, dim, Frame::Inertial> pi_2_up{};
-  for (size_t nu = 0; nu < dim + 1; ++nu) {
-    for (size_t alpha = 0; alpha < dim + 1; ++alpha) {
-      pi_2_up.get(nu, alpha) = 0.0;
-      for (size_t beta = 0; beta < dim + 1; ++beta) {
-        pi_2_up.get(nu, alpha) +=
-            inverse_spacetime_metric.get(alpha, beta) * pi.get(nu, beta);
-      }
-    }
-  }
-
-  tnsr::abC<double, dim, Frame::Inertial> christoffel_first_kind_3_up{};
-  for (size_t mu = 0; mu < dim + 1; ++mu) {
-    for (size_t nu = 0; nu < dim + 1; ++nu) {
-      for (size_t alpha = 0; alpha < dim + 1; ++alpha) {
-        christoffel_first_kind_3_up.get(mu, nu, alpha) = 0.0;
-        for (size_t beta = 0; beta < dim + 1; ++beta) {
-          christoffel_first_kind_3_up.get(mu, nu, alpha) +=
-              inverse_spacetime_metric.get(alpha, beta) *
-              christoffel_first_kind.get(mu, nu, beta);
-        }
-      }
-    }
-  }
-
-  tnsr::Abb<double, dim, Frame::Inertial> christoffel_second_kind{};
-  for (size_t delta = 0; delta < dim + 1; ++delta) {
-    for (size_t mu = 0; mu < dim + 1; ++mu) {
-      for (size_t nu = mu; nu < dim + 1; ++nu) {
-        christoffel_second_kind.get(delta, mu, nu) = 0.0;
-        for (size_t alpha = 0; alpha < dim + 1; ++alpha) {
-          christoffel_second_kind.get(delta, mu, nu) +=
-              inverse_spacetime_metric.get(delta, alpha) *
-              christoffel_first_kind.get(alpha, mu, nu);
-        }
-      }
-    }
-  }
-
-  tnsr::a<double, dim, Frame::Inertial> pi_one_normal{};
-  for (size_t mu = 0; mu < dim + 1; ++mu) {
-    pi_one_normal.get(mu) = 0.0;
-    for (size_t nu = 0; nu < dim + 1; ++nu) {
-      pi_one_normal.get(mu) += normal_spacetime_vector.get(nu) * pi.get(nu, mu);
-    }
-  }
-
-  double half_pi_two_normals = 0.0;
-  for (size_t mu = 0; mu < dim + 1; ++mu) {
-    half_pi_two_normals +=
-        normal_spacetime_vector.get(mu) * pi_one_normal.get(mu);
-  }
-  half_pi_two_normals *= 0.5;
-
-  tnsr::ia<double, dim, Frame::Inertial> phi_one_normal{};
-  for (size_t n = 0; n < dim; ++n) {
-    for (size_t nu = 0; nu < dim + 1; ++nu) {
-      phi_one_normal.get(n, nu) = 0.0;
-      for (size_t mu = 0; mu < dim + 1; ++mu) {
-        phi_one_normal.get(n, nu) +=
-            normal_spacetime_vector.get(mu) * phi.get(n, mu, nu);
-      }
-    }
-  }
-
-  tnsr::i<double, dim, Frame::Inertial> half_phi_two_normals{};
-  for (size_t n = 0; n < dim; ++n) {
-    half_phi_two_normals.get(n) = 0.0;
-    for (size_t mu = 0; mu < dim + 1; ++mu) {
-      half_phi_two_normals.get(n) +=
-          normal_spacetime_vector.get(mu) * phi_one_normal.get(n, mu);
-    }
-    half_phi_two_normals.get(n) *= 0.5;
-  }
-
-  tnsr::iaa<double, dim, Frame::Inertial> three_index_constraint{};
-  for (size_t n = 0; n < dim; ++n) {
-    for (size_t mu = 0; mu < dim + 1; ++mu) {
-      for (size_t nu = mu; nu < dim + 1; ++nu) {
-        three_index_constraint.get(n, mu, nu) =
-            d_spacetime_metric.get(n, mu, nu) - phi.get(n, mu, nu);
-      }
-    }
-  }
-
-  tnsr::a<double, dim, Frame::Inertial> gauge_constraint{};
-  tnsr::aa<double, dim, Frame::Inertial> shift_dot_three_index_constraint{};
-  for (size_t mu = 0; mu < dim + 1; ++mu) {
-    gauge_constraint.get(mu) = trace_christoffel.get(mu) + gauge_h.get(mu);
-    for (size_t nu = mu; nu < dim + 1; ++nu) {
-      shift_dot_three_index_constraint.get(mu, nu) =
-          shift.get(0) * three_index_constraint.get(0, mu, nu);
-      for (size_t m = 1; m < dim; ++m) {
-        shift_dot_three_index_constraint.get(mu, nu) +=
-            shift.get(m) * three_index_constraint.get(m, mu, nu);
-      }
-    }
-  }
-
-  double normal_dot_gauge_constraint =
-      normal_spacetime_vector.get(0) * gauge_constraint.get(0);
-  for (size_t mu = 1; mu < dim + 1; ++mu) {
-    normal_dot_gauge_constraint +=
-        normal_spacetime_vector.get(mu) * gauge_constraint.get(mu);
-  }
-
-  for (size_t mu = 0; mu < dim + 1; ++mu) {
-    for (size_t nu = mu; nu < dim + 1; ++nu) {
-      dt_spacetime_metric->get(mu, nu) +=
-          gamma1_plus_1 * shift_dot_three_index_constraint.get(mu, nu);
-    }
-  }
-
-  normal_dot_gauge_constraint *= gamma0;
-  const double minus_gamma0_lapse = -gamma0 * lapse;
-
-  for (size_t i = 1; i < dim + 1; ++i) {
-    dt_pi->get(0, i) = minus_gamma0_lapse * gauge_constraint.get(i) -
-                       normal_dot_gauge_constraint * spacetime_metric.get(0, i);
-  }
-  dt_pi->get(0, 0) = 2.0 * minus_gamma0_lapse * gauge_constraint.get(0) -
-                     normal_dot_gauge_constraint * spacetime_metric.get(0, 0);
-  for (size_t mu = 1; mu < dim + 1; ++mu) {
-    for (size_t nu = mu; nu < dim + 1; ++nu) {
-      dt_pi->get(mu, nu) =
-          -normal_dot_gauge_constraint * spacetime_metric.get(mu, nu);
-    }
-  }
-
-  for (size_t mu = 0; mu < dim + 1; ++mu) {
-    for (size_t nu = mu; nu < dim + 1; ++nu) {
-      dt_pi->get(mu, nu) -= half_pi_two_normals * pi.get(mu, nu);
-      dt_pi->get(mu, nu) -= spacetime_deriv_gauge_h.get(mu, nu) +
-                            spacetime_deriv_gauge_h.get(nu, mu);
-
-      for (size_t delta = 0; delta < dim + 1; ++delta) {
-        dt_pi->get(mu, nu) -= 2.0 * pi.get(mu, delta) * pi_2_up.get(nu, delta);
-        dt_pi->get(mu, nu) += 2.0 * christoffel_second_kind.get(delta, mu, nu) *
-                              gauge_h.get(delta);
-
-        for (size_t n = 0; n < dim; ++n) {
-          dt_pi->get(mu, nu) +=
-              2.0 * phi_1_up.get(n, mu, delta) * phi_3_up.get(n, nu, delta);
-        }
-
-        for (size_t alpha = 0; alpha < dim + 1; ++alpha) {
-          dt_pi->get(mu, nu) -=
-              2.0 * christoffel_first_kind_3_up.get(mu, alpha, delta) *
-              christoffel_first_kind_3_up.get(nu, delta, alpha);
-        }
-      }
-
-      for (size_t m = 0; m < dim; ++m) {
-        dt_pi->get(mu, nu) -=
-            pi_one_normal.get(m + 1) * phi_1_up.get(m, mu, nu);
-        for (size_t n = 0; n < dim; ++n) {
-          dt_pi->get(mu, nu) -=
-              inverse_spatial_metric.get(m, n) * d_phi.get(m, n, mu, nu);
-        }
-      }
-
-      dt_pi->get(mu, nu) *= lapse;
-      dt_pi->get(mu, nu) +=
-          gamma1gamma2 * shift_dot_three_index_constraint.get(mu, nu);
-      for (size_t m = 0; m < dim; ++m) {
-        dt_pi->get(mu, nu) += shift.get(m) * d_pi.get(m, mu, nu);
-      }
-    }
-  }
-
-  for (size_t i = 0; i < dim; ++i) {
-    for (size_t mu = 0; mu < dim + 1; ++mu) {
-      for (size_t nu = mu; nu < dim + 1; ++nu) {
-        dt_phi->get(i, mu, nu) = pi.get(mu, nu) * half_phi_two_normals.get(i) -
-                                 d_pi.get(i, mu, nu) +
-                                 gamma2 * three_index_constraint.get(i, mu, nu);
-
-        for (size_t n = 0; n < dim; ++n) {
-          dt_phi->get(i, mu, nu) +=
-              phi_one_normal.get(i, n + 1) * phi_1_up.get(n, mu, nu);
-        }
-
-        dt_phi->get(i, mu, nu) *= lapse;
-        for (size_t m = 0; m < dim; ++m) {
-          dt_phi->get(i, mu, nu) += shift.get(m) * d_phi.get(m, i, mu, nu);
-        }
-      }
-    }
-  }
-}
-
 void compute_hardcoded_analytic_gauge_and_spacetime_derivative(
     const gsl::not_null<device_gauge_data_type*> device_gauge_data,
+    const gsl::not_null<device_spatial_deriv_gauge_data_type*>
+        device_spatial_gauge_deriv,
     const device_inertial_coordinates_type& device_inertial_coordinates,
     const ::Kokkos::View<double***>& element_inverse_jacobian,
     const Mesh<dim>& mesh) {
@@ -720,9 +557,9 @@ void compute_hardcoded_analytic_gauge_and_spacetime_derivative(
   if (device_gauge_data->number_of_grid_points() != number_of_points) {
     device_gauge_data->initialize(number_of_points);
   }
-
-  using device_spatial_deriv_gauge_h_tag =
-      ::Tags::deriv<device_gauge_h_tag, tmpl::size_t<dim>, Frame::Inertial>;
+  if (device_spatial_gauge_deriv->number_of_grid_points() != number_of_points) {
+    device_spatial_gauge_deriv->initialize(number_of_points);
+  }
 
   const auto device_gauge_h = get<device_gauge_h_tag>(*device_gauge_data);
   ::Kokkos::parallel_for(
@@ -730,48 +567,32 @@ void compute_hardcoded_analytic_gauge_and_spacetime_derivative(
       KOKKOS_LAMBDA(const int s) {
         const size_t point = static_cast<size_t>(s);
         tnsr::I<double, dim, Frame::Inertial> inertial_coords_at_s{};
-        for (size_t d = 0; d < dim; ++d) {
+        for (int d = 0; d < static_cast<int>(dim); ++d) {
           inertial_coords_at_s.get(d) =
               device_inertial_coordinates.get(d)(point);
         }
         tnsr::a<double, dim, Frame::Inertial> gauge_h_at_s{};
         compute_hardcoded_analytic_gauge(make_not_null(&gauge_h_at_s),
                                          inertial_coords_at_s);
-        for (size_t a = 0; a < dim + 1; ++a) {
+        for (int a = 0; a < static_cast<int>(dim + 1); ++a) {
           device_gauge_h.get(a)[point] = gauge_h_at_s.get(a);
         }
       });
 
-  Variables<tmpl::list<device_gauge_h_tag>> device_gauge_h_vars{
-      number_of_points};
-  const auto gauge_h_src = get<device_gauge_h_tag>(*device_gauge_data);
-  const auto gauge_h_dst = get<device_gauge_h_tag>(device_gauge_h_vars);
-  ::Kokkos::parallel_for(
-      "GhBatchedComputeTimeDerivativeCopyGaugeH", number_of_points,
-      KOKKOS_LAMBDA(const int s) {
-        const size_t point = static_cast<size_t>(s);
-        for (size_t a = 0; a < dim + 1; ++a) {
-          gauge_h_dst.get(a)[point] = gauge_h_src.get(a)[point];
-        }
-      });
-
-  Variables<tmpl::list<device_spatial_deriv_gauge_h_tag>>
-      device_spatial_gauge_deriv{number_of_points};
-  partial_derivatives_batched(make_not_null(&device_spatial_gauge_deriv),
-                              device_gauge_h_vars, mesh,
-                              element_inverse_jacobian);
+  partial_derivatives_batched(device_spatial_gauge_deriv, *device_gauge_data,
+                              mesh, element_inverse_jacobian);
 
   const auto device_spatial_deriv_gauge_h =
-      get<device_spatial_deriv_gauge_h_tag>(device_spatial_gauge_deriv);
+      get<device_spatial_deriv_gauge_h_tag>(*device_spatial_gauge_deriv);
   const auto device_spacetime_deriv_gauge_h =
       get<device_spacetime_deriv_gauge_h_tag>(*device_gauge_data);
   ::Kokkos::parallel_for(
       "GhBatchedComputeTimeDerivativeDerivGaugeH", number_of_points,
       KOKKOS_LAMBDA(const int s) {
         const size_t point = static_cast<size_t>(s);
-        for (size_t a = 0; a < dim + 1; ++a) {
+        for (int a = 0; a < static_cast<int>(dim + 1); ++a) {
           device_spacetime_deriv_gauge_h.get(0, a)[point] = 0.0;
-          for (size_t i = 0; i < dim; ++i) {
+          for (int i = 0; i < static_cast<int>(dim); ++i) {
             device_spacetime_deriv_gauge_h.get(i + 1, a)[point] =
                 device_spatial_deriv_gauge_h.get(i, a)[point];
           }
@@ -784,6 +605,8 @@ void compute_hardcoded_analytic_gauge_and_spacetime_derivative(
 void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
     const gsl::not_null<typename packed_evolution_state_tag::type*>
         packed_evolution_state,
+    const gsl::not_null<typename packed_boundary_scratch_tag::type*>
+        packed_boundary_scratch,
     const typename device_constraint_gamma0_tag::type& device_constraint_gamma0,
     const typename device_constraint_gamma1_tag::type& device_constraint_gamma1,
     const typename device_constraint_gamma2_tag::type& device_constraint_gamma2,
@@ -807,8 +630,12 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
   auto& device_vars = packed_evolution_state->device_variables;
   auto& device_dt = packed_evolution_state->device_dt_variables;
 
-  Variables<device_derivative_tags> partial_derivatives_all_elements{
-      total_points};
+  auto& partial_derivatives_all_elements =
+      packed_boundary_scratch->volume_partial_derivatives;
+  if (partial_derivatives_all_elements.number_of_grid_points() !=
+      total_points) {
+    partial_derivatives_all_elements.initialize(total_points);
+  }
   partial_derivatives_batched(make_not_null(&partial_derivatives_all_elements),
                               device_vars, mesh,
                               packed_geometry.element_inverse_jacobian_device);
@@ -821,9 +648,18 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
                  total_points,
          "Packed inertial device coordinates size mismatch with total points.");
 
-  device_gauge_data_type device_gauge_data{total_points};
+  auto& device_gauge_data = packed_boundary_scratch->volume_gauge_data;
+  if (device_gauge_data.number_of_grid_points() != total_points) {
+    device_gauge_data.initialize(total_points);
+  }
+  auto& device_spatial_gauge_deriv =
+      packed_boundary_scratch->volume_spatial_deriv_gauge;
+  if (device_spatial_gauge_deriv.number_of_grid_points() != total_points) {
+    device_spatial_gauge_deriv.initialize(total_points);
+  }
   compute_hardcoded_analytic_gauge_and_spacetime_derivative(
       make_not_null(&device_gauge_data),
+      make_not_null(&device_spatial_gauge_deriv),
       packed_geometry.inertial_coordinates_device,
       packed_geometry.element_inverse_jacobian_device, mesh);
 
@@ -831,52 +667,472 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
       get<::Tags::MirrorView<::Tags::dt<spacetime_metric_tag>>>(device_dt);
   const auto dt_pi = get<::Tags::MirrorView<::Tags::dt<pi_tag>>>(device_dt);
   const auto dt_phi = get<::Tags::MirrorView<::Tags::dt<phi_tag>>>(device_dt);
+  const auto spacetime_metric = get<device_spacetime_metric_tag>(device_vars);
+  const auto pi = get<device_pi_tag>(device_vars);
+  const auto phi = get<device_phi_tag>(device_vars);
+  const auto d_spacetime_metric =
+      get<device_d_spacetime_metric_tag>(partial_derivatives_all_elements);
+  const auto d_pi = get<device_d_pi_tag>(partial_derivatives_all_elements);
+  const auto d_phi = get<device_d_phi_tag>(partial_derivatives_all_elements);
+  const auto gauge_h = get<device_gauge_h_tag>(device_gauge_data);
+  const auto spacetime_deriv_gauge_h =
+      get<device_spacetime_deriv_gauge_h_tag>(device_gauge_data);
 
   ::Kokkos::parallel_for(
-      "GhBatchedComputeTimeDerivativeVolumeTerms", total_points,
+      "GhBatchedComputeTimeDerivativeDtSpacetimeMetric", total_points,
       KOKKOS_LAMBDA(const int s) {
-        tnsr::aa<double, dim, Frame::Inertial> dt_spacetime_metric_at_s{};
-        tnsr::aa<double, dim, Frame::Inertial> dt_pi_at_s{};
-        tnsr::iaa<double, dim, Frame::Inertial> dt_phi_at_s{};
-
-        const auto vars_at_s = make_at_index(device_vars, s);
-        const auto derivs_at_s =
-            make_at_index(partial_derivatives_all_elements, s);
-        const auto gauge_data_at_s = make_at_index(device_gauge_data, s);
-        const auto gamma0_at_s = make_at_index(device_constraint_gamma0, s);
+        const size_t point = static_cast<size_t>(s);
         const auto gamma1_at_s = make_at_index(device_constraint_gamma1, s);
+        const double gamma1 = get(gamma1_at_s);
+
+        const auto spacetime_metric_at_s = make_at_index(spacetime_metric, s);
+        const auto pi_at_s = make_at_index(pi, s);
+        const auto phi_at_s = make_at_index(phi, s);
+
+        tnsr::II<double, dim, Frame::Inertial> inverse_spatial_metric{};
+        tnsr::I<double, dim, Frame::Inertial> shift{};
+        double lapse = 0.0;
+        double inv_lapse_squared = 0.0;
+        compute_inverse_spatial_metric_shift_lapse(
+            make_not_null(&inverse_spatial_metric), make_not_null(&shift),
+            make_not_null(&lapse), make_not_null(&inv_lapse_squared),
+            spacetime_metric_at_s);
+        (void)inv_lapse_squared;
+        const double gamma1_plus_1 = 1.0 + gamma1;
+
+        for (int mu = 0; mu < static_cast<int>(dim + 1); ++mu) {
+          for (int nu = mu; nu < static_cast<int>(dim + 1); ++nu) {
+            const double dt_spacetime_metric_piece =
+                spacetime_metric_deriv_component(0, mu, nu, lapse, shift,
+                                                 pi_at_s, phi_at_s);
+            double shift_dot_three_index_constraint_mu_nu = 0.0;
+            for (int m = 0; m < static_cast<int>(dim); ++m) {
+              shift_dot_three_index_constraint_mu_nu +=
+                  shift.get(m) * (d_spacetime_metric.get(m, mu, nu)[point] -
+                                  phi_at_s.get(m, mu, nu));
+            }
+            dt_spacetime_metric.get(mu, nu)[point] =
+                dt_spacetime_metric_piece +
+                gamma1_plus_1 * shift_dot_three_index_constraint_mu_nu;
+          }
+        }
+      });
+
+  constexpr size_t dt_pi_offset_lapse = 0;
+  constexpr size_t dt_pi_offset_half_pi_two_normals = dt_pi_offset_lapse + 1;
+  constexpr size_t dt_pi_offset_gamma1gamma2 =
+      dt_pi_offset_half_pi_two_normals + 1;
+  constexpr size_t dt_pi_offset_minus_gamma0_lapse =
+      dt_pi_offset_gamma1gamma2 + 1;
+  constexpr size_t dt_pi_offset_normal_dot_gauge_constraint =
+      dt_pi_offset_minus_gamma0_lapse + 1;
+  constexpr size_t dt_pi_offset_shift =
+      dt_pi_offset_normal_dot_gauge_constraint + 1;
+  constexpr size_t dt_pi_offset_inverse_spatial_metric =
+      dt_pi_offset_shift + dim;
+  constexpr size_t dt_pi_offset_inverse_spacetime_metric =
+      dt_pi_offset_inverse_spatial_metric + dim * dim;
+  constexpr size_t dt_pi_offset_pi_up =
+      dt_pi_offset_inverse_spacetime_metric + spacetime_dim * spacetime_dim;
+  constexpr size_t dt_pi_offset_pi_one_normal =
+      dt_pi_offset_pi_up + spacetime_dim * spacetime_dim;
+  constexpr size_t dt_pi_offset_gauge_constraint =
+      dt_pi_offset_pi_one_normal + spacetime_dim;
+  constexpr size_t dt_pi_offset_gauge_h =
+      dt_pi_offset_gauge_constraint + spacetime_dim;
+  constexpr size_t dt_pi_offset_spacetime_metric_components =
+      dt_pi_offset_gauge_h + spacetime_dim;
+  constexpr size_t dt_pi_offset_pi_components =
+      dt_pi_offset_spacetime_metric_components + spacetime_symmetric_size;
+  constexpr size_t dt_pi_offset_phi_components =
+      dt_pi_offset_pi_components + spacetime_symmetric_size;
+  constexpr size_t dt_pi_scratch_size_doubles =
+      dt_pi_offset_phi_components + dim * spacetime_symmetric_size;
+  constexpr size_t dt_pi_scratch_size_bytes =
+      dt_pi_scratch_size_doubles * sizeof(double);
+
+  using dt_pi_team_policy = ::Kokkos::TeamPolicy<>;
+  dt_pi_team_policy dt_pi_policy(total_points, 32);
+  dt_pi_policy = dt_pi_policy.set_scratch_size(
+      0, ::Kokkos::PerTeam(dt_pi_scratch_size_bytes));
+  ::Kokkos::parallel_for(
+      "GhBatchedComputeTimeDerivativeDtPi", dt_pi_policy,
+      KOKKOS_LAMBDA(const dt_pi_team_policy::member_type& team_member) {
+        const size_t point = team_member.league_rank();
+        constexpr int int_dim = static_cast<int>(dim);
+        constexpr int int_spacetime_dim = static_cast<int>(spacetime_dim);
+        const auto gamma0_at_s = make_at_index(device_constraint_gamma0, point);
+        const auto gamma1_at_s = make_at_index(device_constraint_gamma1, point);
+        const auto gamma2_at_s = make_at_index(device_constraint_gamma2, point);
+        const double gamma0 = get(gamma0_at_s);
+        const double gamma1 = get(gamma1_at_s);
+        const double gamma2 = get(gamma2_at_s);
+
+        double* const shmem = static_cast<double*>(
+            team_member.team_shmem().get_shmem(dt_pi_scratch_size_bytes));
+        double* const shift = shmem + dt_pi_offset_shift;
+        double* const inverse_spatial_metric =
+            shmem + dt_pi_offset_inverse_spatial_metric;
+        double* const inverse_spacetime_metric =
+            shmem + dt_pi_offset_inverse_spacetime_metric;
+        double* const pi_up = shmem + dt_pi_offset_pi_up;
+        double* const pi_one_normal = shmem + dt_pi_offset_pi_one_normal;
+        double* const gauge_constraint = shmem + dt_pi_offset_gauge_constraint;
+        double* const gauge_h_components = shmem + dt_pi_offset_gauge_h;
+        double* const spacetime_metric_components =
+            shmem + dt_pi_offset_spacetime_metric_components;
+        double* const pi_components = shmem + dt_pi_offset_pi_components;
+        double* const phi_components = shmem + dt_pi_offset_phi_components;
+
+        ::Kokkos::single(::Kokkos::PerTeam(team_member), [&]() {
+          for (int mu = 0; mu < int_spacetime_dim; ++mu) {
+            gauge_h_components[mu] = gauge_h.get(mu)[point];
+            for (int nu = mu; nu < int_spacetime_dim; ++nu) {
+              const int symmetric_index =
+                  static_cast<int>(symmetric_spacetime_index(mu, nu));
+              spacetime_metric_components[symmetric_index] =
+                  spacetime_metric.get(mu, nu)[point];
+              pi_components[symmetric_index] = pi.get(mu, nu)[point];
+              for (int i = 0; i < int_dim; ++i) {
+                phi_components[i * spacetime_symmetric_size + symmetric_index] =
+                    phi.get(i, mu, nu)[point];
+              }
+            }
+          }
+
+          const double g11 = get_symmetric_spacetime_component(
+              spacetime_metric_components, 1, 1);
+          const double g12 = get_symmetric_spacetime_component(
+              spacetime_metric_components, 1, 2);
+          const double g13 = get_symmetric_spacetime_component(
+              spacetime_metric_components, 1, 3);
+          const double g22 = get_symmetric_spacetime_component(
+              spacetime_metric_components, 2, 2);
+          const double g23 = get_symmetric_spacetime_component(
+              spacetime_metric_components, 2, 3);
+          const double g33 = get_symmetric_spacetime_component(
+              spacetime_metric_components, 3, 3);
+          const double det_spatial_metric = g11 * (g22 * g33 - g23 * g23) -
+                                            g12 * (g12 * g33 - g23 * g13) +
+                                            g13 * (g12 * g23 - g22 * g13);
+          const double inv_det = 1.0 / det_spatial_metric;
+
+          inverse_spatial_metric[0 * dim + 0] =
+              (g22 * g33 - g23 * g23) * inv_det;
+          inverse_spatial_metric[0 * dim + 1] =
+              (g13 * g23 - g12 * g33) * inv_det;
+          inverse_spatial_metric[0 * dim + 2] =
+              (g12 * g23 - g13 * g22) * inv_det;
+          inverse_spatial_metric[1 * dim + 0] =
+              inverse_spatial_metric[0 * dim + 1];
+          inverse_spatial_metric[1 * dim + 1] =
+              (g11 * g33 - g13 * g13) * inv_det;
+          inverse_spatial_metric[1 * dim + 2] =
+              (g13 * g12 - g11 * g23) * inv_det;
+          inverse_spatial_metric[2 * dim + 0] =
+              inverse_spatial_metric[0 * dim + 2];
+          inverse_spatial_metric[2 * dim + 1] =
+              inverse_spatial_metric[1 * dim + 2];
+          inverse_spatial_metric[2 * dim + 2] =
+              (g11 * g22 - g12 * g12) * inv_det;
+
+          for (int i = 0; i < int_dim; ++i) {
+            shift[i] = 0.0;
+            for (int j = 0; j < int_dim; ++j) {
+              shift[i] += inverse_spatial_metric[i * dim + j] *
+                          get_symmetric_spacetime_component(
+                              spacetime_metric_components, 0, j + 1);
+            }
+          }
+
+          double lapse_squared = -get_symmetric_spacetime_component(
+              spacetime_metric_components, 0, 0);
+          for (int i = 0; i < int_dim; ++i) {
+            lapse_squared +=
+                shift[i] * get_symmetric_spacetime_component(
+                               spacetime_metric_components, 0, i + 1);
+          }
+          const double lapse = sqrt(lapse_squared);
+          const double inv_lapse_squared = 1.0 / lapse_squared;
+          shmem[dt_pi_offset_lapse] = lapse;
+
+          for (int a = 0; a < int_spacetime_dim; ++a) {
+            for (int b = 0; b < int_spacetime_dim; ++b) {
+              inverse_spacetime_metric[a * spacetime_dim + b] = 0.0;
+            }
+          }
+          inverse_spacetime_metric[0 * spacetime_dim + 0] = -inv_lapse_squared;
+          for (int i = 0; i < int_dim; ++i) {
+            const double zero_i_component = shift[i] * inv_lapse_squared;
+            inverse_spacetime_metric[0 * spacetime_dim + (i + 1)] =
+                zero_i_component;
+            inverse_spacetime_metric[(i + 1) * spacetime_dim + 0] =
+                zero_i_component;
+            for (int j = i; j < int_dim; ++j) {
+              const double ii_component =
+                  inverse_spatial_metric[i * dim + j] -
+                  shift[i] * shift[j] * inv_lapse_squared;
+              inverse_spacetime_metric[(i + 1) * spacetime_dim + (j + 1)] =
+                  ii_component;
+              inverse_spacetime_metric[(j + 1) * spacetime_dim + (i + 1)] =
+                  ii_component;
+            }
+          }
+
+          for (int nu = 0; nu < int_spacetime_dim; ++nu) {
+            for (int delta = 0; delta < int_spacetime_dim; ++delta) {
+              pi_up[nu * spacetime_dim + delta] = 0.0;
+              for (int beta = 0; beta < int_spacetime_dim; ++beta) {
+                pi_up[nu * spacetime_dim + delta] +=
+                    inverse_spacetime_metric[delta * spacetime_dim + beta] *
+                    get_symmetric_spacetime_component(pi_components, nu, beta);
+              }
+            }
+          }
+
+          double normal_spacetime_vector[spacetime_dim];
+          normal_spacetime_vector[0] = 1.0 / lapse;
+          for (int i = 0; i < int_dim; ++i) {
+            normal_spacetime_vector[i + 1] = -shift[i] / lapse;
+          }
+
+          for (int mu = 0; mu < int_spacetime_dim; ++mu) {
+            pi_one_normal[mu] = 0.0;
+            for (int nu = 0; nu < int_spacetime_dim; ++nu) {
+              pi_one_normal[mu] +=
+                  normal_spacetime_vector[nu] *
+                  get_symmetric_spacetime_component(pi_components, nu, mu);
+            }
+          }
+
+          double half_pi_two_normals = 0.0;
+          for (int mu = 0; mu < int_spacetime_dim; ++mu) {
+            half_pi_two_normals +=
+                normal_spacetime_vector[mu] * pi_one_normal[mu];
+          }
+          shmem[dt_pi_offset_half_pi_two_normals] = 0.5 * half_pi_two_normals;
+
+          for (int a = 0; a < int_spacetime_dim; ++a) {
+            double trace_christoffel = 0.0;
+            for (int b = 0; b < int_spacetime_dim; ++b) {
+              for (int c = 0; c < int_spacetime_dim; ++c) {
+                trace_christoffel +=
+                    christoffel_first_kind_component_from_scratch(
+                        a, b, c, lapse, shift, pi_components, phi_components) *
+                    inverse_spacetime_metric[b * spacetime_dim + c];
+              }
+            }
+            gauge_constraint[a] = trace_christoffel + gauge_h_components[a];
+          }
+
+          double normal_dot_gauge_constraint =
+              normal_spacetime_vector[0] * gauge_constraint[0];
+          for (int mu = 1; mu < int_spacetime_dim; ++mu) {
+            normal_dot_gauge_constraint +=
+                normal_spacetime_vector[mu] * gauge_constraint[mu];
+          }
+
+          shmem[dt_pi_offset_gamma1gamma2] = gamma1 * gamma2;
+          shmem[dt_pi_offset_minus_gamma0_lapse] = -gamma0 * lapse;
+          shmem[dt_pi_offset_normal_dot_gauge_constraint] =
+              gamma0 * normal_dot_gauge_constraint;
+        });
+
+        team_member.team_barrier();
+
+        ::Kokkos::parallel_for(
+            ::Kokkos::TeamThreadRange(
+                team_member, static_cast<int>(spacetime_symmetric_size)),
+            [&](const int component_int) {
+              const int component = component_int;
+              const auto mu_nu =
+                  symmetric_spacetime_indices(static_cast<size_t>(component));
+              const int mu = static_cast<int>(mu_nu[0]);
+              const int nu = static_cast<int>(mu_nu[1]);
+
+              const double lapse = shmem[dt_pi_offset_lapse];
+              const double half_pi_two_normals =
+                  shmem[dt_pi_offset_half_pi_two_normals];
+              const double gamma1gamma2 = shmem[dt_pi_offset_gamma1gamma2];
+              const double minus_gamma0_lapse =
+                  shmem[dt_pi_offset_minus_gamma0_lapse];
+              const double normal_dot_gauge_constraint =
+                  shmem[dt_pi_offset_normal_dot_gauge_constraint];
+
+              double dt_pi_mu_nu = -normal_dot_gauge_constraint *
+                                   get_symmetric_spacetime_component(
+                                       spacetime_metric_components, mu, nu);
+              if (mu == 0) {
+                dt_pi_mu_nu = minus_gamma0_lapse * gauge_constraint[nu] -
+                              normal_dot_gauge_constraint *
+                                  get_symmetric_spacetime_component(
+                                      spacetime_metric_components, 0, nu);
+                if (nu == 0) {
+                  dt_pi_mu_nu = 2.0 * minus_gamma0_lapse * gauge_constraint[0] -
+                                normal_dot_gauge_constraint *
+                                    get_symmetric_spacetime_component(
+                                        spacetime_metric_components, 0, 0);
+                }
+              }
+              dt_pi_mu_nu -=
+                  half_pi_two_normals *
+                  get_symmetric_spacetime_component(pi_components, mu, nu);
+              dt_pi_mu_nu -= spacetime_deriv_gauge_h.get(mu, nu)[point] +
+                             spacetime_deriv_gauge_h.get(nu, mu)[point];
+
+              for (int delta = 0; delta < int_spacetime_dim; ++delta) {
+                dt_pi_mu_nu -= 2.0 *
+                               get_symmetric_spacetime_component(pi_components,
+                                                                 mu, delta) *
+                               pi_up[nu * spacetime_dim + delta];
+
+                double christoffel_second_kind_delta_mu_nu = 0.0;
+                for (int alpha = 0; alpha < int_spacetime_dim; ++alpha) {
+                  christoffel_second_kind_delta_mu_nu +=
+                      inverse_spacetime_metric[delta * spacetime_dim + alpha] *
+                      christoffel_first_kind_component_from_scratch(
+                          alpha, mu, nu, lapse, shift, pi_components,
+                          phi_components);
+                }
+                dt_pi_mu_nu += 2.0 * christoffel_second_kind_delta_mu_nu *
+                               gauge_h_components[delta];
+
+                for (int n = 0; n < int_dim; ++n) {
+                  double phi_1_up_n_mu_delta = 0.0;
+                  for (int m = 0; m < int_dim; ++m) {
+                    phi_1_up_n_mu_delta +=
+                        inverse_spatial_metric[n * dim + m] *
+                        get_phi_component(phi_components, m, mu, delta);
+                  }
+
+                  double phi_3_up_n_nu_delta = 0.0;
+                  for (int beta = 0; beta < int_spacetime_dim; ++beta) {
+                    phi_3_up_n_nu_delta +=
+                        inverse_spacetime_metric[delta * spacetime_dim + beta] *
+                        get_phi_component(phi_components, n, nu, beta);
+                  }
+
+                  dt_pi_mu_nu +=
+                      2.0 * phi_1_up_n_mu_delta * phi_3_up_n_nu_delta;
+                }
+
+                for (int alpha = 0; alpha < int_spacetime_dim; ++alpha) {
+                  double christoffel_first_kind_3_up_mu_alpha_delta = 0.0;
+                  double christoffel_first_kind_3_up_nu_delta_alpha = 0.0;
+                  for (int beta = 0; beta < int_spacetime_dim; ++beta) {
+                    christoffel_first_kind_3_up_mu_alpha_delta +=
+                        inverse_spacetime_metric[alpha * spacetime_dim + beta] *
+                        christoffel_first_kind_component_from_scratch(
+                            mu, delta, beta, lapse, shift, pi_components,
+                            phi_components);
+                    christoffel_first_kind_3_up_nu_delta_alpha +=
+                        inverse_spacetime_metric[delta * spacetime_dim + beta] *
+                        christoffel_first_kind_component_from_scratch(
+                            nu, alpha, beta, lapse, shift, pi_components,
+                            phi_components);
+                  }
+                  dt_pi_mu_nu -= 2.0 *
+                                 christoffel_first_kind_3_up_mu_alpha_delta *
+                                 christoffel_first_kind_3_up_nu_delta_alpha;
+                }
+              }
+
+              for (int m = 0; m < int_dim; ++m) {
+                double phi_1_up_m_mu_nu = 0.0;
+                for (int n = 0; n < int_dim; ++n) {
+                  phi_1_up_m_mu_nu +=
+                      inverse_spatial_metric[m * dim + n] *
+                      get_phi_component(phi_components, n, mu, nu);
+                }
+                dt_pi_mu_nu -= pi_one_normal[m + 1] * phi_1_up_m_mu_nu;
+                for (int n = 0; n < int_dim; ++n) {
+                  dt_pi_mu_nu -= inverse_spatial_metric[m * dim + n] *
+                                 d_phi.get(m, n, mu, nu)[point];
+                }
+              }
+
+              dt_pi_mu_nu *= lapse;
+              double shift_dot_three_index_constraint_mu_nu = 0.0;
+              for (int m = 0; m < int_dim; ++m) {
+                shift_dot_three_index_constraint_mu_nu +=
+                    shift[m] * (d_spacetime_metric.get(m, mu, nu)[point] -
+                                get_phi_component(phi_components, m, mu, nu));
+              }
+              dt_pi_mu_nu +=
+                  gamma1gamma2 * shift_dot_three_index_constraint_mu_nu;
+              for (int m = 0; m < int_dim; ++m) {
+                dt_pi_mu_nu += shift[m] * d_pi.get(m, mu, nu)[point];
+              }
+              dt_pi.get(mu, nu)[point] = dt_pi_mu_nu;
+            });
+      });
+
+  ::Kokkos::parallel_for(
+      "GhBatchedComputeTimeDerivativeDtPhi", total_points,
+      KOKKOS_LAMBDA(const int s) {
+        const size_t point = static_cast<size_t>(s);
+        constexpr int int_dim = static_cast<int>(dim);
+        constexpr int int_dim_plus_one = static_cast<int>(dim + 1);
         const auto gamma2_at_s = make_at_index(device_constraint_gamma2, s);
+        const double gamma2 = get(gamma2_at_s);
 
-        compute_rhs_at_point(
-            make_not_null(&dt_spacetime_metric_at_s),
-            make_not_null(&dt_pi_at_s), make_not_null(&dt_phi_at_s),
-            get<::Tags::AtIndex<::Tags::MirrorView<spacetime_metric_tag>>>(
-                vars_at_s),
-            get<::Tags::AtIndex<::Tags::MirrorView<pi_tag>>>(vars_at_s),
-            get<::Tags::AtIndex<::Tags::MirrorView<phi_tag>>>(vars_at_s),
-            get<::Tags::AtIndex<
-                ::Tags::deriv<::Tags::MirrorView<spacetime_metric_tag>,
-                              tmpl::size_t<dim>, Frame::Inertial>>>(
-                derivs_at_s),
-            get<::Tags::AtIndex<
-                ::Tags::deriv<::Tags::MirrorView<pi_tag>, tmpl::size_t<dim>,
-                              Frame::Inertial>>>(derivs_at_s),
-            get<::Tags::AtIndex<
-                ::Tags::deriv<::Tags::MirrorView<phi_tag>, tmpl::size_t<dim>,
-                              Frame::Inertial>>>(derivs_at_s),
-            get<::Tags::AtIndex<device_gauge_h_tag>>(gauge_data_at_s),
-            get<::Tags::AtIndex<device_spacetime_deriv_gauge_h_tag>>(
-                gauge_data_at_s),
-            get(gamma0_at_s), get(gamma1_at_s), get(gamma2_at_s));
+        const auto spacetime_metric_at_s = make_at_index(spacetime_metric, s);
+        const auto pi_at_s = make_at_index(pi, s);
+        const auto phi_at_s = make_at_index(phi, s);
 
-        for (size_t mu = 0; mu < dim + 1; ++mu) {
-          for (size_t nu = mu; nu < dim + 1; ++nu) {
-            dt_spacetime_metric.get(mu, nu)[static_cast<size_t>(s)] =
-                dt_spacetime_metric_at_s.get(mu, nu);
-            dt_pi.get(mu, nu)[static_cast<size_t>(s)] = dt_pi_at_s.get(mu, nu);
-            for (size_t i = 0; i < dim; ++i) {
-              dt_phi.get(i, mu, nu)[static_cast<size_t>(s)] =
-                  dt_phi_at_s.get(i, mu, nu);
+        tnsr::II<double, dim, Frame::Inertial> inverse_spatial_metric{};
+        tnsr::I<double, dim, Frame::Inertial> shift{};
+        double lapse = 0.0;
+        double inv_lapse_squared = 0.0;
+        compute_inverse_spatial_metric_shift_lapse(
+            make_not_null(&inverse_spatial_metric), make_not_null(&shift),
+            make_not_null(&lapse), make_not_null(&inv_lapse_squared),
+            spacetime_metric_at_s);
+        (void)inv_lapse_squared;
+
+        tnsr::A<double, dim, Frame::Inertial> normal_spacetime_vector{};
+        normal_spacetime_vector.get(0) = 1.0 / lapse;
+        for (int i = 0; i < int_dim; ++i) {
+          normal_spacetime_vector.get(i + 1) = -shift.get(i) / lapse;
+        }
+
+        for (int i = 0; i < int_dim; ++i) {
+          double phi_one_normal_i[4];
+          for (int a = 0; a < int_dim_plus_one; ++a) {
+            phi_one_normal_i[a] = 0.0;
+            for (int b = 0; b < int_dim_plus_one; ++b) {
+              phi_one_normal_i[a] +=
+                  normal_spacetime_vector.get(b) * phi_at_s.get(i, b, a);
+            }
+          }
+          double half_phi_two_normals_i = 0.0;
+          for (int a = 0; a < int_dim_plus_one; ++a) {
+            half_phi_two_normals_i +=
+                normal_spacetime_vector.get(a) * phi_one_normal_i[a];
+          }
+          half_phi_two_normals_i *= 0.5;
+          for (int mu = 0; mu < int_dim_plus_one; ++mu) {
+            for (int nu = mu; nu < int_dim_plus_one; ++nu) {
+              double dt_phi_i_mu_nu =
+                  pi_at_s.get(mu, nu) * half_phi_two_normals_i -
+                  d_pi.get(i, mu, nu)[point] +
+                  gamma2 * (d_spacetime_metric.get(i, mu, nu)[point] -
+                            phi_at_s.get(i, mu, nu));
+
+              for (int n = 0; n < int_dim; ++n) {
+                double phi_1_up_n_mu_nu = 0.0;
+                for (int m = 0; m < int_dim; ++m) {
+                  phi_1_up_n_mu_nu += inverse_spatial_metric.get(n, m) *
+                                      phi_at_s.get(m, mu, nu);
+                }
+                dt_phi_i_mu_nu += phi_one_normal_i[n + 1] * phi_1_up_n_mu_nu;
+              }
+
+              dt_phi_i_mu_nu *= lapse;
+              for (int m = 0; m < int_dim; ++m) {
+                dt_phi_i_mu_nu += shift.get(m) * d_phi.get(m, i, mu, nu)[point];
+              }
+              dt_phi.get(i, mu, nu)[point] = dt_phi_i_mu_nu;
             }
           }
         }
@@ -886,14 +1142,16 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
 void ComputeTimeDerivativeBatched::apply(
     const gsl::not_null<typename packed_evolution_state_tag::type*>
         packed_evolution_state,
+    const gsl::not_null<typename packed_boundary_scratch_tag::type*>
+        packed_boundary_scratch,
     const typename packed_topology_tag::type& packed_topology,
     const typename packed_geometry_tag::type& packed_geometry,
     const typename device_constraint_gamma0_tag::type& device_gamma0,
     const typename device_constraint_gamma1_tag::type& device_gamma1,
     const typename device_constraint_gamma2_tag::type& device_gamma2) {
   compute_time_derivative_batched_volume_impl(
-      packed_evolution_state, device_gamma0, device_gamma1, device_gamma2,
-      packed_topology, packed_geometry);
+      packed_evolution_state, packed_boundary_scratch, device_gamma0,
+      device_gamma1, device_gamma2, packed_topology, packed_geometry);
 }
 
 }  // namespace gh::Actions
