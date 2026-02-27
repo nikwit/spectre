@@ -7,6 +7,7 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/ComputeInternalBoundaryTermsBatched.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/ComputeTimeDerivativeBatched.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/DriverState.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/FilterKokkosBatched.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/InitializeBatchedData.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/InitializeBoundaryBatchMetadata.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/LiftInternalBoundaryTermsBatched.hpp"
