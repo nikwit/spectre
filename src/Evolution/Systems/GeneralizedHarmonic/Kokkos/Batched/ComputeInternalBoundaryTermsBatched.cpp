@@ -26,10 +26,14 @@ namespace {
 static constexpr size_t volume_dim = 3;
 static constexpr size_t number_of_faces = 2 * volume_dim;
 using system = gh::System<volume_dim>;
+using packed_boundary_scratch_type =
+    evolution::Kokkos::PackedBoundaryScratch<system>;
 using device_package_field_tags =
-    evolution::Kokkos::PackedBoundaryScratch<system>::device_package_field_tags;
+    packed_boundary_scratch_type::device_package_field_tags;
 using device_dt_boundary_tags =
-    evolution::Kokkos::PackedBoundaryScratch<system>::device_dt_boundary_tags;
+    packed_boundary_scratch_type::device_dt_boundary_tags;
+using projection_workspace_type =
+    typename packed_boundary_scratch_type::projection_workspace_type;
 using package_storage_type =
     typename Variables<device_package_field_tags>::storage_type;
 using face_boundary_metadata = evolution::Kokkos::Batched::FaceBoundaryMetadata;
@@ -79,7 +83,8 @@ void apply_tensor_product_projection_2d_batched(
     const size_t num_work_items, const size_t source_points_dim_0,
     const size_t source_points_dim_1, const size_t target_points_dim_0,
     const size_t target_points_dim_1, const MatrixViewRO& matrix_dim_0,
-    const MatrixViewRO& matrix_dim_1) {
+    const MatrixViewRO& matrix_dim_1,
+    const gsl::not_null<projection_workspace_type*> projected_dim_0_workspace) {
   const size_t num_components = input_view.extent(1);
   const size_t source_points_per_work_item =
       source_points_dim_0 * source_points_dim_1;
@@ -91,9 +96,15 @@ void apply_tensor_product_projection_2d_batched(
   ASSERT(result_num_points == num_work_items * target_points_per_work_item,
          "Result size mismatch in batched 2D projection.");
 
-  ::Kokkos::View<double***> projected_dim_0(
-      "GhComputeInternalBoundaryTermsBatchedProjectedDim0", num_work_items,
-      target_points_dim_0 * source_points_dim_1, num_components);
+  if (projected_dim_0_workspace->extent(0) != num_work_items or
+      projected_dim_0_workspace->extent(1) !=
+          target_points_dim_0 * source_points_dim_1 or
+      projected_dim_0_workspace->extent(2) != num_components) {
+    *projected_dim_0_workspace = projection_workspace_type(
+        "GhComputeInternalBoundaryTermsBatchedProjectedDim0", num_work_items,
+        target_points_dim_0 * source_points_dim_1, num_components);
+  }
+  const auto projected_dim_0 = *projected_dim_0_workspace;
   ::Kokkos::parallel_for(
       "GhComputeInternalBoundaryTermsBatchedProjectDim0",
       ::Kokkos::RangePolicy<size_t>{0, num_work_items * target_points_dim_0 *
@@ -151,7 +162,8 @@ void project_to_mortar_package_data_batched(
     const Variables<device_package_field_tags>& vars,
     const size_t num_work_items, const Mesh<2>& face_mesh,
     const Mesh<2>& mortar_mesh,
-    const std::array<Spectral::SegmentSize, 2>& mortar_size) {
+    const std::array<Spectral::SegmentSize, 2>& mortar_size,
+    const gsl::not_null<projection_workspace_type*> projected_dim_0_workspace) {
   if (not Spectral::needs_projection(face_mesh, mortar_mesh, mortar_size)) {
     ASSERT(result->number_of_grid_points() == vars.number_of_grid_points(),
            "Cannot skip batched projection for incompatible result size.");
@@ -171,14 +183,15 @@ void project_to_mortar_package_data_batched(
       result->view(), result->number_of_grid_points(), vars.view(),
       vars.number_of_grid_points(), num_work_items, face_mesh.extents(0),
       face_mesh.extents(1), mortar_mesh.extents(0), mortar_mesh.extents(1),
-      matrix_dim_0, matrix_dim_1);
+      matrix_dim_0, matrix_dim_1, projected_dim_0_workspace);
 }
 
 void project_from_mortar_dt_data_batched(
     const gsl::not_null<Variables<device_dt_boundary_tags>*> result,
     const Variables<device_dt_boundary_tags>& vars, const size_t num_work_items,
     const Mesh<2>& face_mesh, const Mesh<2>& mortar_mesh,
-    const std::array<Spectral::SegmentSize, 2>& mortar_size) {
+    const std::array<Spectral::SegmentSize, 2>& mortar_size,
+    const gsl::not_null<projection_workspace_type*> projected_dim_0_workspace) {
   ASSERT(Spectral::needs_projection(face_mesh, mortar_mesh, mortar_size),
          "project_from_mortar_dt_data_batched should not be called when no "
          "projection is needed.");
@@ -195,7 +208,7 @@ void project_from_mortar_dt_data_batched(
       result->view(), result->number_of_grid_points(), vars.view(),
       vars.number_of_grid_points(), num_work_items, mortar_mesh.extents(0),
       mortar_mesh.extents(1), face_mesh.extents(0), face_mesh.extents(1),
-      matrix_dim_0, matrix_dim_1);
+      matrix_dim_0, matrix_dim_1, projected_dim_0_workspace);
 }
 
 KOKKOS_INLINE_FUNCTION double step_function_double(const double value) {
@@ -383,13 +396,36 @@ void ComputeInternalBoundaryTermsBatched::apply(
           Variables<device_dt_boundary_tags>{elements.size() * num_face_points};
     }
   }
+  auto& local_packaged_face_data_batched =
+      packed_boundary_scratch->projection_local_packaged_face_data;
+  auto& remote_packaged_face_data_batched =
+      packed_boundary_scratch->projection_remote_packaged_face_data;
+  auto& local_packaged_mortar_data_batched =
+      packed_boundary_scratch->projection_local_packaged_mortar_data;
+  auto& remote_packaged_mortar_data_batched =
+      packed_boundary_scratch->projection_remote_packaged_mortar_data;
+  auto& dt_boundary_on_mortar_batched =
+      packed_boundary_scratch->projection_dt_boundary_on_mortar;
+  auto& dt_boundary_on_face_batched =
+      packed_boundary_scratch->projection_dt_boundary_on_face;
+  auto& projection_workspace = packed_boundary_scratch->projection_workspace;
 
   for (size_t d = 0; d < volume_dim; ++d) {
     const Mesh<volume_dim - 1>& face_mesh = uniform_face_mesh;
     for (size_t side_i = 0; side_i < 2; ++side_i) {
       const size_t local_face_id = face_index(d, side_i);
       auto& dt_face_sum_all = dt_face_sum_for_all_elements[local_face_id];
-      ::Kokkos::deep_copy(dt_face_sum_all.view(), 0.0);
+      const auto dt_face_sum_all_view = dt_face_sum_all.view();
+      const size_t dt_face_points = dt_face_sum_all_view.extent(0);
+      const size_t dt_face_components = dt_face_sum_all_view.extent(1);
+      ::Kokkos::parallel_for(
+          "GhComputeInternalBoundaryTermsBatchedZeroFaceSum",
+          dt_face_points * dt_face_components,
+          KOKKOS_LAMBDA(const size_t linear_index) {
+            const size_t point = linear_index / dt_face_components;
+            const size_t component = linear_index % dt_face_components;
+            dt_face_sum_all_view(point, component) = 0.0;
+          });
 
       const face_boundary_metadata& cached_face_metadata =
           packed_boundary_metadata
@@ -584,10 +620,16 @@ void ComputeInternalBoundaryTermsBatched::apply(
         const auto& projection_oriented_remote_face_indices =
             projection_group.oriented_remote_face_indices;
 
-        Variables<device_package_field_tags> local_packaged_face_data_batched{
-            num_projection_work_items * num_face_points};
-        Variables<device_package_field_tags> remote_packaged_face_data_batched{
-            num_projection_work_items * num_face_points};
+        const size_t projection_face_points =
+            num_projection_work_items * num_face_points;
+        if (local_packaged_face_data_batched.number_of_grid_points() !=
+            projection_face_points) {
+          local_packaged_face_data_batched.initialize(projection_face_points);
+        }
+        if (remote_packaged_face_data_batched.number_of_grid_points() !=
+            projection_face_points) {
+          remote_packaged_face_data_batched.initialize(projection_face_points);
+        }
         auto local_packaged_face_data_batched_view =
             local_packaged_face_data_batched.view();
         auto remote_packaged_face_data_batched_view =
@@ -655,24 +697,33 @@ void ComputeInternalBoundaryTermsBatched::apply(
               }
             });
 
-        Variables<device_package_field_tags> local_packaged_mortar_data_batched{
-            num_projection_work_items * num_mortar_points};
-        Variables<device_package_field_tags>
-            remote_packaged_mortar_data_batched{num_projection_work_items *
-                                                num_mortar_points};
+        const size_t projection_mortar_points =
+            num_projection_work_items * num_mortar_points;
+        if (local_packaged_mortar_data_batched.number_of_grid_points() !=
+            projection_mortar_points) {
+          local_packaged_mortar_data_batched.initialize(
+              projection_mortar_points);
+        }
+        if (remote_packaged_mortar_data_batched.number_of_grid_points() !=
+            projection_mortar_points) {
+          remote_packaged_mortar_data_batched.initialize(
+              projection_mortar_points);
+        }
         project_to_mortar_package_data_batched(
             make_not_null(&local_packaged_mortar_data_batched),
             local_packaged_face_data_batched, num_projection_work_items,
             face_mesh, projection_group.mortar_mesh,
-            projection_group.mortar_size);
+            projection_group.mortar_size, make_not_null(&projection_workspace));
         project_to_mortar_package_data_batched(
             make_not_null(&remote_packaged_mortar_data_batched),
             remote_packaged_face_data_batched, num_projection_work_items,
             face_mesh, projection_group.mortar_mesh,
-            projection_group.mortar_size);
+            projection_group.mortar_size, make_not_null(&projection_workspace));
 
-        Variables<device_dt_boundary_tags> dt_boundary_on_mortar_batched{
-            num_projection_work_items * num_mortar_points};
+        if (dt_boundary_on_mortar_batched.number_of_grid_points() !=
+            projection_mortar_points) {
+          dt_boundary_on_mortar_batched.initialize(projection_mortar_points);
+        }
         const auto dt_spacetime_metric_on_mortar =
             get<::Tags::MirrorView<::Tags::dt<spacetime_metric_tag>>>(
                 dt_boundary_on_mortar_batched);
@@ -803,12 +854,15 @@ void ComputeInternalBoundaryTermsBatched::apply(
               }
             });
 
-        Variables<device_dt_boundary_tags> dt_boundary_on_face_batched{
-            num_projection_work_items * num_face_points};
+        if (dt_boundary_on_face_batched.number_of_grid_points() !=
+            projection_face_points) {
+          dt_boundary_on_face_batched.initialize(projection_face_points);
+        }
         project_from_mortar_dt_data_batched(
             make_not_null(&dt_boundary_on_face_batched),
             dt_boundary_on_mortar_batched, num_projection_work_items, face_mesh,
-            projection_group.mortar_mesh, projection_group.mortar_size);
+            projection_group.mortar_mesh, projection_group.mortar_size,
+            make_not_null(&projection_workspace));
         const auto dt_spacetime_metric_on_face =
             get<::Tags::MirrorView<::Tags::dt<spacetime_metric_tag>>>(
                 dt_boundary_on_face_batched);

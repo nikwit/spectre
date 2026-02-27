@@ -72,7 +72,9 @@ const MatrixViewRO& filter_matrix_on_device_batched(
 inline void apply_filter_matrices_on_device_batched(
     const Kokkos::View<double**>& vars_view, const Mesh<3>& mesh,
     const MatrixViewRO& matrix_dim_0, const MatrixViewRO& matrix_dim_1,
-    const MatrixViewRO& matrix_dim_2) {
+    const MatrixViewRO& matrix_dim_2,
+    const gsl::not_null<Kokkos::View<double**>*> scratch_0,
+    const gsl::not_null<Kokkos::View<double**>*> scratch_1) {
   const auto extents = mesh.extents();
   const size_t n0 = extents[0];
   const size_t n1 = extents[1];
@@ -91,10 +93,18 @@ inline void apply_filter_matrices_on_device_batched(
                                                     << ").");
   const size_t num_elements = total_points / points_per_element;
 
-  Kokkos::View<double**> scratch_0{"GhFilterKokkosBatchedScratch0",
-                                   total_points, num_components};
-  Kokkos::View<double**> scratch_1{"GhFilterKokkosBatchedScratch1",
-                                   total_points, num_components};
+  if (scratch_0->extent(0) != total_points or
+      scratch_0->extent(1) != num_components) {
+    *scratch_0 = Kokkos::View<double**>{"GhFilterKokkosBatchedScratch0",
+                                        total_points, num_components};
+  }
+  if (scratch_1->extent(0) != total_points or
+      scratch_1->extent(1) != num_components) {
+    *scratch_1 = Kokkos::View<double**>{"GhFilterKokkosBatchedScratch1",
+                                        total_points, num_components};
+  }
+  const auto scratch_0_view = *scratch_0;
+  const auto scratch_1_view = *scratch_1;
 
   Kokkos::parallel_for(
       "GhFilterKokkosBatchedDim0",
@@ -118,7 +128,7 @@ inline void apply_filter_matrices_on_device_batched(
               element_index * points_per_element + local_source_index;
           sum += matrix_dim_0(i0, k0) * vars_view(source_index, component);
         }
-        scratch_0(point_index, component) = sum;
+        scratch_0_view(point_index, component) = sum;
       });
 
   Kokkos::parallel_for(
@@ -141,9 +151,9 @@ inline void apply_filter_matrices_on_device_batched(
           const size_t local_source_index = i0 + n0 * (k1 + n1 * i2);
           const size_t source_index =
               element_index * points_per_element + local_source_index;
-          sum += matrix_dim_1(i1, k1) * scratch_0(source_index, component);
+          sum += matrix_dim_1(i1, k1) * scratch_0_view(source_index, component);
         }
-        scratch_1(point_index, component) = sum;
+        scratch_1_view(point_index, component) = sum;
       });
 
   Kokkos::parallel_for(
@@ -166,7 +176,7 @@ inline void apply_filter_matrices_on_device_batched(
           const size_t local_source_index = i0 + n0 * (i1 + n1 * k2);
           const size_t source_index =
               element_index * points_per_element + local_source_index;
-          sum += matrix_dim_2(i2, k2) * scratch_1(source_index, component);
+          sum += matrix_dim_2(i2, k2) * scratch_1_view(source_index, component);
         }
         vars_view(point_index, component) = sum;
       });
@@ -182,10 +192,13 @@ struct FilterKokkosBatched {
   using system = gh::System<volume_dim>;
   using packed_evolution_state_tag =
       evolution::Kokkos::Tags::PackedEvolutionState<system>;
+  using packed_boundary_scratch_tag =
+      evolution::Kokkos::Tags::PackedBoundaryScratch<system>;
   using packed_topology_tag = evolution::Kokkos::Tags::PackedTopology<system>;
 
  public:
-  using return_tags = tmpl::list<packed_evolution_state_tag>;
+  using return_tags =
+      tmpl::list<packed_evolution_state_tag, packed_boundary_scratch_tag>;
   using argument_tags =
       tmpl::list<packed_topology_tag, ::Filters::Tags::Filter<FilterType>>;
   using const_global_cache_tags =
@@ -194,6 +207,8 @@ struct FilterKokkosBatched {
   static void apply(
       const gsl::not_null<typename packed_evolution_state_tag::type*>
           packed_evolution_state,
+      const gsl::not_null<typename packed_boundary_scratch_tag::type*>
+          packed_boundary_scratch,
       const typename packed_topology_tag::type& packed_topology,
       const FilterType& filter_helper) {
     if (packed_topology.total_points == 0 or not filter_helper.enable()) {
@@ -214,7 +229,9 @@ struct FilterKokkosBatched {
 
     detail::apply_filter_matrices_on_device_batched(
         packed_evolution_state->device_variables.view(), mesh, matrix_view_0,
-        matrix_view_1, matrix_view_2);
+        matrix_view_1, matrix_view_2,
+        make_not_null(&packed_boundary_scratch->filter_workspace_0),
+        make_not_null(&packed_boundary_scratch->filter_workspace_1));
   }
 };
 
