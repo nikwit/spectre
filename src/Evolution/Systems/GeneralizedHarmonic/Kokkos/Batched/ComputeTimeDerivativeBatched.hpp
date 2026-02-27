@@ -27,6 +27,8 @@ struct ComputeTimeDerivativeBatched {
 
   using packed_evolution_state_tag =
       evolution::Kokkos::Tags::PackedEvolutionState<system>;
+  using packed_boundary_scratch_tag =
+      evolution::Kokkos::Tags::PackedBoundaryScratch<system>;
   using packed_topology_tag = evolution::Kokkos::Tags::PackedTopology<system>;
   using packed_geometry_tag = evolution::Kokkos::Tags::PackedGeometry<system>;
   using device_constraint_gamma0_tag = gh::KokkosTags::DeviceConstraintGamma0;
@@ -37,6 +39,8 @@ struct ComputeTimeDerivativeBatched {
   static void compute_time_derivative_batched_volume_impl(
       gsl::not_null<typename packed_evolution_state_tag::type*>
           packed_evolution_state,
+      gsl::not_null<typename packed_boundary_scratch_tag::type*>
+          packed_boundary_scratch,
       const typename device_constraint_gamma0_tag::type&
           device_constraint_gamma0,
       const typename device_constraint_gamma1_tag::type&
@@ -46,7 +50,8 @@ struct ComputeTimeDerivativeBatched {
       const typename packed_topology_tag::type& packed_topology,
       const typename packed_geometry_tag::type& packed_geometry);
 
-  using return_tags = tmpl::list<packed_evolution_state_tag>;
+  using return_tags =
+      tmpl::list<packed_evolution_state_tag, packed_boundary_scratch_tag>;
   using argument_tags =
       tmpl::list<packed_topology_tag, packed_geometry_tag,
                  device_constraint_gamma0_tag, device_constraint_gamma1_tag,
@@ -55,6 +60,8 @@ struct ComputeTimeDerivativeBatched {
   static void apply(
       gsl::not_null<typename packed_evolution_state_tag::type*>
           packed_evolution_state,
+      gsl::not_null<typename packed_boundary_scratch_tag::type*>
+          packed_boundary_scratch,
       const typename packed_topology_tag::type& packed_topology,
       const typename packed_geometry_tag::type& packed_geometry,
       const typename device_constraint_gamma0_tag::type& device_gamma0,

@@ -207,6 +207,17 @@ void test_compute_time_derivative_batched_matches_host() {
   evolution::Kokkos::PackedGeometry<system> packed_geometry{};
   packed_geometry.inertial_coordinates_host = {
       {inertial_coords.get(0), inertial_coords.get(1), inertial_coords.get(2)}};
+  for (size_t d = 0; d < Dim; ++d) {
+    packed_geometry.inertial_coordinates_device.get(d) =
+        ::Kokkos::View<double*>("TestGhBatchedInertialCoordinates", num_points);
+    auto host_coords_component = ::Kokkos::create_mirror_view(
+        packed_geometry.inertial_coordinates_device.get(d));
+    for (size_t s = 0; s < num_points; ++s) {
+      host_coords_component(s) = inertial_coords.get(d)[s];
+    }
+    ::Kokkos::deep_copy(packed_geometry.inertial_coordinates_device.get(d),
+                        host_coords_component);
+  }
   packed_geometry.element_inverse_jacobian_device = ::Kokkos::View<double***>(
       "TestGhBatchedElementInverseJacobian", 1, num_points, Dim * Dim);
   auto host_inverse_jacobian = ::Kokkos::create_mirror_view(
@@ -228,6 +239,7 @@ void test_compute_time_derivative_batched_matches_host() {
       typename evolution::Kokkos::PackedEvolutionState<
           system>::device_dt_variables_type{num_points};
   ::Kokkos::deep_copy(packed_evolution_state.device_dt_variables.view(), 0.0);
+  evolution::Kokkos::PackedBoundaryScratch<system> packed_boundary_scratch{};
 
   typename gh::KokkosTags::DeviceConstraintGamma0::type device_gamma0{
       "DeviceGamma0", num_points};
@@ -247,7 +259,8 @@ void test_compute_time_derivative_batched_matches_host() {
   ::Kokkos::deep_copy(get(device_gamma2), host_gamma2_mirror);
 
   gh::Actions::ComputeTimeDerivativeBatched::apply(
-      make_not_null(&packed_evolution_state), packed_topology, packed_geometry,
+      make_not_null(&packed_evolution_state),
+      make_not_null(&packed_boundary_scratch), packed_topology, packed_geometry,
       device_gamma0, device_gamma1, device_gamma2);
 
   dt_variables_type dt_batched{num_points, 0.0};

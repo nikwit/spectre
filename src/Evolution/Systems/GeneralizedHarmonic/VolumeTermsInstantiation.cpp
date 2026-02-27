@@ -138,6 +138,23 @@ GENERATE_INSTANTIATIONS(INSTANTIATION, (1, 2, 3))
       const Mesh<DIM(data)>& mesh,                                         \
       const Kokkos::View<double***>& inverse_jacobian);
 
+#define INSTANTIATE_KOKKOS_GAUGE_H_FROM_GAUGE_DATA_BATCHED_                \
+  PARTIAL_DERIVATIVES(r, data)                                             \
+  template void partial_derivatives_batched(                               \
+      gsl::not_null<Variables<                                             \
+          db::wrap_tags_in<::Tags::deriv,                                  \
+                           tmpl::list<::Tags::MirrorView<gh::Tags::GaugeH< \
+                               DataVector, DIM(data), Frame::Inertial>>>,  \
+                           tmpl::size_t<DIM(data)>, Frame::Inertial>>*>    \
+          du,                                                              \
+      const Variables<                                                     \
+          tmpl::list<::Tags::MirrorView<gh::Tags::GaugeH<                  \
+                         DataVector, DIM(data), Frame::Inertial>>,         \
+                     ::Tags::MirrorView<gh::Tags::SpacetimeDerivGaugeH<    \
+                         DataVector, DIM(data), Frame::Inertial>>>>& u,    \
+      const Mesh<DIM(data)>& mesh,                                         \
+      const Kokkos::View<double***>& inverse_jacobian);
+
 GENERATE_INSTANTIATIONS(INSTANTIATE_KOKKOS_SYSTEM_PARTIAL_DERIVATIVES,
                         (1, 2, 3))
 GENERATE_INSTANTIATIONS(INSTANTIATE_KOKKOS_GAUGE_H_PARTIAL_DERIVATIVES,
@@ -146,7 +163,11 @@ GENERATE_INSTANTIATIONS(INSTANTIATE_KOKKOS_SYSTEM_BATCHED_PARTIAL_DERIVATIVES,
                         (1, 2, 3))
 GENERATE_INSTANTIATIONS(INSTANTIATE_KOKKOS_GAUGE_H_BATCHED_PARTIAL_DERIVATIVES,
                         (1, 2, 3))
+GENERATE_INSTANTIATIONS(
+    INSTANTIATE_KOKKOS_GAUGE_H_FROM_GAUGE_DATA_BATCHED_PARTIAL_DERIVATIVES,
+    (1, 2, 3))
 
+#undef INSTANTIATE_KOKKOS_GAUGE_H_FROM_GAUGE_DATA_BATCHED_PARTIAL_DERIVATIVES
 #undef INSTANTIATE_KOKKOS_GAUGE_H_BATCHED_PARTIAL_DERIVATIVES
 #undef INSTANTIATE_KOKKOS_SYSTEM_BATCHED_PARTIAL_DERIVATIVES
 #undef INSTANTIATE_KOKKOS_GAUGE_H_PARTIAL_DERIVATIVES
