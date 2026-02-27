@@ -11,7 +11,7 @@ ResourceInfo:
   AvoidGlobalProc0: false
   Singletons:
     GhKokkosBatchedDriver:
-      Exclusive: false
+      Exclusive: true
       Proc: Auto
 
 Evolution:
@@ -29,7 +29,7 @@ InitialData: &InitialData
 DomainCreator:
   Sphere:
     InnerRadius: 1.9
-    OuterRadius: 100.
+    OuterRadius: 300.
     Interior:
       ExciseWithBoundaryCondition:
         DirichletAnalytic:
@@ -38,8 +38,9 @@ DomainCreator:
     InitialGridPoints: 8
     UseEquiangularMap: true
     EquatorialCompression: None
-    RadialPartitioning: [10., 30., 60.]
-    RadialDistribution: [Linear, Linear, Linear, Linear]
+    RadialPartitioning: [10., 30., 60., 100., 150., 200., 250.]
+    RadialDistribution:
+      [Linear, Linear, Linear, Linear, Linear, Linear, Linear, Linear]
     WhichWedges: All
     TimeDependentMaps: None
     OuterBoundaryCondition:
@@ -70,12 +71,12 @@ EvolutionSystem:
         Width: 11.313708499
         Center: [0.0, 0.0, 0.0]
 
-#Filtering:
-#  ExpFilter0:
-#    Alpha: 36.0
-#    HalfPower: 64
-#    Enable: false
-#    BlocksToFilter: All
+Filtering:
+  ExpFilter0:
+    Alpha: 36.0
+    HalfPower: 64
+    Enable: true
+    BlocksToFilter: All
 
 SpatialDiscretization:
   DiscontinuousGalerkin:
@@ -85,8 +86,8 @@ EventsAndTriggersAtSlabs:
   - Trigger:
       Slabs:
         EvenlySpaced:
-          Interval: 100
-          Offset: 0
+          Interval: 10
+          Offset: 10000
     Events:
       - ObserveNormsBatched:
           SubfileName: Norms
@@ -103,7 +104,7 @@ EventsAndTriggersAtSlabs:
   - Trigger:
       Slabs:
         Specified:
-          Values: [3]
+          Values: [1]
     Events:
       - CompletionBatched
 

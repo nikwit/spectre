@@ -13,7 +13,11 @@ Parallelization:
 
 ResourceInfo:
   AvoidGlobalProc0: false
-  Singletons: Auto
+  Singletons:
+    MemoryMonitor:
+      Proc: Auto
+      Exclusive: true
+
 
 Evolution:
   InitialTime: 0.0
@@ -42,17 +46,17 @@ InitialData: &InitialData
 DomainCreator:
   Sphere:
     InnerRadius: &InnerRadius 1.9
-    OuterRadius: 2.3
+    OuterRadius: 400.
     Interior:
       ExciseWithBoundaryCondition:
         DirichletAnalytic:
           AnalyticPrescription: *InitialData
     InitialRefinement: 0
-    InitialGridPoints: 5
+    InitialGridPoints: 10
     UseEquiangularMap: true
     EquatorialCompression: None
-    RadialPartitioning: []
-    RadialDistribution: [Logarithmic]
+    RadialPartitioning: [10., 50., 100., 200., 300.]
+    RadialDistribution: [Linear, Linear, Linear, Linear, Linear, Linear]
     WhichWedges: All
     TimeDependentMaps: None
     OuterBoundaryCondition:
@@ -90,7 +94,7 @@ Filtering:
   ExpFilter0:
     Alpha: 36.0
     HalfPower: 64
-    Enable: false
+    Enable: true
     BlocksToFilter: All
 
 SpatialDiscretization:
@@ -98,68 +102,68 @@ SpatialDiscretization:
     Quadrature: GaussLobatto
 
 EventsAndTriggersAtSlabs:
-  - Trigger:
-      Slabs:
-        EvenlySpaced:
-          Interval: 10
-          Offset: 0
-    Events:
-      - SyncKokkosToHost
-      - ObserveTimeStep:
-          SubfileName: TimeSteps
-          PrintTimeToTerminal: True
-          ObservePerCore: False
-      - ObserveNorms:
-          SubfileName: Errors
-          TensorsToObserve:
-            - Name: Error(SpacetimeMetric)
-              NormType: L2Norm
-              Components: Sum
-            - Name: Error(Pi)
-              NormType: L2Norm
-              Components: Sum
-            - Name: Error(Phi)
-              NormType: L2Norm
-              Components: Sum
-      - ObserveNorms:
-          SubfileName: Norms
-          TensorsToObserve:
-          - Name: Lapse
-            NormType: L2Norm
-            Components: Individual
-          - Name: PointwiseL2Norm(GaugeConstraint)
-            NormType: L2Norm
-            Components: Sum
-          - Name: PointwiseL2Norm(ThreeIndexConstraint)
-            NormType: L2Norm
-            Components: Sum
-          - Name: PointwiseL2Norm(FourIndexConstraint)
-            NormType: L2Norm
-            Components: Sum
-  - Trigger:
-      Slabs:
-        EvenlySpaced:
-          Interval: 2
-          Offset: 0
-    Events:
-      - ObserveFields:
-          SubfileName: VolumeData
-          VariablesToObserve:
-            - SpacetimeMetric
-            - Pi
-            - Phi
-            - GaugeH
-            - PointwiseL2Norm(GaugeConstraint)
-            - PointwiseL2Norm(ThreeIndexConstraint)
-            - PointwiseL2Norm(FourIndexConstraint)
-          InterpolateToMesh: None
-          CoordinatesFloatingPointType: Double
-          FloatingPointTypes: [Double]
-          BlocksToObserve: All
+  #- Trigger:
+  #    Slabs:
+  #      EvenlySpaced:
+  #        Interval: 100
+  #        Offset: 1000
+  #  Events:
+  #    - SyncKokkosToHost
+  #    - ObserveTimeStep:
+  #        SubfileName: TimeSteps
+  #        PrintTimeToTerminal: True
+  #        ObservePerCore: False
+  #    - ObserveNorms:
+  #        SubfileName: Errors
+  #        TensorsToObserve:
+  #          - Name: Error(SpacetimeMetric)
+  #            NormType: L2Norm
+  #            Components: Sum
+  #          - Name: Error(Pi)
+  #            NormType: L2Norm
+  #            Components: Sum
+  #          - Name: Error(Phi)
+  #            NormType: L2Norm
+  #            Components: Sum
+  #    - ObserveNorms:
+  #        SubfileName: Norms
+  #        TensorsToObserve:
+  #        - Name: Lapse
+  #          NormType: L2Norm
+  #          Components: Individual
+  #        - Name: PointwiseL2Norm(GaugeConstraint)
+  #          NormType: L2Norm
+  #          Components: Sum
+  #        - Name: PointwiseL2Norm(ThreeIndexConstraint)
+  #          NormType: L2Norm
+  #          Components: Sum
+  #        - Name: PointwiseL2Norm(FourIndexConstraint)
+  #          NormType: L2Norm
+  #          Components: Sum
+  #- Trigger:
+  #    Slabs:
+  #      EvenlySpaced:
+  #        Interval: 2
+  #        Offset: 0
+  #  Events:
+  #    - ObserveFields:
+  #        SubfileName: VolumeData
+  #        VariablesToObserve:
+  #          - SpacetimeMetric
+  #          - Pi
+  #          - Phi
+  #          - GaugeH
+  #          - PointwiseL2Norm(GaugeConstraint)
+  #          - PointwiseL2Norm(ThreeIndexConstraint)
+  #          - PointwiseL2Norm(FourIndexConstraint)
+  #        InterpolateToMesh: None
+  #        CoordinatesFloatingPointType: Double
+  #        FloatingPointTypes: [Double]
+  #        BlocksToObserve: All
   - Trigger:
       Slabs:
         Specified:
-          Values: [10]
+          Values: [100]
     Events:
       - Completion
 
