@@ -703,7 +703,20 @@ void compute_hardcoded_analytic_gauge_and_spacetime_derivative(
     const device_inertial_coordinates_type& device_inertial_coordinates,
     const ::Kokkos::View<double***>& element_inverse_jacobian,
     const Mesh<dim>& mesh) {
-  const size_t number_of_points = mesh.number_of_grid_points();
+  const size_t points_per_element = mesh.number_of_grid_points();
+  const size_t number_of_elements = element_inverse_jacobian.extent(0);
+  const size_t number_of_points = number_of_elements * points_per_element;
+  ASSERT(
+      device_inertial_coordinates.get(0).extent(0) == number_of_points and
+          device_inertial_coordinates.get(1).extent(0) == number_of_points and
+          device_inertial_coordinates.get(2).extent(0) == number_of_points,
+      "Packed inertial coordinates must have one entry per packed point. "
+          << "Expected " << number_of_points << " points from "
+          << number_of_elements << " elements x " << points_per_element
+          << " points/element, got ["
+          << device_inertial_coordinates.get(0).extent(0) << ", "
+          << device_inertial_coordinates.get(1).extent(0) << ", "
+          << device_inertial_coordinates.get(2).extent(0) << "].");
   if (device_gauge_data->number_of_grid_points() != number_of_points) {
     device_gauge_data->initialize(number_of_points);
   }
@@ -800,29 +813,18 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
                               device_vars, mesh,
                               packed_geometry.element_inverse_jacobian_device);
 
-  ASSERT(
-      packed_geometry.inertial_coordinates_host[0].size() == total_points and
-          packed_geometry.inertial_coordinates_host[1].size() ==
-              total_points and
-          packed_geometry.inertial_coordinates_host[2].size() == total_points,
-      "Packed inertial coordinates size mismatch with total points.");
-  device_inertial_coordinates_type device_inertial_coordinates{};
-  for (size_t d = 0; d < dim; ++d) {
-    device_inertial_coordinates.get(d) =
-        ::Kokkos::View<double*>("GhBatchedInertialCoordinates", total_points);
-    auto host_coords_component =
-        ::Kokkos::create_mirror_view(device_inertial_coordinates.get(d));
-    for (size_t s = 0; s < total_points; ++s) {
-      host_coords_component(s) =
-          packed_geometry.inertial_coordinates_host[d][s];
-    }
-    ::Kokkos::deep_copy(device_inertial_coordinates.get(d),
-                        host_coords_component);
-  }
+  ASSERT(packed_geometry.inertial_coordinates_device.get(0).extent(0) ==
+                 total_points and
+             packed_geometry.inertial_coordinates_device.get(1).extent(0) ==
+                 total_points and
+             packed_geometry.inertial_coordinates_device.get(2).extent(0) ==
+                 total_points,
+         "Packed inertial device coordinates size mismatch with total points.");
 
   device_gauge_data_type device_gauge_data{total_points};
   compute_hardcoded_analytic_gauge_and_spacetime_derivative(
-      make_not_null(&device_gauge_data), device_inertial_coordinates,
+      make_not_null(&device_gauge_data),
+      packed_geometry.inertial_coordinates_device,
       packed_geometry.element_inverse_jacobian_device, mesh);
 
   const auto dt_spacetime_metric =
