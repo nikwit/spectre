@@ -3,37 +3,56 @@
 
 add_subdirectory(GaugeSourceFunctions)
 
-    set(LIBRARY "Test_GeneralizedHarmonic")
+set(LIBRARY "Test_GeneralizedHarmonic")
 
-        set(LIBRARY_SOURCES Actions /
-            Test_SetInitialData.cpp BoundaryConditions /
-            Test_Bjorhus.cpp BoundaryConditions /
-            Test_BjorhusImpl.cpp BoundaryConditions /
-            Test_DemandOutgoingCharSpeeds.cpp BoundaryConditions /
-            Test_DirichletAnalytic.cpp BoundaryConditions /
-            Test_DirichletMinkowski.cpp BoundaryConditions /
-            Test_Periodic.cpp BoundaryCorrections /
-            Test_UpwindPenalty
-                .cpp Test_ApplyBoundaryCorrectionsToTimeDerivativeKokkos
-                .cpp Test_Characteristics.cpp Test_ComputeTimeDerivativeBatched
-                .cpp Test_ComputeTimeDerivativeKokkos.cpp Test_Constraints
-                .cpp Test_DuDt.cpp Test_DuDtTempTags.cpp Test_FilterKokkos
-                .cpp Test_Fluxes.cpp Test_SyncKokkosToHostEvent.cpp Test_Tags
-                .cpp)
+set(LIBRARY_SOURCES
+    Actions/Test_SetInitialData.cpp
+    BoundaryConditions/Test_Bjorhus.cpp
+    BoundaryConditions/Test_BjorhusImpl.cpp
+    BoundaryConditions/Test_DemandOutgoingCharSpeeds.cpp
+    BoundaryConditions/Test_DirichletAnalytic.cpp
+    BoundaryConditions/Test_DirichletMinkowski.cpp
+    BoundaryConditions/Test_Periodic.cpp
+    BoundaryCorrections/Test_UpwindPenalty.cpp
+    Test_ApplyBoundaryCorrectionsToTimeDerivativeKokkos.cpp
+    Test_Characteristics.cpp
+    Test_ComputeTimeDerivativeBatched.cpp
+    Test_ComputeTimeDerivativeKokkos.cpp
+    Test_Constraints.cpp
+    Test_DuDt.cpp
+    Test_DuDtTempTags.cpp
+    Test_FilterKokkos.cpp
+    Test_Fluxes.cpp
+    Test_SyncKokkosToHostEvent.cpp
+    Test_Tags.cpp
+)
 
-            add_test_library($ { LIBRARY } "${LIBRARY_SOURCES}")
+add_test_library(${LIBRARY} "${LIBRARY_SOURCES}")
 
-                target_link_libraries(
-                    ${LIBRARY} PRIVATE CoordinateMaps DataBoxTestHelpers
-                        DataStructures DataStructuresHelpers
-                            DiscontinuousGalerkin Domain DomainCreators
-                                DomainStructure Evolution FunctionsOfTime
-                                    GeneralRelativity GeneralRelativityHelpers
-                                        GeneralRelativitySolutions
-                                            GeneralizedHarmonic
-                                                GeneralizedHarmonicKokkos
-                                                    Importers Initialization
-                                                        LinearOperators
-                                                            MathFunctions Options
-                                                                Spectral Time
-                                                                    Utilities)
+target_link_libraries(
+  ${LIBRARY}
+  PRIVATE
+  CoordinateMaps
+  DataBoxTestHelpers
+  DataStructures
+  DataStructuresHelpers
+  DiscontinuousGalerkin
+  Domain
+  DomainCreators
+  DomainStructure
+  Evolution
+  FunctionsOfTime
+  GeneralRelativity
+  GeneralRelativityHelpers
+  GeneralRelativitySolutions
+  GeneralizedHarmonic
+  GeneralizedHarmonicKokkos
+  Importers
+  Initialization
+  LinearOperators
+  MathFunctions
+  Options
+  Spectral
+  Time
+  Utilities
+)
