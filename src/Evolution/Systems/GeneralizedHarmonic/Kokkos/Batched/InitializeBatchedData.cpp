@@ -20,6 +20,7 @@
 #include "Evolution/TypeTraits.hpp"
 #include "NumericalAlgorithms/Spectral/LogicalCoordinates.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "Parallel/Printf/Printf.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/Factory.hpp"
 #include "Time/History.hpp"
 #include "Utilities/CallWithDynamicType.hpp"
@@ -27,6 +28,10 @@
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
 #include "Utilities/TMPL.hpp"
+
+#if defined(KOKKOS_ENABLE_CUDA)
+#include <cuda_runtime_api.h>
+#endif
 
 namespace gh::Actions {
 
@@ -50,6 +55,24 @@ void InitializeBatchedData::apply(
         damping_function_gamma1,
     const typename damping_function_gamma2_tag::DampingFunctionType&
         damping_function_gamma2) {
+#ifdef SPECTRE_KOKKOS
+  const auto execution_space_name = ::Kokkos::DefaultExecutionSpace::name();
+  const int execution_space_concurrency =
+      ::Kokkos::DefaultExecutionSpace{}.concurrency();
+  bool found_gpu = false;
+  int cuda_device_count = 0;
+#if defined(KOKKOS_ENABLE_CUDA)
+  found_gpu = ::cudaGetDeviceCount(&cuda_device_count) == ::cudaSuccess and
+              cuda_device_count > 0;
+#endif
+  Parallel::printf(
+      "Kokkos startup (GH batched): initialized=%s, execution_space=%s, "
+      "concurrency=%d, cuda_device_count=%d, found_gpu=%s\n",
+      ::Kokkos::is_initialized() ? "true" : "false", execution_space_name,
+      execution_space_concurrency, cuda_device_count,
+      found_gpu ? "true" : "false");
+#endif
+
   using host_variables_type = typename system::variables_tag::type;
   using host_dt_tag =
       db::add_tag_prefix<::Tags::dt, typename system::variables_tag>;
