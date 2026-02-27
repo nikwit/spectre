@@ -39,8 +39,8 @@ struct InitializeBoundaryBatchMetadata {
   using packed_boundary_scratch_tag =
       evolution::Kokkos::Tags::PackedBoundaryScratch<system>;
 
-  using return_tags = tmpl::list<packed_boundary_metadata_tag,
-                                 packed_boundary_scratch_tag>;
+  using return_tags =
+      tmpl::list<packed_boundary_metadata_tag, packed_boundary_scratch_tag>;
   using argument_tags = tmpl::list<packed_topology_tag>;
 
   static constexpr size_t side_index(const Side side) {
@@ -117,8 +117,36 @@ struct InitializeBoundaryBatchMetadata {
         packed_topology.uniform_extents_host[1],
         packed_topology.uniform_extents_host[2]};
     const size_t num_face_points = mesh.slice_away(0).number_of_grid_points();
+    constexpr std::array<const char*, number_of_faces> external_mask_labels{
+        {"GhBatchedExternalFaceMask0", "GhBatchedExternalFaceMask1",
+         "GhBatchedExternalFaceMask2", "GhBatchedExternalFaceMask3",
+         "GhBatchedExternalFaceMask4", "GhBatchedExternalFaceMask5"}};
 
-    for (size_t e = 0; e < packed_topology.local_elements.size(); ++e) {
+    const size_t num_elements = packed_topology.local_elements.size();
+    for (size_t sliced_dim = 0; sliced_dim < volume_dim; ++sliced_dim) {
+      for (size_t side_i = 0; side_i < 2; ++side_i) {
+        const Side side = side_i == 0 ? Side::Lower : Side::Upper;
+        const Direction<volume_dim> direction{sliced_dim, side};
+        const size_t local_face_id = face_index(sliced_dim, side_i);
+        auto& external_face_mask =
+            packed_boundary_metadata
+                ->external_face_mask_for_all_elements[local_face_id];
+        external_face_mask = ::Kokkos::View<int*>{
+            external_mask_labels[local_face_id], num_elements};
+        auto host_external_face_mask =
+            ::Kokkos::create_mirror_view(external_face_mask);
+        for (size_t e = 0; e < num_elements; ++e) {
+          host_external_face_mask(e) =
+              packed_topology.local_elements[e].external_boundaries().count(
+                  direction) == 0
+                  ? 0
+                  : 1;
+        }
+        ::Kokkos::deep_copy(external_face_mask, host_external_face_mask);
+      }
+    }
+
+    for (size_t e = 0; e < num_elements; ++e) {
       const auto& element = packed_topology.local_elements[e];
       auto& oriented_remote_face_index_for_local =
           packed_boundary_metadata->oriented_remote_face_index_for_local[e];
@@ -192,7 +220,7 @@ struct InitializeBoundaryBatchMetadata {
     }
 
     std::array<FaceBoundaryHostData, number_of_faces> host_metadata{};
-    for (size_t e = 0; e < packed_topology.local_elements.size(); ++e) {
+    for (size_t e = 0; e < num_elements; ++e) {
       const auto& element = packed_topology.local_elements[e];
       const auto& oriented_remote_face_index_for_local =
           packed_boundary_metadata->oriented_remote_face_index_for_local[e];
@@ -304,14 +332,14 @@ struct InitializeBoundaryBatchMetadata {
 
     for (auto& packaged_face_data :
          packed_boundary_scratch->packaged_face_data_for_all_elements) {
-      packaged_face_data = Variables<device_package_field_tags>{
-          packed_topology.local_elements.size() * num_face_points};
+      packaged_face_data =
+          Variables<device_package_field_tags>{num_elements * num_face_points};
       ::Kokkos::deep_copy(packaged_face_data.view(), 0.0);
     }
     for (auto& internal_boundary_terms :
          packed_boundary_scratch->internal_boundary_terms_for_all_elements) {
-      internal_boundary_terms = Variables<device_dt_boundary_tags>{
-          packed_topology.local_elements.size() * num_face_points};
+      internal_boundary_terms =
+          Variables<device_dt_boundary_tags>{num_elements * num_face_points};
       ::Kokkos::deep_copy(internal_boundary_terms.view(), 0.0);
     }
   }

@@ -35,6 +35,9 @@ struct PackedBoundaryMetadataStorage {
   evolution::Kokkos::Batched::MortarMetadataMaps mortar_metadata{};
   evolution::Kokkos::Batched::FaceBoundaryMetadataArray
       boundary_correction_face_metadata{};
+  std::array<::Kokkos::View<int*>,
+             evolution::Kokkos::Batched::boundary_number_of_faces>
+      external_face_mask_for_all_elements{};
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {
