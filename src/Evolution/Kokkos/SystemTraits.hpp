@@ -18,6 +18,7 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Evolution/Systems/ScalarWave/BoundaryCorrections/UpwindPenalty.hpp"
 #include "Evolution/Systems/ScalarWave/System.hpp"
+#include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -125,6 +126,14 @@ struct PackedBoundaryScratchStorage<
                     Frame::Inertial>;
   using device_spatial_deriv_gauge_data_type =
       Variables<tmpl::list<device_spatial_deriv_gauge_h_tag>>;
+  using device_inverse_spatial_metric_tag = ::Tags::MirrorView<
+      gr::Tags::InverseSpatialMetric<DataVector, volume_dim, Frame::Inertial>>;
+  using device_shift_tag = ::Tags::MirrorView<
+      gr::Tags::Shift<DataVector, volume_dim, Frame::Inertial>>;
+  using device_lapse_tag = ::Tags::MirrorView<gr::Tags::Lapse<DataVector>>;
+  using device_three_plus_one_data_type =
+      Variables<tmpl::list<device_inverse_spatial_metric_tag, device_shift_tag,
+                           device_lapse_tag>>;
   using projection_workspace_type = ::Kokkos::View<double***>;
   using filter_workspace_type = ::Kokkos::View<double**>;
 
@@ -134,6 +143,7 @@ struct PackedBoundaryScratchStorage<
   Variables<device_derivative_tags> volume_partial_derivatives{};
   device_gauge_data_type volume_gauge_data{};
   device_spatial_deriv_gauge_data_type volume_spatial_deriv_gauge{};
+  device_three_plus_one_data_type volume_three_plus_one_data{};
   Variables<device_package_field_tags> projection_local_packaged_face_data{};
   Variables<device_package_field_tags> projection_remote_packaged_face_data{};
   Variables<device_package_field_tags> projection_local_packaged_mortar_data{};

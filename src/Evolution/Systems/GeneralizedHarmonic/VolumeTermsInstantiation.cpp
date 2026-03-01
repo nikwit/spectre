@@ -138,8 +138,8 @@ GENERATE_INSTANTIATIONS(INSTANTIATION, (1, 2, 3))
       const Mesh<DIM(data)>& mesh,                                         \
       const Kokkos::View<double***>& inverse_jacobian);
 
-#define INSTANTIATE_KOKKOS_GAUGE_H_FROM_GAUGE_DATA_BATCHED_                \
-  PARTIAL_DERIVATIVES(r, data)                                             \
+#define INSTANTIATE_KOKKOS_GAUGE_H_FROM_GAUGE_DATA_BATCHED_PARTIAL_DERIVATIVES( \
+    r, data)                                                                    \
   template void partial_derivatives_batched(                               \
       gsl::not_null<Variables<                                             \
           db::wrap_tags_in<::Tags::deriv,                                  \
