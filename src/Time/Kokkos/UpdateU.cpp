@@ -46,12 +46,11 @@ void update_u_impl(
 
   ::Kokkos::parallel_for(
       "KokkosUpdateUFused",
-      ::Kokkos::RangePolicy<size_t>{0, num_points * num_components},
-      KOKKOS_LAMBDA(const size_t linear_index) {
-        const size_t point = linear_index / num_components;
-        const size_t component = linear_index % num_components;
+      ::Kokkos::MDRangePolicy<::Kokkos::Rank<2>>({0, 0},
+                                             {num_points, num_components}),
+      KOKKOS_LAMBDA(const int point, const int component) {
         double weighted_sum = 0.0;
-        for (size_t coeff_index = 0; coeff_index < num_coefficients;
+        for (int coeff_index = 0; coeff_index < num_coefficients;
              ++coeff_index) {
           weighted_sum += coefficients_array[coeff_index] *
                           deriv_history_view(coeff_index, point, component);

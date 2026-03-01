@@ -25,9 +25,13 @@ namespace gh::Actions {
 
 namespace detail {
 
-inline MatrixViewRO matrix_on_device(const Matrix& matrix,
-                                     const char* const label) {
-  Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace>
+using MatrixViewRightLayout =
+    Kokkos::View<const double**, Kokkos::LayoutRight,
+                 typename Kokkos::DefaultExecutionSpace::memory_space,
+                 Kokkos::MemoryTraits<Kokkos::RandomAccess>>;
+inline MatrixViewRightLayout matrix_on_device(const Matrix& matrix,
+                                              const char* const label) {
+  Kokkos::View<double**, Kokkos::LayoutRight, Kokkos::HostSpace>
       host_matrix_view{"GhFilterKokkosBatchedHostMatrix", matrix.rows(),
                        matrix.columns()};
   for (size_t i = 0; i < matrix.rows(); ++i) {
@@ -35,14 +39,14 @@ inline MatrixViewRO matrix_on_device(const Matrix& matrix,
       host_matrix_view(i, j) = matrix(i, j);
     }
   }
-  Kokkos::View<double**, Kokkos::LayoutLeft> device_matrix_view{
+  Kokkos::View<double**, Kokkos::LayoutRight> device_matrix_view{
       label, matrix.rows(), matrix.columns()};
   Kokkos::deep_copy(device_matrix_view, host_matrix_view);
-  return MatrixViewRO{device_matrix_view};
+  return MatrixViewRightLayout{device_matrix_view};
 }
 
 template <typename FilterType>
-const MatrixViewRO& filter_matrix_on_device_batched(
+const MatrixViewRightLayout& filter_matrix_on_device_batched(
     const FilterType& filter_helper, const Mesh<1>& mesh) {
   const static FilterType cached_filter = filter_helper;
   ASSERT(cached_filter == filter_helper,
@@ -71,8 +75,9 @@ const MatrixViewRO& filter_matrix_on_device_batched(
 
 inline void apply_filter_matrices_on_device_batched(
     const Kokkos::View<double**>& vars_view, const Mesh<3>& mesh,
-    const MatrixViewRO& matrix_dim_0, const MatrixViewRO& matrix_dim_1,
-    const MatrixViewRO& matrix_dim_2,
+    const MatrixViewRightLayout& matrix_dim_0,
+    const MatrixViewRightLayout& matrix_dim_1,
+    const MatrixViewRightLayout& matrix_dim_2,
     const gsl::not_null<Kokkos::View<double**>*> scratch_0,
     const gsl::not_null<Kokkos::View<double**>*> scratch_1) {
   const auto extents = mesh.extents();
@@ -107,75 +112,76 @@ inline void apply_filter_matrices_on_device_batched(
   const auto scratch_1_view = *scratch_1;
 
   Kokkos::parallel_for(
-      "GhFilterKokkosBatchedDim0",
-      Kokkos::RangePolicy<size_t>{0, total_points * num_components},
-      KOKKOS_LAMBDA(const size_t linear_index) {
-        size_t remaining = linear_index;
-        const size_t component = remaining % num_components;
-        remaining /= num_components;
-        const size_t point_index = remaining;
-        const size_t element_index = point_index / points_per_element;
-        size_t local_point = point_index % points_per_element;
-        const size_t i0 = local_point % n0;
+      "GhFilterKokkosBatchedDim0_MD",
+      Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0},
+                                             {total_points, num_components}),
+      KOKKOS_LAMBDA(const size_t point_index, const size_t component) {
+        const int element_index =
+            static_cast<int>(point_index / points_per_element);
+        int local_point = static_cast<int>(point_index % points_per_element);
+
+        const int i0 = local_point % n0;
         local_point /= n0;
-        const size_t i1 = local_point % n1;
-        const size_t i2 = local_point / n1;
+        const int i1 = local_point % n1;
+        const int i2 = local_point / n1;
 
         double sum = 0.0;
-        for (size_t k0 = 0; k0 < n0; ++k0) {
-          const size_t local_source_index = k0 + n0 * (i1 + n1 * i2);
+        for (int k0 = 0; k0 < n0; ++k0) {
+          const int local_source_index = k0 + n0 * (i1 + n1 * i2);
           const size_t source_index =
-              element_index * points_per_element + local_source_index;
+              static_cast<size_t>(element_index) * points_per_element +
+              static_cast<size_t>(local_source_index);
+
           sum += matrix_dim_0(i0, k0) * vars_view(source_index, component);
         }
         scratch_0_view(point_index, component) = sum;
       });
 
   Kokkos::parallel_for(
-      "GhFilterKokkosBatchedDim1",
-      Kokkos::RangePolicy<size_t>{0, total_points * num_components},
-      KOKKOS_LAMBDA(const size_t linear_index) {
-        size_t remaining = linear_index;
-        const size_t component = remaining % num_components;
-        remaining /= num_components;
-        const size_t point_index = remaining;
-        const size_t element_index = point_index / points_per_element;
-        size_t local_point = point_index % points_per_element;
-        const size_t i0 = local_point % n0;
+      "GhFilterKokkosBatchedDim1_MD",
+      Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0},
+                                             {total_points, num_components}),
+      KOKKOS_LAMBDA(const size_t point_index, const size_t component) {
+        const int element_index = point_index / points_per_element;
+        int local_point = point_index % points_per_element;
+
+        const int i0 = local_point % n0;
         local_point /= n0;
-        const size_t i1 = local_point % n1;
-        const size_t i2 = local_point / n1;
+        const int i1 = local_point % n1;
+        const int i2 = local_point / n1;
 
         double sum = 0.0;
-        for (size_t k1 = 0; k1 < n1; ++k1) {
-          const size_t local_source_index = i0 + n0 * (k1 + n1 * i2);
+        for (int k1 = 0; k1 < n1; ++k1) {
+          const int local_source_index = i0 + n0 * (k1 + n1 * i2);
           const size_t source_index =
-              element_index * points_per_element + local_source_index;
+              static_cast<size_t>(element_index) * points_per_element +
+              static_cast<size_t>(local_source_index);
           sum += matrix_dim_1(i1, k1) * scratch_0_view(source_index, component);
         }
         scratch_1_view(point_index, component) = sum;
       });
 
   Kokkos::parallel_for(
-      "GhFilterKokkosBatchedDim2",
-      Kokkos::RangePolicy<size_t>{0, total_points * num_components},
-      KOKKOS_LAMBDA(const size_t linear_index) {
-        size_t remaining = linear_index;
-        const size_t component = remaining % num_components;
-        remaining /= num_components;
-        const size_t point_index = remaining;
-        const size_t element_index = point_index / points_per_element;
-        size_t local_point = point_index % points_per_element;
-        const size_t i0 = local_point % n0;
+      "GhFilterKokkosBatchedDim2_MD",
+      Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0},
+                                             {total_points, num_components}),
+      KOKKOS_LAMBDA(const size_t point_index, const size_t component) {
+        const int element_index =
+            static_cast<int>(point_index / points_per_element);
+        int local_point = static_cast<int>(point_index % points_per_element);
+
+        const int i0 = local_point % n0;
         local_point /= n0;
-        const size_t i1 = local_point % n1;
-        const size_t i2 = local_point / n1;
+        const int i1 = local_point % n1;
+        const int i2 = local_point / n1;
 
         double sum = 0.0;
-        for (size_t k2 = 0; k2 < n2; ++k2) {
-          const size_t local_source_index = i0 + n0 * (i1 + n1 * k2);
+        for (int k2 = 0; k2 < n2; ++k2) {
+          const int local_source_index = i0 + n0 * (i1 + n1 * k2);
           const size_t source_index =
-              element_index * points_per_element + local_source_index;
+              static_cast<size_t>(element_index) * points_per_element +
+              static_cast<size_t>(local_source_index);
+
           sum += matrix_dim_2(i2, k2) * scratch_1_view(source_index, component);
         }
         vars_view(point_index, component) = sum;

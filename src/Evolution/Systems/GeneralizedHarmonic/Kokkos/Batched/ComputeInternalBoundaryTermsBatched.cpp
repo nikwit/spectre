@@ -76,6 +76,17 @@ size_t face_index(const Direction<volume_dim>& direction) {
   return face_index(direction.dimension(), side_index(direction.side()));
 }
 
+template <std::size_t N, class F, std::size_t... Is>
+KOKKOS_INLINE_FUNCTION constexpr void static_for_impl(
+    F&& f, std::index_sequence<Is...>) {
+  (f(std::integral_constant<std::size_t, Is>{}), ...);
+}
+
+template <std::size_t N, class F>
+KOKKOS_INLINE_FUNCTION constexpr void static_for(F&& f) {
+  static_for_impl<N>(static_cast<F&&>(f), std::make_index_sequence<N>{});
+}
+
 template <typename StorageType>
 void apply_tensor_product_projection_2d_batched(
     const StorageType& result_view, const size_t result_num_points,
@@ -220,13 +231,15 @@ KOKKOS_INLINE_FUNCTION void load_aa_from_packaged_data(
     const package_storage_type& packaged_data_view, const size_t point,
     const size_t component_offset) {
   size_t component_index = 0;
-  for (size_t a = 0; a < volume_dim + 1; ++a) {
-    for (size_t b = a; b < volume_dim + 1; ++b) {
-      tensor->get(a, b) =
+  static_for<volume_dim + 1>([&](auto a_c) {
+    constexpr int a = (int)a_c;
+    static_for<volume_dim + 1 - a>([&](auto off_c) {
+      constexpr int b = a + (int)off_c;
+      get<a, b>(*tensor) =
           packaged_data_view(point, component_offset + component_index);
       ++component_index;
-    }
-  }
+    });
+  });
 }
 
 KOKKOS_INLINE_FUNCTION void load_iaa_from_packaged_data(
@@ -234,24 +247,28 @@ KOKKOS_INLINE_FUNCTION void load_iaa_from_packaged_data(
     const package_storage_type& packaged_data_view, const size_t point,
     const size_t component_offset) {
   size_t component_index = 0;
-  for (size_t d = 0; d < volume_dim; ++d) {
-    for (size_t a = 0; a < volume_dim + 1; ++a) {
-      for (size_t b = a; b < volume_dim + 1; ++b) {
-        tensor->get(d, a, b) =
+  static_for<volume_dim>([&](auto d_c) {
+    constexpr int d = (int)d_c;
+    static_for<volume_dim + 1>([&](auto a_c) {
+      constexpr int a = (int)a_c;
+      static_for<volume_dim + 1 - a>([&](auto off_c) {
+        constexpr int b = a + (int)off_c;
+        get<d, a, b>(*tensor) =
             packaged_data_view(point, component_offset + component_index);
         ++component_index;
-      }
-    }
-  }
+      });
+    });
+  });
 }
 
 KOKKOS_INLINE_FUNCTION void load_a_from_packaged_data(
     const gsl::not_null<tnsr::a<double, volume_dim, Frame::Inertial>*> tensor,
     const package_storage_type& packaged_data_view, const size_t point,
     const size_t component_offset) {
-  for (size_t a = 0; a < volume_dim + 1; ++a) {
-    tensor->get(a) = packaged_data_view(point, component_offset + a);
-  }
+  static_for<volume_dim + 1>([&](auto a_c) {
+    constexpr int a = (int)a_c;
+    get<a>(*tensor) = packaged_data_view(point, component_offset + a);
+  });
 }
 
 KOKKOS_INLINE_FUNCTION void compute_boundary_terms_at_point(
