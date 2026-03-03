@@ -636,7 +636,8 @@ void compute_hardcoded_analytic_gauge_and_spacetime_derivative(
     const gsl::not_null<device_spatial_deriv_gauge_data_type*>
         device_spatial_gauge_deriv,
     const device_inertial_coordinates_type& device_inertial_coordinates,
-    const ::Kokkos::View<double***>& element_inverse_jacobian,
+    const packed_geometry_type::device_inverse_jacobian_type&
+        element_inverse_jacobian,
     const Mesh<dim>& mesh) {
   const size_t points_per_element = mesh.number_of_grid_points();
   const size_t number_of_elements = element_inverse_jacobian.extent(0);

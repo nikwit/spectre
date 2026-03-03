@@ -101,7 +101,8 @@ GENERATE_INSTANTIATIONS(INSTANTIATE_KOKKOS_PARTIAL_DERIVATIVES, (1, 2, 3))
           ::Tags::MirrorView, typename ::ScalarWave::System<DIM(               \
                                   data)>::variables_tag::tags_list>>& u,       \
       const Mesh<DIM(data)>& mesh,                                             \
-      const Kokkos::View<double***>& inverse_jacobian);
+      const partial_derivatives_detail::BatchedInverseJacobianView&            \
+          inverse_jacobian);
 
 GENERATE_INSTANTIATIONS(INSTANTIATE_KOKKOS_BATCHED_PARTIAL_DERIVATIVES,
                         (1, 2, 3))

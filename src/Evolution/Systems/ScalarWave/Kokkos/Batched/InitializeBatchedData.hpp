@@ -52,6 +52,8 @@ struct InitializeBatchedData {
   using device_constraint_gamma2_tag =
       ScalarWave::KokkosTags::DeviceConstraintGamma2;
   using device_constraint_gamma2_type = device_constraint_gamma2_tag::type;
+  using packed_geometry_type =
+      evolution::Kokkos::Tags::PackedGeometry<ScalarWave::System<3>>::type;
   using packed_evolution_state_type =
       evolution::Kokkos::Tags::PackedEvolutionState<
           ScalarWave::System<3>>::type;
@@ -105,18 +107,18 @@ struct InitializeBatchedData {
         device_dt_variables_type(packed_topology->total_points);
     packed_evolution_state->device_step_start =
         device_step_start_type(packed_topology->total_points);
-    *device_constraint_gamma2 =
-        device_constraint_gamma2_type("BatchedConstraintGamma2",
-                                      packed_topology->total_points);
+    *device_constraint_gamma2 = device_constraint_gamma2_type(
+        "BatchedConstraintGamma2", packed_topology->total_points);
     packed_evolution_state->device_derivative_history =
         device_derivative_history_type(
             "BatchedDerivativeHistory", TimeSteppers::history_max_substeps,
             packed_topology->total_points,
             device_dt_variables_type::number_of_independent_components);
     packed_geometry->element_inverse_jacobian_device =
-        ::Kokkos::View<double***>("BatchedElementInverseJacobian",
-                                  packed_topology->local_element_ids.size(),
-                                  packed_topology->points_per_element, 9);
+        typename packed_geometry_type::device_inverse_jacobian_type(
+            "BatchedElementInverseJacobian",
+            packed_topology->local_element_ids.size(),
+            packed_topology->points_per_element, 9);
 
     if (packed_topology->total_points > 0) {
       ::Kokkos::deep_copy(packed_evolution_state->device_variables.view(), 0.0);

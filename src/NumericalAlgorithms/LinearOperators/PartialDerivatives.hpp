@@ -47,6 +47,8 @@ void apply_matrix_in_first_dim(std::complex<double>* result,
                                const Matrix& matrix, size_t size,
                                bool add_to_result = false);
 #ifdef SPECTRE_KOKKOS
+using BatchedInverseJacobianView = Kokkos::View<double***, Kokkos::LayoutRight>;
+
 template <size_t DerivDim, size_t Dim, bool AddToResult = false>
 void apply_matrix_in_dim(
     Kokkos::View<double**> result, const Kokkos::View<double**>& input,
@@ -57,13 +59,13 @@ template <size_t DerivDim, size_t Dim, bool AddToResult = false>
 void apply_matrix_in_dim_batched(
     Kokkos::View<double**> result, const Kokkos::View<double**>& input,
     const MatrixViewRO& matrix, const Mesh<Dim>& mesh,
-    const Kokkos::View<double***>& inverse_jacobian);
+    const BatchedInverseJacobianView& inverse_jacobian);
 template <size_t Dim>
 void apply_diff_matrices_fused_batched(
     Kokkos::View<double**> result, const Kokkos::View<double**>& input,
     const MatrixViewRO& matrix_dim_0, const MatrixViewRO& matrix_dim_1,
     const MatrixViewRO& matrix_dim_2, const Mesh<Dim>& mesh,
-    const Kokkos::View<double***>& inverse_jacobian);
+    const BatchedInverseJacobianView& inverse_jacobian);
 #endif  // SPECTRE_KOKKOS
 }  // namespace partial_derivatives_detail
 
@@ -259,7 +261,9 @@ auto partial_derivatives(
 template <typename ResultTags, typename VariableTags, size_t Dim>
 void partial_derivatives_batched(
     gsl::not_null<Variables<ResultTags>*> du, const Variables<VariableTags>& u,
-    const Mesh<Dim>& mesh, const Kokkos::View<double***>& inverse_jacobian);
+    const Mesh<Dim>& mesh,
+    const partial_derivatives_detail::BatchedInverseJacobianView&
+        inverse_jacobian);
 #endif  // SPECTRE_KOKKOS
 /// @}
 

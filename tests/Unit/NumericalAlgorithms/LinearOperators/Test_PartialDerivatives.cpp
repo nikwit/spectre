@@ -659,8 +659,9 @@ void test_partial_derivatives_batched_matches_elementwise(
   }
   const auto u_device = copy_to_device(host_u);
 
-  Kokkos::View<double***> batched_inverse_jacobian(
-      "BatchedInverseJacobian", num_elements, points_per_element, 9);
+  partial_derivatives_detail::BatchedInverseJacobianView
+      batched_inverse_jacobian("BatchedInverseJacobian", num_elements,
+                               points_per_element, 9);
   auto host_inverse_jacobian =
       Kokkos::create_mirror_view(batched_inverse_jacobian);
   for (size_t element = 0; element < num_elements; ++element) {

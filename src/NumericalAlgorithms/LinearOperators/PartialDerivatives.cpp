@@ -269,7 +269,7 @@ void apply_matrix_in_dim_batched(
     const Kokkos::View<double**>& input,  // [total_num_points, num_components]
     const MatrixViewRO& matrix,           // [num_points_this_dim^2]
     const Mesh<Dim>& mesh,
-    const Kokkos::View<double***>&
+    const BatchedInverseJacobianView&
         inverse_jacobian) {  // [num_elements, points_per_element, Dim*Dim]
   const size_t num_components = input.extent(1);
   const std::array<size_t, Dim> extents = mesh.extents().indices();
@@ -416,7 +416,7 @@ inline void apply_diff_matrices_fused_batched(
     const MatrixViewRO& D1,               // [n1,n1]
     const MatrixViewRO& D2,               // [n2,n2]
     const Mesh<Dim>& mesh,
-    const Kokkos::View<double***>& inverse_jacobian) {  // [nelems, ppe, 9]
+    const BatchedInverseJacobianView& inverse_jacobian) {  // [nelems, ppe, 9]
   static_assert(Dim == 3, "Assumes Dim==3.");
 
   const auto ext = mesh.extents().indices();
@@ -433,6 +433,12 @@ inline void apply_diff_matrices_fused_batched(
   ASSERT(static_cast<size_t>(total_points) % static_cast<size_t>(ppe) == 0,
          "total_points must be divisible by points_per_element");
   const int nelems = total_points / ppe;
+  std::array<size_t, 3> inverse_jacobian_strides{};
+  inverse_jacobian.stride(inverse_jacobian_strides.data());
+  ASSERT(inverse_jacobian_strides[2] == 1,
+         "Expected batched inverse Jacobian to have contiguous component index "
+         "(stride[2] == 1), got stride[2] == "
+             << inverse_jacobian_strides[2] << '.');
 
   using exec_space = typename Kokkos::View<double**>::execution_space;
   using team_policy = Kokkos::TeamPolicy<exec_space>;
@@ -625,7 +631,7 @@ INSTANTIATE_APPLY_MATRIX_IN_DIM(2, 3, true)
   template void apply_matrix_in_dim_batched<DerivDim, Dim, AddToResult>(    \
       Kokkos::View<double**> result, const Kokkos::View<double**>& input,   \
       const MatrixViewRO& matrix, const Mesh<Dim>& mesh,                    \
-      const Kokkos::View<double***>& inverse_jacobian);
+      const BatchedInverseJacobianView& inverse_jacobian);
 INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(0, 1, false)
 INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(0, 2, false)
 INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(0, 3, false)
@@ -639,7 +645,7 @@ INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(2, 3, true)
       Kokkos::View<double**> result, const Kokkos::View<double**>& input, \
       const MatrixViewRO& matrix_dim_0, const MatrixViewRO& matrix_dim_1, \
       const MatrixViewRO& matrix_dim_2, const Mesh<Dim>& mesh,            \
-      const Kokkos::View<double***>& inverse_jacobian);
+      const BatchedInverseJacobianView& inverse_jacobian);
 
 INSTANTIATE_APPLY_DIFF_MATRICES_FUSED_BATCHED(3)
 

@@ -123,7 +123,8 @@ GENERATE_INSTANTIATIONS(INSTANTIATION, (1, 2, 3))
           ::Tags::MirrorView,                                                \
           typename ::gh::System<DIM(data)>::variables_tag::tags_list>>& u,   \
       const Mesh<DIM(data)>& mesh,                                           \
-      const Kokkos::View<double***>& inverse_jacobian);
+      const partial_derivatives_detail::BatchedInverseJacobianView&          \
+          inverse_jacobian);
 
 #define INSTANTIATE_KOKKOS_GAUGE_H_BATCHED_PARTIAL_DERIVATIVES(r, data)    \
   template void partial_derivatives_batched(                               \
@@ -136,24 +137,26 @@ GENERATE_INSTANTIATIONS(INSTANTIATION, (1, 2, 3))
       const Variables<tmpl::list<::Tags::MirrorView<                       \
           gh::Tags::GaugeH<DataVector, DIM(data), Frame::Inertial>>>>& u,  \
       const Mesh<DIM(data)>& mesh,                                         \
-      const Kokkos::View<double***>& inverse_jacobian);
+      const partial_derivatives_detail::BatchedInverseJacobianView&        \
+          inverse_jacobian);
 
 #define INSTANTIATE_KOKKOS_GAUGE_H_FROM_GAUGE_DATA_BATCHED_PARTIAL_DERIVATIVES( \
     r, data)                                                                    \
-  template void partial_derivatives_batched(                               \
-      gsl::not_null<Variables<                                             \
-          db::wrap_tags_in<::Tags::deriv,                                  \
-                           tmpl::list<::Tags::MirrorView<gh::Tags::GaugeH< \
-                               DataVector, DIM(data), Frame::Inertial>>>,  \
-                           tmpl::size_t<DIM(data)>, Frame::Inertial>>*>    \
-          du,                                                              \
-      const Variables<                                                     \
-          tmpl::list<::Tags::MirrorView<gh::Tags::GaugeH<                  \
-                         DataVector, DIM(data), Frame::Inertial>>,         \
-                     ::Tags::MirrorView<gh::Tags::SpacetimeDerivGaugeH<    \
-                         DataVector, DIM(data), Frame::Inertial>>>>& u,    \
-      const Mesh<DIM(data)>& mesh,                                         \
-      const Kokkos::View<double***>& inverse_jacobian);
+  template void partial_derivatives_batched(                                    \
+      gsl::not_null<Variables<                                                  \
+          db::wrap_tags_in<::Tags::deriv,                                       \
+                           tmpl::list<::Tags::MirrorView<gh::Tags::GaugeH<      \
+                               DataVector, DIM(data), Frame::Inertial>>>,       \
+                           tmpl::size_t<DIM(data)>, Frame::Inertial>>*>         \
+          du,                                                                   \
+      const Variables<                                                          \
+          tmpl::list<::Tags::MirrorView<gh::Tags::GaugeH<                       \
+                         DataVector, DIM(data), Frame::Inertial>>,              \
+                     ::Tags::MirrorView<gh::Tags::SpacetimeDerivGaugeH<         \
+                         DataVector, DIM(data), Frame::Inertial>>>>& u,         \
+      const Mesh<DIM(data)>& mesh,                                              \
+      const partial_derivatives_detail::BatchedInverseJacobianView&             \
+          inverse_jacobian);
 
 GENERATE_INSTANTIATIONS(INSTANTIATE_KOKKOS_SYSTEM_PARTIAL_DERIVATIVES,
                         (1, 2, 3))

@@ -67,9 +67,11 @@ struct PackedGeometry {
   using device_inertial_coordinates_type =
       typename evolution::Kokkos::Tags::DeviceInertialCoordinates<
           volume_dim>::type;
+  using device_inverse_jacobian_type =
+      ::Kokkos::View<double***, ::Kokkos::LayoutRight>;
   std::array<DataVector, volume_dim> inertial_coordinates_host{};
   device_inertial_coordinates_type inertial_coordinates_device{};
-  ::Kokkos::View<double***> element_inverse_jacobian_device{};
+  device_inverse_jacobian_type element_inverse_jacobian_device{};
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {

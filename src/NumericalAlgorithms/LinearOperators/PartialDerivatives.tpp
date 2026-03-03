@@ -730,7 +730,8 @@ template <typename ResultTags, typename VariableTags, size_t Dim>
 void partial_derivatives_batched(
     const gsl::not_null<Variables<ResultTags>*> du,
     const Variables<VariableTags>& u, const Mesh<Dim>& mesh,
-    const Kokkos::View<double***>& inverse_jacobian) {
+    const partial_derivatives_detail::BatchedInverseJacobianView&
+        inverse_jacobian) {
   using DerivativeTags =
       tmpl::front<tmpl::split_at<VariableTags, tmpl::size<ResultTags>>>;
   using InputVectorType = typename Variables<VariableTags>::vector_type;

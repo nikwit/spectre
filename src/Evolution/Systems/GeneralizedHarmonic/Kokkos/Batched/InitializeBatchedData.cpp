@@ -115,9 +115,10 @@ void InitializeBatchedData::apply(
       "GhBatchedConstraintGamma2", packed_topology.total_points);
 
   packed_geometry->element_inverse_jacobian_device =
-      ::Kokkos::View<double***>("GhBatchedElementInverseJacobian",
-                                packed_topology.local_element_ids.size(),
-                                packed_topology.points_per_element, 9);
+      typename packed_geometry_tag::type::device_inverse_jacobian_type(
+          "GhBatchedElementInverseJacobian",
+          packed_topology.local_element_ids.size(),
+          packed_topology.points_per_element, 9);
   packed_geometry->inertial_coordinates_host = {
       {DataVector{packed_topology.total_points},
        DataVector{packed_topology.total_points},
