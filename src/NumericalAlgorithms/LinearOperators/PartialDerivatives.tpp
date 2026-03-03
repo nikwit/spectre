@@ -796,16 +796,10 @@ void partial_derivatives_batched(
           "Spherical harmonic differentiation on GPUs is not yet "
           "implemented.");
     }
-    partial_derivatives_detail::apply_matrix_in_dim_batched<0, Dim, false>(
+    partial_derivatives_detail::apply_diff_matrices_fused_batched<Dim>(
         du->view(), u_subview,
-        Spectral::differentiation_matrix_on_device(mesh.slice_through(0)), mesh,
-        inverse_jacobian);
-    partial_derivatives_detail::apply_matrix_in_dim_batched<1, Dim, true>(
-        du->view(), u_subview,
-        Spectral::differentiation_matrix_on_device(mesh.slice_through(1)), mesh,
-        inverse_jacobian);
-    partial_derivatives_detail::apply_matrix_in_dim_batched<2, Dim, true>(
-        du->view(), u_subview,
+        Spectral::differentiation_matrix_on_device(mesh.slice_through(0)),
+        Spectral::differentiation_matrix_on_device(mesh.slice_through(1)),
         Spectral::differentiation_matrix_on_device(mesh.slice_through(2)), mesh,
         inverse_jacobian);
   }

@@ -407,6 +407,206 @@ void apply_matrix_in_dim_batched(
             });
       });
 }
+
+template <size_t Dim>
+inline void apply_diff_matrices_fused_batched(
+    Kokkos::View<double**> result,        // [total_points, num_components*3]
+    const Kokkos::View<double**>& input,  // [total_points, num_components]
+    const MatrixViewRO& D0,               // [n0,n0]
+    const MatrixViewRO& D1,               // [n1,n1]
+    const MatrixViewRO& D2,               // [n2,n2]
+    const Mesh<Dim>& mesh,
+    const Kokkos::View<double***>& inverse_jacobian) {  // [nelems, ppe, 9]
+  static_assert(Dim == 3, "Assumes Dim==3.");
+
+  const auto ext = mesh.extents().indices();
+  const int n0 = static_cast<int>(ext[0]);
+  const int n1 = static_cast<int>(ext[1]);
+  const int n2 = static_cast<int>(ext[2]);
+  const int ppe = static_cast<int>(mesh.extents().product());
+
+  const int total_points = static_cast<int>(input.extent(0));
+  const int num_components = static_cast<int>(input.extent(1));
+  if (ppe == 0 || total_points == 0 || num_components == 0)
+    return;
+
+  ASSERT(static_cast<size_t>(total_points) % static_cast<size_t>(ppe) == 0,
+         "total_points must be divisible by points_per_element");
+  const int nelems = total_points / ppe;
+
+  using exec_space = typename Kokkos::View<double**>::execution_space;
+  using team_policy = Kokkos::TeamPolicy<exec_space>;
+  using member_type = team_policy::member_type;
+
+  // Tuneable: 4 works well on A100; 5 may also be good for 35 comps.
+  // Keep small to control registers.
+  constexpr int tileC = 2;
+
+  // Shared holds u(lp, tileC) for one element. Layout: [tileC][ppe] contiguous
+  // in lp.
+  const size_t sh_bytes =
+      static_cast<size_t>(tileC) * static_cast<size_t>(ppe) * sizeof(double);
+
+  const int ntiles = (num_components + tileC - 1) / tileC;
+
+  // league over (element, tile)
+  team_policy pol(nelems * ntiles, 256);
+  Kokkos::parallel_for(
+      "apply_diff_matrices_fused_tiled_components_batched",
+      pol.set_scratch_size(0, Kokkos::PerTeam(sh_bytes)),
+      KOKKOS_LAMBDA(const member_type& team) {
+        const int league = team.league_rank();
+        const int e = league / ntiles;
+        const int tile = league - e * ntiles;
+        const int c0 = tile * tileC;
+        const int cN =
+            (c0 + tileC <= num_components) ? tileC : (num_components - c0);
+
+        const size_t elem_base =
+            static_cast<size_t>(e) * static_cast<size_t>(ppe);
+
+        double* sh = (double*)team.team_shmem().get_shmem(sh_bytes);
+
+        // load only this tile's components into shared
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, ppe), [&](int lp) {
+          const size_t pidx = elem_base + static_cast<size_t>(lp);
+#pragma unroll
+          for (int t = 0; t < tileC; ++t) {
+            if (t < cN)
+              sh[t * ppe + lp] = input(pidx, c0 + t);
+          }
+        });
+        team.team_barrier();
+
+        // Compute per point; each thread does tileC components worth of work
+        // (ILP).
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(team, ppe), [&](int lp) {
+          int tmp = lp;
+          const int i0 = tmp % n0;
+          tmp /= n0;
+          const int i1 = tmp % n1;
+          const int i2 = tmp / n1;
+
+          // Prefetch invJ row block (LayoutLeft: e,lp contiguous; idx is
+          // strided but only 9)
+          double j[9];
+#pragma unroll
+          for (int k = 0; k < 9; ++k) {
+            j[k] = inverse_jacobian(e, lp, k);
+          }
+
+          double sum0[tileC], sum1[tileC], sum2[tileC];
+#pragma unroll
+          for (int t = 0; t < tileC; ++t) {
+            sum0[t] = 0.0;
+            sum1[t] = 0.0;
+            sum2[t] = 0.0;
+          }
+
+          // Dim 0
+          {
+            const int base = (i1 + n1 * i2) * n0;  // in lp indexing
+#pragma unroll
+            for (int k0 = 0; k0 < 16; ++k0) {
+              if (k0 >= n0)
+                break;
+              const int src_lp = base + k0;
+              const double a = D0(i0, k0);
+#pragma unroll
+              for (int t = 0; t < tileC; ++t) {
+                if (t < cN)
+                  sum0[t] += a * sh[t * ppe + src_lp];
+              }
+            }
+            for (int k0 = 16; k0 < n0; ++k0) {
+              const int src_lp = base + k0;
+              const double a = D0(i0, k0);
+#pragma unroll
+              for (int t = 0; t < tileC; ++t) {
+                if (t < cN)
+                  sum0[t] += a * sh[t * ppe + src_lp];
+              }
+            }
+          }
+
+          // Dim 1
+          {
+#pragma unroll
+            for (int k1 = 0; k1 < 16; ++k1) {
+              if (k1 >= n1)
+                break;
+              const int src_lp = i0 + n0 * (k1 + n1 * i2);
+              const double a = D1(i1, k1);
+#pragma unroll
+              for (int t = 0; t < tileC; ++t) {
+                if (t < cN)
+                  sum1[t] += a * sh[t * ppe + src_lp];
+              }
+            }
+            for (int k1 = 16; k1 < n1; ++k1) {
+              const int src_lp = i0 + n0 * (k1 + n1 * i2);
+              const double a = D1(i1, k1);
+#pragma unroll
+              for (int t = 0; t < tileC; ++t) {
+                if (t < cN)
+                  sum1[t] += a * sh[t * ppe + src_lp];
+              }
+            }
+          }
+
+          // Dim 2
+          {
+#pragma unroll
+            for (int k2 = 0; k2 < 16; ++k2) {
+              if (k2 >= n2)
+                break;
+              const int src_lp = i0 + n0 * (i1 + n1 * k2);
+              const double a = D2(i2, k2);
+#pragma unroll
+              for (int t = 0; t < tileC; ++t) {
+                if (t < cN)
+                  sum2[t] += a * sh[t * ppe + src_lp];
+              }
+            }
+            for (int k2 = 16; k2 < n2; ++k2) {
+              const int src_lp = i0 + n0 * (i1 + n1 * k2);
+              const double a = D2(i2, k2);
+#pragma unroll
+              for (int t = 0; t < tileC; ++t) {
+                if (t < cN)
+                  sum2[t] += a * sh[t * ppe + src_lp];
+              }
+            }
+          }
+
+          const size_t pidx = elem_base + static_cast<size_t>(lp);
+
+#pragma unroll
+          for (int t = 0; t < tileC; ++t) {
+            if (t >= cN)
+              break;
+
+            const double out0 =
+                j[0] * sum0[t] + j[3] * sum1[t] + j[6] * sum2[t];
+            const double out1 =
+                j[1] * sum0[t] + j[4] * sum1[t] + j[7] * sum2[t];
+            const double out2 =
+                j[2] * sum0[t] + j[5] * sum1[t] + j[8] * sum2[t];
+
+            const int col0 = (c0 + t) * 3 + 0;
+            const int col1 = (c0 + t) * 3 + 1;
+            const int col2 = (c0 + t) * 3 + 2;
+
+            result(pidx, col0) = out0;
+            result(pidx, col1) = out1;
+            result(pidx, col2) = out2;
+          }
+        });
+
+        team.team_barrier();
+      });
+}
+
 // generate instantations
 #define INSTANTIATE_APPLY_MATRIX_IN_DIM(DerivDim, Dim, AddToResult)       \
   template void apply_matrix_in_dim<DerivDim, Dim, AddToResult>(          \
@@ -421,7 +621,6 @@ INSTANTIATE_APPLY_MATRIX_IN_DIM(1, 2, true)
 INSTANTIATE_APPLY_MATRIX_IN_DIM(1, 3, true)
 INSTANTIATE_APPLY_MATRIX_IN_DIM(2, 3, true)
 #undef INSTANTIATE_APPLY_MATRIX_IN_DIM
-
 #define INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(DerivDim, Dim, AddToResult) \
   template void apply_matrix_in_dim_batched<DerivDim, Dim, AddToResult>(    \
       Kokkos::View<double**> result, const Kokkos::View<double**>& input,   \
@@ -434,6 +633,17 @@ INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(1, 2, true)
 INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(1, 3, true)
 INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED(2, 3, true)
 #undef INSTANTIATE_APPLY_MATRIX_IN_DIM_BATCHED
+#define INSTANTIATE_APPLY_DIFF_MATRICES_FUSED_BATCHED(Dim)                \
+  template void                                                           \
+  partial_derivatives_detail::apply_diff_matrices_fused_batched<Dim>(     \
+      Kokkos::View<double**> result, const Kokkos::View<double**>& input, \
+      const MatrixViewRO& matrix_dim_0, const MatrixViewRO& matrix_dim_1, \
+      const MatrixViewRO& matrix_dim_2, const Mesh<Dim>& mesh,            \
+      const Kokkos::View<double***>& inverse_jacobian);
+
+INSTANTIATE_APPLY_DIFF_MATRICES_FUSED_BATCHED(3)
+
+#undef INSTANTIATE_APPLY_DIFF_MATRICES_FUSED_BATCHED
 #endif  // SPECTRE_KOKKOS
 }  // namespace partial_derivatives_detail
 
