@@ -98,97 +98,102 @@ inline void apply_filter_matrices_on_device_batched(
                                                     << ").");
   const size_t num_elements = total_points / points_per_element;
 
-  if (scratch_0->extent(0) != total_points or
-      scratch_0->extent(1) != num_components) {
-    *scratch_0 = Kokkos::View<double**>{"GhFilterKokkosBatchedScratch0",
-                                        total_points, num_components};
-  }
-  if (scratch_1->extent(0) != total_points or
-      scratch_1->extent(1) != num_components) {
-    *scratch_1 = Kokkos::View<double**>{"GhFilterKokkosBatchedScratch1",
-                                        total_points, num_components};
-  }
-  const auto scratch_0_view = *scratch_0;
-  const auto scratch_1_view = *scratch_1;
+  // Fused kernel: one team per element; intermediates in team scratch.
+  using exec_space = typename Kokkos::View<double**>::execution_space;
+  using team_policy = Kokkos::TeamPolicy<exec_space>;
+  using member_type = team_policy::member_type;
 
+  const int P = static_cast<int>(points_per_element);
+  const int N0 = static_cast<int>(n0);
+  const int N1 = static_cast<int>(n1);
+  const int N2 = static_cast<int>(n2);
+  const int NC = static_cast<int>(num_components);
+
+  // Two ping-pong buffers of length P (doubles) per team.
+  const size_t bytes_per_team = 2ull * static_cast<size_t>(P) * sizeof(double);
+
+  team_policy pol(static_cast<int>(num_elements), Kokkos::AUTO);
   Kokkos::parallel_for(
-      "GhFilterKokkosBatchedDim0_MD",
-      Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0},
-                                             {total_points, num_components}),
-      KOKKOS_LAMBDA(const size_t point_index, const size_t component) {
-        const int element_index =
-            static_cast<int>(point_index / points_per_element);
-        int local_point = static_cast<int>(point_index % points_per_element);
+      "GhFilterKokkosBatchedFusedPerElement",
+      pol.set_scratch_size(0, Kokkos::PerTeam(bytes_per_team)),
+      KOKKOS_LAMBDA(const member_type& team) {
+        const int e = team.league_rank();
+        const size_t elem_base =
+            static_cast<size_t>(e) * static_cast<size_t>(P);
 
-        const int i0 = local_point % n0;
-        local_point /= n0;
-        const int i1 = local_point % n1;
-        const int i2 = local_point / n1;
+        double* buf0 =
+            (double*)team.team_shmem().get_shmem(sizeof(double) * P);
+        double* buf1 =
+            (double*)team.team_shmem().get_shmem(sizeof(double) * P);
 
-        double sum = 0.0;
-        for (int k0 = 0; k0 < n0; ++k0) {
-          const int local_source_index = k0 + n0 * (i1 + n1 * i2);
-          const size_t source_index =
-              static_cast<size_t>(element_index) * points_per_element +
-              static_cast<size_t>(local_source_index);
+        for (int component = 0; component < NC; ++component) {
+          // Load this element/component into buf0
+          Kokkos::parallel_for(Kokkos::TeamThreadRange(team, P),
+                               [&](const int lp) {
+                                 const size_t pidx =
+                                     elem_base + static_cast<size_t>(lp);
+                                 buf0[lp] = vars_view(pidx, component);
+                               });
+          team.team_barrier();
 
-          sum += matrix_dim_0(i0, k0) * vars_view(source_index, component);
+          // Dim 0: buf0 -> buf1
+          Kokkos::parallel_for(
+              Kokkos::TeamThreadRange(team, P), [&](const int lp) {
+                int t = lp;
+                const int i0 = t % N0;
+                t /= N0;
+                const int i1 = t % N1;
+                const int i2 = t / N1;
+
+                double sum = 0.0;
+                const int base = N0 * (i1 + N1 * i2);
+                for (int k0 = 0; k0 < N0; ++k0) {
+                  sum += matrix_dim_0(i0, k0) * buf0[k0 + base];
+                }
+                buf1[lp] = sum;
+              });
+          team.team_barrier();
+
+          // Dim 1: buf1 -> buf0 (ping-pong)
+          Kokkos::parallel_for(
+              Kokkos::TeamThreadRange(team, P), [&](const int lp) {
+                int t = lp;
+                const int i0 = t % N0;
+                t /= N0;
+                const int i1 = t % N1;
+                const int i2 = t / N1;
+
+                double sum = 0.0;
+                for (int k1 = 0; k1 < N1; ++k1) {
+                  const int src = i0 + N0 * (k1 + N1 * i2);
+                  sum += matrix_dim_1(i1, k1) * buf1[src];
+                }
+                buf0[lp] = sum;
+              });
+          team.team_barrier();
+
+          // Dim 2: buf0 -> vars_view
+          Kokkos::parallel_for(
+              Kokkos::TeamThreadRange(team, P), [&](const int lp) {
+                int t = lp;
+                const int i0 = t % N0;
+                t /= N0;
+                const int i1 = t % N1;
+                const int i2 = t / N1;
+
+                double sum = 0.0;
+                for (int k2 = 0; k2 < N2; ++k2) {
+                  const int src = i0 + N0 * (i1 + N1 * k2);
+                  sum += matrix_dim_2(i2, k2) * buf0[src];
+                }
+                const size_t pidx = elem_base + static_cast<size_t>(lp);
+                vars_view(pidx, component) = sum;
+              });
+          team.team_barrier();
         }
-        scratch_0_view(point_index, component) = sum;
-      });
-
-  Kokkos::parallel_for(
-      "GhFilterKokkosBatchedDim1_MD",
-      Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0},
-                                             {total_points, num_components}),
-      KOKKOS_LAMBDA(const size_t point_index, const size_t component) {
-        const int element_index = point_index / points_per_element;
-        int local_point = point_index % points_per_element;
-
-        const int i0 = local_point % n0;
-        local_point /= n0;
-        const int i1 = local_point % n1;
-        const int i2 = local_point / n1;
-
-        double sum = 0.0;
-        for (int k1 = 0; k1 < n1; ++k1) {
-          const int local_source_index = i0 + n0 * (k1 + n1 * i2);
-          const size_t source_index =
-              static_cast<size_t>(element_index) * points_per_element +
-              static_cast<size_t>(local_source_index);
-          sum += matrix_dim_1(i1, k1) * scratch_0_view(source_index, component);
-        }
-        scratch_1_view(point_index, component) = sum;
-      });
-
-  Kokkos::parallel_for(
-      "GhFilterKokkosBatchedDim2_MD",
-      Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0, 0},
-                                             {total_points, num_components}),
-      KOKKOS_LAMBDA(const size_t point_index, const size_t component) {
-        const int element_index =
-            static_cast<int>(point_index / points_per_element);
-        int local_point = static_cast<int>(point_index % points_per_element);
-
-        const int i0 = local_point % n0;
-        local_point /= n0;
-        const int i1 = local_point % n1;
-        const int i2 = local_point / n1;
-
-        double sum = 0.0;
-        for (int k2 = 0; k2 < n2; ++k2) {
-          const int local_source_index = i0 + n0 * (i1 + n1 * k2);
-          const size_t source_index =
-              static_cast<size_t>(element_index) * points_per_element +
-              static_cast<size_t>(local_source_index);
-
-          sum += matrix_dim_2(i2, k2) * scratch_1_view(source_index, component);
-        }
-        vars_view(point_index, component) = sum;
       });
   (void)num_elements;
 }
-
 }  // namespace detail
 
 template <typename FilterType>
