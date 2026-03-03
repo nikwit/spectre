@@ -53,11 +53,16 @@ void apply_matrix_in_dim(
     const MatrixViewRO& matrix, const Mesh<Dim>& mesh,
     const std::array<const double*, Dim * Dim>& inv_jacobian,
     const std::array<size_t, Dim * Dim>& inv_jacobian_strides);
-
 template <size_t DerivDim, size_t Dim, bool AddToResult = false>
 void apply_matrix_in_dim_batched(
     Kokkos::View<double**> result, const Kokkos::View<double**>& input,
     const MatrixViewRO& matrix, const Mesh<Dim>& mesh,
+    const Kokkos::View<double***>& inverse_jacobian);
+template <size_t Dim>
+void apply_diff_matrices_fused_batched(
+    Kokkos::View<double**> result, const Kokkos::View<double**>& input,
+    const MatrixViewRO& matrix_dim_0, const MatrixViewRO& matrix_dim_1,
+    const MatrixViewRO& matrix_dim_2, const Mesh<Dim>& mesh,
     const Kokkos::View<double***>& inverse_jacobian);
 #endif  // SPECTRE_KOKKOS
 }  // namespace partial_derivatives_detail
