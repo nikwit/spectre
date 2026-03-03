@@ -11,6 +11,7 @@
 #include <charm++.h>
 #include <cstddef>
 #include <initializer_list>
+#include <nvtx3/nvtx3.hpp>
 #include <pup.h>
 #include <string>
 #include <tuple>
@@ -287,10 +288,12 @@ void AtSyncIndicator<Metavariables>::ResumeFromSync() {
 
 // ================================================================
 
+static nvtx3::range_handle evolve_handle;
 template <typename Metavariables>
 Main<Metavariables>::Main(CkArgMsg* msg) {
 #ifdef SPECTRE_KOKKOS
   Kokkos::initialize(msg->argc, msg->argv);
+  evolve_handle = nvtx3::start_range("Evolve");
 #endif  // SPECTRE_KOKKOS
 
   Informer::print_startup_info(msg);
@@ -640,7 +643,7 @@ void Main<Metavariables>::pup(PUP::er& p) {  // NOLINT
     just_restored_from_checkpoint_ = true;
     // Initialize Kokkos on restart
 #ifdef SPECTRE_KOKKOS
-  Kokkos::initialize();
+    Kokkos::initialize();
 #endif  // SPECTRE_KOKKOS
   }
 
@@ -810,6 +813,8 @@ void Main<Metavariables>::execute_next_phase() {
   if (Parallel::Phase::Exit == current_phase_) {
     check_if_component_terminated_correctly();
 #ifdef SPECTRE_KOKKOS
+    Kokkos::fence();
+    nvtx3::end_range(evolve_handle);
     Kokkos::finalize();
 #endif  // SPECTRE_KOKKOS
     return;
