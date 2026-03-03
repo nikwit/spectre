@@ -26,7 +26,6 @@ void update_u_impl(
   using unmanaged_const_view_3d =
       ::Kokkos::View<const double***, ::Kokkos::LayoutStride, memory_space,
                      ::Kokkos::MemoryTraits<::Kokkos::Unmanaged>>;
-
   unmanaged_view_2d u_view(
       u_data, ::Kokkos::LayoutStride(num_points, u_stride_0, num_components,
                                      u_stride_1));
@@ -43,20 +42,23 @@ void update_u_impl(
   for (size_t coeff_index = 0; coeff_index < num_coefficients; ++coeff_index) {
     coefficients_array[coeff_index] = coefficients[coeff_index];
   }
-
+  // using Policy = ::Kokkos::MDRangePolicy<::Kokkos::Rank<2>>;
+  // Policy pol({0, 0}, {num_components, num_points}, {2, 256});
   ::Kokkos::parallel_for(
       "KokkosUpdateUFused",
-      ::Kokkos::MDRangePolicy<::Kokkos::Rank<2>>({0, 0},
-                                             {num_points, num_components}),
-      KOKKOS_LAMBDA(const int point, const int component) {
-        double weighted_sum = 0.0;
-        for (int coeff_index = 0; coeff_index < num_coefficients;
-             ++coeff_index) {
-          weighted_sum += coefficients_array[coeff_index] *
-                          deriv_history_view(coeff_index, point, component);
+      ::Kokkos::RangePolicy<::Kokkos::Cuda, ::Kokkos::IndexType<int>>(
+          0, num_points),
+      KOKKOS_LAMBDA(const int point) {
+#pragma unroll
+        for (int i = 0; i < num_components; ++i) {
+          double weighted_sum = 0.0;
+          for (int coeff_index = 0; coeff_index < num_coefficients;
+               ++coeff_index) {
+            weighted_sum += coefficients_array[coeff_index] *
+                            deriv_history_view(coeff_index, point, i);
+          }
+          u_view(point, i) = u0_view(point, i) + dt * weighted_sum;
         }
-        u_view(point, component) =
-            u0_view(point, component) + dt * weighted_sum;
       });
 }
 
