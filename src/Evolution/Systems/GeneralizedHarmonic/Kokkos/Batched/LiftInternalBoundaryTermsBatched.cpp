@@ -33,6 +33,16 @@ using phi_tag = gh::Tags::Phi<DataVector, volume_dim, Frame::Inertial>;
 double outward_sign(const Side side) {
   return side == Side::Upper ? 1.0 : -1.0;
 }
+template <std::size_t N, class F, std::size_t... Is>
+KOKKOS_INLINE_FUNCTION constexpr void static_for_impl(
+    F&& f, std::index_sequence<Is...>) {
+  (f(std::integral_constant<std::size_t, Is>{}), ...);
+}
+
+template <std::size_t N, class F>
+KOKKOS_INLINE_FUNCTION constexpr void static_for(F&& f) {
+  static_for_impl<N>(static_cast<F&&>(f), std::make_index_sequence<N>{});
+}
 
 constexpr size_t face_index(const size_t sliced_dim, const size_t side_i) {
   return 2 * sliced_dim + side_i;
@@ -156,12 +166,14 @@ void LiftInternalBoundaryTermsBatched::apply(
 
             tnsr::aa<double, volume_dim, Frame::Inertial>
                 local_spacetime_metric{};
-            for (size_t a = 0; a < volume_dim + 1; ++a) {
-              for (size_t b = a; b < volume_dim + 1; ++b) {
-                local_spacetime_metric.get(a, b) =
-                    spacetime_metric.get(a, b)[local_volume_index];
-              }
-            }
+            static_for<volume_dim + 1>([&](auto a_c) {
+              constexpr int a = (int)a_c;
+              static_for<volume_dim + 1 - a>([&](auto off_c) {
+                constexpr int b = a + (int)off_c;
+                get<a, b>(local_spacetime_metric) =
+                    get<a, b>(spacetime_metric)[local_volume_index];
+              });
+            });
             tnsr::II<double, volume_dim, Frame::Inertial>
                 inverse_spatial_metric{};
             double det_spatial_metric = 0.0;
@@ -172,43 +184,50 @@ void LiftInternalBoundaryTermsBatched::apply(
 
             tnsr::i<double, volume_dim, Frame::Inertial>
                 unnormalized_normal_covector{};
-            for (size_t d = 0; d < volume_dim; ++d) {
+            static_for<volume_dim>([&](auto d_c) {
+              constexpr int d = (int)d_c;
               unnormalized_normal_covector.get(d) =
                   local_outward_sign *
                   inverse_jacobian(element_index, local_volume_index_in_element,
                                    sliced_dim * volume_dim + d);
-            }
+            });
             tnsr::I<double, volume_dim, Frame::Inertial>
                 unnormalized_normal_vector{};
             double normal_magnitude_squared = 0.0;
-            for (size_t i = 0; i < volume_dim; ++i) {
-              unnormalized_normal_vector.get(i) = 0.0;
-              for (size_t j = 0; j < volume_dim; ++j) {
-                unnormalized_normal_vector.get(i) +=
-                    inverse_spatial_metric.get(i, j) *
-                    unnormalized_normal_covector.get(j);
-              }
-              normal_magnitude_squared += unnormalized_normal_vector.get(i) *
-                                          unnormalized_normal_covector.get(i);
-            }
+            static_for<volume_dim>([&](auto i_c) {
+              constexpr int i = (int)i_c;
+              get<i>(unnormalized_normal_vector) = 0.0;
+              static_for<volume_dim>([&](auto j_c) {
+                constexpr int j = (int)j_c;
+                get<i>(unnormalized_normal_vector) +=
+                    get<i, j>(inverse_spatial_metric) *
+                    get<j>(unnormalized_normal_covector);
+              });
+              normal_magnitude_squared += get<i>(unnormalized_normal_vector) *
+                                          get<i>(unnormalized_normal_covector);
+            });
             const double lifted_factor =
                 lift_prefactor * sqrt(normal_magnitude_squared);
 
-            for (size_t a = 0; a < volume_dim + 1; ++a) {
-              for (size_t b = a; b < volume_dim + 1; ++b) {
-                dt_spacetime_metric.get(a, b)[local_volume_index] +=
-                    lifted_factor * dt_spacetime_metric_face_sum_all.get(
-                                        a, b)[local_face_linear_index];
-                dt_pi.get(a, b)[local_volume_index] +=
+            static_for<volume_dim + 1>([&](auto a_c) {
+              constexpr int a = (int)a_c;
+              static_for<volume_dim + 1 - a>([&](auto off_c) {
+                constexpr int b = a + (int)off_c;
+                get<a, b>(dt_spacetime_metric)[local_volume_index] +=
+                    lifted_factor * get<a, b>(dt_spacetime_metric_face_sum_all)
+                                        [local_face_linear_index];
+                get<a, b>(dt_pi)[local_volume_index] +=
                     lifted_factor *
-                    dt_pi_face_sum_all.get(a, b)[local_face_linear_index];
-                for (size_t d = 0; d < volume_dim; ++d) {
-                  dt_phi.get(d, a, b)[local_volume_index] +=
+                    get<a, b>(dt_pi_face_sum_all)[local_face_linear_index];
+                static_for<volume_dim>([&](auto d_c) {
+                  constexpr int d = (int)d_c;
+                  get<d, a, b>(dt_phi)[local_volume_index] +=
                       lifted_factor *
-                      dt_phi_face_sum_all.get(d, a, b)[local_face_linear_index];
-                }
-              }
-            }
+                      get<d, a, b>(
+                          dt_phi_face_sum_all)[local_face_linear_index];
+                });
+              });
+            });
           });
     }
   }

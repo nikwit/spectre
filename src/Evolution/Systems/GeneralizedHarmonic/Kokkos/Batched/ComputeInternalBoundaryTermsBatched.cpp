@@ -317,38 +317,42 @@ KOKKOS_INLINE_FUNCTION void compute_boundary_terms_at_point(
   const double weighted_lambda_minus_ext =
       -step_function_double(remote_char_speeds.get(3));
 
-  for (size_t a = 0; a < volume_dim + 1; ++a) {
-    for (size_t b = a; b < volume_dim + 1; ++b) {
-      dt_spacetime_metric->get(a, b) = weighted_lambda_spacetime_metric_ext *
-                                           remote_v_spacetime_metric.get(a, b) -
-                                       weighted_lambda_spacetime_metric_int *
-                                           local_v_spacetime_metric.get(a, b);
-
-      dt_pi->get(a, b) =
-          0.5 * (weighted_lambda_plus_ext * remote_v_plus.get(a, b) +
-                 weighted_lambda_minus_ext * remote_v_minus.get(a, b)) +
+  static_for<volume_dim + 1>([&](auto a_c) {
+    constexpr int a = (int)a_c;
+    static_for<volume_dim + 1 - a>([&](auto off_c) {
+      constexpr int b = a + (int)off_c;
+      get<a, b>(*dt_spacetime_metric) =
           weighted_lambda_spacetime_metric_ext *
-              remote_gamma2_v_spacetime_metric.get(a, b) -
-          0.5 * (weighted_lambda_plus_int * local_v_plus.get(a, b) +
-                 weighted_lambda_minus_int * local_v_minus.get(a, b)) -
+              get<a, b>(remote_v_spacetime_metric) -
           weighted_lambda_spacetime_metric_int *
-              local_gamma2_v_spacetime_metric.get(a, b);
+              get<a, b>(local_v_spacetime_metric);
 
-      for (size_t d = 0; d < volume_dim; ++d) {
-        dt_phi->get(d, a, b) =
+      get<a, b>(*dt_pi) =
+          0.5 * (weighted_lambda_plus_ext * get<a, b>(remote_v_plus) +
+                 weighted_lambda_minus_ext * get<a, b>(remote_v_minus)) +
+          weighted_lambda_spacetime_metric_ext *
+              get<a, b>(remote_gamma2_v_spacetime_metric) -
+          0.5 * (weighted_lambda_plus_int * get<a, b>(local_v_plus) +
+                 weighted_lambda_minus_int * get<a, b>(local_v_minus)) -
+          weighted_lambda_spacetime_metric_int *
+              get<a, b>(local_gamma2_v_spacetime_metric);
+
+      static_for<volume_dim>([&](auto d_c) {
+        constexpr int d = (int)d_c;
+        get<d, a, b>(*dt_phi) =
             -0.5 * (weighted_lambda_minus_ext *
-                        remote_normal_times_v_minus.get(d, a, b) -
+                        get<d, a, b>(remote_normal_times_v_minus) -
                     weighted_lambda_plus_ext *
-                        remote_normal_times_v_plus.get(d, a, b)) +
-            weighted_lambda_zero_ext * remote_v_zero.get(d, a, b) -
+                        get<d, a, b>(remote_normal_times_v_plus)) +
+            weighted_lambda_zero_ext * get<d, a, b>(remote_v_zero) -
             0.5 * (weighted_lambda_plus_int *
-                       local_normal_times_v_plus.get(d, a, b) -
+                       get<d, a, b>(local_normal_times_v_plus) -
                    weighted_lambda_minus_int *
-                       local_normal_times_v_minus.get(d, a, b)) -
-            weighted_lambda_zero_int * local_v_zero.get(d, a, b);
-      }
-    }
-  }
+                       get<d, a, b>(local_normal_times_v_minus)) -
+            weighted_lambda_zero_int * get<d, a, b>(local_v_zero);
+      });
+    });
+  });
 }
 
 }  // namespace
@@ -857,18 +861,21 @@ void ComputeInternalBoundaryTermsBatched::apply(
                   remote_v_minus, remote_normal_times_v_plus,
                   remote_normal_times_v_minus, remote_gamma2_v_spacetime_metric,
                   remote_char_speeds);
-              for (size_t a = 0; a < volume_dim + 1; ++a) {
-                for (size_t b = a; b < volume_dim + 1; ++b) {
-                  dt_spacetime_metric_on_mortar.get(a, b)[linear_index] =
-                      dt_spacetime_metric_at_mortar.get(a, b);
-                  dt_pi_on_mortar.get(a, b)[linear_index] =
-                      dt_pi_at_mortar.get(a, b);
-                  for (size_t i = 0; i < volume_dim; ++i) {
-                    dt_phi_on_mortar.get(i, a, b)[linear_index] =
-                        dt_phi_at_mortar.get(i, a, b);
-                  }
-                }
-              }
+              static_for<volume_dim + 1>([&](auto a_c) {
+                constexpr int a = (int)a_c;
+                static_for<volume_dim + 1 - a>([&](auto off_c) {
+                  constexpr int b = a + (int)off_c;
+                  get<a, b>(dt_spacetime_metric_on_mortar)[linear_index] =
+                      get<a, b>(dt_spacetime_metric_at_mortar);
+                  get<a, b>(dt_pi_on_mortar)[linear_index] =
+                      get<a, b>(dt_pi_at_mortar);
+                  static_for<volume_dim>([&](auto i_c) {
+                    constexpr int i = (int)i_c;
+                    get<i, a, b>(dt_phi_on_mortar)[linear_index] =
+                        get<i, a, b>(dt_phi_at_mortar);
+                  });
+                });
+              });
             });
 
         if (dt_boundary_on_face_batched.number_of_grid_points() !=
@@ -901,22 +908,25 @@ void ComputeInternalBoundaryTermsBatched::apply(
               const size_t local_linear_index =
                   work_item.local_element_index * num_face_points +
                   face_index_on_face;
-              for (size_t a = 0; a < volume_dim + 1; ++a) {
-                for (size_t b = a; b < volume_dim + 1; ++b) {
+              static_for<volume_dim + 1>([&](auto a_c) {
+                constexpr int a = (int)a_c;
+                static_for<volume_dim + 1 - a>([&](auto off_c) {
+                  constexpr int b = a + (int)off_c;
                   ::Kokkos::atomic_add(
-                      &dt_spacetime_metric_face_sum_all.get(
-                          a, b)[local_linear_index],
-                      dt_spacetime_metric_on_face.get(a, b)[linear_index]);
+                      &get<a, b>(
+                          dt_spacetime_metric_face_sum_all)[local_linear_index],
+                      get<a, b>(dt_spacetime_metric_on_face)[linear_index]);
                   ::Kokkos::atomic_add(
-                      &dt_pi_face_sum_all.get(a, b)[local_linear_index],
-                      dt_pi_on_face.get(a, b)[linear_index]);
-                  for (size_t i = 0; i < volume_dim; ++i) {
+                      &get<a, b>(dt_pi_face_sum_all)[local_linear_index],
+                      get<a, b>(dt_pi_on_face)[linear_index]);
+                  static_for<volume_dim>([&](auto i_c) {
+                    constexpr int i = (int)i_c;
                     ::Kokkos::atomic_add(
-                        &dt_phi_face_sum_all.get(i, a, b)[local_linear_index],
-                        dt_phi_on_face.get(i, a, b)[linear_index]);
-                  }
-                }
-              }
+                        &get<i, a, b>(dt_phi_face_sum_all)[local_linear_index],
+                        get<i, a, b>(dt_phi_on_face)[linear_index]);
+                  });
+                });
+              });
             });
       }
     }
