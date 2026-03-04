@@ -13,6 +13,6 @@
 template <typename T>
 std::string get_output(const T& t) {
   std::ostringstream os;
-  os << t;
+  os << std::setprecision(16) << t;
   return os.str();
 }

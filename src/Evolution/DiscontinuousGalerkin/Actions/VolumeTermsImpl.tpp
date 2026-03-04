@@ -25,8 +25,10 @@
 #include "NumericalAlgorithms/LinearOperators/PartialDerivatives.tpp"
 #include "NumericalAlgorithms/LinearOperators/WeakDivergence.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "Parallel/Printf/Printf.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
+#include "Utilities/GetOutput.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -121,6 +123,7 @@ void volume_terms(
     partial_derivatives(partial_derivs, evolved_vars, mesh,
                         logical_to_inertial_inverse_jacobian,
                         inertial_coordinates);
+    //Parallel::printf(get_output(*partial_derivs));
   }
 
   // For now just zero dt_vars. If this is a performance bottle neck we

@@ -10,7 +10,9 @@
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Variables.hpp"
 #include "Evolution/Systems/CurvedScalarWave/System.hpp"
+#include "Parallel/Printf/Printf.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
+#include "Utilities/GetOutput.hpp"
 #include "Utilities/Math.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -76,6 +78,13 @@ evolution::dg::TimeDerivativeDecisions<Dim> TimeDerivative<Dim>::apply(
   *result_inverse_spatial_metric = upper_spatial_metric;
   *result_gamma1 = gamma1;
   *result_gamma2 = gamma2;
+
+  // Parallel::printf("TimeDerivative: dt_psi = %s\n", get_output(*dt_psi));
+  // Parallel::printf("TimeDerivative: dt_pi = %s\n", get_output(*dt_pi));
+  // Parallel::printf("TimeDerivative: dt_phi = %s\n", get_output(*dt_phi));
+  // Parallel::printf("TimeDerivative: lapse = %s\n",
+  // get_output(*result_lapse)); Parallel::printf("TimeDerivative: d_lapse =
+  // %s\n", get_output(deriv_lapse));
   return {true};
 }
 }  // namespace CurvedScalarWave
