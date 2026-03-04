@@ -218,8 +218,10 @@ void test_compute_time_derivative_batched_matches_host() {
     ::Kokkos::deep_copy(packed_geometry.inertial_coordinates_device.get(d),
                         host_coords_component);
   }
-  packed_geometry.element_inverse_jacobian_device = ::Kokkos::View<double***>(
-      "TestGhBatchedElementInverseJacobian", 1, num_points, Dim * Dim);
+  packed_geometry.element_inverse_jacobian_device =
+      typename evolution::Kokkos::PackedGeometry<
+          system>::device_inverse_jacobian_type{
+          "TestGhBatchedElementInverseJacobian", 1, num_points, Dim * Dim};
   auto host_inverse_jacobian = ::Kokkos::create_mirror_view(
       packed_geometry.element_inverse_jacobian_device);
   for (size_t logical_d = 0; logical_d < Dim; ++logical_d) {
