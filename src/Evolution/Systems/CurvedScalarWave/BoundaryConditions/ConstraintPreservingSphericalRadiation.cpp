@@ -30,6 +30,20 @@ void ConstraintPreservingSphericalRadiation<Dim>::pup(PUP::er& p) {
   BoundaryCondition<Dim>::pup(p);
 }
 
+template <typename T>
+void set_bc_corr_zero_when_char_speed_is_positive(
+    const gsl::not_null<T*> dt_v_corr, const DataVector& char_speed_u) {
+  for (DataVector& component : *dt_v_corr) {
+    for (size_t i = 0; i < component.size(); ++i) {
+      if (char_speed_u[i] > 0.) {
+        component[i] = 0.;
+      } else {
+        component[i] = -component[i];
+      }
+    }
+  }
+}
+
 template <size_t Dim>
 ConstraintPreservingSphericalRadiation<
     Dim>::ConstraintPreservingSphericalRadiation(CkMigrateMessage* const msg)
@@ -55,7 +69,31 @@ ConstraintPreservingSphericalRadiation<Dim>::dg_time_derivative(
     const tnsr::i<DataVector, Dim>& logical_dt_phi,
     const tnsr::i<DataVector, Dim>& d_psi, const tnsr::i<DataVector, Dim>& d_pi,
     const tnsr::ij<DataVector, Dim>& d_phi) const {
-  Variables<tmpl::list<
+  const auto char_speeds =
+      characteristic_speeds(gamma1, lapse, shift, normal_covector);
+  const auto char_fields =
+      characteristic_fields(gamma2, logical_dt_psi, logical_dt_pi,
+                            logical_dt_phi, normal_covector, normal_vector);
+
+  auto dt_v_psi_correction = get<Tags::VPsi>(char_fields);
+  auto dt_v_zero_correction = get<Tags::VZero<Dim>>(char_fields);
+  auto dt_v_plus_correction = get<Tags::VPlus>(char_fields);
+  auto dt_v_minus_correction = get<Tags::VMinus>(char_fields);
+  set_bc_corr_zero_when_char_speed_is_positive(
+      make_not_null(&dt_v_psi_correction), char_speeds[0]);
+  set_bc_corr_zero_when_char_speed_is_positive(
+      make_not_null(&dt_v_zero_correction), char_speeds[1]);
+  set_bc_corr_zero_when_char_speed_is_positive(
+      make_not_null(&dt_v_plus_correction), char_speeds[2]);
+  set_bc_corr_zero_when_char_speed_is_positive(
+      make_not_null(&dt_v_minus_correction), char_speeds[3]);
+  evolved_fields_from_characteristic_fields(
+      dt_psi_correction, dt_pi_correction, dt_phi_correction, gamma2,
+      dt_v_psi_correction, dt_v_zero_correction, dt_v_plus_correction,
+      dt_v_minus_correction, normal_covector);
+
+  return {};
+  /*Variables<tmpl::list<
       ::Tags::Tempa<0, 3>, ::Tags::TempScalar<1>, ::Tags::TempScalar<2>,
       // Inertial time derivatives
       ::Tags::dt<Tags::Psi>, ::Tags::dt<Tags::Pi>, ::Tags::dt<Tags::Phi<Dim>>>>
@@ -152,7 +190,8 @@ ConstraintPreservingSphericalRadiation<Dim>::dg_time_derivative(
     }
   }
   get(*dt_pi_correction) /= get(lapse);
-  get(*dt_pi_correction) += get(gamma2) * get(*dt_psi_correction) - get(dt_pi);
+  get(*dt_pi_correction) += get(gamma2) * get(*dt_psi_correction) -
+  get(dt_pi);*/
   return {};
 }
 

@@ -8,10 +8,14 @@
 
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
+#include "Domain/Tags.hpp"
 #include "Evolution/BoundaryCorrection.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Characteristics.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
+#include "Evolution/Tags/Filter.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Formulation.hpp"
+#include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/ApplyTensorYlmFilter.hpp"
 #include "Options/String.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "Utilities/Serialization/CharmPupable.hpp"
@@ -87,6 +91,9 @@ class UpwindPenalty final : public evolution::BoundaryCorrection {
   struct CharSpeedsTensor : db::SimpleTag {
     using type = tnsr::a<DataVector, 3, Frame::Inertial>;
   };
+  struct InterfaceUnitNormalVector : db::SimpleTag {
+    using type = tnsr::I<DataVector, Dim, Frame::Inertial>;
+  };
 
  public:
   using options = tmpl::list<>;
@@ -115,12 +122,14 @@ class UpwindPenalty final : public evolution::BoundaryCorrection {
                  Tags::ConstraintGamma2,
                  ::Tags::Normalized<domain::Tags::UnnormalizedFaceNormal<
                      Dim, Frame::Inertial>>,
-                 CharSpeedsTensor>;
+                 InterfaceUnitNormalVector, CharSpeedsTensor>;
   using dg_package_data_temporary_tags =
       tmpl::list<gr::Tags::Lapse<DataVector>, gr::Tags::Shift<DataVector, Dim>,
                  Tags::ConstraintGamma1, Tags::ConstraintGamma2>;
   using dg_package_data_volume_tags = tmpl::list<>;
-  using dg_boundary_terms_volume_tags = tmpl::list<>;
+  using dg_boundary_terms_volume_tags = tmpl::list<
+      domain::Tags::Mesh<Dim>,
+      ::Filters::Tags::Filter<ylm::TensorYlm::CurvedScalarWaveTensorYlmFilter>>;
 
   double dg_package_data(
       gsl::not_null<Scalar<DataVector>*> packaged_v_psi,
@@ -130,6 +139,8 @@ class UpwindPenalty final : public evolution::BoundaryCorrection {
       gsl::not_null<Scalar<DataVector>*> packaged_gamma2,
       gsl::not_null<tnsr::i<DataVector, Dim, Frame::Inertial>*>
           packaged_interface_unit_normal,
+      gsl::not_null<tnsr::I<DataVector, Dim, Frame::Inertial>*>
+          packaged_interface_unit_normal_vector,
       gsl::not_null<tnsr::a<DataVector, 3, Frame::Inertial>*>
           packaged_char_speeds,
 
@@ -161,6 +172,8 @@ class UpwindPenalty final : public evolution::BoundaryCorrection {
       const Scalar<DataVector>& gamma2_int,
       const tnsr::i<DataVector, Dim, Frame::Inertial>&
           interface_unit_normal_int,
+      const tnsr::I<DataVector, Dim, Frame::Inertial>&
+          interface_unit_normal_vector_int,
       const tnsr::a<DataVector, 3, Frame::Inertial>& char_speeds_int,
 
       const Scalar<DataVector>& v_psi_ext,
@@ -170,8 +183,12 @@ class UpwindPenalty final : public evolution::BoundaryCorrection {
       const Scalar<DataVector>& gamma2_ext,
       const tnsr::i<DataVector, Dim, Frame::Inertial>&
           interface_unit_normal_ext,
+      const tnsr::I<DataVector, Dim, Frame::Inertial>&
+          interface_unit_normal_vector_ext,
       const tnsr::a<DataVector, 3, Frame::Inertial>& char_speeds_ext,
-      dg::Formulation /*dg_formulation*/) const;
+      dg::Formulation dg_formulation, const Mesh<Dim>& volume_mesh,
+      const ylm::TensorYlm::CurvedScalarWaveTensorYlmFilter& tensor_ylm_filter)
+      const;
 };
 
 template <size_t Dim>
