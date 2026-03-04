@@ -55,7 +55,7 @@ struct InitializeConstraintDampingGammas
                     const Mesh<Dim>& mesh) {
     const size_t number_of_grid_points = mesh.number_of_grid_points();
     *gamma1 = Scalar<DataVector>{number_of_grid_points, 0.};
-    *gamma2 = Scalar<DataVector>{number_of_grid_points, 1.};
+    *gamma2 = Scalar<DataVector>{number_of_grid_points, 0.};
   }
 };
 

@@ -103,7 +103,7 @@ void DgElementArray<Metavariables, PhaseDepActionList>::allocate_array(
           initialization_items);
   const auto& initial_extents =
       get<domain::Tags::InitialExtents<volume_dim>>(initialization_items);
-  const auto i1_basis = Spectral::Basis::Legendre;
+  const auto i1_basis = Spectral::Basis::Chebyshev;
   const auto& i1_quadrature =
       get<evolution::dg::Tags::Quadrature>(initialization_items);
   const std::optional<domain::ElementWeight>& element_weight =
