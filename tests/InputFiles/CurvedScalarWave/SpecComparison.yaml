@@ -1,0 +1,145 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+Executable: EvolveCurvedScalarWaveKerrSchild3D
+Testing:
+  Check: parse
+  Priority: High
+
+---
+
+Parallelization:
+  ElementDistribution: NumGridPoints
+
+InitialData:
+  PlaneWave:
+    WaveVector: [1., 0., 0.]
+    Center: [0., 0., 0.]
+    Profile:
+      Gaussian:
+        Amplitude: 1.
+        Width: 10.
+        Center: 0.
+
+BackgroundSpacetime:
+  KerrSchild:
+    Mass: 1.
+    Center: [0., 0., 0.]
+    Spin: [0., 0., 0.]
+    Velocity: [0., 0., 0.]
+
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
+
+PhaseChangeAndTriggers:
+
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.01
+  MinimumTimeStep: 1e-7
+  TimeStepper: ClassicalRungeKutta4
+
+DomainCreator:
+  SphericalShells:
+    InnerRadius: &InnerRadius 1.9 #1.57 #1.57 # Change to 1.8 for Non-Spinning
+    OuterRadius: 7.0
+    InitialRadialRefinement: 0
+    InitialNumberOfRadialGridPoints: 8
+    InitialSphericalHarmonicL: 12
+    RadialPartitioning: []
+    RadialDistribution: [Linear]
+    TimeDependentMaps: # None for spin = 0
+      InitialTime: 0.0
+      ShapeMap: None
+      RotationMap: None
+      ExpansionMap:
+        InitialValues: [1.0, 0.0, 0.0]
+        InitialValuesOuterBoundary: [1.0, 0., 0.0]
+        DecayTimescale: 1.0
+        DecayTimescaleOuterBoundary: 1.0
+      TranslationMap: None
+      TransitionRotScaleTrans: false    
+    InnerBoundaryCondition:
+      DemandOutgoingCharSpeeds:
+    OuterBoundaryCondition:
+      ConstraintPreservingSphericalRadiation:
+
+
+SpatialDiscretization:
+  BoundaryCorrection:
+    UpwindPenalty:
+  DiscontinuousGalerkin:
+    Formulation: StrongInertial
+    Quadrature: GaussLobatto
+
+EventsAndTriggersAtCheckpoints:
+
+EventsAndTriggersAtSlabs:
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 10
+          Offset: 0
+    Events:
+      - ObserveNorms:
+          SubfileName: Norms
+          TensorsToObserve:
+            - Name: PointwiseL2Norm(OneIndexConstraint)
+              NormType: L2Norm
+              Components: Individual
+            - Name: PointwiseL2Norm(TwoIndexConstraint)
+              NormType: L2Norm
+              Components: Individual
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 10
+          Offset: 0
+    Events:
+      - ObserveFields:
+          SubfileName: Volume
+          VariablesToObserve:
+            - Psi
+            - Pi
+            - Phi
+          InterpolateToMesh: None
+          CoordinatesFloatingPointType: Double
+          FloatingPointTypes: [Double]
+          BlocksToObserve: All
+  - Trigger:
+      Slabs:
+        Specified:
+          Values: [20000]
+    Events:
+      - Completion
+
+
+Interpolator:
+  Verbosity: Silent
+
+InterpolationTargets:
+  SphericalSurface:
+    LMax: 10
+    Center: [0.,0.,0.]
+    Radius: 10.
+    AngularOrdering: Cce
+
+
+Filtering:
+  ExpFilter0:
+    Alpha: 64.
+    HalfPower: 210.
+    Enable: false
+    BlocksToFilter: All
+  CurvedScalarWaveTensorYlmFilter:
+    NumModesToKill: 4
+    HalfPower: None
+    Enable: true
+
+
+EventsAndDenseTriggers:
+
+Observers:
+  VolumeFileName: "Volume"
+  ReductionFileName: "Reductions"

@@ -17,7 +17,9 @@ from spectre.Domain import Domain, deserialize_domain
 from spectre.IO.H5 import open_volfiles, open_volfiles_command, parse_point
 from spectre.IO.H5.IterElements import iter_elements, stripped_element_name
 from spectre.NumericalAlgorithms.LinearOperators import power_monitors
-from spectre.Spectral import Basis
+from spectre.SphericalHarmonics import Spherepack, SpherepackIterator
+
+from spectre.Spectral import Basis, nodal_to_modal_matrix
 from spectre.support.CliExceptions import RequiredChoiceError
 from spectre.Visualization.Plot import (
     apply_stylesheet_command,
@@ -45,6 +47,156 @@ def find_block_or_group(
     return None
 
 
+def _spherical_harmonic_dims(mesh) -> Optional[Sequence[int]]:
+    sh_dims = [
+        d
+        for d, basis in enumerate(mesh.basis())
+        if basis == Basis.SphericalHarmonic
+    ]
+    if not sh_dims:
+        return None
+    if len(sh_dims) != 2 or sh_dims[1] != sh_dims[0] + 1:
+        raise RuntimeError(
+            "SphericalHarmonic basis must appear in exactly two consecutive "
+            "dimensions to compute power monitors."
+        )
+    return sh_dims
+
+
+def _plot_dimension_specs(mesh, dimension_labels: Sequence[str]):
+    sh_dims = _spherical_harmonic_dims(mesh)
+    if sh_dims is None:
+        return [
+            {"kind": "tensor", "label": dimension_labels[d], "mesh_dim": d}
+            for d in range(mesh.dim)
+        ]
+
+    if mesh.dim == 3:
+        if sh_dims != [1, 2]:
+            raise RuntimeError(
+                "SphericalHarmonic power monitors currently assume angular "
+                "dimensions are (1, 2) and the radial dimension is 0."
+            )
+        specs = [
+            {"kind": "tensor", "label": dimension_labels[0], "mesh_dim": 0}
+        ]
+        specs.append({"kind": "ylm", "label": r"$\ell$"})
+        return specs
+
+    if mesh.dim == 2:
+        if sh_dims != [0, 1]:
+            raise RuntimeError(
+                "SphericalHarmonic power monitors currently assume angular "
+                "dimensions are (0, 1)."
+            )
+        return [{"kind": "ylm", "label": r"$\ell$"}]
+
+    raise RuntimeError(
+        "SphericalHarmonic power monitors are only implemented for "
+        "2D and 3D meshes."
+    )
+
+
+def _plot_dim_length(plot_dim_spec, mesh) -> int:
+    if plot_dim_spec["kind"] == "tensor":
+        return mesh.extents(plot_dim_spec["mesh_dim"])
+    if plot_dim_spec["kind"] == "ylm":
+        sh_dims = _spherical_harmonic_dims(mesh)
+        return mesh.extents(sh_dims[0])  # l_max + 1
+    raise RuntimeError(f"Unknown plot dimension kind: {plot_dim_spec['kind']}")
+
+
+def _ylm_power_monitors(component_dv, mesh):
+    sh_dims = _spherical_harmonic_dims(mesh)
+    if sh_dims is None:
+        raise RuntimeError("Mesh has no SphericalHarmonic basis.")
+
+    l_max = mesh.extents(sh_dims[0]) - 1
+    n_phi = mesh.extents(sh_dims[1])
+    m_max = (n_phi - 1) // 2
+    if 2 * m_max + 1 != n_phi:
+        raise RuntimeError(
+            "SphericalHarmonic mesh must have phi extent = 2 * m_max + 1."
+        )
+    if m_max != l_max:
+        raise RuntimeError(
+            "SphericalHarmonic power monitors currently assume m_max == l_max."
+        )
+
+    spherepack = Spherepack(l_max, m_max)
+    iterator = SpherepackIterator(l_max, m_max)
+
+    if mesh.dim == 3:
+        if sh_dims != [1, 2]:
+            raise RuntimeError(
+                "SphericalHarmonic power monitors currently assume angular "
+                "dimensions are (1, 2) and the radial dimension is 0."
+            )
+        n_r = mesh.extents(0)
+        power_l = np.zeros(l_max + 1)
+        power_r = np.zeros(n_r)
+        radial_mesh = mesh.slices()[0]
+        radial_transform = np.array(nodal_to_modal_matrix(radial_mesh))
+        angular_size = mesh.extents(1) * mesh.extents(2)
+        nodal_values = np.array(component_dv)
+        nodal_by_radial = nodal_values.reshape((n_r, angular_size), order="F")
+        modal_by_radial = radial_transform @ nodal_by_radial
+        for r in range(n_r):
+            spectral = spherepack.phys_to_spec(
+                DataVector(modal_by_radial[r, :]),
+                physical_stride=1,
+                physical_offset=0,
+            )
+            sum_all = 0.0
+            for l in range(l_max + 1):
+                sum_m = 0.0
+                iterator.set(l, 0)
+                a = spectral[iterator()]
+                sum_m += a * a
+                for m in range(1, l + 1):
+                    iterator.set(l, m)
+                    a = spectral[iterator()]
+                    iterator.set(l, -m)
+                    b = spectral[iterator()]
+                    sum_m += a * a + b * b
+                power_l[l] += sum_m
+                sum_all += sum_m
+            power_r[r] = sum_all
+        power_l = np.sqrt(power_l / n_r)
+        power_r = np.sqrt(power_r / ((l_max + 1) ** 2))
+        return [power_r, power_l]
+
+    if mesh.dim == 2:
+        if sh_dims != [0, 1]:
+            raise RuntimeError(
+                "SphericalHarmonic power monitors currently assume angular "
+                "dimensions are (0, 1)."
+            )
+        spectral = spherepack.phys_to_spec(
+            component_dv, physical_stride=1, physical_offset=0
+        )
+        power_l = np.zeros(l_max + 1)
+        for l in range(l_max + 1):
+            sum_m = 0.0
+            iterator.set(l, 0)
+            a = spectral[iterator()]
+            sum_m += a * a
+            for m in range(1, l + 1):
+                iterator.set(l, m)
+                a = spectral[iterator()]
+                iterator.set(l, -m)
+                b = spectral[iterator()]
+                sum_m += a * a + b * b
+            power_l[l] = sum_m
+        power_l = np.sqrt(power_l)
+        return [power_l]
+
+    raise RuntimeError(
+        "SphericalHarmonic power monitors are only implemented for "
+        "2D and 3D meshes."
+    )
+
+
 def plot_power_monitors(
     volfiles: Union[spectre_h5.H5Vol, Iterable[spectre_h5.H5Vol]],
     obs_id: Optional[int],
@@ -59,37 +211,15 @@ def plot_power_monitors(
     plot_over_time = obs_id is None
     # One column per block or group
     num_cols = len(block_or_group_names)
-    # One row per dimension if plotted over time to declutter the plots
-    num_rows = domain.dim if plot_over_time else 1
-    fig, axes = plt.subplots(
-        nrows=num_rows,
-        ncols=num_cols,
-        figsize=figsize or (num_cols * 4, num_rows * 4),
-        sharey=True,
-        sharex=True,
-        squeeze=False,
-    )
-
-    # Evaluate property cycles (by default this is just 'color'). We do multiple
-    # plotting commands (at least one per element), so we don't want matplotlib
-    # to cycle through the properties at every plotting command.
-    prop_cycle = {
-        key: cycle(values)
-        for key, values in plt.rcParams["axes.prop_cycle"].by_key().items()
-    }
-    props_dim = {
-        d: {key: next(values) for key, values in prop_cycle.items()}
-        for d in range(domain.dim)
-    }
-
-    # Collect data for each subplot
-    if plot_over_time:
-        all_mode_time_series = {
-            subplot_index: dict() for subplot_index in range(num_cols)
-        }
-    else:
-        num_elements = np.zeros(num_cols, dtype=int)
-        max_error = np.zeros((num_cols, domain.dim))
+    fig = None
+    axes = None
+    plot_dim_specs = None
+    plot_dim_labels = None
+    expects_ylm = None
+    props_dim = None
+    all_mode_time_series = None
+    num_elements = None
+    max_error = None
 
     shown_dtype_warning_once = False
     for element, tensor_data in iter_elements(
@@ -109,10 +239,53 @@ def plot_power_monitors(
         if subplot_index is None:
             continue
 
+        if plot_dim_specs is None:
+            plot_dim_specs = _plot_dimension_specs(
+                element.mesh, dimension_labels
+            )
+            plot_dim_labels = [spec["label"] for spec in plot_dim_specs]
+            expects_ylm = any(
+                spec["kind"] == "ylm" for spec in plot_dim_specs
+            )
+            # One row per plot dimension if plotted over time to declutter
+            num_rows = len(plot_dim_specs) if plot_over_time else 1
+            fig, axes = plt.subplots(
+                nrows=num_rows,
+                ncols=num_cols,
+                figsize=figsize or (num_cols * 4, num_rows * 4),
+                sharey=True,
+                sharex=True,
+                squeeze=False,
+            )
+
+            # Evaluate property cycles (by default this is just 'color'). We do
+            # multiple plotting commands (at least one per element), so we don't
+            # want matplotlib to cycle through the properties at every plotting
+            # command.
+            prop_cycle = {
+                key: cycle(values)
+                for key, values in plt.rcParams["axes.prop_cycle"]
+                .by_key()
+                .items()
+            }
+            props_dim = {
+                d: {key: next(values) for key, values in prop_cycle.items()}
+                for d in range(len(plot_dim_specs))
+            }
+
+            # Collect data for each subplot
+            if plot_over_time:
+                all_mode_time_series = {
+                    subplot_index: dict() for subplot_index in range(num_cols)
+                }
+            else:
+                num_elements = np.zeros(num_cols, dtype=int)
+                max_error = np.zeros((num_cols, len(plot_dim_specs)))
+
         # Compute power monitors and take L2 norm over tensor components
         all_modes = [
-            np.zeros(element.mesh.extents(d) - skip_filtered_modes)
-            for d in range(element.dim)
+            np.zeros(_plot_dim_length(spec, element.mesh) - skip_filtered_modes)
+            for spec in plot_dim_specs
         ]
         if tensor_data.dtype != np.float64:
             if not shown_dtype_warning_once:
@@ -122,12 +295,34 @@ def plot_power_monitors(
                 )
                 shown_dtype_warning_once = True
             tensor_data = tensor_data.astype(np.float64)
+        has_ylm = _spherical_harmonic_dims(element.mesh) is not None
+        if expects_ylm != has_ylm:
+            logger.warning(
+                "Skipping element with %s spherical-harmonic basis because the "
+                "plot layout was initialized for %s.",
+                "a" if has_ylm else "no",
+                "spherical-harmonic" if expects_ylm else "tensor-product",
+            )
+            continue
+
         for component in tensor_data:
-            modes = power_monitors(DataVector(component), element.mesh)
-            for d, modes_dim in enumerate(modes):
-                num_modes = len(modes_dim) - skip_filtered_modes
-                all_modes[d] += np.array(modes_dim)[:num_modes] ** 2
-        for d in range(element.dim):
+            component_dv = DataVector(component)
+            if not has_ylm:
+                modes = power_monitors(component_dv, element.mesh)
+                for plot_index, spec in enumerate(plot_dim_specs):
+                    modes_dim = modes[spec["mesh_dim"]]
+                    num_modes = len(modes_dim) - skip_filtered_modes
+                    all_modes[plot_index] += (
+                        np.array(modes_dim)[:num_modes] ** 2
+                    )
+            else:
+                modes = _ylm_power_monitors(component_dv, element.mesh)
+                for plot_index, modes_dim in enumerate(modes):
+                    num_modes = len(modes_dim) - skip_filtered_modes
+                    all_modes[plot_index] += (
+                        np.array(modes_dim)[:num_modes] ** 2
+                    )
+        for d in range(len(all_modes)):
             all_modes[d] = np.sqrt(all_modes[d])
 
         if plot_over_time:
@@ -156,6 +351,10 @@ def plot_power_monitors(
                 )
             num_elements[subplot_index] += 1
 
+    if fig is None:
+        logger.warning("No elements matched the selection for plotting.")
+        return
+
     if plot_over_time:
         # Plot mode timeseries
         max_num_modes = np.max(
@@ -177,14 +376,14 @@ def plot_power_monitors(
                 ["black", props_dim[d].get("color", "black")],
                 N=max_num_modes[d],
             )
-            for d in range(domain.dim)
+            for d in range(len(plot_dim_specs))
         ]
         for subplot_index in range(num_cols):
             for element_id, mode_time_series in all_mode_time_series[
                 subplot_index
             ].items():
                 times = np.array([time for time, _ in mode_time_series])
-                for d in range(domain.dim):
+                for d in range(len(plot_dim_specs)):
                     ax = axes[d][subplot_index]
                     for mode in range(max_num_modes[d]):
                         mode_time_series_i = np.array(
@@ -208,7 +407,7 @@ def plot_power_monitors(
         import matplotlib.cm
         import matplotlib.colors
 
-        for d in range(domain.dim):
+        for d in range(len(plot_dim_specs)):
             colorbar = plt.colorbar(
                 matplotlib.cm.ScalarMappable(
                     norm=matplotlib.colors.Normalize(0, max_num_modes[d]),
@@ -216,18 +415,18 @@ def plot_power_monitors(
                 ),
                 ax=axes[d],
                 ticks=list(range(max_num_modes[d])),
-                label=dimension_labels[d] + " Mode",
+                label=plot_dim_labels[d] + " Mode",
             )
             colorbar.ax.invert_yaxis()
     else:
         # Annotate the max truncation error. Also serves as a legend.
         for subplot_index, ax in enumerate(axes[0]):
-            for d in range(domain.dim):
+            for d in range(len(plot_dim_specs)):
                 ax.axhline(
                     max_error[subplot_index][d], **props_dim[d], zorder=20 + d
                 )
                 ax.annotate(
-                    dimension_labels[d],
+                    plot_dim_labels[d],
                     xy=(0, max_error[subplot_index][d]),
                     xytext=((2 * d + 0.5) * plt.rcParams["font.size"], 0),
                     textcoords="offset points",
@@ -266,7 +465,9 @@ def plot_power_monitors(
     if plot_over_time:
         for d, ax in enumerate(axes):
             ax[0].set_ylabel(
-                r"Power monitors $P_{q_" + dimension_labels[d].strip("$") + "}$"
+                r"Power monitors $P_{q_"
+                + plot_dim_labels[d].strip("$")
+                + "}$"
             )
     else:
         axes[0][0].set_ylabel(r"Power monitors $P_{q_{\hat{\imath}}}$")
@@ -354,6 +555,8 @@ def plot_power_monitors_command(
     indication how well the spectral expansion resolves fields on the grid.
     Power monitors are computed for all tensor components selected with the
     '--var' / '-y' option, and combined as an L2 norm.
+    For spherical-harmonic bases, the angular power monitor is collapsed to a
+    single $\ell$ spectrum by summing over $m$.
 
     One subplot is created for every selected '--block' / '-b'. This can be a
     single block name, or a block group defined by the domain (such as all six
