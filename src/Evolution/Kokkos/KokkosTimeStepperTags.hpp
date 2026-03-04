@@ -49,7 +49,8 @@ struct DeviceDerivativeHistory : db::SimpleTag {
   using dt_vars_type = typename DeviceDtVariables<System>::type;
 
  public:
-  using type = ::Kokkos::View<typename dt_vars_type::value_type***>;
+  using type = ::Kokkos::View<typename dt_vars_type::value_type***,
+                              ::Kokkos::LayoutStride>;
 };
 
 template <size_t Dim>
