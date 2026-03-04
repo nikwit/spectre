@@ -3,15 +3,22 @@
 
 #include "Framework/TestingFramework.hpp"
 
+#include <array>
+#include <cmath>
 #include <random>
 
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/ModalVector.hpp"
 #include "DataStructures/Tensor/EagerMath/DeterminantAndInverse.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Framework/TestHelpers.hpp"
+#include "NumericalAlgorithms/LinearOperators/CoefficientTransforms.hpp"
+#include "NumericalAlgorithms/LinearOperators/ExponentialFilter.hpp"
+#include "NumericalAlgorithms/Spectral/Basis.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/ApplyTensorYlmFilter.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/SpherepackCache.hpp"
@@ -395,6 +402,102 @@ void test_apply_filter_2d(const size_t num_to_kill) {
       });
 }
 
+void test_tensor_ylm_plus_exponential_filter_radial() {
+  constexpr size_t radial_extents = 5;
+  constexpr size_t ell_max = 6;
+  const auto& ylm = ::ylm::get_spherepack_cache(ell_max);
+
+  const Mesh<3> mesh{
+      std::array<size_t, 3>{radial_extents, ell_max + 1, 2 * ell_max + 1},
+      std::array<Spectral::Basis, 3>{Spectral::Basis::Legendre,
+                                     Spectral::Basis::SphericalHarmonic,
+                                     Spectral::Basis::SphericalHarmonic},
+      std::array<Spectral::Quadrature, 3>{Spectral::Quadrature::GaussLobatto,
+                                          Spectral::Quadrature::Gauss,
+                                          Spectral::Quadrature::Equiangular}};
+  const Mesh<1> radial_mesh{radial_extents, Spectral::Basis::Legendre,
+                            Spectral::Quadrature::GaussLobatto};
+
+  const size_t spectral_mesh_size = ylm.spectral_size() * radial_extents;
+  const size_t physical_mesh_size = ylm.physical_size() * radial_extents;
+  CHECK(mesh.number_of_grid_points() == physical_mesh_size);
+
+  Variables<filter_detail::sw_vars_list<Frame::Inertial>> modal_vars(
+      spectral_mesh_size, 0.0);
+
+  ModalVector radial_modal(radial_extents);
+  for (size_t i = 0; i < radial_extents; ++i) {
+    radial_modal[i] = static_cast<double>(i + 1);
+  }
+  const DataVector radial_nodal =
+      to_nodal_coefficients(radial_modal, radial_mesh);
+
+  ylm::SpherepackIterator it(ell_max, ell_max, radial_extents, true);
+  it.set(2, 1, ylm::SpherepackIterator::CoefficientArray::a);
+  auto& psi_modal = get<CurvedScalarWave::Tags::Psi>(modal_vars);
+  for (size_t offset = 0; offset < radial_extents; ++offset) {
+    get(psi_modal)[it() + offset] = radial_nodal[offset];
+  }
+
+  Variables<filter_detail::sw_vars_list<Frame::Inertial>> nodal_vars(
+      physical_mesh_size, 0.0);
+  filter_detail::modal_to_nodal_ylm(make_not_null(&nodal_vars), modal_vars, ylm,
+                                    radial_extents);
+
+  InverseJacobian<DataVector, 3, Frame::Grid, Frame::Inertial>
+      jac_grid_to_inertial(physical_mesh_size);
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t j = 0; j < 3; ++j) {
+      jac_grid_to_inertial.get(i, j) = (i == j ? 1.0 : 0.0);
+    }
+  }
+
+  TensorYlmFilter tensor_filter(0, std::nullopt, true);
+  tensor_filter(make_not_null(&nodal_vars), mesh, jac_grid_to_inertial);
+
+  Variables<filter_detail::sw_vars_list<Frame::Inertial>> tensor_modal_vars(
+      spectral_mesh_size, 0.0);
+  filter_detail::nodal_to_modal_ylm(make_not_null(&tensor_modal_vars),
+                                    nodal_vars, ylm, radial_extents);
+  DataVector tensor_radial_nodal(radial_extents);
+  const auto& psi_tensor_modal =
+      get<CurvedScalarWave::Tags::Psi>(tensor_modal_vars);
+  for (size_t offset = 0; offset < radial_extents; ++offset) {
+    tensor_radial_nodal[offset] = get(psi_tensor_modal)[it() + offset];
+  }
+  const ModalVector tensor_radial_modal =
+      to_modal_coefficients(tensor_radial_nodal, radial_mesh);
+
+  const double alpha = 12.0;
+  const unsigned half_power = 4;
+  Filters::Exponential<3, 0> exp_filter(alpha, half_power, true,
+                                        std::nullopt);
+  exp_filter(make_not_null(&nodal_vars), mesh);
+
+  Variables<filter_detail::sw_vars_list<Frame::Inertial>>
+      filtered_modal_vars(spectral_mesh_size, 0.0);
+  filter_detail::nodal_to_modal_ylm(make_not_null(&filtered_modal_vars),
+                                    nodal_vars, ylm, radial_extents);
+  DataVector filtered_radial_nodal(radial_extents);
+  const auto& psi_filtered_modal =
+      get<CurvedScalarWave::Tags::Psi>(filtered_modal_vars);
+  for (size_t offset = 0; offset < radial_extents; ++offset) {
+    filtered_radial_nodal[offset] = get(psi_filtered_modal)[it() + offset];
+  }
+  const ModalVector filtered_radial_modal =
+      to_modal_coefficients(filtered_radial_nodal, radial_mesh);
+
+  Approx local_approx = Approx::custom().epsilon(1.0e-10).scale(1.0);
+  const double basis_order = static_cast<double>(radial_extents - 1);
+  for (size_t i = 0; i < radial_extents; ++i) {
+    const double expected =
+        tensor_radial_modal[i] *
+        exp(-alpha * pow(static_cast<double>(i) / basis_order,
+                         2 * half_power));
+    CHECK(filtered_radial_modal[i] == local_approx(expected));
+  }
+}
+
 // Debug builds are slightly > 5 seconds, so increase the timeout.
 // [[TimeOut, 10]]
 SPECTRE_TEST_CASE("Unit.SphericalHarmonics.ApplyTensorYlmFilter",
@@ -406,6 +509,11 @@ SPECTRE_TEST_CASE("Unit.SphericalHarmonics.ApplyTensorYlmFilter",
   test_apply_filter<filter_detail::gh_spacetime_vars_list>(5);
   test_apply_filter<filter_detail::sw_vars_list<Frame::Inertial>>(0);
   test_apply_filter<filter_detail::sw_vars_list<Frame::Inertial>>(5);
+}
+
+SPECTRE_TEST_CASE("Unit.SphericalHarmonics.TensorYlmAndExpFilterRadial",
+                  "[NumericalAlgorithms][Unit]") {
+  test_tensor_ylm_plus_exponential_filter_radial();
 }
 }  // namespace
 }  // namespace ylm::TensorYlm

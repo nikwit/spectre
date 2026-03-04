@@ -328,6 +328,90 @@ class TensorYlmFilter {
 
 bool operator==(const TensorYlmFilter& lhs, const TensorYlmFilter& rhs);
 bool operator!=(const TensorYlmFilter& lhs, const TensorYlmFilter& rhs);
+
+class CurvedScalarWaveTensorYlmFilter {
+ public:
+  struct NumModesToKill {
+    using type = size_t;
+    static constexpr Options::String help =
+        "How many of the top ell modes to set to zero";
+  };
+  struct HalfPower {
+    using type = Options::Auto<size_t, Options::AutoLabel::None>;
+    static constexpr Options::String help =
+        "The half-power sigma for more complicated filtering. "
+        "If None, implements a Heaviside filter.";
+  };
+  struct Enable {
+    using type = bool;
+    static constexpr Options::String help = {"Enable the filter"};
+  };
+  using options = tmpl::list<NumModesToKill, HalfPower, Enable>;
+  static constexpr Options::String help = {
+      "Tensor Ylm filter for Curved Scalar Wave."};
+
+  CurvedScalarWaveTensorYlmFilter();
+  CurvedScalarWaveTensorYlmFilter(const CurvedScalarWaveTensorYlmFilter& rhs);
+  CurvedScalarWaveTensorYlmFilter& operator=(
+      const CurvedScalarWaveTensorYlmFilter& rhs);
+  CurvedScalarWaveTensorYlmFilter(CurvedScalarWaveTensorYlmFilter&& rhs);
+  CurvedScalarWaveTensorYlmFilter& operator=(
+      CurvedScalarWaveTensorYlmFilter&& rhs);
+
+  CurvedScalarWaveTensorYlmFilter(size_t num_modes_to_kill,
+                                  std::optional<size_t> half_power,
+                                  bool enable);
+
+  bool enable() const { return enable_; }
+
+  std::optional<std::unordered_set<std::string>> blocks_to_filter() const {
+    return std::nullopt;
+  }
+
+  // NOLINTNEXTLINE(google-runtime-references)
+  void pup(PUP::er& p);
+
+ public:  // DataBox-mutator protocol
+  using argument_tags = tmpl::list<
+      domain::Tags::Mesh<3>,
+      domain::Tags::InverseJacobian<3, Frame::Grid, Frame::Inertial>>;
+  void operator()(
+      gsl::not_null<Variables<filter_detail::sw_vars_list<Frame::Inertial>>*>
+          sw_vars,
+      const Mesh<2>& mesh,
+      const InverseJacobian<DataVector, 3, Frame::Grid, Frame::Inertial>&
+          jac_grid_to_inertial) const;
+  void operator()(
+      gsl::not_null<Variables<filter_detail::sw_vars_list<Frame::Inertial>>*>
+          sw_vars,
+      const Mesh<3>& mesh,
+      const InverseJacobian<DataVector, 3, Frame::Grid, Frame::Inertial>&
+          jac_grid_to_inertial) const;
+
+ private:
+  friend bool operator==(const CurvedScalarWaveTensorYlmFilter& lhs,
+                         const CurvedScalarWaveTensorYlmFilter& rhs);
+
+  size_t num_modes_to_kill_{0};
+  std::optional<size_t> half_power_{std::nullopt};
+  bool enable_{true};
+
+  // Caches and memory buffers
+  // NOLINTNEXTLINE(spectre-mutable)
+  mutable size_t cached_l_max_{0};
+  // NOLINTNEXTLINE(spectre-mutable)
+  mutable SimpleSparseMatrix filter_matrix_scalar_{};
+  // NOLINTNEXTLINE(spectre-mutable)
+  mutable SimpleSparseMatrix filter_matrix_i_{};
+  // NOLINTNEXTLINE(spectre-mutable)
+  mutable Variables<filter_detail::sw_vars_list<Frame::Inertial>>
+      temp_storage_{};
+};
+
+bool operator==(const CurvedScalarWaveTensorYlmFilter& lhs,
+                const CurvedScalarWaveTensorYlmFilter& rhs);
+bool operator!=(const CurvedScalarWaveTensorYlmFilter& lhs,
+                const CurvedScalarWaveTensorYlmFilter& rhs);
 /*!
  * \brief Applies TensorYlm filter in place to Curved Scalar Wave variables.
  *
@@ -341,21 +425,11 @@ bool operator!=(const TensorYlmFilter& lhs, const TensorYlmFilter& rhs);
  * happens in the entire volume, internally iterating over each
  * spherical slice at a time.
  *
- * For performance reasons, apply_tensor_ylm_filter does not allocate
- * or deallocate memory, but it does take a temp_storage buffer.  The
- * size of temp_storage should at least
- * radial_extents*spectral_size*num_components, where num_components
- * is the total number of independent components in the SW variable
- * list (i.e. 5), and spectral_size is the size of the S2 Spherepack
- * spectral coefficient array for ell_max, as obtained from the member
- * function ylm::Spherepack::spectral_size().  Note that for S2 on
- * Spherepack, the number of collocation points is different than the
- * number of spectral coefficients, and both are different than the
- * size of the Spherepack storage array.
+ * For clarity and memory safety, this overload allocates its temporary
+ * storage internally and does not reuse external buffers.
  *
  * \param sw_vars Scalar wave variables at collocation points.
- * \param temp_storage Temporary storage for scalar wave variables,
- *   allocated outside apply_tensor_ylm_filter. See above for size requirements.
+ * \param temp_storage Unused. Kept for API compatibility.
  * \param jac_inertial_to_grid Jacobian taking V_x from inertial to grid.
  * \param jac_grid_to_inertial Jacobian taking V_x from grid to inertial.
  * \param filter_matrix_scalar The scalar filter matrix computed by fill_filter.
