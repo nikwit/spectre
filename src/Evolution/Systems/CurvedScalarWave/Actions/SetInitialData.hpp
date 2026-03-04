@@ -278,7 +278,7 @@ struct SetInitialData {
           "system-specific initialization routine to your executable.");
     }
 
-    return {Parallel::AlgorithmExecution::Pause, std::nullopt};
+    return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }
 };
 
@@ -307,9 +307,13 @@ struct ReceiveNumericInitialData {
     } else {
       auto& inbox = tuples::get<
           importers::Tags::VolumeData<NumericInitialData::all_vars>>(inboxes);
-      const auto& initial_data = dynamic_cast<const NumericInitialData&>(
-          db::get<evolution::initial_data::Tags::InitialData>(box));
-      const size_t volume_data_id = initial_data.volume_data_id();
+      const auto* initial_data = dynamic_cast<const NumericInitialData*>(
+          &db::get<evolution::initial_data::Tags::InitialData>(box));
+      if (initial_data == nullptr) {
+        // Analytic initial data path: no importer inbox to wait on.
+        return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+      }
+      const size_t volume_data_id = initial_data->volume_data_id();
       if (inbox.find(volume_data_id) == inbox.end()) {
         return {Parallel::AlgorithmExecution::Retry, std::nullopt};
       }
@@ -317,12 +321,12 @@ struct ReceiveNumericInitialData {
 
       db::mutate<CurvedScalarWave::Tags::Psi, CurvedScalarWave::Tags::Pi,
                  CurvedScalarWave::Tags::Phi<Dim>>(
-          [&initial_data, &numeric_data](
+          [initial_data, &numeric_data](
               const gsl::not_null<Scalar<DataVector>*> psi_scalar,
               const gsl::not_null<Scalar<DataVector>*> pi_scalar,
               const gsl::not_null<tnsr::i<DataVector, Dim>*> phi_scalar) {
-            initial_data.set_initial_data(psi_scalar, pi_scalar, phi_scalar,
-                                          make_not_null(&numeric_data));
+            initial_data->set_initial_data(psi_scalar, pi_scalar, phi_scalar,
+                                           make_not_null(&numeric_data));
           },
           make_not_null(&box));
 

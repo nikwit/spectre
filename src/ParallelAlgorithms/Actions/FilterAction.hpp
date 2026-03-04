@@ -132,7 +132,9 @@ class Filter<FilterType, tmpl::list<TagsToFilter...>> {
           });
     }
 
-    if (not enable) {
+    const auto& next_time_step_id =
+        db::get<::Tags::Next<::Tags::TimeStepId>>(box);
+    if (not enable or next_time_step_id.substep() != 0) {
       return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
 

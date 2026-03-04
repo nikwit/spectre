@@ -45,6 +45,8 @@
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Formulation.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Tags.hpp"
 #include "NumericalAlgorithms/LinearOperators/ExponentialFilter.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/ApplyTensorYlmFilter.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/TensorYlmFilter.hpp"
 #include "Options/Protocols/FactoryCreation.hpp"
 #include "Options/String.hpp"
 #include "Parallel/Local.hpp"
@@ -137,7 +139,7 @@ struct EvolutionMetavars {
 
   using system = CurvedScalarWave::System<Dim>;
   using temporal_id = Tags::TimeStepId;
-  using TimeStepperBase = LtsTimeStepper;
+  using TimeStepperBase = TimeStepper;
 
   static constexpr bool local_time_stepping =
       TimeStepperBase::local_time_stepping;
@@ -251,7 +253,22 @@ struct EvolutionMetavars {
       tmpl::at<typename factory_creation::factory_classes, Event>>;
 
   static constexpr bool use_filtering = true;
-
+  using filter_actions = tmpl::conditional_t<
+      use_filtering,
+      tmpl::list<
+          tmpl::conditional_t<
+              volume_dim == 3,
+              tmpl::list<dg::Actions::Filter<
+                  ylm::TensorYlm::CurvedScalarWaveTensorYlmFilter,
+                  tmpl::list<CurvedScalarWave::Tags::Psi,
+                             CurvedScalarWave::Tags::Pi,
+                             CurvedScalarWave::Tags::Phi<Dim>>>>,
+              tmpl::list<>>,
+          dg::Actions::Filter<Filters::Exponential<Dim, 0>,
+                              tmpl::list<CurvedScalarWave::Tags::Psi,
+                                         CurvedScalarWave::Tags::Pi,
+                                         CurvedScalarWave::Tags::Phi<Dim>>>>,
+      tmpl::list<>>;
   using step_actions = tmpl::flatten<tmpl::list<
       CurvedScalarWave::Actions::CalculateGrVars<system, true>,
       evolution::dg::Actions::ComputeTimeDerivative<
@@ -268,23 +285,16 @@ struct EvolutionMetavars {
                      evolution::dg::Actions::ApplyLtsBoundaryCorrections<
                          volume_dim, false, use_dg_element_collection>,
                      Actions::MutateApply<ChangeTimeStepperOrder<system>>>,
-          tmpl::list<
+          tmpl::flatten<tmpl::list<
               evolution::dg::Actions::ApplyBoundaryCorrectionsToTimeDerivative<
                   volume_dim, use_dg_element_collection>,
               Actions::MutateApply<RecordTimeStepperData<system>>,
               evolution::Actions::RunEventsAndDenseTriggers<tmpl::list<>>,
-              Actions::MutateApply<UpdateU<system, local_time_stepping>>>>,
-      Actions::MutateApply<CleanHistory<system>>,
+              Actions::MutateApply<UpdateU<system, local_time_stepping>>>>>,
+      filter_actions, Actions::MutateApply<CleanHistory<system>>,
       tmpl::conditional_t<
           local_time_stepping,
           Actions::MutateApply<evolution::dg::CleanMortarHistory<system>>,
-          tmpl::list<>>,
-      tmpl::conditional_t<
-          use_filtering,
-          dg::Actions::Filter<Filters::Exponential<0>,
-                              tmpl::list<CurvedScalarWave::Tags::Psi,
-                                         CurvedScalarWave::Tags::Pi,
-                                         CurvedScalarWave::Tags::Phi<Dim>>>,
           tmpl::list<>>>>;
 
   using const_global_cache_tags = tmpl::list<
@@ -326,7 +336,7 @@ struct EvolutionMetavars {
               Parallel::Phase::ImportInitialData,
               tmpl::list<CurvedScalarWave::Actions::SetInitialData,
                          CurvedScalarWave::Actions::ReceiveNumericInitialData,
-                         Parallel::Actions::TerminatePhase>>,
+                         filter_actions, Parallel::Actions::TerminatePhase>>,
           Parallel::PhaseActions<
               Parallel::Phase::InitializeTimeStepperHistory,
               SelfStart::self_start_procedure<step_actions, system>>,
