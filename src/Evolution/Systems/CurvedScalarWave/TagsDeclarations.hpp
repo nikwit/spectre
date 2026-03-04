@@ -11,7 +11,7 @@
 namespace CurvedScalarWave::Tags {
 struct Psi;
 struct Pi;
-template <size_t Dim>
+template <size_t Dim, typename Frame = Frame::Inertial>
 struct Phi;
 
 struct ConstraintGamma1;
