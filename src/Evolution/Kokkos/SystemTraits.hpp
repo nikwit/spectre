@@ -135,7 +135,6 @@ struct PackedBoundaryScratchStorage<
       Variables<tmpl::list<device_inverse_spatial_metric_tag, device_shift_tag,
                            device_lapse_tag>>;
   using projection_workspace_type = ::Kokkos::View<double***>;
-  using filter_workspace_type = ::Kokkos::View<double**>;
 
   packaged_face_data_storage_type packaged_face_data_for_all_elements{};
   internal_boundary_terms_storage_type
@@ -151,8 +150,6 @@ struct PackedBoundaryScratchStorage<
   Variables<device_dt_boundary_tags> projection_dt_boundary_on_mortar{};
   Variables<device_dt_boundary_tags> projection_dt_boundary_on_face{};
   projection_workspace_type projection_workspace{};
-  filter_workspace_type filter_workspace_0{};
-  filter_workspace_type filter_workspace_1{};
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {

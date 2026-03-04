@@ -71,9 +71,7 @@ void apply_filter_matrices_on_device_batched(
     const Kokkos::View<double**>& vars_view, const Mesh<3>& mesh,
     const MatrixViewRightLayout& matrix_dim_0,
     const MatrixViewRightLayout& matrix_dim_1,
-    const MatrixViewRightLayout& matrix_dim_2,
-    const gsl::not_null<Kokkos::View<double**>*> scratch_0,
-    const gsl::not_null<Kokkos::View<double**>*> scratch_1) {
+    const MatrixViewRightLayout& matrix_dim_2) {
   const auto extents = mesh.extents();
   const size_t n0 = extents[0];
   const size_t n1 = extents[1];
@@ -180,8 +178,6 @@ void apply_filter_matrices_on_device_batched(
           team.team_barrier();
         }
       });
-  (void)scratch_0;
-  (void)scratch_1;
 }
 
 }  // namespace detail
@@ -190,8 +186,6 @@ template <typename FilterType>
 void FilterKokkosBatched<FilterType>::apply(
     const gsl::not_null<typename packed_evolution_state_tag::type*>
         packed_evolution_state,
-    const gsl::not_null<typename packed_boundary_scratch_tag::type*>
-        packed_boundary_scratch,
     const typename packed_topology_tag::type& packed_topology,
     const FilterType& filter_helper) {
   if (packed_topology.total_points == 0 or not filter_helper.enable()) {
@@ -212,9 +206,7 @@ void FilterKokkosBatched<FilterType>::apply(
 
   detail::apply_filter_matrices_on_device_batched(
       packed_evolution_state->device_variables.view(), mesh, matrix_view_0,
-      matrix_view_1, matrix_view_2,
-      make_not_null(&packed_boundary_scratch->filter_workspace_0),
-      make_not_null(&packed_boundary_scratch->filter_workspace_1));
+      matrix_view_1, matrix_view_2);
 }
 
 template struct FilterKokkosBatched<Filters::Exponential<0>>;

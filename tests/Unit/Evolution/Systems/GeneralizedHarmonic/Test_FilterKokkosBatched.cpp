@@ -143,10 +143,8 @@ SPECTRE_TEST_CASE(
 
   evolution::Kokkos::PackedEvolutionState<gh_system> packed_evolution_state{};
   packed_evolution_state.device_variables = copy_to_device(host_vars);
-  evolution::Kokkos::PackedBoundaryScratch<gh_system> packed_boundary_scratch{};
 
   batched_filter_action::apply(make_not_null(&packed_evolution_state),
-                               make_not_null(&packed_boundary_scratch),
                                packed_topology, filter);
 
   typename gh_system::variables_tag::type filtered_batched{num_points, 0.0};
