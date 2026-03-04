@@ -12,6 +12,7 @@ spectre_target_sources(
   Batched/ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched.cpp
   Batched/ComputeInternalBoundaryTermsBatched.cpp
   Batched/ComputeTimeDerivativeBatched.cpp
+  Batched/FilterKokkosBatched.cpp
   Batched/InitializeBatchedData.cpp
   Batched/LiftInternalBoundaryTermsBatched.cpp
   Batched/PackageLocalFacesBatched.cpp
