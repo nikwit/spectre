@@ -12,6 +12,7 @@
 #include "DataStructures/Tensor/AtIndex.hpp"
 #include "DataStructures/Variables.hpp"
 #include "Domain/Structure/Direction.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/BoundaryCorrectionHelpers.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
@@ -60,10 +61,6 @@ double outward_sign(const Side side) {
   return side == Side::Upper ? 1.0 : -1.0;
 }
 
-constexpr size_t face_index(const size_t sliced_dim, const size_t side_i) {
-  return 2 * sliced_dim + side_i;
-}
-
 template <std::size_t N, class F, std::size_t... Is>
 KOKKOS_INLINE_FUNCTION constexpr void static_for_impl(
     F&& f, std::index_sequence<Is...>) {
@@ -73,31 +70,6 @@ KOKKOS_INLINE_FUNCTION constexpr void static_for_impl(
 template <std::size_t N, class F>
 KOKKOS_INLINE_FUNCTION constexpr void static_for(F&& f) {
   static_for_impl<N>(static_cast<F&&>(f), std::make_index_sequence<N>{});
-}
-
-KOKKOS_INLINE_FUNCTION void inverse_spatial_metric_and_det(
-    const gsl::not_null<tnsr::II<double, volume_dim, Frame::Inertial>*>
-        inverse_spatial_metric,
-    const gsl::not_null<double*> det_spatial_metric,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& spacetime_metric) {
-  const double g00 = spacetime_metric.get(1, 1);
-  const double g01 = spacetime_metric.get(1, 2);
-  const double g02 = spacetime_metric.get(1, 3);
-  const double g11 = spacetime_metric.get(2, 2);
-  const double g12 = spacetime_metric.get(2, 3);
-  const double g22 = spacetime_metric.get(3, 3);
-
-  *det_spatial_metric = g00 * (g11 * g22 - g12 * g12) -
-                        g01 * (g01 * g22 - g12 * g02) +
-                        g02 * (g01 * g12 - g11 * g02);
-  const double inv_det = 1.0 / *det_spatial_metric;
-
-  inverse_spatial_metric->get(0, 0) = (g11 * g22 - g12 * g12) * inv_det;
-  inverse_spatial_metric->get(0, 1) = (g02 * g12 - g01 * g22) * inv_det;
-  inverse_spatial_metric->get(0, 2) = (g01 * g12 - g02 * g11) * inv_det;
-  inverse_spatial_metric->get(1, 1) = (g00 * g22 - g02 * g02) * inv_det;
-  inverse_spatial_metric->get(1, 2) = (g02 * g01 - g00 * g12) * inv_det;
-  inverse_spatial_metric->get(2, 2) = (g00 * g11 - g01 * g01) * inv_det;
 }
 
 KOKKOS_INLINE_FUNCTION void compute_spacetime_metric_from_3plus1(
@@ -295,132 +267,6 @@ KOKKOS_INLINE_FUNCTION void compute_hardcoded_schwarzschild_gh_fields(
                                        spatial_metric);
 }
 
-KOKKOS_INLINE_FUNCTION void compute_packaged_boundary_data_at_point(
-    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*>
-        char_speed_v_spacetime_metric,
-    const gsl::not_null<tnsr::iaa<double, volume_dim, Frame::Inertial>*>
-        char_speed_v_zero,
-    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*>
-        char_speed_v_plus,
-    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*>
-        char_speed_v_minus,
-    const gsl::not_null<tnsr::iaa<double, volume_dim, Frame::Inertial>*>
-        char_speed_n_times_v_plus,
-    const gsl::not_null<tnsr::iaa<double, volume_dim, Frame::Inertial>*>
-        char_speed_n_times_v_minus,
-    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*>
-        char_speed_gamma2_v_spacetime_metric,
-    const gsl::not_null<tnsr::a<double, volume_dim, Frame::Inertial>*>
-        char_speeds,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& spacetime_metric,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& pi,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>& phi,
-    const double gamma1, const double gamma2,
-    const tnsr::i<double, volume_dim, Frame::Inertial>&
-        unnormalized_normal_covector) {
-  tnsr::II<double, volume_dim, Frame::Inertial> inverse_spatial_metric{};
-  double det_spatial_metric = 0.0;
-  inverse_spatial_metric_and_det(make_not_null(&inverse_spatial_metric),
-                                 make_not_null(&det_spatial_metric),
-                                 spacetime_metric);
-  (void)det_spatial_metric;
-
-  tnsr::I<double, volume_dim, Frame::Inertial> shift{};
-  for (size_t i = 0; i < volume_dim; ++i) {
-    shift.get(i) = 0.0;
-    for (size_t j = 0; j < volume_dim; ++j) {
-      shift.get(i) +=
-          inverse_spatial_metric.get(i, j) * spacetime_metric.get(0, j + 1);
-    }
-  }
-  double lapse_squared = -spacetime_metric.get(0, 0);
-  for (size_t i = 0; i < volume_dim; ++i) {
-    lapse_squared += shift.get(i) * spacetime_metric.get(0, i + 1);
-  }
-  const double lapse = sqrt(lapse_squared);
-
-  tnsr::I<double, volume_dim, Frame::Inertial> normal_vector{};
-  double normal_magnitude_squared = 0.0;
-  for (size_t i = 0; i < volume_dim; ++i) {
-    normal_vector.get(i) = 0.0;
-    for (size_t j = 0; j < volume_dim; ++j) {
-      normal_vector.get(i) += inverse_spatial_metric.get(i, j) *
-                              unnormalized_normal_covector.get(j);
-    }
-    normal_magnitude_squared +=
-        normal_vector.get(i) * unnormalized_normal_covector.get(i);
-  }
-  const double one_over_normal_magnitude = 1.0 / sqrt(normal_magnitude_squared);
-  tnsr::i<double, volume_dim, Frame::Inertial> normal_covector{};
-  for (size_t i = 0; i < volume_dim; ++i) {
-    normal_vector.get(i) *= one_over_normal_magnitude;
-    normal_covector.get(i) =
-        unnormalized_normal_covector.get(i) * one_over_normal_magnitude;
-  }
-
-  double shift_dot_normal = 0.0;
-  for (size_t i = 0; i < volume_dim; ++i) {
-    shift_dot_normal += shift.get(i) * normal_covector.get(i);
-  }
-  shift_dot_normal *= -1.0;
-
-  char_speeds->get(0) = (1.0 + gamma1) * shift_dot_normal;
-  char_speeds->get(1) = shift_dot_normal;
-  char_speeds->get(2) = lapse + shift_dot_normal;
-  char_speeds->get(3) = -lapse + shift_dot_normal;
-
-  for (size_t a = 0; a < volume_dim + 1; ++a) {
-    for (size_t b = a; b < volume_dim + 1; ++b) {
-      char_speed_gamma2_v_spacetime_metric->get(a, b) =
-          gamma2 * spacetime_metric.get(a, b);
-    }
-  }
-
-  tnsr::aa<double, volume_dim, Frame::Inertial> normal_dot_phi{};
-  for (size_t a = 0; a < volume_dim + 1; ++a) {
-    for (size_t b = a; b < volume_dim + 1; ++b) {
-      normal_dot_phi.get(a, b) = normal_vector.get(0) * phi.get(0, a, b);
-      for (size_t i = 1; i < volume_dim; ++i) {
-        normal_dot_phi.get(a, b) += normal_vector.get(i) * phi.get(i, a, b);
-      }
-    }
-  }
-
-  for (size_t a = 0; a < volume_dim + 1; ++a) {
-    for (size_t b = a; b < volume_dim + 1; ++b) {
-      char_speed_v_plus->get(a, b) =
-          char_speeds->get(2) *
-          (pi.get(a, b) + normal_dot_phi.get(a, b) -
-           char_speed_gamma2_v_spacetime_metric->get(a, b));
-      char_speed_v_minus->get(a, b) =
-          char_speeds->get(3) *
-          (pi.get(a, b) - normal_dot_phi.get(a, b) -
-           char_speed_gamma2_v_spacetime_metric->get(a, b));
-
-      for (size_t i = 0; i < volume_dim; ++i) {
-        char_speed_v_zero->get(i, a, b) =
-            char_speeds->get(1) *
-            (phi.get(i, a, b) -
-             normal_covector.get(i) * normal_dot_phi.get(a, b));
-      }
-    }
-  }
-
-  for (size_t a = 0; a < volume_dim + 1; ++a) {
-    for (size_t b = a; b < volume_dim + 1; ++b) {
-      for (size_t i = 0; i < volume_dim; ++i) {
-        char_speed_n_times_v_plus->get(i, a, b) =
-            char_speed_v_plus->get(a, b) * normal_covector.get(i);
-        char_speed_n_times_v_minus->get(i, a, b) =
-            char_speed_v_minus->get(a, b) * normal_covector.get(i);
-      }
-      char_speed_v_spacetime_metric->get(a, b) =
-          char_speeds->get(0) * spacetime_metric.get(a, b);
-      char_speed_gamma2_v_spacetime_metric->get(a, b) *= char_speeds->get(0);
-    }
-  }
-}
-
 KOKKOS_INLINE_FUNCTION void load_aa_from_packaged_data(
     const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*> tensor,
     const package_storage_type& packaged_data_view, const size_t point,
@@ -464,90 +310,6 @@ KOKKOS_INLINE_FUNCTION void load_a_from_packaged_data(
     constexpr int a = (int)a_c;
     get<a>(*tensor) = packaged_data_view(point, component_offset + a);
   });
-}
-
-KOKKOS_INLINE_FUNCTION double step_function_double(const double value) {
-  return value < 0.0 ? 0.0 : 1.0;
-}
-
-KOKKOS_INLINE_FUNCTION void compute_boundary_terms_at_point(
-    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*>
-        dt_spacetime_metric,
-    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*> dt_pi,
-    const gsl::not_null<tnsr::iaa<double, volume_dim, Frame::Inertial>*> dt_phi,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>&
-        local_v_spacetime_metric,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>& local_v_zero,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& local_v_plus,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& local_v_minus,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>&
-        local_normal_times_v_plus,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>&
-        local_normal_times_v_minus,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>&
-        local_gamma2_v_spacetime_metric,
-    const tnsr::a<double, volume_dim, Frame::Inertial>& local_char_speeds,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>&
-        remote_v_spacetime_metric,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>& remote_v_zero,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& remote_v_plus,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& remote_v_minus,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>&
-        remote_normal_times_v_plus,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>&
-        remote_normal_times_v_minus,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>&
-        remote_gamma2_v_spacetime_metric,
-    const tnsr::a<double, volume_dim, Frame::Inertial>& remote_char_speeds) {
-  const double weighted_lambda_spacetime_metric_int =
-      step_function_double(-local_char_speeds.get(0));
-  const double weighted_lambda_spacetime_metric_ext =
-      -step_function_double(remote_char_speeds.get(0));
-  const double weighted_lambda_zero_int =
-      step_function_double(-local_char_speeds.get(1));
-  const double weighted_lambda_zero_ext =
-      -step_function_double(remote_char_speeds.get(1));
-  const double weighted_lambda_plus_int =
-      step_function_double(-local_char_speeds.get(2));
-  const double weighted_lambda_plus_ext =
-      -step_function_double(remote_char_speeds.get(2));
-  const double weighted_lambda_minus_int =
-      step_function_double(-local_char_speeds.get(3));
-  const double weighted_lambda_minus_ext =
-      -step_function_double(remote_char_speeds.get(3));
-
-  for (size_t a = 0; a < volume_dim + 1; ++a) {
-    for (size_t b = a; b < volume_dim + 1; ++b) {
-      dt_spacetime_metric->get(a, b) = weighted_lambda_spacetime_metric_ext *
-                                           remote_v_spacetime_metric.get(a, b) -
-                                       weighted_lambda_spacetime_metric_int *
-                                           local_v_spacetime_metric.get(a, b);
-
-      dt_pi->get(a, b) =
-          0.5 * (weighted_lambda_plus_ext * remote_v_plus.get(a, b) +
-                 weighted_lambda_minus_ext * remote_v_minus.get(a, b)) +
-          weighted_lambda_spacetime_metric_ext *
-              remote_gamma2_v_spacetime_metric.get(a, b) -
-          0.5 * (weighted_lambda_plus_int * local_v_plus.get(a, b) +
-                 weighted_lambda_minus_int * local_v_minus.get(a, b)) -
-          weighted_lambda_spacetime_metric_int *
-              local_gamma2_v_spacetime_metric.get(a, b);
-
-      for (size_t d = 0; d < volume_dim; ++d) {
-        dt_phi->get(d, a, b) =
-            -0.5 * (weighted_lambda_minus_ext *
-                        remote_normal_times_v_minus.get(d, a, b) -
-                    weighted_lambda_plus_ext *
-                        remote_normal_times_v_plus.get(d, a, b)) +
-            weighted_lambda_zero_ext * remote_v_zero.get(d, a, b) -
-            0.5 * (weighted_lambda_plus_int *
-                       local_normal_times_v_plus.get(d, a, b) -
-                   weighted_lambda_minus_int *
-                       local_normal_times_v_minus.get(d, a, b)) -
-            weighted_lambda_zero_int * local_v_zero.get(d, a, b);
-      }
-    }
-  }
 }
 
 }  // namespace
@@ -611,184 +373,183 @@ void ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
       dt_vars);
 
   const size_t num_elements = elements.size();
-  for (size_t sliced_dim = 0; sliced_dim < volume_dim; ++sliced_dim) {
-    for (size_t side_i = 0; side_i < 2; ++side_i) {
-      const Side side = side_i == 0 ? Side::Lower : Side::Upper;
-      const size_t local_face_id = face_index(sliced_dim, side_i);
-      const auto packaged_face_data_view =
-          packaged_face_data_for_all_elements[local_face_id].view();
-      ASSERT(packaged_face_data_view.extent(1) ==
-                 packaged_boundary_data_components,
-             "Unexpected number of packaged boundary components for GH batched "
-             "external boundary corrections.");
-      ASSERT(packaged_face_data_for_all_elements[local_face_id]
-                     .number_of_grid_points() == num_elements * num_face_points,
-             "PackageLocalFacesBatched must run before external boundary "
-             "corrections.");
-      const auto external_face_mask =
-          external_face_mask_for_all_elements[local_face_id];
-      ASSERT(external_face_mask.extent(0) == num_elements,
-             "External-face mask extent mismatch. "
-             "InitializeBoundaryBatchMetadata must run before external "
-             "boundary corrections.");
+  for (size_t local_face_id = 0; local_face_id < 2 * volume_dim;
+       ++local_face_id) {
+    const size_t sliced_dim = local_face_id / 2;
+    const size_t side_i = local_face_id % 2;
+    const Side side = side_i == 0 ? Side::Lower : Side::Upper;
+    const auto packaged_face_data_view =
+        packaged_face_data_for_all_elements[local_face_id].view();
+    ASSERT(
+        packaged_face_data_view.extent(1) == packaged_boundary_data_components,
+        "Unexpected number of packaged boundary components for GH batched "
+        "external boundary corrections.");
+    ASSERT(packaged_face_data_for_all_elements[local_face_id]
+                   .number_of_grid_points() == num_elements * num_face_points,
+           "PackageLocalFacesBatched must run before external boundary "
+           "corrections.");
+    const auto external_face_mask =
+        external_face_mask_for_all_elements[local_face_id];
+    ASSERT(external_face_mask.extent(0) == num_elements,
+           "External-face mask extent mismatch. "
+           "InitializeBoundaryBatchMetadata must run before external "
+           "boundary corrections.");
 
-      const auto local_face_to_volume_index =
-          side == Side::Upper
-              ? gsl::at(face_to_volume_index_map, sliced_dim).second
-              : gsl::at(face_to_volume_index_map, sliced_dim).first;
-      const double outward = outward_sign(side);
-      const double lift_prefactor =
-          -0.5 *
-          static_cast<double>(extents[sliced_dim] * (extents[sliced_dim] - 1));
+    const auto local_face_to_volume_index =
+        side == Side::Upper
+            ? gsl::at(face_to_volume_index_map, sliced_dim).second
+            : gsl::at(face_to_volume_index_map, sliced_dim).first;
+    const double outward = outward_sign(side);
+    const double lift_prefactor =
+        -0.5 *
+        static_cast<double>(extents[sliced_dim] * (extents[sliced_dim] - 1));
 
-      ::Kokkos::parallel_for(
-          "ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched",
-          num_elements * num_face_points,
-          KOKKOS_LAMBDA(const int linear_index_int) {
-            const size_t linear_index = static_cast<size_t>(linear_index_int);
-            const size_t face_index_on_face = linear_index % num_face_points;
-            const size_t element_index = linear_index / num_face_points;
-            if (external_face_mask(element_index) == 0) {
-              return;
-            }
+    ::Kokkos::parallel_for(
+        "ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched",
+        num_elements * num_face_points,
+        KOKKOS_LAMBDA(const int linear_index_int) {
+          const size_t linear_index = static_cast<size_t>(linear_index_int);
+          const size_t face_index_on_face = linear_index % num_face_points;
+          const size_t element_index = linear_index / num_face_points;
+          if (external_face_mask(element_index) == 0) {
+            return;
+          }
 
-            const size_t local_volume_index_in_element =
-                local_face_to_volume_index(face_index_on_face);
-            const size_t local_volume_index =
-                element_point_offsets_device(element_index) +
-                local_volume_index_in_element;
+          const size_t local_volume_index_in_element =
+              local_face_to_volume_index(face_index_on_face);
+          const size_t local_volume_index =
+              element_point_offsets_device(element_index) +
+              local_volume_index_in_element;
 
-            tnsr::i<double, volume_dim, Frame::Inertial>
-                unnormalized_normal_covector{};
-            double normal_magnitude_squared = 0.0;
-            for (size_t d = 0; d < volume_dim; ++d) {
-              const double component =
-                  outward * inverse_jacobian(element_index,
-                                             local_volume_index_in_element,
-                                             sliced_dim * volume_dim + d);
-              unnormalized_normal_covector.get(d) = component;
-              normal_magnitude_squared += component * component;
-            }
-            const double normal_magnitude = sqrt(normal_magnitude_squared);
+          tnsr::i<double, volume_dim, Frame::Inertial>
+              unnormalized_normal_covector{};
+          double normal_magnitude_squared = 0.0;
+          for (size_t d = 0; d < volume_dim; ++d) {
+            const double component =
+                outward * inverse_jacobian(element_index,
+                                           local_volume_index_in_element,
+                                           sliced_dim * volume_dim + d);
+            unnormalized_normal_covector.get(d) = component;
+            normal_magnitude_squared += component * component;
+          }
+          const double normal_magnitude = sqrt(normal_magnitude_squared);
 
-            tnsr::aa<double, volume_dim, Frame::Inertial>
-                local_v_spacetime_metric{};
-            tnsr::iaa<double, volume_dim, Frame::Inertial> local_v_zero{};
-            tnsr::aa<double, volume_dim, Frame::Inertial> local_v_plus{};
-            tnsr::aa<double, volume_dim, Frame::Inertial> local_v_minus{};
-            tnsr::iaa<double, volume_dim, Frame::Inertial>
-                local_normal_times_v_plus{};
-            tnsr::iaa<double, volume_dim, Frame::Inertial>
-                local_normal_times_v_minus{};
-            tnsr::aa<double, volume_dim, Frame::Inertial>
-                local_gamma2_v_spacetime_metric{};
-            tnsr::a<double, volume_dim, Frame::Inertial> local_char_speeds{};
-            load_aa_from_packaged_data(make_not_null(&local_v_spacetime_metric),
-                                       packaged_face_data_view, linear_index,
-                                       offset_v_spacetime_metric);
-            load_iaa_from_packaged_data(make_not_null(&local_v_zero),
-                                        packaged_face_data_view, linear_index,
-                                        offset_v_zero);
-            load_aa_from_packaged_data(make_not_null(&local_v_plus),
-                                       packaged_face_data_view, linear_index,
-                                       offset_v_plus);
-            load_aa_from_packaged_data(make_not_null(&local_v_minus),
-                                       packaged_face_data_view, linear_index,
-                                       offset_v_minus);
-            load_iaa_from_packaged_data(
-                make_not_null(&local_normal_times_v_plus),
-                packaged_face_data_view, linear_index,
-                offset_normal_times_v_plus);
-            load_iaa_from_packaged_data(
-                make_not_null(&local_normal_times_v_minus),
-                packaged_face_data_view, linear_index,
-                offset_normal_times_v_minus);
-            load_aa_from_packaged_data(
-                make_not_null(&local_gamma2_v_spacetime_metric),
-                packaged_face_data_view, linear_index,
-                offset_gamma2_v_spacetime_metric);
-            load_a_from_packaged_data(make_not_null(&local_char_speeds),
+          tnsr::aa<double, volume_dim, Frame::Inertial>
+              local_v_spacetime_metric{};
+          tnsr::iaa<double, volume_dim, Frame::Inertial> local_v_zero{};
+          tnsr::aa<double, volume_dim, Frame::Inertial> local_v_plus{};
+          tnsr::aa<double, volume_dim, Frame::Inertial> local_v_minus{};
+          tnsr::iaa<double, volume_dim, Frame::Inertial>
+              local_normal_times_v_plus{};
+          tnsr::iaa<double, volume_dim, Frame::Inertial>
+              local_normal_times_v_minus{};
+          tnsr::aa<double, volume_dim, Frame::Inertial>
+              local_gamma2_v_spacetime_metric{};
+          tnsr::a<double, volume_dim, Frame::Inertial> local_char_speeds{};
+          load_aa_from_packaged_data(make_not_null(&local_v_spacetime_metric),
+                                     packaged_face_data_view, linear_index,
+                                     offset_v_spacetime_metric);
+          load_iaa_from_packaged_data(make_not_null(&local_v_zero),
                                       packaged_face_data_view, linear_index,
-                                      offset_char_speeds);
+                                      offset_v_zero);
+          load_aa_from_packaged_data(make_not_null(&local_v_plus),
+                                     packaged_face_data_view, linear_index,
+                                     offset_v_plus);
+          load_aa_from_packaged_data(make_not_null(&local_v_minus),
+                                     packaged_face_data_view, linear_index,
+                                     offset_v_minus);
+          load_iaa_from_packaged_data(make_not_null(&local_normal_times_v_plus),
+                                      packaged_face_data_view, linear_index,
+                                      offset_normal_times_v_plus);
+          load_iaa_from_packaged_data(
+              make_not_null(&local_normal_times_v_minus),
+              packaged_face_data_view, linear_index,
+              offset_normal_times_v_minus);
+          load_aa_from_packaged_data(
+              make_not_null(&local_gamma2_v_spacetime_metric),
+              packaged_face_data_view, linear_index,
+              offset_gamma2_v_spacetime_metric);
+          load_a_from_packaged_data(make_not_null(&local_char_speeds),
+                                    packaged_face_data_view, linear_index,
+                                    offset_char_speeds);
 
-            tnsr::I<double, volume_dim, Frame::Inertial> inertial_coords{};
-            for (size_t d = 0; d < volume_dim; ++d) {
-              inertial_coords.get(d) =
-                  inertial_coordinates.get(d)(local_volume_index);
-            }
+          tnsr::I<double, volume_dim, Frame::Inertial> inertial_coords{};
+          for (size_t d = 0; d < volume_dim; ++d) {
+            inertial_coords.get(d) =
+                inertial_coordinates.get(d)(local_volume_index);
+          }
 
-            tnsr::aa<double, volume_dim, Frame::Inertial>
-                exterior_spacetime_metric{};
-            tnsr::aa<double, volume_dim, Frame::Inertial> exterior_pi{};
-            tnsr::iaa<double, volume_dim, Frame::Inertial> exterior_phi{};
-            compute_hardcoded_schwarzschild_gh_fields(
-                make_not_null(&exterior_spacetime_metric),
-                make_not_null(&exterior_pi), make_not_null(&exterior_phi),
-                inertial_coords);
+          tnsr::aa<double, volume_dim, Frame::Inertial>
+              exterior_spacetime_metric{};
+          tnsr::aa<double, volume_dim, Frame::Inertial> exterior_pi{};
+          tnsr::iaa<double, volume_dim, Frame::Inertial> exterior_phi{};
+          compute_hardcoded_schwarzschild_gh_fields(
+              make_not_null(&exterior_spacetime_metric),
+              make_not_null(&exterior_pi), make_not_null(&exterior_phi),
+              inertial_coords);
 
-            tnsr::i<double, volume_dim, Frame::Inertial>
-                exterior_unnormalized_normal_covector{};
-            for (size_t d = 0; d < volume_dim; ++d) {
-              exterior_unnormalized_normal_covector.get(d) =
-                  -unnormalized_normal_covector.get(d);
-            }
+          tnsr::i<double, volume_dim, Frame::Inertial>
+              exterior_unnormalized_normal_covector{};
+          for (size_t d = 0; d < volume_dim; ++d) {
+            exterior_unnormalized_normal_covector.get(d) =
+                -unnormalized_normal_covector.get(d);
+          }
 
-            const auto gamma1_at_s = make_at_index(gamma1, local_volume_index);
-            const auto gamma2_at_s = make_at_index(gamma2, local_volume_index);
-            tnsr::aa<double, volume_dim, Frame::Inertial>
-                remote_v_spacetime_metric{};
-            tnsr::iaa<double, volume_dim, Frame::Inertial> remote_v_zero{};
-            tnsr::aa<double, volume_dim, Frame::Inertial> remote_v_plus{};
-            tnsr::aa<double, volume_dim, Frame::Inertial> remote_v_minus{};
-            tnsr::iaa<double, volume_dim, Frame::Inertial>
-                remote_normal_times_v_plus{};
-            tnsr::iaa<double, volume_dim, Frame::Inertial>
-                remote_normal_times_v_minus{};
-            tnsr::aa<double, volume_dim, Frame::Inertial>
-                remote_gamma2_v_spacetime_metric{};
-            tnsr::a<double, volume_dim, Frame::Inertial> remote_char_speeds{};
-            compute_packaged_boundary_data_at_point(
-                make_not_null(&remote_v_spacetime_metric),
-                make_not_null(&remote_v_zero), make_not_null(&remote_v_plus),
-                make_not_null(&remote_v_minus),
-                make_not_null(&remote_normal_times_v_plus),
-                make_not_null(&remote_normal_times_v_minus),
-                make_not_null(&remote_gamma2_v_spacetime_metric),
-                make_not_null(&remote_char_speeds), exterior_spacetime_metric,
-                exterior_pi, exterior_phi, get(gamma1_at_s), get(gamma2_at_s),
-                exterior_unnormalized_normal_covector);
+          const auto gamma1_at_s = make_at_index(gamma1, local_volume_index);
+          const auto gamma2_at_s = make_at_index(gamma2, local_volume_index);
+          tnsr::aa<double, volume_dim, Frame::Inertial>
+              remote_v_spacetime_metric{};
+          tnsr::iaa<double, volume_dim, Frame::Inertial> remote_v_zero{};
+          tnsr::aa<double, volume_dim, Frame::Inertial> remote_v_plus{};
+          tnsr::aa<double, volume_dim, Frame::Inertial> remote_v_minus{};
+          tnsr::iaa<double, volume_dim, Frame::Inertial>
+              remote_normal_times_v_plus{};
+          tnsr::iaa<double, volume_dim, Frame::Inertial>
+              remote_normal_times_v_minus{};
+          tnsr::aa<double, volume_dim, Frame::Inertial>
+              remote_gamma2_v_spacetime_metric{};
+          tnsr::a<double, volume_dim, Frame::Inertial> remote_char_speeds{};
+          detail::compute_packaged_boundary_data_at_point<volume_dim>(
+              make_not_null(&remote_v_spacetime_metric),
+              make_not_null(&remote_v_zero), make_not_null(&remote_v_plus),
+              make_not_null(&remote_v_minus),
+              make_not_null(&remote_normal_times_v_plus),
+              make_not_null(&remote_normal_times_v_minus),
+              make_not_null(&remote_gamma2_v_spacetime_metric),
+              make_not_null(&remote_char_speeds), exterior_spacetime_metric,
+              exterior_pi, exterior_phi, get(gamma1_at_s), get(gamma2_at_s),
+              exterior_unnormalized_normal_covector);
 
-            tnsr::aa<double, volume_dim, Frame::Inertial>
-                dt_spacetime_metric_correction{};
-            tnsr::aa<double, volume_dim, Frame::Inertial> dt_pi_correction{};
-            tnsr::iaa<double, volume_dim, Frame::Inertial> dt_phi_correction{};
-            compute_boundary_terms_at_point(
-                make_not_null(&dt_spacetime_metric_correction),
-                make_not_null(&dt_pi_correction),
-                make_not_null(&dt_phi_correction), local_v_spacetime_metric,
-                local_v_zero, local_v_plus, local_v_minus,
-                local_normal_times_v_plus, local_normal_times_v_minus,
-                local_gamma2_v_spacetime_metric, local_char_speeds,
-                remote_v_spacetime_metric, remote_v_zero, remote_v_plus,
-                remote_v_minus, remote_normal_times_v_plus,
-                remote_normal_times_v_minus, remote_gamma2_v_spacetime_metric,
-                remote_char_speeds);
+          tnsr::aa<double, volume_dim, Frame::Inertial>
+              dt_spacetime_metric_correction{};
+          tnsr::aa<double, volume_dim, Frame::Inertial> dt_pi_correction{};
+          tnsr::iaa<double, volume_dim, Frame::Inertial> dt_phi_correction{};
+          detail::compute_boundary_terms_at_point<volume_dim>(
+              make_not_null(&dt_spacetime_metric_correction),
+              make_not_null(&dt_pi_correction),
+              make_not_null(&dt_phi_correction), local_v_spacetime_metric,
+              local_v_zero, local_v_plus, local_v_minus,
+              local_normal_times_v_plus, local_normal_times_v_minus,
+              local_gamma2_v_spacetime_metric, local_char_speeds,
+              remote_v_spacetime_metric, remote_v_zero, remote_v_plus,
+              remote_v_minus, remote_normal_times_v_plus,
+              remote_normal_times_v_minus, remote_gamma2_v_spacetime_metric,
+              remote_char_speeds);
 
-            const double lifted_factor = lift_prefactor * normal_magnitude;
-            for (size_t a = 0; a < volume_dim + 1; ++a) {
-              for (size_t b = a; b < volume_dim + 1; ++b) {
-                dt_spacetime_metric.get(a, b)[local_volume_index] +=
-                    lifted_factor * dt_spacetime_metric_correction.get(a, b);
-                dt_pi.get(a, b)[local_volume_index] +=
-                    lifted_factor * dt_pi_correction.get(a, b);
-                for (size_t d = 0; d < volume_dim; ++d) {
-                  dt_phi.get(d, a, b)[local_volume_index] +=
-                      lifted_factor * dt_phi_correction.get(d, a, b);
-                }
+          const double lifted_factor = lift_prefactor * normal_magnitude;
+          for (size_t a = 0; a < volume_dim + 1; ++a) {
+            for (size_t b = a; b < volume_dim + 1; ++b) {
+              dt_spacetime_metric.get(a, b)[local_volume_index] +=
+                  lifted_factor * dt_spacetime_metric_correction.get(a, b);
+              dt_pi.get(a, b)[local_volume_index] +=
+                  lifted_factor * dt_pi_correction.get(a, b);
+              for (size_t d = 0; d < volume_dim; ++d) {
+                dt_phi.get(d, a, b)[local_volume_index] +=
+                    lifted_factor * dt_phi_correction.get(d, a, b);
               }
             }
-          });
-    }
+          }
+        });
   }
 }
 

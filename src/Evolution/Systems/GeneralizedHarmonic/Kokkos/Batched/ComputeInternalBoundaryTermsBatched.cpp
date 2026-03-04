@@ -11,6 +11,7 @@
 #include "DataStructures/Variables.hpp"
 #include "DataStructures/VariablesKokkos.hpp"
 #include "Domain/Structure/Direction.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/BoundaryCorrectionHelpers.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/Spectral/Projection.hpp"
@@ -222,10 +223,6 @@ void project_from_mortar_dt_data_batched(
       matrix_dim_0, matrix_dim_1, projected_dim_0_workspace);
 }
 
-KOKKOS_INLINE_FUNCTION double step_function_double(const double value) {
-  return value < 0.0 ? 0.0 : 1.0;
-}
-
 KOKKOS_INLINE_FUNCTION void load_aa_from_packaged_data(
     const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*> tensor,
     const package_storage_type& packaged_data_view, const size_t point,
@@ -268,90 +265,6 @@ KOKKOS_INLINE_FUNCTION void load_a_from_packaged_data(
   static_for<volume_dim + 1>([&](auto a_c) {
     constexpr int a = (int)a_c;
     get<a>(*tensor) = packaged_data_view(point, component_offset + a);
-  });
-}
-
-KOKKOS_INLINE_FUNCTION void compute_boundary_terms_at_point(
-    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*>
-        dt_spacetime_metric,
-    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*> dt_pi,
-    const gsl::not_null<tnsr::iaa<double, volume_dim, Frame::Inertial>*> dt_phi,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>&
-        local_v_spacetime_metric,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>& local_v_zero,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& local_v_plus,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& local_v_minus,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>&
-        local_normal_times_v_plus,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>&
-        local_normal_times_v_minus,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>&
-        local_gamma2_v_spacetime_metric,
-    const tnsr::a<double, volume_dim, Frame::Inertial>& local_char_speeds,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>&
-        remote_v_spacetime_metric,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>& remote_v_zero,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& remote_v_plus,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& remote_v_minus,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>&
-        remote_normal_times_v_plus,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>&
-        remote_normal_times_v_minus,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>&
-        remote_gamma2_v_spacetime_metric,
-    const tnsr::a<double, volume_dim, Frame::Inertial>& remote_char_speeds) {
-  const double weighted_lambda_spacetime_metric_int =
-      step_function_double(-local_char_speeds.get(0));
-  const double weighted_lambda_spacetime_metric_ext =
-      -step_function_double(remote_char_speeds.get(0));
-  const double weighted_lambda_zero_int =
-      step_function_double(-local_char_speeds.get(1));
-  const double weighted_lambda_zero_ext =
-      -step_function_double(remote_char_speeds.get(1));
-  const double weighted_lambda_plus_int =
-      step_function_double(-local_char_speeds.get(2));
-  const double weighted_lambda_plus_ext =
-      -step_function_double(remote_char_speeds.get(2));
-  const double weighted_lambda_minus_int =
-      step_function_double(-local_char_speeds.get(3));
-  const double weighted_lambda_minus_ext =
-      -step_function_double(remote_char_speeds.get(3));
-
-  static_for<volume_dim + 1>([&](auto a_c) {
-    constexpr int a = (int)a_c;
-    static_for<volume_dim + 1 - a>([&](auto off_c) {
-      constexpr int b = a + (int)off_c;
-      get<a, b>(*dt_spacetime_metric) =
-          weighted_lambda_spacetime_metric_ext *
-              get<a, b>(remote_v_spacetime_metric) -
-          weighted_lambda_spacetime_metric_int *
-              get<a, b>(local_v_spacetime_metric);
-
-      get<a, b>(*dt_pi) =
-          0.5 * (weighted_lambda_plus_ext * get<a, b>(remote_v_plus) +
-                 weighted_lambda_minus_ext * get<a, b>(remote_v_minus)) +
-          weighted_lambda_spacetime_metric_ext *
-              get<a, b>(remote_gamma2_v_spacetime_metric) -
-          0.5 * (weighted_lambda_plus_int * get<a, b>(local_v_plus) +
-                 weighted_lambda_minus_int * get<a, b>(local_v_minus)) -
-          weighted_lambda_spacetime_metric_int *
-              get<a, b>(local_gamma2_v_spacetime_metric);
-
-      static_for<volume_dim>([&](auto d_c) {
-        constexpr int d = (int)d_c;
-        get<d, a, b>(*dt_phi) =
-            -0.5 * (weighted_lambda_minus_ext *
-                        get<d, a, b>(remote_normal_times_v_minus) -
-                    weighted_lambda_plus_ext *
-                        get<d, a, b>(remote_normal_times_v_plus)) +
-            weighted_lambda_zero_ext * get<d, a, b>(remote_v_zero) -
-            0.5 * (weighted_lambda_plus_int *
-                       get<d, a, b>(local_normal_times_v_plus) -
-                   weighted_lambda_minus_int *
-                       get<d, a, b>(local_normal_times_v_minus)) -
-            weighted_lambda_zero_int * get<d, a, b>(local_v_zero);
-      });
-    });
   });
 }
 
@@ -598,7 +511,7 @@ void ComputeInternalBoundaryTermsBatched::apply(
                   dt_spacetime_metric_at_face{};
               tnsr::aa<double, volume_dim, Frame::Inertial> dt_pi_at_face{};
               tnsr::iaa<double, volume_dim, Frame::Inertial> dt_phi_at_face{};
-              compute_boundary_terms_at_point(
+              detail::compute_boundary_terms_at_point<volume_dim>(
                   make_not_null(&dt_spacetime_metric_at_face),
                   make_not_null(&dt_pi_at_face), make_not_null(&dt_phi_at_face),
                   local_v_spacetime_metric, local_v_zero, local_v_plus,
@@ -850,7 +763,7 @@ void ComputeInternalBoundaryTermsBatched::apply(
                   dt_spacetime_metric_at_mortar{};
               tnsr::aa<double, volume_dim, Frame::Inertial> dt_pi_at_mortar{};
               tnsr::iaa<double, volume_dim, Frame::Inertial> dt_phi_at_mortar{};
-              compute_boundary_terms_at_point(
+              detail::compute_boundary_terms_at_point<volume_dim>(
                   make_not_null(&dt_spacetime_metric_at_mortar),
                   make_not_null(&dt_pi_at_mortar),
                   make_not_null(&dt_phi_at_mortar), local_v_spacetime_metric,
