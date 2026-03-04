@@ -11,6 +11,7 @@
 #include "DataStructures/Tensor/AtIndex.hpp"
 #include "DataStructures/Variables.hpp"
 #include "Domain/Structure/Direction.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/BoundaryCorrectionHelpers.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
@@ -38,157 +39,6 @@ double outward_sign(const Side side) {
 constexpr size_t local_face_index(const size_t sliced_dim,
                                   const size_t side_i) {
   return 2 * sliced_dim + side_i;
-}
-
-KOKKOS_INLINE_FUNCTION void inverse_spatial_metric_and_det(
-    const gsl::not_null<tnsr::II<double, volume_dim, Frame::Inertial>*>
-        inverse_spatial_metric,
-    const gsl::not_null<double*> det_spatial_metric,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& spacetime_metric) {
-  const double g00 = spacetime_metric.get(1, 1);
-  const double g01 = spacetime_metric.get(1, 2);
-  const double g02 = spacetime_metric.get(1, 3);
-  const double g11 = spacetime_metric.get(2, 2);
-  const double g12 = spacetime_metric.get(2, 3);
-  const double g22 = spacetime_metric.get(3, 3);
-
-  *det_spatial_metric = g00 * (g11 * g22 - g12 * g12) -
-                        g01 * (g01 * g22 - g12 * g02) +
-                        g02 * (g01 * g12 - g11 * g02);
-  const double inv_det = 1.0 / *det_spatial_metric;
-
-  inverse_spatial_metric->get(0, 0) = (g11 * g22 - g12 * g12) * inv_det;
-  inverse_spatial_metric->get(0, 1) = (g02 * g12 - g01 * g22) * inv_det;
-  inverse_spatial_metric->get(0, 2) = (g01 * g12 - g02 * g11) * inv_det;
-  inverse_spatial_metric->get(1, 1) = (g00 * g22 - g02 * g02) * inv_det;
-  inverse_spatial_metric->get(1, 2) = (g02 * g01 - g00 * g12) * inv_det;
-  inverse_spatial_metric->get(2, 2) = (g00 * g11 - g01 * g01) * inv_det;
-}
-
-KOKKOS_INLINE_FUNCTION void compute_packaged_boundary_data_at_point(
-    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*>
-        char_speed_v_spacetime_metric,
-    const gsl::not_null<tnsr::iaa<double, volume_dim, Frame::Inertial>*>
-        char_speed_v_zero,
-    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*>
-        char_speed_v_plus,
-    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*>
-        char_speed_v_minus,
-    const gsl::not_null<tnsr::iaa<double, volume_dim, Frame::Inertial>*>
-        char_speed_n_times_v_plus,
-    const gsl::not_null<tnsr::iaa<double, volume_dim, Frame::Inertial>*>
-        char_speed_n_times_v_minus,
-    const gsl::not_null<tnsr::aa<double, volume_dim, Frame::Inertial>*>
-        char_speed_gamma2_v_spacetime_metric,
-    const gsl::not_null<tnsr::a<double, volume_dim, Frame::Inertial>*>
-        char_speeds,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& spacetime_metric,
-    const tnsr::aa<double, volume_dim, Frame::Inertial>& pi,
-    const tnsr::iaa<double, volume_dim, Frame::Inertial>& phi,
-    const double gamma1, const double gamma2,
-    const tnsr::i<double, volume_dim, Frame::Inertial>&
-        unnormalized_normal_covector) {
-  tnsr::II<double, volume_dim, Frame::Inertial> inverse_spatial_metric{};
-  double det_spatial_metric = 0.0;
-  inverse_spatial_metric_and_det(make_not_null(&inverse_spatial_metric),
-                                 make_not_null(&det_spatial_metric),
-                                 spacetime_metric);
-  (void)det_spatial_metric;
-
-  tnsr::I<double, volume_dim, Frame::Inertial> shift{};
-  for (size_t i = 0; i < volume_dim; ++i) {
-    shift.get(i) = 0.0;
-    for (size_t j = 0; j < volume_dim; ++j) {
-      shift.get(i) +=
-          inverse_spatial_metric.get(i, j) * spacetime_metric.get(0, j + 1);
-    }
-  }
-  double lapse_squared = -spacetime_metric.get(0, 0);
-  for (size_t i = 0; i < volume_dim; ++i) {
-    lapse_squared += shift.get(i) * spacetime_metric.get(0, i + 1);
-  }
-  const double lapse = sqrt(lapse_squared);
-
-  tnsr::I<double, volume_dim, Frame::Inertial> normal_vector{};
-  double normal_magnitude_squared = 0.0;
-  for (size_t i = 0; i < volume_dim; ++i) {
-    normal_vector.get(i) = 0.0;
-    for (size_t j = 0; j < volume_dim; ++j) {
-      normal_vector.get(i) += inverse_spatial_metric.get(i, j) *
-                              unnormalized_normal_covector.get(j);
-    }
-    normal_magnitude_squared +=
-        normal_vector.get(i) * unnormalized_normal_covector.get(i);
-  }
-  const double one_over_normal_magnitude = 1.0 / sqrt(normal_magnitude_squared);
-  tnsr::i<double, volume_dim, Frame::Inertial> normal_covector{};
-  for (size_t i = 0; i < volume_dim; ++i) {
-    normal_vector.get(i) *= one_over_normal_magnitude;
-    normal_covector.get(i) =
-        unnormalized_normal_covector.get(i) * one_over_normal_magnitude;
-  }
-
-  double shift_dot_normal = 0.0;
-  for (size_t i = 0; i < volume_dim; ++i) {
-    shift_dot_normal += shift.get(i) * normal_covector.get(i);
-  }
-  shift_dot_normal *= -1.0;
-
-  char_speeds->get(0) = (1.0 + gamma1) * shift_dot_normal;
-  char_speeds->get(1) = shift_dot_normal;
-  char_speeds->get(2) = lapse + shift_dot_normal;
-  char_speeds->get(3) = -lapse + shift_dot_normal;
-
-  for (size_t a = 0; a < volume_dim + 1; ++a) {
-    for (size_t b = a; b < volume_dim + 1; ++b) {
-      char_speed_gamma2_v_spacetime_metric->get(a, b) =
-          gamma2 * spacetime_metric.get(a, b);
-    }
-  }
-
-  tnsr::aa<double, volume_dim, Frame::Inertial> normal_dot_phi{};
-  for (size_t a = 0; a < volume_dim + 1; ++a) {
-    for (size_t b = a; b < volume_dim + 1; ++b) {
-      normal_dot_phi.get(a, b) = normal_vector.get(0) * phi.get(0, a, b);
-      for (size_t i = 1; i < volume_dim; ++i) {
-        normal_dot_phi.get(a, b) += normal_vector.get(i) * phi.get(i, a, b);
-      }
-    }
-  }
-
-  for (size_t a = 0; a < volume_dim + 1; ++a) {
-    for (size_t b = a; b < volume_dim + 1; ++b) {
-      char_speed_v_plus->get(a, b) =
-          char_speeds->get(2) *
-          (pi.get(a, b) + normal_dot_phi.get(a, b) -
-           char_speed_gamma2_v_spacetime_metric->get(a, b));
-      char_speed_v_minus->get(a, b) =
-          char_speeds->get(3) *
-          (pi.get(a, b) - normal_dot_phi.get(a, b) -
-           char_speed_gamma2_v_spacetime_metric->get(a, b));
-
-      for (size_t i = 0; i < volume_dim; ++i) {
-        char_speed_v_zero->get(i, a, b) =
-            char_speeds->get(1) *
-            (phi.get(i, a, b) -
-             normal_covector.get(i) * normal_dot_phi.get(a, b));
-      }
-    }
-  }
-
-  for (size_t a = 0; a < volume_dim + 1; ++a) {
-    for (size_t b = a; b < volume_dim + 1; ++b) {
-      for (size_t i = 0; i < volume_dim; ++i) {
-        char_speed_n_times_v_plus->get(i, a, b) =
-            char_speed_v_plus->get(a, b) * normal_covector.get(i);
-        char_speed_n_times_v_minus->get(i, a, b) =
-            char_speed_v_minus->get(a, b) * normal_covector.get(i);
-      }
-      char_speed_v_spacetime_metric->get(a, b) =
-          char_speeds->get(0) * spacetime_metric.get(a, b);
-      char_speed_gamma2_v_spacetime_metric->get(a, b) *= char_speeds->get(0);
-    }
-  }
 }
 
 }  // namespace
@@ -289,7 +139,7 @@ void PackageLocalFacesBatched::apply(
                 gamma2_v_spacetime_metric{};
             tnsr::a<double, volume_dim, Frame::Inertial> char_speeds{};
 
-            compute_packaged_boundary_data_at_point(
+            detail::compute_packaged_boundary_data_at_point<volume_dim>(
                 make_not_null(&v_spacetime_metric), make_not_null(&v_zero),
                 make_not_null(&v_plus), make_not_null(&v_minus),
                 make_not_null(&normal_times_v_plus),
