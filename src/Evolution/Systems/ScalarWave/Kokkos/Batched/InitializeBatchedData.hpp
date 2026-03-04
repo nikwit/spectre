@@ -109,11 +109,20 @@ struct InitializeBatchedData {
         device_step_start_type(packed_topology->total_points);
     *device_constraint_gamma2 = device_constraint_gamma2_type(
         "BatchedConstraintGamma2", packed_topology->total_points);
+    const size_t num_substeps = TimeSteppers::history_max_substeps;
+    const size_t num_points = packed_topology->total_points;
+    const size_t num_components =
+        device_dt_variables_type::number_of_independent_components;
+    const size_t point_stride = 1;
+    const size_t component_stride = num_points > 0 ? num_points : 1;
+    const size_t substep_stride =
+        component_stride * (num_components > 0 ? num_components : 1);
+    const ::Kokkos::LayoutStride derivative_history_layout(
+        num_substeps, substep_stride, num_points, point_stride, num_components,
+        component_stride);
     packed_evolution_state->device_derivative_history =
-        device_derivative_history_type(
-            "BatchedDerivativeHistory", TimeSteppers::history_max_substeps,
-            packed_topology->total_points,
-            device_dt_variables_type::number_of_independent_components);
+        device_derivative_history_type("BatchedDerivativeHistory",
+                                       derivative_history_layout);
     packed_geometry->element_inverse_jacobian_device =
         typename packed_geometry_type::device_inverse_jacobian_type(
             "BatchedElementInverseJacobian",

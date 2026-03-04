@@ -50,11 +50,20 @@ struct InitializeKokkosTimeStepperState {
     *device_dt = copy_to_device(host_dt_vars);
     *device_step_start = copy_to_device(host_vars);
 
+    const size_t num_substeps = TimeSteppers::history_max_substeps;
+    const size_t num_points = device_vars->number_of_grid_points();
+    const size_t num_components =
+        device_dt_variables_tag::type::number_of_independent_components;
+    const size_t point_stride = 1;
+    const size_t component_stride = num_points > 0 ? num_points : 1;
+    const size_t substep_stride =
+        component_stride * (num_components > 0 ? num_components : 1);
+    const ::Kokkos::LayoutStride derivative_history_layout(
+        num_substeps, substep_stride, num_points, point_stride, num_components,
+        component_stride);
     *device_derivative_history = typename device_derivative_history_tag::type(
-        "KokkosDerivativeHistory", TimeSteppers::history_max_substeps,
-        device_vars->number_of_grid_points(),
-        device_dt_variables_tag::type::number_of_independent_components);
-    if (device_vars->number_of_grid_points() > 0) {
+        "KokkosDerivativeHistory", derivative_history_layout);
+    if (num_points > 0) {
       ::Kokkos::deep_copy(*device_derivative_history, 0.0);
     }
   }
