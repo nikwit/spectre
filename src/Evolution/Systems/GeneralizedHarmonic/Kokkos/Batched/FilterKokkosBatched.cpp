@@ -18,14 +18,14 @@ namespace gh::Actions {
 
 namespace detail {
 
-using MatrixViewRightLayout =
-    Kokkos::View<const double**, Kokkos::LayoutRight,
+using MatrixViewLeftLayout =
+    Kokkos::View<const double**, Kokkos::LayoutLeft,
                  typename Kokkos::DefaultExecutionSpace::memory_space,
                  Kokkos::MemoryTraits<Kokkos::RandomAccess>>;
 
-MatrixViewRightLayout matrix_on_device(const Matrix& matrix,
-                                       const char* const label) {
-  Kokkos::View<double**, Kokkos::LayoutRight, Kokkos::HostSpace>
+MatrixViewLeftLayout matrix_on_device(const Matrix& matrix,
+                                      const char* const label) {
+  Kokkos::View<double**, Kokkos::LayoutLeft, Kokkos::HostSpace>
       host_matrix_view{"GhFilterKokkosBatchedHostMatrix", matrix.rows(),
                        matrix.columns()};
   for (size_t i = 0; i < matrix.rows(); ++i) {
@@ -33,14 +33,14 @@ MatrixViewRightLayout matrix_on_device(const Matrix& matrix,
       host_matrix_view(i, j) = matrix(i, j);
     }
   }
-  Kokkos::View<double**, Kokkos::LayoutRight> device_matrix_view{
+  Kokkos::View<double**, Kokkos::LayoutLeft> device_matrix_view{
       label, matrix.rows(), matrix.columns()};
   Kokkos::deep_copy(device_matrix_view, host_matrix_view);
-  return MatrixViewRightLayout{device_matrix_view};
+  return MatrixViewLeftLayout{device_matrix_view};
 }
 
 template <typename FilterType>
-const MatrixViewRightLayout& filter_matrix_on_device_batched(
+const MatrixViewLeftLayout& filter_matrix_on_device_batched(
     const FilterType& filter_helper, const Mesh<1>& mesh) {
   const static FilterType cached_filter = filter_helper;
   ASSERT(cached_filter == filter_helper,
@@ -69,9 +69,9 @@ const MatrixViewRightLayout& filter_matrix_on_device_batched(
 
 void apply_filter_matrices_on_device_batched(
     const Kokkos::View<double**>& vars_view, const Mesh<3>& mesh,
-    const MatrixViewRightLayout& matrix_dim_0,
-    const MatrixViewRightLayout& matrix_dim_1,
-    const MatrixViewRightLayout& matrix_dim_2) {
+    const MatrixViewLeftLayout& matrix_dim_0,
+    const MatrixViewLeftLayout& matrix_dim_1,
+    const MatrixViewLeftLayout& matrix_dim_2) {
   const auto extents = mesh.extents();
   const size_t n0 = extents[0];
   const size_t n1 = extents[1];
@@ -101,12 +101,15 @@ void apply_filter_matrices_on_device_batched(
   const int num_components_int = static_cast<int>(num_components);
   const size_t bytes_per_team = 2 * static_cast<size_t>(p) * sizeof(double);
 
-  team_policy policy(static_cast<int>(num_elements), Kokkos::AUTO);
+  team_policy policy(static_cast<int>(num_elements * num_components),
+                     Kokkos::AUTO());
   Kokkos::parallel_for(
       "GhFilterKokkosBatchedFusedPerElement",
       policy.set_scratch_size(0, Kokkos::PerTeam(bytes_per_team)),
       KOKKOS_LAMBDA(const member_type& team) {
-        const int element_index = team.league_rank();
+        const int work_item_index = team.league_rank();
+        const int element_index = work_item_index / num_components_int;
+        const int component = work_item_index % num_components_int;
         const size_t element_base =
             static_cast<size_t>(element_index) * static_cast<size_t>(p);
 
@@ -115,68 +118,65 @@ void apply_filter_matrices_on_device_batched(
         double* buffer_1 = static_cast<double*>(team.team_shmem().get_shmem(
             sizeof(double) * static_cast<size_t>(p)));
 
-        for (int component = 0; component < num_components_int; ++component) {
-          Kokkos::parallel_for(
-              Kokkos::TeamThreadRange(team, p), [&](const int local_point) {
-                const size_t point_index =
-                    element_base + static_cast<size_t>(local_point);
-                buffer_0[local_point] = vars_view(point_index, component);
-              });
-          team.team_barrier();
+        Kokkos::parallel_for(
+            Kokkos::TeamThreadRange(team, p), [&](const int local_point) {
+              const size_t point_index =
+                  element_base + static_cast<size_t>(local_point);
+              buffer_0[local_point] = vars_view(point_index, component);
+            });
+        team.team_barrier();
 
-          Kokkos::parallel_for(
-              Kokkos::TeamThreadRange(team, p), [&](const int local_point) {
-                int tensor_index = local_point;
-                const int i_0 = tensor_index % n_0;
-                tensor_index /= n_0;
-                const int i_1 = tensor_index % n_1;
-                const int i_2 = tensor_index / n_1;
+        Kokkos::parallel_for(
+            Kokkos::TeamThreadRange(team, p), [&](const int local_point) {
+              int tensor_index = local_point;
+              const int i_0 = tensor_index % n_0;
+              tensor_index /= n_0;
+              const int i_1 = tensor_index % n_1;
+              const int i_2 = tensor_index / n_1;
 
-                double sum = 0.0;
-                const int base = n_0 * (i_1 + n_1 * i_2);
-                for (int k_0 = 0; k_0 < n_0; ++k_0) {
-                  sum += matrix_dim_0(i_0, k_0) * buffer_0[k_0 + base];
-                }
-                buffer_1[local_point] = sum;
-              });
-          team.team_barrier();
+              double sum = 0.0;
+              const int base = n_0 * (i_1 + n_1 * i_2);
+              for (int k_0 = 0; k_0 < n_0; ++k_0) {
+                sum += matrix_dim_0(i_0, k_0) * buffer_0[k_0 + base];
+              }
+              buffer_1[local_point] = sum;
+            });
+        team.team_barrier();
 
-          Kokkos::parallel_for(
-              Kokkos::TeamThreadRange(team, p), [&](const int local_point) {
-                int tensor_index = local_point;
-                const int i_0 = tensor_index % n_0;
-                tensor_index /= n_0;
-                const int i_1 = tensor_index % n_1;
-                const int i_2 = tensor_index / n_1;
+        Kokkos::parallel_for(
+            Kokkos::TeamThreadRange(team, p), [&](const int local_point) {
+              int tensor_index = local_point;
+              const int i_0 = tensor_index % n_0;
+              tensor_index /= n_0;
+              const int i_1 = tensor_index % n_1;
+              const int i_2 = tensor_index / n_1;
 
-                double sum = 0.0;
-                for (int k_1 = 0; k_1 < n_1; ++k_1) {
-                  const int source = i_0 + n_0 * (k_1 + n_1 * i_2);
-                  sum += matrix_dim_1(i_1, k_1) * buffer_1[source];
-                }
-                buffer_0[local_point] = sum;
-              });
-          team.team_barrier();
+              double sum = 0.0;
+              for (int k_1 = 0; k_1 < n_1; ++k_1) {
+                const int source = i_0 + n_0 * (k_1 + n_1 * i_2);
+                sum += matrix_dim_1(i_1, k_1) * buffer_1[source];
+              }
+              buffer_0[local_point] = sum;
+            });
+        team.team_barrier();
 
-          Kokkos::parallel_for(
-              Kokkos::TeamThreadRange(team, p), [&](const int local_point) {
-                int tensor_index = local_point;
-                const int i_0 = tensor_index % n_0;
-                tensor_index /= n_0;
-                const int i_1 = tensor_index % n_1;
-                const int i_2 = tensor_index / n_1;
+        Kokkos::parallel_for(
+            Kokkos::TeamThreadRange(team, p), [&](const int local_point) {
+              int tensor_index = local_point;
+              const int i_0 = tensor_index % n_0;
+              tensor_index /= n_0;
+              const int i_1 = tensor_index % n_1;
+              const int i_2 = tensor_index / n_1;
 
-                double sum = 0.0;
-                for (int k_2 = 0; k_2 < n_2; ++k_2) {
-                  const int source = i_0 + n_0 * (i_1 + n_1 * k_2);
-                  sum += matrix_dim_2(i_2, k_2) * buffer_0[source];
-                }
-                const size_t point_index =
-                    element_base + static_cast<size_t>(local_point);
-                vars_view(point_index, component) = sum;
-              });
-          team.team_barrier();
-        }
+              double sum = 0.0;
+              for (int k_2 = 0; k_2 < n_2; ++k_2) {
+                const int source = i_0 + n_0 * (i_1 + n_1 * k_2);
+                sum += matrix_dim_2(i_2, k_2) * buffer_0[source];
+              }
+              const size_t point_index =
+                  element_base + static_cast<size_t>(local_point);
+              vars_view(point_index, component) = sum;
+            });
       });
 }
 
