@@ -103,16 +103,6 @@ struct SizeOfElementCompute : db::ComputeTag, SizeOfElement<VolumeDim> {
           std::string,
           std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
           functions_of_time) {
-    ASSERT(alg::all_of(mesh.basis(),
-                       [](const auto& basis) {
-                         return basis == Spectral::Basis::Chebyshev or
-                                basis == Spectral::Basis::Legendre or
-                                basis == Spectral::Basis::FiniteDifference;
-                       }),
-           "SizeOfElement is not implemented for elements with basis "
-               << mesh.basis()
-               << ". Check if this basis makes sense for computing the size of "
-                  "an element.");
     *result = size_of_element(logical_to_grid_map, grid_to_inertial_map, time,
                               functions_of_time);
   }
