@@ -4,12 +4,16 @@
 #include "NumericalAlgorithms/SphericalHarmonics/ApplyTensorYlmFilter.hpp"
 
 #include <cstddef>
+#include <fstream>
+#include <iomanip>
+#include <string>
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tags/TempTensor.hpp"
 #include "DataStructures/Tensor/Structure.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/SpherepackCache.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/SpherepackIterator.hpp"
 #include "Parallel/Printf/Printf.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/TMPL.hpp"
@@ -225,6 +229,63 @@ void transform_spatial_tensors_to_different_frame_without_hessians(
 }
 }  // namespace filter_detail
 
+namespace {
+
+void dump_phi_modal_to_file(
+    const std::string& filename, const std::string& header,
+    const tnsr::i<DataVector, 3, Frame::Grid>& phi_modal) {
+  std::ofstream out(filename.c_str());
+  out << std::setprecision(16);
+  out << "# " << header << "\n";
+  for (size_t component = 0; component < 3; ++component) {
+    out << "# component " << component << " size "
+        << phi_modal.get(component).size() << "\n";
+    for (size_t i = 0; i < phi_modal.get(component).size(); ++i) {
+      out << component << " " << i << " " << phi_modal.get(component)[i]
+          << "\n";
+    }
+  }
+}
+
+void dump_sparse_matrix_to_file(const std::string& filename,
+                                const std::string& header,
+                                const SimpleSparseMatrix& matrix,
+                                const size_t rows, const size_t cols) {
+  std::ofstream out(filename.c_str());
+  out << std::setprecision(16);
+  out << "# " << header << "\n";
+  out << "# rows " << rows << " cols " << cols << "\n";
+  for (size_t row = 0; row < rows; ++row) {
+    for (size_t col = 0; col < cols; ++col) {
+      const double value = matrix(row, col);
+      if (value != 0.0) {
+        out << row << " " << col << " " << value << "\n";
+      }
+    }
+  }
+}
+
+template <typename TensorType>
+void apply_minus_one_to_m_sign_convention(
+    const gsl::not_null<TensorType*> tensor, const size_t ell_max,
+    const size_t radial_extents) {
+  // SpEC's TensorYlmComponent storage differs from raw SPHEREPACK storage by a
+  // factor (-1)^m. Apply this conversion in-place for all modal components.
+  ylm::SpherepackIterator iter(ell_max, ell_max, 1, false);
+  for (size_t component = 0; component < tensor->size(); ++component) {
+    auto& data = (*tensor)[component];
+    for (size_t offset = 0; offset < radial_extents; ++offset) {
+      for (iter.reset(); iter; ++iter) {
+        if (iter.m() % 2 == 1) {
+          data[iter() * radial_extents + offset] *= -1.0;
+        }
+      }
+    }
+  }
+}
+
+}  // namespace
+
 void apply_tensor_ylm_filter(
     const gsl::not_null<Variables<filter_detail::gh_spacetime_vars_list>*>
         gh_vars,
@@ -336,6 +397,9 @@ void apply_tensor_ylm_filter(
             temp_spatial_vars.data(),
             gh_spatial_spectral_vars.number_of_grid_points() *
                 num_independent_components);
+        apply_minus_one_to_m_sign_convention(
+            make_not_null(&get<Tag>(gh_spatial_spectral_vars)), ylm.l_max(),
+            radial_extents);
 
         // Delta term
         get<Tag>(dest_tensor) = get<Tag>(gh_spatial_spectral_vars);
@@ -382,6 +446,8 @@ void apply_tensor_ylm_filter(
                 make_not_null(&dest), offset, stride, src, offset, stride);
           }
         }
+        apply_minus_one_to_m_sign_convention(
+            make_not_null(&get<Tag>(dest_tensor)), ylm.l_max(), radial_extents);
         // Copy the result for this tensor back into gh_spatial_spectral_vars.
         get<Tag>(gh_spatial_spectral_vars) = get<Tag>(dest_tensor);
       });
@@ -421,7 +487,6 @@ void apply_tensor_ylm_filter(
     const SimpleSparseMatrix& filter_matrix_scalar,
     const SimpleSparseMatrix& filter_matrix_i, const size_t ell_max,
     const size_t radial_extents) {
-
   const auto& ylm = ylm::get_spherepack_cache(ell_max);
   (void)temp_storage;
   const size_t physical_points = radial_extents * ylm.physical_size();
@@ -456,16 +521,21 @@ void apply_tensor_ylm_filter(
   // dest: sw_spectral_vars
   filter_detail::nodal_to_modal_ylm(make_not_null(&sw_spectral_vars), grid_vars,
                                     ylm, radial_extents);
-  /*Parallel::printf(
-      "CSW TensorYlmFilter debug: Phi modal before filter matrix apply = %s\n",
-      get<CurvedScalarWave::Tags::Phi<3, Frame::Grid>>(sw_spectral_vars));*/
+  static bool wrote_first_phi_modal_dump = false;
+  if (not wrote_first_phi_modal_dump) {
+    dump_phi_modal_to_file(
+        "spectre_phi_modal_before_matrix.dat",
+        "CSW phi modal before matrix apply",
+        get<CurvedScalarWave::Tags::Phi<3, Frame::Grid>>(sw_spectral_vars));
+  }
 
   // 3. Filter
   // src: sw_spectral_vars
   // dest: filtered_spectral_vars
   tmpl::for_each<filter_detail::sw_vars_list<Frame::Grid>>(
       [&sw_spectral_vars, radial_extents, &filter_matrix_i,
-       &filter_matrix_scalar]<class Tag>(const tmpl::type_<Tag> /*meta*/) {
+       &filter_matrix_scalar,
+       &ylm]<class Tag>(const tmpl::type_<Tag> /*meta*/) {
         // Different compilers disagree on whether radial_extents
         // needs to be in the capture list of this lambda, and
         // whether radial_extents is 'used' in the lambda.
@@ -476,7 +546,10 @@ void apply_tensor_ylm_filter(
             Tag::type::structure::size();
         Variables<tmpl::list<Tag>> dest_tensor(
             sw_spectral_vars.number_of_grid_points());
-        // Delta term
+        apply_minus_one_to_m_sign_convention(
+            make_not_null(&get<Tag>(sw_spectral_vars)), ylm.l_max(),
+            radial_extents);
+        // Delta term.
         get<Tag>(dest_tensor) = get<Tag>(sw_spectral_vars);
         // The rest of the terms.
 
@@ -506,13 +579,11 @@ void apply_tensor_ylm_filter(
                 make_not_null(&dest), offset, stride, src, offset, stride);
           }
         }
+        apply_minus_one_to_m_sign_convention(
+            make_not_null(&get<Tag>(dest_tensor)), ylm.l_max(), radial_extents);
         // Copy the result for this tensor back into sw_spectral_vars.
         get<Tag>(sw_spectral_vars) = get<Tag>(dest_tensor);
       });
-  /*Parallel::printf(
-      "CSW TensorYlmFilter debug: Phi modal after filter matrix apply = %s\n",
-      get<CurvedScalarWave::Tags::Phi<3, Frame::Grid>>(sw_spectral_vars));*/
-
   // 4. Modal to nodal transformation.
   // src: filtered_spectral_vars
   // dest: temp_grid_vars

@@ -69,7 +69,7 @@ ConstraintPreservingSphericalRadiation<Dim>::dg_time_derivative(
     const tnsr::i<DataVector, Dim>& logical_dt_phi,
     const tnsr::i<DataVector, Dim>& d_psi, const tnsr::i<DataVector, Dim>& d_pi,
     const tnsr::ij<DataVector, Dim>& d_phi) const {
-  const auto char_speeds =
+  /*const auto char_speeds =
       characteristic_speeds(gamma1, lapse, shift, normal_covector);
   const auto char_fields =
       characteristic_fields(gamma2, logical_dt_psi, logical_dt_pi,
@@ -92,8 +92,8 @@ ConstraintPreservingSphericalRadiation<Dim>::dg_time_derivative(
       dt_v_psi_correction, dt_v_zero_correction, dt_v_plus_correction,
       dt_v_minus_correction, normal_covector);
 
-  return {};
-  /*Variables<tmpl::list<
+  return {};*/
+  Variables<tmpl::list<
       ::Tags::Tempa<0, 3>, ::Tags::TempScalar<1>, ::Tags::TempScalar<2>,
       // Inertial time derivatives
       ::Tags::dt<Tags::Psi>, ::Tags::dt<Tags::Pi>, ::Tags::dt<Tags::Phi<Dim>>>>
@@ -190,8 +190,7 @@ ConstraintPreservingSphericalRadiation<Dim>::dg_time_derivative(
     }
   }
   get(*dt_pi_correction) /= get(lapse);
-  get(*dt_pi_correction) += get(gamma2) * get(*dt_psi_correction) -
-  get(dt_pi);*/
+  get(*dt_pi_correction) += get(gamma2) * get(*dt_psi_correction) - get(dt_pi);
   return {};
 }
 
