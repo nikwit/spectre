@@ -901,10 +901,13 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
     using projectors = tmpl::list<
         Initialization::ProjectTimeStepping<volume_dim>,
         evolution::dg::Initialization::ProjectDomain<volume_dim>,
-        Initialization::ProjectTimeStepperHistory<EvolutionMetavars>,
         ::amr::projectors::ProjectVariables<volume_dim,
                                             typename system::variables_tag>,
-        evolution::dg::Initialization::ProjectMortars<EvolutionMetavars>,
+        evolution::dg::Initialization::ProjectMortars<volume_dim,
+                                                      local_time_stepping>,
+        dg::Actions::InitializeFilters<
+            typename gh_base::FilterEvolvedVariables>,
+        Initialization::ProjectTimeStepperHistory<EvolutionMetavars>,
         evolution::Actions::ProjectRunEventsAndDenseTriggers,
         ::amr::projectors::DefaultInitialize<
             Initialization::Tags::InitialTimeDelta,
