@@ -29,7 +29,7 @@ using puncture_vars =
 
 Worldtube::PunctureField make_schwarzschild_puncture_field(const size_t order) {
   return Worldtube::PunctureField{
-      Worldtube::PunctureField::Schwarzschild{order, 1.}};
+      Worldtube::PunctureField::Schwarzschild{order, 1.2345}};
 }
 
 std::array<tnsr::I<double, 3>, 3> get_circular_orbit_pos_vel_acc(

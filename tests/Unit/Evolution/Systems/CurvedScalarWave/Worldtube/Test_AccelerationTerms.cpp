@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <numbers>
 #include <random>
 
 #include "DataStructures/DataBox/Prefixes.hpp"
@@ -30,15 +31,16 @@ using deriv_psi_tag =
 using puncture_vars =
     Variables<tmpl::list<Tags::Psi, ::Tags::dt<Tags::Psi>, deriv_psi_tag>>;
 
-Worldtube::PunctureField make_schwarzschild_puncture_field(const size_t order) {
+Worldtube::PunctureField make_schwarzschild_puncture_field(
+    const size_t order, const double bh_mass) {
   return Worldtube::PunctureField{
-      Worldtube::PunctureField::Schwarzschild{order, 1.}};
+      Worldtube::PunctureField::Schwarzschild{order, bh_mass}};
 }
 
 void test_dispatch() {
   MAKE_GENERATOR(gen);
-  std::uniform_real_distribution<double> theta_dist{0., M_PI};
-  std::uniform_real_distribution<double> phi_dist{0., 2. * M_PI};
+  std::uniform_real_distribution<double> theta_dist{0., std::numbers::pi};
+  std::uniform_real_distribution<double> phi_dist{0., 2. * std::numbers::pi};
   std::uniform_real_distribution<double> pos_dist{2., 10.};
   std::uniform_real_distribution<double> vel_acc_dist{-0.1, 0.1};
   const size_t size = 8;
@@ -62,19 +64,20 @@ void test_dispatch() {
           make_not_null(&gen), make_not_null(&vel_acc_dist), 1);
   const auto random_self_force = make_with_random_values<Scalar<DataVector>>(
       make_not_null(&gen), make_not_null(&vel_acc_dist), DataVector(12));
-
+  const double bh_mass = 1.2345;
   for (size_t order = 0; order <= 1; ++order) {
     CAPTURE(order);
     puncture_vars expected{size};
     puncture_vars dispatched{size};
-    const auto puncture_field = make_schwarzschild_puncture_field(order);
+    const auto puncture_field =
+        make_schwarzschild_puncture_field(order, bh_mass);
     if (order == 0) {
       Worldtube::acceleration_terms_0(
           make_not_null(&expected), centered_coords, random_position,
           random_velocity, random_acceleration, get(random_self_force)[0],
           get(random_self_force)[1], get(random_self_force)[2],
           get(random_self_force)[3], get(random_self_force)[4],
-          get(random_self_force)[5], 1.);
+          get(random_self_force)[5], bh_mass);
     } else {
       Worldtube::acceleration_terms_1(
           make_not_null(&expected), centered_coords, random_position,
@@ -84,7 +87,7 @@ void test_dispatch() {
           get(random_self_force)[5], get(random_self_force)[6],
           get(random_self_force)[7], get(random_self_force)[8],
           get(random_self_force)[9], get(random_self_force)[10],
-          get(random_self_force)[11], 1.);
+          get(random_self_force)[11], bh_mass);
     }
     puncture_field.apply_acceleration_terms(
         make_not_null(&dispatched), centered_coords, random_position,

@@ -36,14 +36,7 @@ PunctureField::Kerr::Kerr(const size_t expansion_order_in,
 PunctureField::PunctureField(const Schwarzschild& schwarzschild,
                              const Options::Context& /*context*/)
     : expansion_order_(schwarzschild.expansion_order),
-      black_hole_mass_(schwarzschild.black_hole_mass) {
-  if (not equal_within_roundoff(spin_along_z_axis_, 0.0)) {
-    ERROR(
-        "Schwarzschild puncture requires SpinAlongZAxis = 0 but got "
-        "SpinAlongZAxis = "
-        << spin_along_z_axis_);
-  }
-}
+      black_hole_mass_(schwarzschild.black_hole_mass) {}
 
 PunctureField::PunctureField(const Kerr& kerr,
                              const Options::Context& /*context*/)

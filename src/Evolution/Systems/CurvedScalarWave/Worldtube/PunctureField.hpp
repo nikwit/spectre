@@ -23,23 +23,38 @@ class er;
 /// \endcond
 
 namespace CurvedScalarWave::Worldtube {
+/*!
+ * \brief Dispatcher to compute the puncture/singular field for a scalar charge
+ * on a generic orbit in Schwarzschild or Kerr spacetime. The Kerr puncture
+ * reduces to Schwarzsschild for zero spin but is faster to evaluate.
+ */
 class PunctureField {
  public:
   enum class Type { Schwarzschild, Kerr };
 
+  /*!
+   * \brief Use the Schwarzschild puncture field model.
+   */
   struct Schwarzschild {
     using type = Schwarzschild;
     static constexpr Options::String help = {
         "Use the Schwarzschild puncture field model."};
 
+    /*!
+     * \brief Puncture field expansion order. Currently orders 0 and 1 are
+     * implemented.
+     */
     struct ExpansionOrder {
       using type = size_t;
       static constexpr Options::String help{
-          "Puncture-field expansion order. Currently orders 0 and 1 are "
+          "Puncture field expansion order. Currently orders 0 and 1 are "
           "implemented."};
       static size_t upper_bound() { return 1; }
     };
 
+    /*!
+     * \brief The mass of the central black hole.
+     */
     struct BlackHoleMass {
       using type = double;
       static constexpr Options::String help{
@@ -57,20 +72,31 @@ class PunctureField {
     double black_hole_mass{};
   };
 
+  /*!
+   * \brief Use the Kerr puncture field model. This option is currently parsed
+   * but not yet implemented at runtime.
+   */
   struct Kerr {
     using type = Kerr;
     static constexpr Options::String help = {
         "Use the Kerr puncture field model. This option is currently parsed "
         "but not yet implemented at runtime."};
 
+    /*!
+     * \brief Puncture field expansion order. Currently orders 0 and 1 are
+     * implemented.
+     */
     struct ExpansionOrder {
       using type = size_t;
       static constexpr Options::String help{
-          "Puncture-field expansion order. Currently orders 0 and 1 are "
+          "Puncture field expansion order. Currently orders 0 and 1 are "
           "implemented."};
       static size_t upper_bound() { return 1; }
     };
 
+    /*!
+     * \brief The mass of the central black hole.
+     */
     struct BlackHoleMass {
       using type = double;
       static constexpr Options::String help{
@@ -78,6 +104,9 @@ class PunctureField {
       static double lower_bound() { return 0.; }
     };
 
+    /*!
+     * \brief The dimensionless z-component of the black-hole spin.
+     */
     struct SpinAlongZAxis {
       using type = double;
       static constexpr Options::String help{
@@ -115,6 +144,10 @@ class PunctureField {
   double black_hole_mass() const;
   double spin_along_z_axis() const;
 
+  /*!
+   * \brief Compute and write the puncture field and its derivatives for the
+   * configured puncture model and expansion order.
+   */
   void apply_puncture(
       gsl::not_null<Variables<tmpl::list<
           CurvedScalarWave::Tags::Psi, ::Tags::dt<CurvedScalarWave::Tags::Psi>,
@@ -126,6 +159,11 @@ class PunctureField {
       const tnsr::I<double, 3>& particle_velocity,
       const tnsr::I<double, 3>& particle_acceleration) const;
 
+  /*!
+   * \brief Compute and write the corrections to the
+   * puncture field for the configured puncture model and expansion order. These
+   * terms arise at non-geodesic accelerations such as the self-force.
+   */
   void apply_acceleration_terms(
       gsl::not_null<Variables<tmpl::list<
           CurvedScalarWave::Tags::Psi, ::Tags::dt<CurvedScalarWave::Tags::Psi>,

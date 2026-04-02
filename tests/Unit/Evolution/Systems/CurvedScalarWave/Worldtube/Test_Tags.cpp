@@ -701,12 +701,12 @@ void test_puncture_field_options() {
         TestHelpers::test_creation<CurvedScalarWave::Worldtube::PunctureField>(
             "Kerr:\n"
             "  ExpansionOrder: 1\n"
-            "  BlackHoleMass: 1.0\n"
+            "  BlackHoleMass: 1.2345\n"
             "  SpinAlongZAxis: 0.7\n");
     CHECK(options.type() ==
           CurvedScalarWave::Worldtube::PunctureField::Type::Kerr);
     CHECK(options.expansion_order() == 1);
-    CHECK(options.black_hole_mass() == 1.0);
+    CHECK(options.black_hole_mass() == 1.2345);
     CHECK(options.spin_along_z_axis() == 0.7);
   }
   CHECK_THROWS_WITH(
