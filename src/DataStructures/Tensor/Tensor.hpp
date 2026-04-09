@@ -17,6 +17,7 @@
 #include "DataStructures/Tensor/Expressions/Divide.hpp"
 #include "DataStructures/Tensor/Expressions/Evaluate.hpp"
 #include "DataStructures/Tensor/Expressions/IndexPropertyCheck.hpp"
+#include "DataStructures/Tensor/Expressions/KroneckerDelta.hpp"
 #include "DataStructures/Tensor/Expressions/LhsTensorSymmAndIndices.hpp"
 #include "DataStructures/Tensor/Expressions/Negate.hpp"
 #include "DataStructures/Tensor/Expressions/NumberAsExpression.hpp"

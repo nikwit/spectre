@@ -1156,6 +1156,8 @@ struct TensorContract
     }
   }
 
+  SPECTRE_ALWAYS_INLINE const T& operand_expression() const { return t_; }
+
  private:
   /// Operand expression being contracted
   T t_;

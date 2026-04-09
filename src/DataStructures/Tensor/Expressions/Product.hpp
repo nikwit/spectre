@@ -15,6 +15,7 @@
 
 #include "DataStructures/Tensor/Expressions/Contract.hpp"
 #include "DataStructures/Tensor/Expressions/DataTypeSupport.hpp"
+#include "DataStructures/Tensor/Expressions/KroneckerDelta.hpp"
 #include "DataStructures/Tensor/Expressions/NumberAsExpression.hpp"
 #include "DataStructures/Tensor/Expressions/TensorExpression.hpp"
 #include "DataStructures/Tensor/Symmetry.hpp"
@@ -24,6 +25,20 @@
 #include "Utilities/TMPL.hpp"
 
 namespace tenex {
+template <typename T1, typename T2,
+          typename IndexList1 = typename T1::index_list,
+          typename IndexList2 = typename T2::index_list,
+          typename ArgsList1 = typename T1::args_list,
+          typename ArgsList2 = typename T2::args_list>
+struct OuterProduct;
+
+template <typename T, typename X, typename Symm, typename IndexList,
+          typename ArgsList>
+SPECTRE_ALWAYS_INLINE constexpr auto simplify(
+    const TensorExpression<T, X, Symm, IndexList, ArgsList>& t) {
+  return ~t;
+}
+
 namespace detail {
 template <typename T1, typename T2, typename SymmList1 = typename T1::symmetry,
           typename SymmList2 = typename T2::symmetry>
@@ -42,6 +57,160 @@ struct OuterProductType<T1, T2, SymmList1<Symm1...>, SymmList2<Symm2...>> {
   using tensorindex_list =
       tmpl::append<typename T1::args_list, typename T2::args_list>;
 };
+
+template <typename T>
+struct is_kronecker_delta_expression : std::false_type {};
+
+template <typename IndexType1, typename IndexType2,
+          template <typename...> class ArgsList, typename Arg1, typename Arg2>
+struct is_kronecker_delta_expression<
+    KroneckerDeltaAsExpression<IndexType1, IndexType2, ArgsList<Arg1, Arg2>>>
+    : std::true_type {};
+
+template <typename T>
+constexpr bool is_kronecker_delta_expression_v =
+    is_kronecker_delta_expression<T>::value;
+
+template <typename T>
+struct contains_kronecker_delta : is_kronecker_delta_expression<T> {};
+
+template <typename T1, typename T2, template <typename...> class IndexList1,
+          typename... Indices1, template <typename...> class IndexList2,
+          typename... Indices2, template <typename...> class ArgsList1,
+          typename... Args1, template <typename...> class ArgsList2,
+          typename... Args2>
+struct contains_kronecker_delta<
+    OuterProduct<T1, T2, IndexList1<Indices1...>, IndexList2<Indices2...>,
+                 ArgsList1<Args1...>, ArgsList2<Args2...>>>
+    : std::bool_constant<contains_kronecker_delta<T1>::value or
+                         contains_kronecker_delta<T2>::value> {};
+
+template <typename T, typename X, typename Symm, typename IndexList,
+          typename ArgsList, size_t NumContractedIndices>
+struct contains_kronecker_delta<
+    TensorContract<T, X, Symm, IndexList, ArgsList, NumContractedIndices>>
+    : contains_kronecker_delta<T> {};
+
+template <typename T, size_t Position, typename NewArg, typename NewIndexType,
+          typename IndexList, typename ArgsList>
+struct contains_kronecker_delta<TensorIndexSubstitution<
+    T, Position, NewArg, NewIndexType, IndexList, ArgsList>>
+    : contains_kronecker_delta<T> {};
+
+template <typename T>
+constexpr bool contains_kronecker_delta_v = contains_kronecker_delta<T>::value;
+
+template <typename E1, typename E2>
+SPECTRE_ALWAYS_INLINE constexpr auto contract_outer_product(const E1& e1,
+                                                            const E2& e2) {
+  if constexpr (E1::num_ops_subtree >= E2::num_ops_subtree) {
+    return tenex::contract(tenex::OuterProduct<E1, E2>(e1, e2));
+  } else {
+    return tenex::contract(tenex::OuterProduct<E2, E1>(e2, e1));
+  }
+}
+
+template <typename Delta>
+struct kronecker_delta_info {
+  using args_list = typename Delta::args_list;
+  using index_list = typename Delta::index_list;
+  using arg1 = tmpl::at_c<args_list, 0>;
+  using arg2 = tmpl::at_c<args_list, 1>;
+  using index1 = tmpl::at_c<index_list, 0>;
+  using index2 = tmpl::at_c<index_list, 1>;
+  using opposite_arg1 =
+      TensorIndex<get_tensorindex_value_with_opposite_valence(arg1::value)>;
+  using opposite_arg2 =
+      TensorIndex<get_tensorindex_value_with_opposite_valence(arg2::value)>;
+};
+
+template <typename Delta, typename Expr>
+SPECTRE_ALWAYS_INLINE constexpr auto eliminate_kronecker_delta(
+    const Delta& delta, const Expr& expr) {
+  using info = kronecker_delta_info<Delta>;
+  if constexpr (tmpl::list_contains<typename Expr::args_list,
+                                    typename info::opposite_arg1>::value) {
+    return tenex::contract(
+        tenex::substitute_tensor_index<typename info::opposite_arg1,
+                                       typename info::arg2,
+                                       typename info::index2>(expr));
+  } else if constexpr (tmpl::list_contains<
+                           typename Expr::args_list,
+                           typename info::opposite_arg2>::value) {
+    return tenex::contract(
+        tenex::substitute_tensor_index<typename info::opposite_arg2,
+                                       typename info::arg1,
+                                       typename info::index1>(expr));
+  } else {
+    return contract_outer_product(delta, expr);
+  }
+}
+
+template <typename E1, typename E2>
+SPECTRE_ALWAYS_INLINE constexpr auto kronecker_multiply(const E1& e1,
+                                                        const E2& e2) {
+  if constexpr (is_kronecker_delta_expression_v<E1>) {
+    return eliminate_kronecker_delta(e1, e2);
+  } else if constexpr (is_kronecker_delta_expression_v<E2>) {
+    return eliminate_kronecker_delta(e2, e1);
+  } else {
+    return contract_outer_product(e1, e2);
+  }
+}
+
+template <typename E>
+SPECTRE_ALWAYS_INLINE constexpr auto simplify_kronecker_products(const E& e) {
+  return e;
+}
+
+template <typename T1, typename T2, template <typename...> class IndexList1,
+          typename... Indices1, template <typename...> class IndexList2,
+          typename... Indices2, template <typename...> class ArgsList1,
+          typename... Args1, template <typename...> class ArgsList2,
+          typename... Args2>
+SPECTRE_ALWAYS_INLINE constexpr auto simplify_kronecker_products(
+    const OuterProduct<T1, T2, IndexList1<Indices1...>, IndexList2<Indices2...>,
+                       ArgsList1<Args1...>, ArgsList2<Args2...>>& product) {
+  const auto simplified_t1 =
+      simplify_kronecker_products(product.first_operand_expression());
+  const auto simplified_t2 =
+      simplify_kronecker_products(product.second_operand_expression());
+  return kronecker_multiply(simplified_t1, simplified_t2);
+}
+
+template <typename T, typename X, typename Symm, typename IndexList,
+          typename ArgsList, size_t NumContractedIndices>
+SPECTRE_ALWAYS_INLINE constexpr auto simplify_kronecker_products(
+    const TensorContract<T, X, Symm, IndexList, ArgsList, NumContractedIndices>&
+        contraction) {
+  const auto simplified_operand =
+      simplify_kronecker_products(contraction.operand_expression());
+  return tenex::contract(simplified_operand);
+}
+
+template <typename T, size_t Position, typename NewArg, typename NewIndexType,
+          typename IndexList, typename ArgsList>
+SPECTRE_ALWAYS_INLINE constexpr auto simplify_kronecker_products(
+    const TensorIndexSubstitution<T, Position, NewArg, NewIndexType, IndexList,
+                                  ArgsList>& substitution) {
+  using old_arg = tmpl::at_c<typename T::args_list, Position>;
+  const auto simplified_operand =
+      simplify_kronecker_products(substitution.operand_expression());
+  return tenex::substitute_tensor_index<old_arg, NewArg, NewIndexType>(
+      simplified_operand);
+}
+
+template <typename E1, typename E2>
+SPECTRE_ALWAYS_INLINE constexpr auto simplify_product(const E1& e1,
+                                                      const E2& e2) {
+  if constexpr (is_kronecker_delta_expression_v<E1>) {
+    return eliminate_kronecker_delta(e1, e2);
+  } else if constexpr (is_kronecker_delta_expression_v<E2>) {
+    return eliminate_kronecker_delta(e2, e1);
+  } else {
+    return contract_outer_product(e1, e2);
+  }
+}
 }  // namespace detail
 
 /// \ingroup TensorExpressionsGroup
@@ -55,12 +224,6 @@ struct OuterProductType<T1, T2, SymmList1<Symm1...>, SymmList2<Symm2...>> {
 ///
 /// \tparam T1 the left operand expression of the outer product expression
 /// \tparam T2 the right operand expression of the outer product expression
-template <typename T1, typename T2,
-          typename IndexList1 = typename T1::index_list,
-          typename IndexList2 = typename T2::index_list,
-          typename ArgsList1 = typename T1::args_list,
-          typename ArgsList2 = typename T2::args_list>
-struct OuterProduct;
 
 template <typename T1, typename T2, template <typename...> class IndexList1,
           typename... Indices1, template <typename...> class IndexList2,
@@ -177,6 +340,14 @@ struct OuterProduct<T1, T2, IndexList1<Indices1...>, IndexList2<Indices2...>,
 
   OuterProduct(T1 t1, T2 t2) : t1_(std::move(t1)), t2_(std::move(t2)) {}
   ~OuterProduct() override = default;
+
+  SPECTRE_ALWAYS_INLINE const T1& first_operand_expression() const {
+    return t1_;
+  }
+
+  SPECTRE_ALWAYS_INLINE const T2& second_operand_expression() const {
+    return t2_;
+  }
 
   /// \brief Assert that the LHS tensor of the equation does not also appear in
   /// this expression's subtree
@@ -454,6 +625,19 @@ struct OuterProduct<T1, T2, IndexList1<Indices1...>, IndexList2<Indices2...>,
 /// \param t2 the second operand expression of the product
 /// \return the tensor expression representing the product of two tensor
 /// expressions
+template <typename T1, typename T2, typename ArgsList1, typename ArgsList2>
+  requires(tenex::detail::contains_kronecker_delta_v<T1> or
+           tenex::detail::contains_kronecker_delta_v<T2>)
+SPECTRE_ALWAYS_INLINE auto operator*(
+    const TensorExpression<T1, typename T1::type, typename T1::symmetry,
+                           typename T1::index_list, ArgsList1>& t1,
+    const TensorExpression<T2, typename T2::type, typename T2::symmetry,
+                           typename T2::index_list, ArgsList2>& t2) {
+  const auto simplified_t1 = tenex::detail::simplify_kronecker_products(~t1);
+  const auto simplified_t2 = tenex::detail::simplify_kronecker_products(~t2);
+  return tenex::detail::kronecker_multiply(simplified_t1, simplified_t2);
+}
+
 template <typename T1, typename T2, typename ArgsList1, typename ArgsList2>
 SPECTRE_ALWAYS_INLINE auto operator*(
     const TensorExpression<T1, typename T1::type, typename T1::symmetry,
