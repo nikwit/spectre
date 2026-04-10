@@ -454,6 +454,185 @@ using surface_compute_items = tmpl::list<
     WorldtubePsi0BcComponentCompute<true>, WorldtubePsi2KinnersleyCompute>;
 }  // namespace gh::worldtube_diagnostics
 
+namespace gh::gb_translation {
+struct Measurement : tt::ConformsTo<control_system::protocols::Measurement> {
+  struct Submeasurement
+      : tt::ConformsTo<control_system::protocols::Submeasurement> {
+    static std::string name() { return Measurement::name(); }
+
+   private:
+    template <typename ControlSystems>
+    struct InterpolationTarget
+        : tt::ConformsTo<intrp::protocols::InterpolationTargetTag> {
+      static std::string name() { return "ControlSystemGaussBonnetDipole"; }
+      using temporal_id = ::Tags::TimeAndPrevious<0>;
+      using vars_to_interpolate_to_target =
+          gh::worldtube_diagnostics::volume_target_tags;
+      using compute_vars_to_interpolate =
+          gh::worldtube_diagnostics::ComputeVolumeQuantities;
+      using compute_items_on_source =
+          tmpl::list<::Tags::TimeAndPreviousCompute<0>>;
+      using compute_items_on_target = tmpl::list<
+          gr::Tags::WeylElectricScalarCompute<DataVector, 3, Frame::Inertial>,
+          gr::Tags::WeylMagneticScalarCompute<DataVector, 3, Frame::Inertial>,
+          gr::Tags::GaussBonnetScalarCompute<DataVector>>;
+      using compute_target_points =
+          intrp::TargetPoints::Sphere<InterpolationTarget, ::Frame::Grid>;
+      using post_interpolation_callbacks = tmpl::list<
+          control_system::RunCallbacks<Submeasurement, ControlSystems>>;
+
+      template <typename Metavariables>
+      using interpolating_component =
+          typename Metavariables::gh_dg_element_array;
+    };
+
+   public:
+    template <typename ControlSystems>
+    using interpolation_target_tag = InterpolationTarget<ControlSystems>;
+    template <typename ControlSystems>
+    using horizon_metavars = void;
+
+    template <typename ControlSystems>
+    using event = NonFactoryCreatableWrapper<
+        intrp::Events::InterpolateWithoutInterpComponent<
+            3, InterpolationTarget<ControlSystems>,
+            gh::worldtube_diagnostics::volume_source_tags>>;
+  };
+
+  static std::string name() { return "GaussBonnetDipole"; }
+  using submeasurements = tmpl::list<Submeasurement>;
+};
+
+struct ControlError : tt::ConformsTo<control_system::protocols::ControlError> {
+  using object_centers = domain::object_list<>;
+  using options = tmpl::list<>;
+  static constexpr Options::String help{
+      "Computes the translation control error from the Gauss-Bonnet dipole. "
+      "This should not take any options."};
+
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+  std::optional<double> get_suggested_timescale() const { return std::nullopt; }
+
+  void reset() {}
+  void pup(PUP::er& /*p*/) {}
+
+  template <typename Metavariables, typename... TupleTags>
+  DataVector operator()(const ::TimescaleTuner<true>& /*unused*/,
+                        const Parallel::GlobalCache<Metavariables>& /*cache*/,
+                        const double /*time*/,
+                        const std::string& /*function_of_time_name*/,
+                        const tuples::TaggedTuple<TupleTags...>& measurements) {
+    return get<control_system::QueueTags::Center<::domain::ObjectLabel::None>>(
+        measurements);
+  }
+};
+
+template <size_t DerivOrder>
+struct Translation : tt::ConformsTo<control_system::protocols::ControlSystem> {
+  static constexpr size_t deriv_order = DerivOrder;
+
+  static std::string name() { return "Translation"; }
+
+  static std::optional<std::string> component_name(
+      const size_t component, const size_t num_components) {
+    ASSERT(num_components == 3,
+           "Translation control expects 3 components but there are "
+               << num_components << " instead.");
+    return component == 0 ? "x" : component == 1 ? "y" : "z";
+  }
+
+  using measurement = Measurement;
+  using control_error = ControlError;
+
+  struct MeasurementQueue : db::SimpleTag {
+    using type =
+        LinkedMessageQueue<double, tmpl::list<control_system::QueueTags::Center<
+                                       ::domain::ObjectLabel::None>>>;
+  };
+
+  using simple_tags = tmpl::list<MeasurementQueue>;
+
+  struct process_measurement {
+    template <typename Submeasurement>
+    using argument_tags = tmpl::list<ylm::Tags::Strahlkorper<Frame::Grid>,
+                                     gr::Tags::GaussBonnetScalar<DataVector>>;
+
+    template <typename Metavariables>
+    static void apply(Measurement::Submeasurement /*submeasurement*/,
+                      const ylm::Strahlkorper<Frame::Grid>& strahlkorper,
+                      const Scalar<DataVector>& gauss_bonnet_scalar,
+                      Parallel::GlobalCache<Metavariables>& cache,
+                      const LinkedMessageId<double>& measurement_id) {
+      auto& control_sys_proxy = Parallel::get_parallel_component<
+          ControlComponent<Metavariables, Translation>>(cache);
+      Parallel::simple_action<::Actions::UpdateMessageQueue<
+          MeasurementQueue, control_system::UpdateControlSystem<Translation>,
+          control_system::QueueTags::Center<::domain::ObjectLabel::None>>>(
+          control_sys_proxy, measurement_id,
+          gauss_bonnet_dipole(strahlkorper, gauss_bonnet_scalar));
+    }
+
+   private:
+    static DataVector gauss_bonnet_dipole(
+        const ylm::Strahlkorper<Frame::Grid>& strahlkorper,
+        const Scalar<DataVector>& gauss_bonnet_scalar) {
+      ASSERT(strahlkorper.l_max() > 0 and strahlkorper.m_max() > 0,
+             "Need l_max >= 1 and m_max >= 1 to compute a dipole.");
+      const auto& ylm = strahlkorper.ylm_spherepack();
+      const size_t points_per_sphere = ylm.physical_size();
+      const DataVector& all_values = get(gauss_bonnet_scalar);
+      ASSERT(all_values.size() >= points_per_sphere and
+                 all_values.size() % points_per_sphere == 0,
+             "Unexpected number of Gauss-Bonnet points: "
+                 << all_values.size() << ", expected a multiple of "
+                 << points_per_sphere << ".");
+
+      // If multiple radii are observed, use the outermost sphere.
+      const size_t offset = all_values.size() - points_per_sphere;
+      DataVector values_on_control_sphere{points_per_sphere};
+      for (size_t i = 0; i < points_per_sphere; ++i) {
+        values_on_control_sphere[i] = sqrt(all_values[offset + i] / 16. / 3.);
+      }
+
+      const DataVector gb_coefs = ylm.phys_to_spec(values_on_control_sphere);
+      ylm::SpherepackIterator iterator(strahlkorper.l_max(),
+                                       strahlkorper.m_max());
+      ModalVector l0_coefs{1, 0.0};
+      l0_coefs[0] = gb_coefs[iterator.set(0, 0)()] * sqrt(M_PI / 2.);
+      ModalVector l1_coefs{3, 0.0};
+      l1_coefs[0] = gb_coefs[iterator.set(1, 1)()] * sqrt(M_PI);
+      l1_coefs[1] = -gb_coefs[iterator.set(1, -1)()] * sqrt(M_PI);
+      l1_coefs[2] = gb_coefs[iterator.set(1, 0)()] * sqrt(M_PI / 2.);
+
+      const double monopole = l0_coefs[0];
+      const double dipole_magnitude =
+          sqrt(square(l1_coefs[0]) + square(l1_coefs[1]) + square(l1_coefs[2]));
+
+      if (dipole_magnitude == 0.0) {
+        return DataVector{3, 0.0};
+      }
+
+      ASSERT(monopole != 0.0,
+             "Gauss-Bonnet monopole coefficient is zero, so the control "
+             "error normalization is singular.");
+
+      const double radius = 1.9;
+      const double delta = dipole_magnitude * radius / (sqrt(3.0) * monopole);
+      DataVector result{3};
+      result[0] = delta * l1_coefs[0] / dipole_magnitude;
+      result[1] = delta * l1_coefs[1] / dipole_magnitude;
+      result[2] = delta * l1_coefs[2] / dipole_magnitude;
+      Parallel::printf(
+          "Gauss-Bonnet monopole: %e, dipole magnitude: %e, control error: "
+          "(%e, %e, %e)\n",
+          monopole, dipole_magnitude, result[0], result[1], result[2]);
+      return result;
+    }
+  };
+};
+}  // namespace gh::gb_translation
+
+
 
 template <bool UseLts>
 struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
@@ -515,11 +694,7 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
                      ::domain::ObjectLabel::None, 2,
                      control_system::measurements::SingleHorizon<
                          ::domain::ObjectLabel::None>>,
-                 control_system::Systems::Translation<
-                     2,
-                     control_system::measurements::SingleHorizon<
-                         ::domain::ObjectLabel::None>,
-                     1>,
+                 gh::gb_translation::Translation<2>,
                  control_system::Systems::Size<::domain::ObjectLabel::None, 2>>;
 
   static constexpr bool use_control_systems =
