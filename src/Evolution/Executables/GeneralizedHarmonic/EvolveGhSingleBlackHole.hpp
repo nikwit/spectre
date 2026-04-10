@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "ControlSystem/Actions/InitializeMeasurements.hpp"
@@ -12,19 +13,34 @@
 #include "ControlSystem/Component.hpp"
 #include "ControlSystem/ControlErrors/Size/Factory.hpp"
 #include "ControlSystem/ControlErrors/Size/State.hpp"
+#include "ControlSystem/Measurements/NonFactoryCreatable.hpp"
 #include "ControlSystem/Measurements/SingleHorizon.hpp"
 #include "ControlSystem/Metafunctions.hpp"
+#include "ControlSystem/Protocols/ControlError.hpp"
+#include "ControlSystem/Protocols/ControlSystem.hpp"
+#include "ControlSystem/Protocols/Measurement.hpp"
+#include "ControlSystem/Protocols/Submeasurement.hpp"
+#include "ControlSystem/RunCallbacks.hpp"
 #include "ControlSystem/Systems/Shape.hpp"
 #include "ControlSystem/Systems/Size.hpp"
 #include "ControlSystem/Systems/Translation.hpp"
 #include "ControlSystem/Trigger.hpp"
+#include "ControlSystem/UpdateControlSystem.hpp"
+#include "DataStructures/DataBox/Tag.hpp"
+#include "DataStructures/DataVector.hpp"
+#include "DataStructures/LinkedMessageQueue.hpp"
+#include "DataStructures/ModalVector.hpp"
+#include "DataStructures/Tensor/EagerMath/DeterminantAndInverse.hpp"
 #include "DataStructures/Tensor/IndexType.hpp"
+#include "DataStructures/Variables.hpp"
 #include "Domain/Structure/ObjectLabel.hpp"
 #include "Evolution/Actions/RunEventsAndTriggers.hpp"
 #include "Evolution/Executables/GeneralizedHarmonic/Deadlock.hpp"
 #include "Evolution/Executables/GeneralizedHarmonic/GeneralizedHarmonicBase.hpp"
 #include "Evolution/Systems/Cce/Callbacks/DumpBondiSachsOnWorldtube.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Actions/SetInitialData.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/BjorhusImpl.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/SpherepackIterator.hpp"
 #include "Options/FactoryHelpers.hpp"
 #include "Options/Protocols/FactoryCreation.hpp"
 #include "Options/String.hpp"
@@ -40,29 +56,58 @@
 #include "ParallelAlgorithms/Amr/Events/ObserveAmrStats.hpp"
 #include "ParallelAlgorithms/Amr/Events/RefineMesh.hpp"
 #include "ParallelAlgorithms/Amr/Projectors/CopyFromCreatorOrLeaveAsIs.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/ErrorOnFailedApparentHorizon.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/FailedHorizonFind.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/FindApparentHorizon.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/IgnoreFailedApparentHorizon.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/ObserveFieldsOnHorizon.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/ObserveTimeSeriesOnHorizon.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Component.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/ComputeExcisionBoundaryVolumeQuantities.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/ComputeExcisionBoundaryVolumeQuantities.tpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/ComputeHorizonVolumeQuantities.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/ComputeHorizonVolumeQuantities.tpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Criteria/Criterion.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Criteria/Factory.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Events/FindApparentHorizon.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/HorizonAliases.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/InterpolationTarget.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Protocols/HorizonMetavars.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/Actions/RunEventsOnFailure.hpp"
+#include "ParallelAlgorithms/Interpolation/Actions/CleanUpInterpolator.hpp"
 #include "ParallelAlgorithms/Interpolation/Actions/ElementInitInterpPoints.hpp"
 #include "ParallelAlgorithms/Interpolation/Actions/InitializeInterpolationTarget.hpp"
+#include "ParallelAlgorithms/Interpolation/Actions/InterpolationTargetReceiveVars.hpp"
+#include "ParallelAlgorithms/Interpolation/Actions/InterpolatorReceivePoints.hpp"
+#include "ParallelAlgorithms/Interpolation/Actions/InterpolatorReceiveVolumeData.hpp"
+#include "ParallelAlgorithms/Interpolation/Actions/InterpolatorRegisterElement.hpp"
+#include "ParallelAlgorithms/Interpolation/Actions/TryToInterpolate.hpp"
 #include "ParallelAlgorithms/Interpolation/Callbacks/ObserveSurfaceData.hpp"
 #include "ParallelAlgorithms/Interpolation/Callbacks/ObserveTimeSeriesOnSurface.hpp"
-#include "ParallelAlgorithms/Interpolation/ComputeExcisionBoundaryVolumeQuantities.hpp"
-#include "ParallelAlgorithms/Interpolation/ComputeExcisionBoundaryVolumeQuantities.tpp"
+#include "ParallelAlgorithms/Interpolation/Events/Interpolate.hpp"
 #include "ParallelAlgorithms/Interpolation/Events/InterpolateWithoutInterpComponent.hpp"
 #include "ParallelAlgorithms/Interpolation/InterpolationTarget.hpp"
+#include "ParallelAlgorithms/Interpolation/Interpolator.hpp"
+#include "ParallelAlgorithms/Interpolation/Protocols/ComputeVarsToInterpolate.hpp"
 #include "ParallelAlgorithms/Interpolation/Protocols/InterpolationTargetTag.hpp"
 #include "ParallelAlgorithms/Interpolation/Tags.hpp"
 #include "ParallelAlgorithms/Interpolation/Targets/Sphere.hpp"
+#include "PointwiseFunctions/GeneralRelativity/CubicCurvatureScalars.hpp"
 #include "PointwiseFunctions/GeneralRelativity/DetAndInverseSpatialMetric.hpp"
+#include "PointwiseFunctions/GeneralRelativity/ExtrinsicCurvature.hpp"
+#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/Christoffel.hpp"
+#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/CovariantDerivOfExtrinsicCurvature.hpp"
+#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ExtrinsicCurvature.hpp"
+#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/Ricci.hpp"
+#include "PointwiseFunctions/GeneralRelativity/InverseSpacetimeMetric.hpp"
+#include "PointwiseFunctions/GeneralRelativity/Lapse.hpp"
+#include "PointwiseFunctions/GeneralRelativity/QuadraticCurvatureScalars.hpp"
+#include "PointwiseFunctions/GeneralRelativity/Shift.hpp"
+#include "PointwiseFunctions/GeneralRelativity/SpacetimeNormalVector.hpp"
+#include "PointwiseFunctions/GeneralRelativity/SpatialMetric.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Surfaces/Tags.hpp"
+#include "PointwiseFunctions/GeneralRelativity/WeylElectric.hpp"
+#include "PointwiseFunctions/GeneralRelativity/WeylMagnetic.hpp"
 #include "Time/Actions/SelfStartActions.hpp"
 #include "Time/AdvanceTime.hpp"
 #include "Time/ChangeSlabSize/Action.hpp"
@@ -72,9 +117,343 @@
 #include "Time/Tags/Time.hpp"
 #include "Time/Tags/TimeAndPrevious.hpp"
 #include "Utilities/Algorithm.hpp"
+#include "Utilities/ContainerHelpers.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
+#include "Utilities/MakeString.hpp"
+#include "Utilities/Numeric.hpp"
 #include "Utilities/PrettyType.hpp"
 #include "Utilities/ProtocolHelpers.hpp"
+#include "Utilities/TMPL.hpp"
+
+namespace gh::worldtube_diagnostics {
+using diagnostic_frame = Frame::Inertial;
+using volume_source_tags =
+    tmpl::list<gr::Tags::SpacetimeMetric<DataVector, 3, diagnostic_frame>,
+               gh::Tags::Pi<DataVector, 3, diagnostic_frame>,
+               gh::Tags::Phi<DataVector, 3, diagnostic_frame>,
+               ::Tags::deriv<gh::Tags::Pi<DataVector, 3, diagnostic_frame>,
+                             tmpl::size_t<3>, diagnostic_frame>,
+               ::Tags::deriv<gh::Tags::Phi<DataVector, 3, diagnostic_frame>,
+                             tmpl::size_t<3>, diagnostic_frame>>;
+
+using volume_target_tags =
+    tmpl::list<gr::Tags::SpatialMetric<DataVector, 3, diagnostic_frame>,
+               gr::Tags::InverseSpatialMetric<DataVector, 3, diagnostic_frame>,
+               gr::Tags::WeylElectric<DataVector, 3, diagnostic_frame>,
+               gr::Tags::WeylMagnetic<DataVector, 3, diagnostic_frame>>;
+using worldtube_volume_target_tags =
+    tmpl::push_back<volume_target_tags,
+                    gr::Tags::SpacetimeMetric<DataVector, 3, diagnostic_frame>>;
+
+struct ComputeVolumeQuantities
+    : tt::ConformsTo<intrp::protocols::ComputeVarsToInterpolate> {
+  using allowed_src_tags = volume_source_tags;
+  using required_src_tags = volume_source_tags;
+
+  template <typename TargetFrame>
+  using allowed_dest_tags =
+      tmpl::conditional_t<std::is_same_v<TargetFrame, diagnostic_frame>,
+                          worldtube_volume_target_tags, tmpl::list<>>;
+  template <typename TargetFrame>
+  using required_dest_tags =
+      tmpl::conditional_t<std::is_same_v<TargetFrame, diagnostic_frame>,
+                          volume_target_tags, tmpl::list<>>;
+
+  template <typename SrcTagList, typename DestTagList>
+  static void apply(const gsl::not_null<Variables<DestTagList>*> target_vars,
+                    const Variables<SrcTagList>& src_vars, const Mesh<3>&) {
+    static_assert(
+        std::is_same_v<tmpl::list_difference<SrcTagList, allowed_src_tags>,
+                       tmpl::list<>>,
+        "Found a source tag that is not allowed");
+    static_assert(
+        std::is_same_v<tmpl::list_difference<required_src_tags, SrcTagList>,
+                       tmpl::list<>>,
+        "A required source tag is missing");
+    static_assert(
+        std::is_same_v<tmpl::list_difference<
+                           DestTagList, allowed_dest_tags<diagnostic_frame>>,
+                       tmpl::list<>>,
+        "Found a destination tag that is not allowed");
+
+    if (target_vars->number_of_grid_points() !=
+        src_vars.number_of_grid_points()) {
+      target_vars->initialize(src_vars.number_of_grid_points());
+    }
+
+    auto& spatial_metric =
+        get<gr::Tags::SpatialMetric<DataVector, 3, diagnostic_frame>>(
+            *target_vars);
+    auto& inverse_spatial_metric =
+        get<gr::Tags::InverseSpatialMetric<DataVector, 3, diagnostic_frame>>(
+            *target_vars);
+    auto& weyl_electric =
+        get<gr::Tags::WeylElectric<DataVector, 3, diagnostic_frame>>(
+            *target_vars);
+    auto& weyl_magnetic =
+        get<gr::Tags::WeylMagnetic<DataVector, 3, diagnostic_frame>>(
+            *target_vars);
+
+    const auto& spacetime_metric =
+        get<gr::Tags::SpacetimeMetric<DataVector, 3, diagnostic_frame>>(
+            src_vars);
+    const auto& pi =
+        get<gh::Tags::Pi<DataVector, 3, diagnostic_frame>>(src_vars);
+    const auto& phi =
+        get<gh::Tags::Phi<DataVector, 3, diagnostic_frame>>(src_vars);
+    const auto& d_pi =
+        get<::Tags::deriv<gh::Tags::Pi<DataVector, 3, diagnostic_frame>,
+                          tmpl::size_t<3>, diagnostic_frame>>(src_vars);
+    const auto& d_phi =
+        get<::Tags::deriv<gh::Tags::Phi<DataVector, 3, diagnostic_frame>,
+                          tmpl::size_t<3>, diagnostic_frame>>(src_vars);
+
+    if constexpr (tmpl::list_contains_v<DestTagList,
+                                        gr::Tags::SpacetimeMetric<
+                                            DataVector, 3, diagnostic_frame>>) {
+      get<gr::Tags::SpacetimeMetric<DataVector, 3, diagnostic_frame>>(
+          *target_vars) = spacetime_metric;
+    }
+
+    Scalar<DataVector> det_spatial_metric{src_vars.number_of_grid_points()};
+    Scalar<DataVector> lapse{src_vars.number_of_grid_points()};
+    Scalar<DataVector> sqrt_det_spatial_metric{
+        src_vars.number_of_grid_points()};
+    tnsr::I<DataVector, 3, diagnostic_frame> shift{
+        src_vars.number_of_grid_points()};
+    tnsr::AA<DataVector, 3, diagnostic_frame> inverse_spacetime_metric{
+        src_vars.number_of_grid_points()};
+    tnsr::A<DataVector, 3, diagnostic_frame> spacetime_normal_vector{
+        src_vars.number_of_grid_points()};
+    tnsr::ii<DataVector, 3, diagnostic_frame> extrinsic_curvature{
+        src_vars.number_of_grid_points()};
+    tnsr::Ijj<DataVector, 3, diagnostic_frame> spatial_christoffel{
+        src_vars.number_of_grid_points()};
+    tnsr::ijj<DataVector, 3, diagnostic_frame>
+        covariant_deriv_extrinsic_curvature{src_vars.number_of_grid_points()};
+    tnsr::ii<DataVector, 3, diagnostic_frame> spatial_ricci{
+        src_vars.number_of_grid_points()};
+
+    gr::spatial_metric(make_not_null(&spatial_metric), spacetime_metric);
+    determinant_and_inverse(make_not_null(&det_spatial_metric),
+                            make_not_null(&inverse_spatial_metric),
+                            spatial_metric);
+    gr::shift(make_not_null(&shift), spacetime_metric, inverse_spatial_metric);
+    gr::lapse(make_not_null(&lapse), shift, spacetime_metric);
+    gr::inverse_spacetime_metric(make_not_null(&inverse_spacetime_metric),
+                                 lapse, shift, inverse_spatial_metric);
+    gr::spacetime_normal_vector(make_not_null(&spacetime_normal_vector), lapse,
+                                shift);
+    gh::extrinsic_curvature(make_not_null(&extrinsic_curvature),
+                            spacetime_normal_vector, pi, phi);
+    gh::christoffel_second_kind(make_not_null(&spatial_christoffel), phi,
+                                inverse_spatial_metric);
+    gh::covariant_deriv_of_extrinsic_curvature(
+        make_not_null(&covariant_deriv_extrinsic_curvature),
+        extrinsic_curvature, spacetime_normal_vector, spatial_christoffel,
+        inverse_spacetime_metric, phi, d_pi, d_phi);
+    gh::spatial_ricci_tensor(make_not_null(&spatial_ricci), phi, d_phi,
+                             inverse_spatial_metric);
+    get(sqrt_det_spatial_metric) = sqrt(get(det_spatial_metric));
+    gr::weyl_electric(make_not_null(&weyl_electric), spatial_ricci,
+                      extrinsic_curvature, inverse_spatial_metric);
+    gr::weyl_magnetic(make_not_null(&weyl_magnetic),
+                      covariant_deriv_extrinsic_curvature, spatial_metric,
+                      sqrt_det_spatial_metric);
+  }
+};
+
+template <typename SurfaceFrame>
+inline tnsr::I<DataVector, 3, diagnostic_frame> inward_unit_interface_normal(
+    const tnsr::I<DataVector, 3, SurfaceFrame>& coords,
+    const ylm::Strahlkorper<SurfaceFrame>& strahlkorper,
+    const tnsr::II<DataVector, 3, diagnostic_frame>& inverse_spatial_metric) {
+  const size_t num_points = get<0>(coords).size();
+  tnsr::i<DataVector, 3, diagnostic_frame> inward_normal_one_form{num_points};
+  Scalar<DataVector> euclidean_radius{num_points, 0.0};
+  Scalar<DataVector> normal_magnitude{num_points, 0.0};
+  tnsr::I<DataVector, 3, diagnostic_frame> unit_interface_normal_vector{
+      num_points};
+
+  const auto center = strahlkorper.expansion_center();
+  for (size_t i = 0; i < 3; ++i) {
+    inward_normal_one_form.get(i) = center[i] - coords.get(i);
+    get(euclidean_radius) += square(inward_normal_one_form.get(i));
+  }
+  get(euclidean_radius) = sqrt(get(euclidean_radius));
+  for (size_t i = 0; i < 3; ++i) {
+    inward_normal_one_form.get(i) /= get(euclidean_radius);
+  }
+
+  for (size_t i = 0; i < 3; ++i) {
+    unit_interface_normal_vector.get(i) = 0.0;
+    for (size_t j = 0; j < 3; ++j) {
+      unit_interface_normal_vector.get(i) +=
+          inverse_spatial_metric.get(i, j) * inward_normal_one_form.get(j);
+      get(normal_magnitude) += inverse_spatial_metric.get(i, j) *
+                               inward_normal_one_form.get(i) *
+                               inward_normal_one_form.get(j);
+    }
+  }
+  get(normal_magnitude) = sqrt(get(normal_magnitude));
+  for (size_t i = 0; i < 3; ++i) {
+    unit_interface_normal_vector.get(i) /= get(normal_magnitude);
+  }
+  return unit_interface_normal_vector;
+}
+
+struct WorldtubeWeylScalarDiagnostics : db::SimpleTag {
+  using type =
+      gh::BoundaryConditions::Bjorhus::detail::WorldtubeWeylScalarDiagnostics<
+          DataVector, diagnostic_frame>;
+  static std::string name() { return "WorldtubeWeylScalarDiagnostics"; }
+};
+
+struct WorldtubeWeylScalarDiagnosticsCompute : WorldtubeWeylScalarDiagnostics,
+                                               db::ComputeTag {
+  using base = WorldtubeWeylScalarDiagnostics;
+  using return_type = typename base::type;
+  using argument_tags = tmpl::list<
+      gr::Tags::SpatialMetric<DataVector, 3, diagnostic_frame>,
+      gr::Tags::InverseSpatialMetric<DataVector, 3, diagnostic_frame>,
+      gr::Tags::WeylElectric<DataVector, 3, diagnostic_frame>,
+      gr::Tags::WeylMagnetic<DataVector, 3, diagnostic_frame>,
+      ylm::Tags::CartesianCoords<Frame::Grid>,
+      ylm::Tags::Strahlkorper<Frame::Grid>>;
+
+  static void function(
+      const gsl::not_null<return_type*> diagnostics,
+      const tnsr::ii<DataVector, 3, diagnostic_frame>& spatial_metric,
+      const tnsr::II<DataVector, 3, diagnostic_frame>& inverse_spatial_metric,
+      const tnsr::ii<DataVector, 3, diagnostic_frame>& weyl_electric,
+      const tnsr::ii<DataVector, 3, diagnostic_frame>& weyl_magnetic,
+      const tnsr::I<DataVector, 3, Frame::Grid>& coords,
+      const ylm::Strahlkorper<Frame::Grid>& strahlkorper) {
+    const auto unit_interface_normal_vector = inward_unit_interface_normal(
+        coords, strahlkorper, inverse_spatial_metric);
+    gh::BoundaryConditions::Bjorhus::detail::worldtube_weyl_scalar_diagnostics(
+        diagnostics, weyl_electric, weyl_magnetic, spatial_metric,
+        inverse_spatial_metric, unit_interface_normal_vector);
+  }
+};
+
+struct WorldtubeGaussBonnetScalar : db::SimpleTag {
+  using type = Scalar<DataVector>;
+  static std::string name() { return "WorldtubeGaussBonnetScalar"; }
+};
+
+struct WorldtubeGaussBonnetScalarCompute : WorldtubeGaussBonnetScalar,
+                                           db::ComputeTag {
+  using base = WorldtubeGaussBonnetScalar;
+  using return_type = typename base::type;
+  using argument_tags = tmpl::list<WorldtubeWeylScalarDiagnostics>;
+  static void function(
+      const gsl::not_null<return_type*> result,
+      const WorldtubeWeylScalarDiagnostics::type& diagnostics) {
+    *result = diagnostics.gauss_bonnet_scalar;
+  }
+};
+
+template <size_t PsiIndex, bool ImaginaryPart>
+struct WorldtubePsiComponent : db::SimpleTag {
+  using type = Scalar<DataVector>;
+  static std::string name() {
+    return MakeString{} << "WorldtubePsi" << PsiIndex
+                        << (ImaginaryPart ? "Imag" : "Real");
+  }
+};
+
+template <size_t PsiIndex, bool ImaginaryPart>
+struct WorldtubePsiComponentCompute
+    : WorldtubePsiComponent<PsiIndex, ImaginaryPart>,
+      db::ComputeTag {
+  using base = WorldtubePsiComponent<PsiIndex, ImaginaryPart>;
+  using return_type = typename base::type;
+  using argument_tags = tmpl::list<WorldtubeWeylScalarDiagnostics>;
+  static void function(
+      const gsl::not_null<return_type*> result,
+      const WorldtubeWeylScalarDiagnostics::type& diagnostics) {
+    if constexpr (ImaginaryPart) {
+      get(*result) = imag(get(diagnostics.weyl_scalars[PsiIndex]));
+    } else {
+      get(*result) = real(get(diagnostics.weyl_scalars[PsiIndex]));
+    }
+  }
+};
+
+template <bool ImaginaryPart>
+struct WorldtubePsi0BcComponent : db::SimpleTag {
+  using type = Scalar<DataVector>;
+  static std::string name() {
+    return ImaginaryPart ? "WorldtubePsi0BcImag" : "WorldtubePsi0BcReal";
+  }
+};
+
+template <bool ImaginaryPart>
+struct WorldtubePsi0BcComponentCompute
+    : WorldtubePsi0BcComponent<ImaginaryPart>,
+      db::ComputeTag {
+  using base = WorldtubePsi0BcComponent<ImaginaryPart>;
+  using return_type = typename base::type;
+  using argument_tags = tmpl::list<WorldtubeWeylScalarDiagnostics>;
+  static void function(
+      const gsl::not_null<return_type*> result,
+      const WorldtubeWeylScalarDiagnostics::type& diagnostics) {
+    if constexpr (ImaginaryPart) {
+      get(*result) = imag(get(diagnostics.inferred_psi0));
+    } else {
+      get(*result) = real(get(diagnostics.inferred_psi0));
+    }
+  }
+};
+
+struct WorldtubePsi2Kinnersley : db::SimpleTag {
+  using type = Scalar<DataVector>;
+  static std::string name() { return "WorldtubePsi2Kinnersley"; }
+};
+
+struct WorldtubePsi2KinnersleyCompute : WorldtubePsi2Kinnersley,
+                                        db::ComputeTag {
+  using base = WorldtubePsi2Kinnersley;
+  using return_type = typename base::type;
+  using argument_tags = tmpl::list<WorldtubeWeylScalarDiagnostics>;
+  static void function(
+      const gsl::not_null<return_type*> result,
+      const WorldtubeWeylScalarDiagnostics::type& diagnostics) {
+    *result = diagnostics.psi2_kinnersley;
+  }
+};
+
+using surface_observe_tags = tmpl::list<
+    WorldtubeGaussBonnetScalar, gr::Tags::PontryaginScalar<DataVector>,
+    gr::Tags::CubicInvariantReal<DataVector>,
+    gr::Tags::CubicInvariantImag<DataVector>, WorldtubePsiComponent<0, false>,
+    WorldtubePsiComponent<0, true>, WorldtubePsiComponent<1, false>,
+    WorldtubePsiComponent<1, true>, WorldtubePsiComponent<2, false>,
+    WorldtubePsiComponent<2, true>, WorldtubePsiComponent<3, false>,
+    WorldtubePsiComponent<3, true>, WorldtubePsiComponent<4, false>,
+    WorldtubePsiComponent<4, true>, WorldtubePsi0BcComponent<false>,
+    WorldtubePsi0BcComponent<true>, WorldtubePsi2Kinnersley>;
+
+using surface_compute_items = tmpl::list<
+    WorldtubeWeylScalarDiagnosticsCompute, WorldtubeGaussBonnetScalarCompute,
+    gr::Tags::PontryaginScalarCompute<DataVector, 3, diagnostic_frame>,
+    gr::Tags::CubicInvariantRealCompute<DataVector, 3, diagnostic_frame>,
+    gr::Tags::CubicInvariantImagCompute<DataVector, 3, diagnostic_frame>,
+    WorldtubePsiComponentCompute<0, false>,
+    WorldtubePsiComponentCompute<0, true>,
+    WorldtubePsiComponentCompute<1, false>,
+    WorldtubePsiComponentCompute<1, true>,
+    WorldtubePsiComponentCompute<2, false>,
+    WorldtubePsiComponentCompute<2, true>,
+    WorldtubePsiComponentCompute<3, false>,
+    WorldtubePsiComponentCompute<3, true>,
+    WorldtubePsiComponentCompute<4, false>,
+    WorldtubePsiComponentCompute<4, true>,
+    WorldtubePsi0BcComponentCompute<false>,
+    WorldtubePsi0BcComponentCompute<true>, WorldtubePsi2KinnersleyCompute>;
+}  // namespace gh::worldtube_diagnostics
+
 
 template <bool UseLts>
 struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
@@ -117,7 +496,7 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
         tmpl::list<gr::Tags::Lapse<DataVector>,
                    gr::Tags::Shift<DataVector, 3, Frame::Grid>>;
     using compute_vars_to_interpolate =
-        intrp::ComputeExcisionBoundaryVolumeQuantities;
+        ah::ComputeExcisionBoundaryVolumeQuantities;
     using vars_to_interpolate_to_target = tags_to_observe;
     using compute_items_on_source = tmpl::list<>;
     using compute_items_on_target = tmpl::list<>;
@@ -147,14 +526,33 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
       tmpl::size<control_systems>::value > 0;
 
   struct BondiSachs;
+  struct GaussBonnetSpheres;
+  struct WorldtubeDiagnostics;
 
   using interpolation_target_tags = tmpl::push_back<
       control_system::metafunctions::interpolation_target_tags<control_systems>,
-      ExcisionBoundary, BondiSachs>;
+      ExcisionBoundary, BondiSachs, GaussBonnetSpheres, WorldtubeDiagnostics>;
   using source_vars_no_deriv =
       tmpl::list<gr::Tags::SpacetimeMetric<DataVector, volume_dim>,
                  gh::Tags::Pi<DataVector, volume_dim>,
                  gh::Tags::Phi<DataVector, volume_dim>>;
+  using curvature_surface_source_vars =
+      gh::worldtube_diagnostics::volume_source_tags;
+  using curvature_surface_observe_tags =
+      tmpl::list<gr::Tags::GaussBonnetScalar<DataVector>,
+                 gr::Tags::PontryaginScalar<DataVector>,
+                 gr::Tags::CubicInvariantReal<DataVector>,
+                 gr::Tags::CubicInvariantImag<DataVector>,
+                 gr::Tags::SpacetimeMetric<DataVector, 3, Frame::Inertial>>;
+  using curvature_surface_compute_items = tmpl::list<
+      gr::Tags::WeylElectricScalarCompute<DataVector, 3, Frame::Inertial>,
+      gr::Tags::WeylMagneticScalarCompute<DataVector, 3, Frame::Inertial>,
+      gr::Tags::GaussBonnetScalarCompute<DataVector>,
+      gr::Tags::PontryaginScalarCompute<DataVector, 3, Frame::Inertial>,
+      gr::Tags::CubicInvariantRealCompute<DataVector, 3, Frame::Inertial>,
+      gr::Tags::CubicInvariantImagCompute<DataVector, 3, Frame::Inertial>>;
+  using worldtube_diagnostic_source_vars =
+      gh::worldtube_diagnostics::volume_source_tags;
 
   struct BondiSachs : tt::ConformsTo<intrp::protocols::InterpolationTargetTag> {
     static std::string name() { return "BondiSachsInterpolation"; }
@@ -165,6 +563,44 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
     using post_interpolation_callbacks =
         tmpl::list<intrp::callbacks::DumpBondiSachsOnWorldtube<BondiSachs>>;
     using compute_items_on_target = tmpl::list<>;
+    template <typename Metavariables>
+    using interpolating_component = typename Metavariables::gh_dg_element_array;
+  };
+
+  struct GaussBonnetSpheres
+      : tt::ConformsTo<intrp::protocols::InterpolationTargetTag> {
+    static std::string name() { return "GaussBonnetSpheres"; }
+    using temporal_id = ::Tags::Time;
+    using compute_vars_to_interpolate =
+        gh::worldtube_diagnostics::ComputeVolumeQuantities;
+    using vars_to_interpolate_to_target =
+        gh::worldtube_diagnostics::worldtube_volume_target_tags;
+    using compute_items_on_target = curvature_surface_compute_items;
+    using compute_target_points =
+        intrp::TargetPoints::Sphere<GaussBonnetSpheres, ::Frame::Grid>;
+    using post_interpolation_callbacks =
+        tmpl::list<intrp::callbacks::ObserveSurfaceData<
+            curvature_surface_observe_tags, GaussBonnetSpheres, ::Frame::Grid>>;
+    template <typename Metavariables>
+    using interpolating_component = typename Metavariables::gh_dg_element_array;
+  };
+
+  struct WorldtubeDiagnostics
+      : tt::ConformsTo<intrp::protocols::InterpolationTargetTag> {
+    static std::string name() { return "WorldtubeDiagnostics"; }
+    using temporal_id = ::Tags::Time;
+    using compute_vars_to_interpolate =
+        gh::worldtube_diagnostics::ComputeVolumeQuantities;
+    using vars_to_interpolate_to_target =
+        gh::worldtube_diagnostics::volume_target_tags;
+    using compute_target_points =
+        intrp::TargetPoints::Sphere<WorldtubeDiagnostics, ::Frame::Grid>;
+    using compute_items_on_target =
+        gh::worldtube_diagnostics::surface_compute_items;
+    using post_interpolation_callbacks =
+        tmpl::list<intrp::callbacks::ObserveSurfaceData<
+            gh::worldtube_diagnostics::surface_observe_tags,
+            WorldtubeDiagnostics, ::Frame::Grid>>;
     template <typename Metavariables>
     using interpolating_component = typename Metavariables::gh_dg_element_array;
   };
@@ -186,18 +622,23 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
             tmpl::pair<LtsTimeStepper,
                        TimeSteppers::monotonic_lts_time_steppers>>,
         tmpl::pair<ah::Criterion, ah::Criteria::standard_criteria>,
-        tmpl::pair<Event,
-                   tmpl::flatten<tmpl::list<
-                       ah::Events::FindApparentHorizon<ApparentHorizon>,
-                       control_system::metafunctions::control_system_events<
-                           control_systems>,
-                       control_system::CleanFunctionsOfTime,
-                       intrp::Events::InterpolateWithoutInterpComponent<
-                           3, BondiSachs, source_vars_no_deriv>,
-                       intrp::Events::InterpolateWithoutInterpComponent<
-                           3, ExcisionBoundary, ::ah::source_vars<volume_dim>>,
-                       amr::Events::RefineMesh,
-                       amr::Events::ObserveAmrStats<volume_dim>>>>,
+        tmpl::pair<
+            Event,
+            tmpl::flatten<tmpl::list<
+                ah::Events::FindApparentHorizon<ApparentHorizon>,
+                control_system::metafunctions::control_system_events<
+                    control_systems>,
+                control_system::CleanFunctionsOfTime,
+                intrp::Events::InterpolateWithoutInterpComponent<
+                    3, BondiSachs, source_vars_no_deriv>,
+                intrp::Events::InterpolateWithoutInterpComponent<
+                    3, GaussBonnetSpheres, curvature_surface_source_vars>,
+                intrp::Events::InterpolateWithoutInterpComponent<
+                    3, ExcisionBoundary, ::ah::source_vars<volume_dim>>,
+                intrp::Events::InterpolateWithoutInterpComponent<
+                    3, WorldtubeDiagnostics, worldtube_diagnostic_source_vars>,
+                amr::Events::RefineMesh,
+                amr::Events::ObserveAmrStats<volume_dim>>>>,
         tmpl::pair<DenseTrigger,
                    control_system::control_system_triggers<control_systems>>,
         tmpl::pair<control_system::size::State,
@@ -207,9 +648,11 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
   using typename gh_base::const_global_cache_tags;
 
   using observed_reduction_data_tags =
-      observers::collect_reduction_data_tags<tmpl::push_back<
+      observers::collect_reduction_data_tags<tmpl::append<
           tmpl::at<typename factory_creation::factory_classes, Event>,
-          typename ExcisionBoundary::post_interpolation_callbacks>>;
+          typename ExcisionBoundary::post_interpolation_callbacks,
+          typename GaussBonnetSpheres::post_interpolation_callbacks,
+          typename WorldtubeDiagnostics::post_interpolation_callbacks>>;
 
   using dg_registration_list = typename gh_base::dg_registration_list;
 
@@ -283,11 +726,10 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
     using projectors = tmpl::list<
         Initialization::ProjectTimeStepping<volume_dim>,
         evolution::dg::Initialization::ProjectDomain<volume_dim>,
+        Initialization::ProjectTimeStepperHistory<EvolutionMetavars>,
         ::amr::projectors::ProjectVariables<volume_dim,
                                             typename system::variables_tag>,
-        evolution::dg::Initialization::ProjectMortars<volume_dim,
-                                                      local_time_stepping>,
-        Initialization::ProjectTimeStepperHistory<EvolutionMetavars>,
+        evolution::dg::Initialization::ProjectMortars<EvolutionMetavars>,
         evolution::Actions::ProjectRunEventsAndDenseTriggers,
         ::amr::projectors::DefaultInitialize<
             Initialization::Tags::InitialTimeDelta,
@@ -332,7 +774,7 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
       const std::vector<std::string>& deadlocked_components) {
     gh::deadlock::run_deadlock_analysis_simple_actions<
         gh_dg_element_array, control_components, interpolation_target_tags,
-        tmpl::list<ApparentHorizon>>(cache, deadlocked_components);
+        tmpl::list<ApparentHorizon>, false>(cache, deadlocked_components);
   }
 
   using component_list = tmpl::flatten<tmpl::list<
