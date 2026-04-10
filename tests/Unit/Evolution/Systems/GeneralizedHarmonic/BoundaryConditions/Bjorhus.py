@@ -419,6 +419,7 @@ def constraint_preserving_gauge_corrections_dt_v_minus(
 def constraint_preserving_gauge_physical_corrections_dt_v_minus(
     gamma2,
     inertial_coords,
+    time,
     unit_interface_normal_one_form,
     unit_interface_normal_vector,
     spacetime_unit_normal_vector,
@@ -956,6 +957,7 @@ def dt_corrs_ConstraintPreservingGaugePhysical(
     dt_v_minus = constraint_preserving_gauge_physical_corrections_dt_v_minus(
         gamma2,
         coords,
+        0.0,
         normal_covector,
         unit_interface_normal_vector,
         spacetime_unit_normal_vector,
