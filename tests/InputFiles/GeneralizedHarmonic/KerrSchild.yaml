@@ -277,6 +277,13 @@ InterpolationTargets:
     Center: *Center
     Radius: *InnerRadius
     AngularOrdering: "Strahlkorper"
+  GaussBonnetSpheres:
+    LMax: 20
+    Radius: [6, 12, 22]
+    Center: *Center
+    AngularOrdering: Strahlkorper
+  ControlSystemGaussBonnetDipole: *ExBdry
+  WorldtubeDiagnostics: *ExBdry
   ControlSystemCharSpeedExcision: *ExBdry
 
 Cce:

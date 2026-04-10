@@ -2,7 +2,8 @@
 # See LICENSE.txt for details.
 
 Executable: EvolveGhSingleBlackHole
-
+Testing:
+  Check: parse
 ---
 
 Parallelization:
@@ -17,22 +18,37 @@ InitialData: #&InitialData
   GeneralizedHarmonic(KerrSchild):
     Mass: &Mass 1.0
     Spin: &Spin [0.0, 0.0, 0.0] # Change to 0.0 for Non-Spinning
-    Center: &Center [0.0, 0.0, 0.0]
-    Velocity: [0.0, 0.0, 0.0]
+    Center: &OffsetCenter [0.000, 0.000, 0.000]
+    Velocity: [0.03, 0.0, 0.0]
 
 DomainCreator:
   SphericalShells:
-    InnerRadius: &InnerRadius 1.8 #1.57 #1.57 # Change to 1.8 for Non-Spinning
-    OuterRadius: 100.0
-    InitialRadialRefinement: 3
-    InitialNumberOfRadialGridPoints: 12
-    InitialSphericalHarmonicL: 16
-    RadialPartitioning: [20.0]
-    RadialDistribution: [Logarithmic, Linear]
+    InnerRadius: &InnerRadius 1.7 #1.57 #1.57 # Change to 1.8 for Non-Spinning
+    OuterRadius: 225.0
+    InitialRadialRefinement: 0
+    InitialNumberOfRadialGridPoints: 14
+    InitialSphericalHarmonicL: 10
+    RadialPartitioning:
+      [5., 10., 15., 25., 50., 75., 100., 125., 150., 175., 200.]
+    RadialDistribution:
+      [
+        Logarithmic,
+        Linear,
+        Linear,
+        Linear,
+        Linear,
+        Linear,
+        Linear,
+        Linear,
+        Linear,
+        Linear,
+        Linear,
+        Linear,
+      ]
     TimeDependentMaps: # None for spin = 0
       InitialTime: 0.0
       ShapeMap:
-        LMax: &LMax 2
+        LMax: &LMax 6
         #CoefficientTruncationLimit: 0.0
         #InitialValues:  # for Schwarzschild
         InitialValues:
@@ -40,15 +56,15 @@ DomainCreator:
           Spin: *Spin
         SizeInitialValues: Auto #[0.0, 0.0, 0.0]
       RotationMap: None
+      TranslationMap:
+        InitialValues: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
       ExpansionMap:
         InitialValues: [1.0, 0.0, 0.0]
         InitialValuesOuterBoundary: [1.0, -1.0e-6, 0.0]
         DecayTimescale: 1.0
         DecayTimescaleOuterBoundary: 1.0
-      TranslationMap: None
       TransitionRotScaleTrans: false
-    InnerBoundaryCondition:
-      DemandOutgoingCharSpeeds:
+    InnerBoundaryCondition: DemandOutgoingCharSpeeds
     OuterBoundaryCondition:
       ConstraintPreservingBjorhus:
         Type: ConstraintPreservingPhysical
@@ -66,8 +82,8 @@ Evolution:
     - LimitIncrease:
         Factor: 2
     - ErrorControl:
-        AbsoluteTolerance: 1e-11
-        RelativeTolerance: 1e-9
+        AbsoluteTolerance: 1e-8
+        RelativeTolerance: 1e-6
         MaxFactor: 2
         MinFactor: 0.25
         SafetyFactor: 0.95
@@ -80,18 +96,18 @@ Evolution:
 EvolutionSystem:
   GeneralizedHarmonic:
     GaugeCondition:
-      #DampedHarmonic: # set to Harmonic for Harmonic
-      #  SpatialDecayWidth: 17.0152695482514
-      #  Amplitudes: [1.0, 0.0, 1.0]
-      #  Exponents: [2, 2, 2]
+      DampedHarmonic: # set to Harmonic for Harmonic
+        SpatialDecayWidth: 17.0152695482514
+        Amplitudes: [1.0, 0.0, 1.0]
+        Exponents: [2, 2, 2]
     # For KerrSchild gauge, instead of DampedHarmonic use...
-      AnalyticChristoffel:
-          AnalyticPrescription: &InitialData
-            GeneralizedHarmonic(KerrSchild):
-              Mass: *Mass
-              Spin: *Spin # Change to 0.0 for Non-Spinning
-              Center: *Center
-              Velocity: [0.0, 0.0, 0.0]
+      #AnalyticChristoffel:
+      #    AnalyticPrescription: &InitialData
+      #      GeneralizedHarmonic(KerrSchild):
+      #        Mass: *Mass
+      #        Spin: *Spin # Change to 0.0 for Non-Spinning
+      #        Center: *OffsetCenter
+      #        Velocity: [0.01, 0.0, 0.0]
 
     # The parameter choices here come from our experience with the Spectral
     # Einstein Code (SpEC). They should be suitable for evolutions of a
@@ -105,12 +121,12 @@ EvolutionSystem:
         Constant: 0.001
         MovementMethod: ExpansionFactor
         Gaussian1:
-          Amplitude: 7.0
-          Width: 2.5                 
-          Center: *Center
+          Amplitude: 12.0
+          Width: 8.
+          Center: &Center [0., 0., 0.]
         Gaussian2:
-          Amplitude: 0.1             
-          Width: 100.0                 
+          Amplitude: 0.1
+          Width: 100.0
           Center: *Center
         Gaussian3:
           Amplitude: 0.0
@@ -125,11 +141,11 @@ EvolutionSystem:
         MovementMethod: ExpansionFactor
         Gaussian1:
           Amplitude: 7.0
-          Width: 2.5                 
+          Width: 2.5
           Center: *Center
         Gaussian2:
-          Amplitude: 0.1             
-          Width: 100.0                 
+          Amplitude: 0.1
+          Width: 100.0
           Center: *Center
         Gaussian3:
           Amplitude: 0.0
@@ -190,7 +206,7 @@ EventsAndTriggersAtSlabs:
   - Trigger:
       Slabs:
         EvenlySpaced:
-          Interval: 1
+          Interval: 10
           Offset: 0
     Events:
       - ObserveTimeStep:
@@ -222,15 +238,15 @@ EventsAndTriggersAtSlabs:
   - Trigger:
       Slabs:
         EvenlySpaced:
-          Interval: 10
+          Interval: 100
           Offset: 0
     Events:
       - ObserveFields:
           BlocksToObserve: All
           SubfileName: VolumeData
           VariablesToObserve:
-            - SpacetimeMetric
             - Lapse
+            - GaussBonnetScalar
             - Psi4Real
             - WeylElectricScalar
             - PointwiseL2Norm(FConstraint)
@@ -249,7 +265,15 @@ EventsAndTriggersAtSlabs:
   #        Offset: 0
   #  Events:
   #    - ApparentHorizon
-  #    - ExcisionBoundary  
+  #    - ExcisionBoundary
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 10
+          Offset: 0
+    Events:
+      - GaussBonnetSpheres
+      - WorldtubeDiagnostics
   # Never terminate... run until something fails!
 
 EventsAndTriggersAtCheckpoints:
@@ -265,15 +289,6 @@ EventsRunAtCleanup:
         CoordinatesFloatingPointType: Float
 
 EventsAndDenseTriggers:
-  # BondiSachs output needs to be often enough for CCE to run properly. An
-  # interval of 0.1 was found to work well in SpEC.
-  - Trigger:
-      Times:
-        EvenlySpaced:
-          Interval: 0.1
-          Offset: 0.0
-    Events:
-      - BondiSachsInterpolation
 
 Interpolator:
   Verbosity: Silent
@@ -312,23 +327,44 @@ InterpolationTargets:
     Center: *Center
     Radius: *InnerRadius
     AngularOrdering: "Strahlkorper"
+  GaussBonnetSpheres:
+    LMax: *LMax
+    Radius: [6]
+    Center: *Center
+    AngularOrdering: Strahlkorper
+  ControlSystemGaussBonnetDipole: *ExBdry
+  WorldtubeDiagnostics: *ExBdry
   ControlSystemCharSpeedExcision: *ExBdry
 
 Cce:
   BondiSachsOutputFilePrefix: "BondiSachs"
 
 ControlSystems:
-  WriteDataToDisk: true
-  MeasurementsPerUpdate: 4
+  WriteDataToDisk: false
+  MeasurementsPerUpdate: 2
   DelayUpdate: true
   Verbosity: Silent
-  Translation: None
+  Translation:
+    Averager:
+      AverageTimescaleFraction: 0.25
+      Average0thDeriv: false
+    Controller:
+      UpdateFraction: 0.3
+    TimescaleTuner:
+      InitialTimescales: 0.2
+      MinTimescale: 1.0e-2
+      MaxTimescale: 10.0
+      IncreaseThreshold: 2.5e-6
+      DecreaseThreshold: 1.0e-5
+      IncreaseFactor: 1.01
+      DecreaseFactor: 0.98
+    ControlError:
   Shape: None
     # Averager:
     #   AverageTimescaleFraction: 0.25
     #   Average0thDeriv: false
     # Controller:
-    #   UpdateFraction: 0.2 # if you find your run is going slow, try adjusting this to be 0.2
+    #   UpdateFraction: 0.2 # If the run is slow, try this at 0.2.
     # TimescaleTuner:
     #   InitialTimescales: 0.2
     #   MinTimescale: 1.0e-2
@@ -343,7 +379,7 @@ ControlSystems:
     #   AverageTimescaleFraction: 0.25
     #   Average0thDeriv: true
     # Controller:
-    #   UpdateFraction: 0.1 # Could also adjust this to 0.1 and see if it's stable.
+    #   UpdateFraction: 0.1 # Try 0.1 if stability needs tuning.
     # TimescaleTuner:
     #   InitialTimescales: 0.2
     #   MinTimescale: 1.0e-4
@@ -367,4 +403,46 @@ ControlSystems:
 
 ResourceInfo:
   AvoidGlobalProc0: false
-  Singletons: Auto
+  Singletons:
+    Component:
+      Exclusive: false
+      Proc: Auto
+    MemoryMonitor:
+      Exclusive: false
+      Proc: Auto
+    ApparentHorizon:
+      Exclusive: false
+      Proc: Auto
+    Shape:
+      Exclusive: false
+      Proc: Auto
+    ControlSystemSingleAh:
+      Exclusive: false
+      Proc: Auto
+    ControlSystemCharSpeedAh:
+      Exclusive: false
+      Proc: Auto
+    ControlSystemGaussBonnetDipole:
+      Exclusive: true
+      Proc: Auto
+    ControlSystemCharSpeedExcision:
+      Exclusive: false
+      Proc: Auto
+    ExcisionBoundary:
+      Exclusive: false
+      Proc: Auto
+    BondiSachsInterpolation:
+      Exclusive: false
+      Proc: Auto
+    GaussBonnetSpheres:
+      Exclusive: false
+      Proc: Auto
+    WorldtubeDiagnostics:
+      Exclusive: false
+      Proc: Auto
+    Translation:
+      Exclusive: true
+      Proc: Auto
+    Size:
+      Exclusive: false
+      Proc: Auto
