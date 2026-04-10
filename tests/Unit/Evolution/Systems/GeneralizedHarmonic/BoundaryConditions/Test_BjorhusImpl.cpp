@@ -24,6 +24,7 @@
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/MakeWithValue.hpp"
+#include "Utilities/Numeric.hpp"
 #include "Utilities/TMPL.hpp"
 
 namespace {
@@ -1583,6 +1584,51 @@ void test_constraint_preserving_gauge_physical_corrections_dt_v_minus(
       "constraint_preserving_gauge_physical_corrections_dt_v_minus",
       {{{-1., 1.}}}, DataVector(grid_size_each_dimension));
 }
+
+void test_worldtube_weyl_scalar_diagnostics() {
+  constexpr double mass = 2.0;
+  constexpr double radius = 5.0;
+  const double expected_psi2_kinnersley = mass / cube(radius);
+  const double expected_gauss_bonnet =
+      48.0 * square(expected_psi2_kinnersley);
+
+  tnsr::ii<DataVector, 3, frame> spatial_metric{1, 0.0};
+  tnsr::II<DataVector, 3, frame> inverse_spatial_metric{1, 0.0};
+  tnsr::ii<DataVector, 3, frame> weyl_electric{1, 0.0};
+  tnsr::ii<DataVector, 3, frame> weyl_magnetic{1, 0.0};
+  tnsr::I<DataVector, 3, frame> unit_interface_normal_vector{1, 0.0};
+
+  for (size_t i = 0; i < 3; ++i) {
+    spatial_metric.get(i, i)[0] = 1.0;
+    inverse_spatial_metric.get(i, i)[0] = 1.0;
+  }
+  // Schwarzschild has E_{ij} = (M/r^3) diag(-2, 1, 1) in an orthonormal frame.
+  weyl_electric.get(0, 0)[0] = -2.0 * expected_psi2_kinnersley;
+  weyl_electric.get(1, 1)[0] = expected_psi2_kinnersley;
+  weyl_electric.get(2, 2)[0] = expected_psi2_kinnersley;
+  unit_interface_normal_vector.get(0)[0] = 1.0;
+
+  gh::BoundaryConditions::Bjorhus::detail::WorldtubeWeylScalarDiagnostics<
+      DataVector, frame>
+      diagnostics{};
+  gh::BoundaryConditions::Bjorhus::detail::worldtube_weyl_scalar_diagnostics(
+      make_not_null(&diagnostics), weyl_electric, weyl_magnetic, spatial_metric,
+      inverse_spatial_metric, unit_interface_normal_vector);
+
+  Approx custom_approx = Approx::custom().epsilon(1.0e-12).scale(1.0);
+  CHECK(get(diagnostics.gauss_bonnet_scalar)[0] ==
+        custom_approx(expected_gauss_bonnet));
+  CHECK(get(diagnostics.psi2_kinnersley)[0] ==
+        custom_approx(expected_psi2_kinnersley));
+  CHECK(real(get(diagnostics.weyl_scalars[1]))[0] == custom_approx(0.0));
+  CHECK(imag(get(diagnostics.weyl_scalars[1]))[0] == custom_approx(0.0));
+  CHECK(real(get(diagnostics.weyl_scalars[3]))[0] == custom_approx(0.0));
+  CHECK(imag(get(diagnostics.weyl_scalars[3]))[0] == custom_approx(0.0));
+  CHECK(real(get(diagnostics.weyl_scalars[4]))[0] == custom_approx(0.0));
+  CHECK(imag(get(diagnostics.weyl_scalars[4]))[0] == custom_approx(0.0));
+  CHECK(real(get(diagnostics.inferred_psi0))[0] == custom_approx(0.0));
+  CHECK(imag(get(diagnostics.inferred_psi0))[0] == custom_approx(0.0));
+}
 }  // namespace
 
 SPECTRE_TEST_CASE("Unit.Evolution.Systems.GeneralizedHarmonic.BCBjorhus.VPsi",
@@ -1646,4 +1692,5 @@ SPECTRE_TEST_CASE("Unit.Evolution.Systems.GeneralizedHarmonic.BCBjorhus.VMinus",
 
   test_constraint_preserving_gauge_physical_bjorhus_v_minus_vs_spec_3d(
       grid_size, lower_bound, upper_bound);
+  test_worldtube_weyl_scalar_diagnostics();
 }

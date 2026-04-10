@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <limits>
 
+#include "DataStructures/ComplexDataVector.hpp"
+#include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Utilities/ContainerHelpers.hpp"
 
@@ -23,6 +25,27 @@ class not_null;
 namespace gh::BoundaryConditions {
 /// \brief Detailed implementation of Bjorhus-type boundary corrections
 namespace Bjorhus {
+namespace detail {
+template <typename DataType, typename Frame>
+struct WorldtubeWeylScalarDiagnostics {
+  std::array<Scalar<ComplexDataVector>, 5> weyl_scalars{};
+  Scalar<DataType> gauss_bonnet_scalar{};
+  Scalar<DataType> psi2_kinnersley{};
+  Scalar<ComplexDataVector> inferred_psi0{};
+  tnsr::I<ComplexDataVector, 3, Frame> m{};
+};
+
+template <typename DataType, typename Frame>
+void worldtube_weyl_scalar_diagnostics(
+    gsl::not_null<WorldtubeWeylScalarDiagnostics<DataType, Frame>*>
+        diagnostics,
+    const tnsr::ii<DataType, 3, Frame>& weyl_electric,
+    const tnsr::ii<DataType, 3, Frame>& weyl_magnetic,
+    const tnsr::ii<DataType, 3, Frame>& spatial_metric,
+    const tnsr::II<DataType, 3, Frame>& inverse_spatial_metric,
+    const tnsr::I<DataType, 3, Frame>& unit_interface_normal_vector);
+}  // namespace detail
+
 /*!
  * \brief Computes the expression needed to set boundary conditions on the time
  * derivative of the characteristic field \f$v^{g}_{ab}\f$

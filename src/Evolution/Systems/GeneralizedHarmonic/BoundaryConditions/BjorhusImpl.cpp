@@ -14,7 +14,6 @@
 #include "DataStructures/TempBuffer.hpp"
 #include "DataStructures/Tensor/EagerMath/Determinant.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
-#include "Parallel/Printf/Printf.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Christoffel.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/CovariantDerivOfExtrinsicCurvature.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/Ricci.hpp"
@@ -23,16 +22,11 @@
 #include "PointwiseFunctions/GeneralRelativity/WeylElectric.hpp"
 #include "PointwiseFunctions/GeneralRelativity/WeylMagnetic.hpp"
 #include "PointwiseFunctions/GeneralRelativity/WeylPropagating.hpp"
-<<<<<<< HEAD
-#include "PointwiseFunctions/MathFunctions/MathFunction.hpp"
-=======
 #include "PointwiseFunctions/GeneralRelativity/WeylScalars.hpp"
->>>>>>> 701fd5ed2a (some BCs)
 #include "Utilities/ContainerHelpers.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
 #include "Utilities/Gsl.hpp"
-#include "Utilities/MakeWithValue.hpp"
 
 namespace gh::BoundaryConditions::Bjorhus {
 template <size_t VolumeDim, typename DataType>
@@ -114,6 +108,42 @@ void constraint_preserving_corrections_dt_v_zero(
 }
 
 namespace detail {
+template <typename DataType, typename Frame>
+void worldtube_weyl_scalar_diagnostics(
+    const gsl::not_null<WorldtubeWeylScalarDiagnostics<DataType, Frame>*>
+        diagnostics,
+    const tnsr::ii<DataType, 3, Frame>& weyl_electric,
+    const tnsr::ii<DataType, 3, Frame>& weyl_magnetic,
+    const tnsr::ii<DataType, 3, Frame>& spatial_metric,
+    const tnsr::II<DataType, 3, Frame>& inverse_spatial_metric,
+    const tnsr::I<DataType, 3, Frame>& unit_interface_normal_vector) {
+  const auto weyl_electric_scalar =
+      gr::weyl_electric_scalar(weyl_electric, inverse_spatial_metric);
+  const auto weyl_magnetic_scalar =
+      gr::weyl_magnetic_scalar(weyl_magnetic, inverse_spatial_metric);
+  diagnostics->gauss_bonnet_scalar = gr::gauss_bonnet_scalar_in_vacuum(
+      weyl_electric_scalar, weyl_magnetic_scalar);
+  get(diagnostics->psi2_kinnersley) =
+      sqrt(get(diagnostics->gauss_bonnet_scalar) / 48.0);
+
+  const auto weyl_scalars_and_m =
+      gr::weyl_scalars(weyl_electric, weyl_magnetic, spatial_metric,
+                       unit_interface_normal_vector);
+  diagnostics->m = weyl_scalars_and_m.m;
+  diagnostics->weyl_scalars = weyl_scalars_and_m.scalars;
+
+  const auto& weyl_psi1 = diagnostics->weyl_scalars[1];
+  const auto& weyl_psi2 = diagnostics->weyl_scalars[2];
+  const auto x =
+      (-6. + sqrt(36. - 24. * (1. - get(weyl_psi2) /
+                                       get(diagnostics->psi2_kinnersley)))) /
+      12.;
+  const auto y =
+      get(weyl_psi1) / (3. * get(diagnostics->psi2_kinnersley) * (1. + 2. * x));
+  get(diagnostics->inferred_psi0) =
+      6. * get(diagnostics->psi2_kinnersley) * square(y);
+}
+
 template <size_t VolumeDim, typename DataType>
 void add_gauge_sommerfeld_terms_to_dt_v_minus(
     const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
@@ -259,8 +289,7 @@ void add_physical_terms_to_dt_v_minus(
     const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& phi,
     const tnsr::ijaa<DataType, VolumeDim, Frame::Inertial>& d_phi,
     const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& d_pi,
-    const std::array<DataType, 4>& char_speeds, const double time,
-    const MathFunction<1, Frame::Inertial>* const incoming_wave_profile) {
+    const std::array<DataType, 4>& char_speeds, const double time) {
   // hard-coded value from SpEC Bbh input file Mu = MuPhys = 0
   constexpr double mu_phys = 0.;
   constexpr bool adjust_phys_using_c4 = true;
@@ -270,15 +299,12 @@ void add_physical_terms_to_dt_v_minus(
   // https://arxiv.org/pdf/gr-qc/0105031.pdf.
   TempBuffer<tmpl::list<::Tags::Tempaa<0, VolumeDim, Frame::Inertial, DataType>,
                         ::Tags::Tempaa<1, VolumeDim, Frame::Inertial, DataType>,
-                        ::Tags::Tempaa<2, VolumeDim, Frame::Inertial, DataType>,
                         ::Tags::TempScalar<0, DataType>>>
       u3_buffer(get_size(get<0>(unit_interface_normal_vector)), 0.);
   auto& U3p =
       get<::Tags::Tempaa<0, VolumeDim, Frame::Inertial, DataType>>(u3_buffer);
   auto& U3m =
       get<::Tags::Tempaa<1, VolumeDim, Frame::Inertial, DataType>>(u3_buffer);
-  auto& injected_wave =
-      get<::Tags::Tempaa<2, VolumeDim, Frame::Inertial, DataType>>(u3_buffer);
 
   {
     TempBuffer<
@@ -444,21 +470,22 @@ void add_physical_terms_to_dt_v_minus(
     }
   }
 
-  if (incoming_wave_profile != nullptr) {
-    if constexpr (VolumeDim == 3) {
-      const double injected_wave_profile_value = (*incoming_wave_profile)(time);
-      injected_wave.get(1, 1) = injected_wave_profile_value;
-      injected_wave.get(2, 2) = injected_wave_profile_value;
-      injected_wave.get(3, 3) = -2. * injected_wave_profile_value;
-    } else {
-      ERROR("IncomingWaveProfile can only be used in 3 spatial dimensions.");
-    }
-  }
-
   // Add physical boundary corrections
   if (gamma2_in_phys) {
     auto& normal_dot_three_index_constraint_gamma2 =
         get(get<::Tags::TempScalar<0, DataType>>(u3_buffer));
+    tnsr::aa<DataVector, VolumeDim, Frame::Inertial> injected_wave(
+        get_size(get<0>(unit_interface_normal_vector)), 0.);
+    const double amplitude = 1e-3;
+    const double tp = 60;
+    const double width = 10;
+    const double t_minus_tp = time - tp;
+    const double exp_factor =
+        amplitude * exp(-square(t_minus_tp) / (width * width));
+    const double derivative = -2.0 * t_minus_tp / (width * width) * exp_factor;
+    injected_wave.get(1, 1) = derivative;
+    injected_wave.get(2, 2) = derivative;
+    injected_wave.get(3, 3) = -2. * derivative;
     for (size_t a = 0; a <= VolumeDim; ++a) {
       for (size_t b = a; b <= VolumeDim; ++b) {
         for (size_t c = 0; c <= VolumeDim; ++c) {
@@ -692,46 +719,19 @@ void add_physical_terms_to_dt_v_minus_worldtube(
   if constexpr (VolumeDim == 3) {
     const auto weyl_magnetic = gr::weyl_magnetic(
         cov_deriv_ex_curv, spatial_metric, sqrt_det_spatial_metric);
-    const auto weyl_electric_scalar =
-        gr::weyl_electric_scalar(weyl_electric, inverse_spatial_metric);
-    const auto weyl_magnetic_scalar =
-        gr::weyl_magnetic_scalar(weyl_magnetic, inverse_spatial_metric);
-    const auto gauss_bonnet_scalar = gr::gauss_bonnet_scalar_in_vacuum(
-        weyl_electric_scalar, weyl_magnetic_scalar);
-    const auto psi2_kinnersley = sqrt(get(gauss_bonnet_scalar) / 48.0);
-
-    const auto weyl_scalars_and_m =
-        gr::weyl_scalars(weyl_electric, weyl_magnetic, spatial_metric,
-                         unit_interface_normal_vector);
-    const auto& m = weyl_scalars_and_m.m;
-    const auto [weyl_psi0, weyl_psi1, weyl_psi2, weyl_psi3, weyl_psi4] =
-        weyl_scalars_and_m.scalars;
-
-    const auto x =
-        (-6. + sqrt(36. - 24. * (1. - get(weyl_psi2) / psi2_kinnersley))) / 12.;
-    const auto y = get(weyl_psi1) / (3. * psi2_kinnersley * (1. + 2. * x));
-
-    const auto psi0 = 6. * psi2_kinnersley * y * y;
-    Parallel::printf(MakeString{} << "Worldtube Weyl scalars: Psi0: "
-                                  << real(get(weyl_psi0))[0] << "  "
-                                  << imag(get(weyl_psi0))[0] << "  "
-                                  << "Psi1: " << real(get(weyl_psi1))[0] << "  "
-                                  << imag(get(weyl_psi1))[0] << "  "
-                                  << "Psi2: " << real(get(weyl_psi2))[0] << "  "
-                                  << imag(get(weyl_psi2))[0] << "  "
-                                  << "Psi3: " << real(get(weyl_psi3))[0] << "  "
-                                  << imag(get(weyl_psi3))[0] << "  "
-                                  << "Psi4: " << real(get(weyl_psi4))[0] << "  "
-                                  << imag(get(weyl_psi4))[0] << "  "
-                                  << "  Kinnersley Psi2: " << psi2_kinnersley[0]
-                                  << " Inferred Psi0: " << real(psi0)[0] << "  "
-                                  << imag(psi0)[0] << "\n");
+    WorldtubeWeylScalarDiagnostics<DataType, Frame::Inertial> diagnostics{};
+    worldtube_weyl_scalar_diagnostics(
+        make_not_null(&diagnostics), weyl_electric, weyl_magnetic,
+        spatial_metric, inverse_spatial_metric, unit_interface_normal_vector);
 
     for (size_t i = 0; i < VolumeDim; ++i) {
       for (size_t j = 0; j < VolumeDim; ++j) {
         weyl_prop_bc.get(i, j) =
-            2. * real(psi0 * conj(m.get(i)) * conj(m.get(j)) +
-                      conj(psi0) * m.get(i) * m.get(j));
+            2. * real(get(diagnostics.inferred_psi0) *
+                          conj(diagnostics.m.get(i)) *
+                          conj(diagnostics.m.get(j)) +
+                      conj(get(diagnostics.inferred_psi0)) *
+                          diagnostics.m.get(i) * diagnostics.m.get(j));
       }
     }
 
@@ -744,6 +744,9 @@ void add_physical_terms_to_dt_v_minus_worldtube(
               U3m.get(a, b) += 2. * projection_Ab.get(i + 1, a) *
                                projection_Ab.get(j + 1, b) *
                                weyl_prop_minus.get(i, j);
+              U3p.get(a, b) += 2. * projection_Ab.get(i + 1, a) *
+                               projection_Ab.get(j + 1, b) *
+                               weyl_prop_bc.get(i, j);
             }
           }
         }
@@ -893,8 +896,7 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus(
     const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& phi,
     const tnsr::ijaa<DataType, VolumeDim, Frame::Inertial>& d_phi,
     const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& d_pi,
-    const std::array<DataType, 4>& char_speeds,
-    const MathFunction<1, Frame::Inertial>* const incoming_wave_profile) {
+    const std::array<DataType, 4>& char_speeds) {
   for (size_t a = 0; a <= VolumeDim; ++a) {
     for (size_t b = a; b <= VolumeDim; ++b) {
       bc_dt_v_minus->get(a, b) = -char_projected_rhs_dt_v_minus.get(a, b);
@@ -910,8 +912,7 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus(
       unit_interface_normal_vector, spacetime_unit_normal_vector, projection_ab,
       projection_Ab, projection_AB, inverse_spatial_metric, extrinsic_curvature,
       spacetime_metric, inverse_spacetime_metric, three_index_constraint,
-      char_projected_rhs_dt_v_minus, phi, d_phi, d_pi, char_speeds, time,
-      incoming_wave_profile);
+      char_projected_rhs_dt_v_minus, phi, d_phi, d_pi, char_speeds, time);
   detail::add_gauge_sommerfeld_terms_to_dt_v_minus(
       bc_dt_v_minus, gamma2, inertial_coords, incoming_null_one_form,
       outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
@@ -962,7 +963,8 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
       bc_dt_v_minus->get(a, b) = -char_projected_rhs_dt_v_minus.get(a, b);
     }
   }
-  /*detail::add_constraint_dependent_terms_to_dt_v_minus(
+
+  detail::add_constraint_dependent_terms_to_dt_v_minus(
       bc_dt_v_minus, outgoing_null_one_form, incoming_null_vector,
       outgoing_null_vector, projection_ab, projection_Ab, projection_AB,
       constraint_char_zero_plus, constraint_char_zero_minus,
@@ -976,13 +978,26 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
   detail::add_gauge_sommerfeld_terms_to_dt_v_minus(
       bc_dt_v_minus, gamma2, inertial_coords, incoming_null_one_form,
       outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
-      projection_Ab, char_projected_rhs_dt_v_psi);*/
+      projection_Ab, char_projected_rhs_dt_v_psi);
 }
 }  // namespace gh::BoundaryConditions::Bjorhus
 
 // Explicit Instantiations
 #define DIM(data) BOOST_PP_TUPLE_ELEM(0, data)
 #define DTYPE(data) BOOST_PP_TUPLE_ELEM(1, data)
+
+template void gh::BoundaryConditions::Bjorhus::detail::
+    worldtube_weyl_scalar_diagnostics(
+        const gsl::not_null<gh::BoundaryConditions::Bjorhus::detail::
+                                WorldtubeWeylScalarDiagnostics<
+                                    DataVector, Frame::Inertial>*>
+            diagnostics,
+        const tnsr::ii<DataVector, 3, Frame::Inertial>& weyl_electric,
+        const tnsr::ii<DataVector, 3, Frame::Inertial>& weyl_magnetic,
+        const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
+        const tnsr::II<DataVector, 3, Frame::Inertial>& inverse_spatial_metric,
+        const tnsr::I<DataVector, 3, Frame::Inertial>&
+            unit_interface_normal_vector);
 
 #define INSTANTIATE(_, data)                                                   \
   template void                                                                \
@@ -1077,8 +1092,7 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
       const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>& phi,           \
       const tnsr::ijaa<DTYPE(data), DIM(data), Frame::Inertial>& d_phi,        \
       const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>& d_pi,          \
-      const std::array<DTYPE(data), 4>& char_speeds, const double time,        \
-      const MathFunction<1, Frame::Inertial>* incoming_wave_profile);          \
+      const std::array<DTYPE(data), 4>& char_speeds, const double time);       \
   template void gh::BoundaryConditions::Bjorhus::                              \
       constraint_preserving_corrections_dt_v_minus(                            \
           const gsl::not_null<                                                 \
@@ -1184,10 +1198,6 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
           const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>& phi,       \
           const tnsr::ijaa<DTYPE(data), DIM(data), Frame::Inertial>& d_phi,    \
           const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>& d_pi,      \
-<<<<<<< HEAD
-          const std::array<DTYPE(data), 4>& char_speeds,                       \
-          const MathFunction<1, Frame::Inertial>* incoming_wave_profile);
-=======
           const std::array<DTYPE(data), 4>& char_speeds);                      \
   template void gh::BoundaryConditions::Bjorhus::                              \
       constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(   \
@@ -1239,7 +1249,6 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
           const tnsr::ijaa<DTYPE(data), DIM(data), Frame::Inertial>& d_phi,    \
           const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>& d_pi,      \
           const std::array<DTYPE(data), 4>& char_speeds);
->>>>>>> 701fd5ed2a (some BCs)
 
 GENERATE_INSTANTIATIONS(INSTANTIATE, (1, 2, 3), (DataVector))
 
