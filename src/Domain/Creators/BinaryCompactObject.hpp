@@ -193,6 +193,12 @@ class BinaryCompactObject : public DomainCreator<3> {
               domain::CoordinateMaps::Interval,
               domain::CoordinateMaps::Identity<2>>,
           domain::CoordinateMaps::SphericalToCartesianPfaffian>,
+      domain::CoordinateMap<
+          Frame::BlockLogical, Frame::Inertial,
+          domain::CoordinateMaps::ProductOf2Maps<
+              domain::CoordinateMaps::Interval,
+              domain::CoordinateMaps::Identity<2>>,
+          domain::CoordinateMaps::SphericalToCartesianPfaffian, Affine3D>,
       bco::TimeDependentMapOptions<false>::maps_list>>;
 
   /// Options for an excision region in the domain
@@ -258,6 +264,14 @@ class BinaryCompactObject : public DomainCreator<3> {
           "Use a logarithmically spaced radial grid in the part of Layer 1 "
           "enveloping the object (requires the interior is excised)"};
     };
+    struct UseSphericalHarmonics {
+      using type = bool;
+      static type suggested_value() { return false; }
+      static constexpr Options::String help = {
+          "Use a spherical-harmonic basis in this object's shell (a single "
+          "block) instead of the default 6-wedge basis. Requires the interior "
+          "is excised."};
+    };
     template <typename Metavariables>
     using options = tmpl::list<
         InnerRadius, OuterRadius, XCoord,
@@ -265,11 +279,12 @@ class BinaryCompactObject : public DomainCreator<3> {
             domain::BoundaryConditions::has_boundary_conditions_base_v<
                 typename Metavariables::system>,
             Interior, ExciseInterior>,
-        UseLogarithmicMap>;
+        UseLogarithmicMap, UseSphericalHarmonics>;
     Object() {}  // NOLINT(modernize-use-equals-default)
     Object(double local_inner_radius, double local_outer_radius,
            double local_x_coord, std::optional<Excision> interior,
-           bool local_use_logarithmic_map)
+           bool local_use_logarithmic_map,
+           bool local_use_spherical_harmonics = false)
         : inner_radius(local_inner_radius),
           outer_radius(local_outer_radius),
           x_coord(local_x_coord),
@@ -277,10 +292,12 @@ class BinaryCompactObject : public DomainCreator<3> {
               interior.has_value()
                   ? std::make_optional(std::move(interior->boundary_condition))
                   : std::nullopt),
-          use_logarithmic_map(local_use_logarithmic_map) {}
+          use_logarithmic_map(local_use_logarithmic_map),
+          use_spherical_harmonics(local_use_spherical_harmonics) {}
     Object(double local_inner_radius, double local_outer_radius,
            double local_x_coord, bool local_excise_interior,
-           bool local_use_logarithmic_map)
+           bool local_use_logarithmic_map,
+           bool local_use_spherical_harmonics = false)
         : inner_radius(local_inner_radius),
           outer_radius(local_outer_radius),
           x_coord(local_x_coord),
@@ -289,7 +306,8 @@ class BinaryCompactObject : public DomainCreator<3> {
                   ? std::optional<std::unique_ptr<
                         domain::BoundaryConditions::BoundaryCondition>>{nullptr}
                   : std::nullopt),
-          use_logarithmic_map(local_use_logarithmic_map) {}
+          use_logarithmic_map(local_use_logarithmic_map),
+          use_spherical_harmonics(local_use_spherical_harmonics) {}
 
     /// Whether or not the object should be excised from the domain, leaving a
     /// spherical hole. When this is true, `inner_boundary_condition` is
@@ -304,6 +322,7 @@ class BinaryCompactObject : public DomainCreator<3> {
         std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>>
         inner_boundary_condition;
     bool use_logarithmic_map{};
+    bool use_spherical_harmonics{false};
   };
 
   // Simpler version of an object: a single cube centered on (xCoord,0,0)
@@ -662,13 +681,23 @@ class BinaryCompactObject : public DomainCreator<3> {
   bool is_excised_b_ = false;
   bool use_single_block_a_ = false;
   bool use_single_block_b_ = false;
+  bool spherical_harmonics_in_object_a_shell_ = false;
+  bool spherical_harmonics_in_object_b_shell_ = false;
+  size_t first_block_object_b_{};
+  size_t first_envelope_block_{};
+  std::array<size_t, 2> first_object_shell_block_{
+      {std::numeric_limits<size_t>::max(), std::numeric_limits<size_t>::max()}};
+  std::array<size_t, 2> first_object_cube_block_{
+      {std::numeric_limits<size_t>::max(), std::numeric_limits<size_t>::max()}};
+  std::array<size_t, 2> number_of_blocks_in_object_region_{{0, 0}};
   std::optional<bco::TimeDependentMapOptions<false>> time_dependent_options_;
   double opening_angle_ = std::numeric_limits<double>::signaling_NaN();
   bool spherical_harmonics_in_wavezone_ = false;
   bool use_worldtube_ = false;
 };
 
-/*! \brief `BinaryCompactObject` restricted to a spherical, excised Object B.
+/*!
+ * \brief `BinaryCompactObject` restricted to a spherical, excised Object B.
  *
  * This domain creator has the same input-file name and options as
  * `BinaryCompactObject`, but rejects a Cartesian-cube Object B, a filled
