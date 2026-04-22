@@ -490,7 +490,8 @@ TimeDependentMapOptions<IsCylindrical>::distorted_to_inertial_map(
                    : false);
     block_has_shape_map =
         include_distorted_map.has_value() and
-        (transition_ends_at_cube or include_distorted_map.value() < 6);
+        (transition_ends_at_cube or include_distorted_map.value() < 6 or
+         include_distorted_map.value() == 12);
   }
 
   const auto& rot_scale_trans = rot_scale_trans_map_.has_value()
@@ -546,7 +547,8 @@ TimeDependentMapOptions<IsCylindrical>::grid_to_distorted_map(
                       shape_options_B_.value());
     block_has_shape_map =
         block_has_shape_map and include_distorted_map.has_value() and
-        (transition_ends_at_cube or include_distorted_map.value() < 6);
+        (transition_ends_at_cube or include_distorted_map.value() < 6 or
+         include_distorted_map.value() == 12);
   }
 
   if (block_has_shape_map) {
@@ -555,10 +557,10 @@ TimeDependentMapOptions<IsCylindrical>::grid_to_distorted_map(
     if constexpr (IsCylindrical) {
       shape = &gsl::at(shape_maps_, index);
     } else {
-      if (include_distorted_map.value() >= 12) {
+      if (include_distorted_map.value() > 12) {
         ERROR(
             "Invalid 'include_distorted_map' argument. Max value allowed is "
-            "11, but it is "
+            "12, but it is "
             << include_distorted_map.value());
       }
       shape =
@@ -602,7 +604,7 @@ TimeDependentMapOptions<IsCylindrical>::grid_to_inertial_map(
     block_has_shape_map =
         block_has_shape_map and include_distorted_map.has_value() and
         (transition_ends_at_cube or include_distorted_map.value() < 6 or
-         return_excision_map);
+         include_distorted_map.value() == 12 or return_excision_map);
   }
 
   const auto& rot_scale_trans = rot_scale_trans_map_.has_value()
@@ -619,10 +621,10 @@ TimeDependentMapOptions<IsCylindrical>::grid_to_inertial_map(
                                         ? shape_maps_.size() - 2 + index
                                         : index);
     } else {
-      if (include_distorted_map.value() >= 12) {
+      if (include_distorted_map.value() > 12) {
         ERROR(
             "Invalid 'include_distorted_map' argument. Max value allowed is "
-            "11, but it is "
+            "12, but it is "
             << include_distorted_map.value());
       }
       shape =
