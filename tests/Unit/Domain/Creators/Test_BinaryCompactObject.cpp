@@ -435,7 +435,9 @@ std::string create_option_string(
     const bool use_logarithmic_map_AB, const bool use_equiangular_map,
     const size_t additional_refinement_outer,
     const size_t additional_refinement_A, const size_t additional_refinement_B,
-    const double opening_angle, const bool add_boundary_condition) {
+    const double opening_angle, const bool add_boundary_condition,
+    const bool use_spherical_harmonics_shell_a = false,
+    const bool use_spherical_harmonics_shell_b = false) {
   const std::string cube_scale =
       (excise_A and excise_B and opening_angle == 90) ? "1.5" : "1.0";
   const std::string time_dependence{
@@ -509,12 +511,18 @@ std::string create_option_string(
          interior_A +
          "    UseLogarithmicMap: " + stringize(use_logarithmic_map_AB) +
          "\n"
+         "    UseSphericalHarmonics: " +
+         stringize(use_spherical_harmonics_shell_a) +
+         "\n"
          "  ObjectB:\n"
          "    InnerRadius: 0.2\n"
          "    OuterRadius: 1.0\n"
          "    XCoord: -2.0\n" +
          interior_B +
          "    UseLogarithmicMap: " + stringize(use_logarithmic_map_AB) +
+         "\n"
+         "    UseSphericalHarmonics: " +
+         stringize(use_spherical_harmonics_shell_b) +
          "\n"
          "  CenterOfMassOffset: [0.1, 0.2]\n"
          "  Envelope:\n"
@@ -532,19 +540,41 @@ std::string create_option_string(
          "  InitialRefinement:\n" +
          (excise_A ? "" : "    ObjectAInterior: [1, 1, 1]\n") +
          (excise_B ? "" : "    ObjectBInterior: [1, 1, 1]\n") +
-         "    ObjectAShell: [1, 1, " +
-         std::to_string(1 + additional_refinement_A) +
-         "]\n"
-         "    ObjectBShell: [1, 1, " +
-         std::to_string(1 + additional_refinement_B) +
-         "]\n"
+         // spherical-harmonic shell blocks only support radial refinement,
+         // specified as a single number
+         (use_spherical_harmonics_shell_a
+              ? "    ObjectAShell: 1\n"s
+              : "    ObjectAShell: [1, 1, " +
+                    std::to_string(1 + additional_refinement_A) + "]\n") +
+         (use_spherical_harmonics_shell_b
+              ? "    ObjectBShell: 1\n"s
+              : "    ObjectBShell: [1, 1, " +
+                    std::to_string(1 + additional_refinement_B) + "]\n") +
          "    ObjectACube: [1, 1, 1]\n"
          "    ObjectBCube: [1, 1, 1]\n"
          "    Envelope: [1, 1, 1]\n"
          "    OuterShell0: [1, 1, " +
          std::to_string(1 + additional_refinement_outer) + "]\n" +
          (excise_B ? "    OuterShell1: [1, 1, 0]\n" : "") +
-         "  InitialGridPoints: 3\n" + "  CubeScale: " + cube_scale +
+         // spherical-harmonic shell blocks require grid points as
+         // [radial_points, L_max] with L_max >= 6
+         ((use_spherical_harmonics_shell_a or use_spherical_harmonics_shell_b)
+              ? "  InitialGridPoints:\n" +
+                    (excise_A ? ""s : "    ObjectAInterior: [3, 3, 3]\n"s) +
+                    (excise_B ? ""s : "    ObjectBInterior: [3, 3, 3]\n"s) +
+                    (use_spherical_harmonics_shell_a
+                         ? "    ObjectAShell: [3, 7]\n"s
+                         : "    ObjectAShell: [3, 3, 3]\n"s) +
+                    (use_spherical_harmonics_shell_b
+                         ? "    ObjectBShell: [3, 7]\n"s
+                         : "    ObjectBShell: [3, 3, 3]\n"s) +
+                    "    ObjectACube: [3, 3, 3]\n"
+                    "    ObjectBCube: [3, 3, 3]\n"
+                    "    Envelope: [3, 3, 3]\n"
+                    "    OuterShell0: [3, 3, 3]\n"s +
+                    (excise_B ? "    OuterShell1: [3, 3, 3]\n"s : ""s)
+              : "  InitialGridPoints: 3\n"s) +
+         "  CubeScale: " + cube_scale +
          "\n"
          "  UseEquiangularMap: " +
          stringize(use_equiangular_map) +
@@ -1311,6 +1341,179 @@ void test_spherical_harmonics_wavezone() {
           "only valid for spherical-harmonic shell blocks"));
 }
 
+void test_spherical_harmonics_object_shells() {
+  INFO("Test BinaryCompactObject with spherical-harmonic object shells");
+  using GridPointsMap = std::unordered_map<
+      std::string, std::variant<std::array<size_t, 3>, std::array<size_t, 2>>>;
+  using RefinementMap =
+      std::unordered_map<std::string,
+                         std::variant<std::array<size_t, 3>, size_t>>;
+
+  const domain::creators::BinaryCompactObject bco_a_sh{
+      Object{0.3, 1.0, 3.0, {{create_inner_boundary_condition()}}, false, true},
+      Object{
+          0.5, 1.0, -3.0, {{create_inner_boundary_condition()}}, false, false},
+      std::array<double, 2>{{0.0, 0.0}},
+      25.5,
+      32.4,
+      1.0,
+      RefinementMap{{"ObjectAShell", size_t{2}},
+                    {"ObjectACube", std::array<size_t, 3>{1, 1, 1}},
+                    {"ObjectBShell", std::array<size_t, 3>{1, 1, 1}},
+                    {"ObjectBCube", std::array<size_t, 3>{1, 1, 1}},
+                    {"Envelope", std::array<size_t, 3>{1, 1, 1}},
+                    {"OuterShell0", std::array<size_t, 3>{1, 1, 2}}},
+      GridPointsMap{{"ObjectAShell", std::array<size_t, 2>{4, 7}},
+                    {"ObjectACube", std::array<size_t, 3>{3, 3, 3}},
+                    {"ObjectBShell", std::array<size_t, 3>{3, 3, 3}},
+                    {"ObjectBCube", std::array<size_t, 3>{3, 3, 3}},
+                    {"Envelope", std::array<size_t, 3>{3, 3, 3}},
+                    {"OuterShell0", std::array<size_t, 3>{3, 3, 3}}},
+      true,
+      Distribution::Projective,
+      std::vector<double>{},
+      Distribution::Linear,
+      120.0,
+      false,
+      false,
+      std::nullopt,
+      create_outer_boundary_condition()};
+
+  CHECK(bco_a_sh.block_names().size() == 39);
+  CHECK(bco_a_sh.block_names()[0] == "ObjectAShell0");
+  REQUIRE(bco_a_sh.block_groups().contains("ObjectAShell"));
+  CHECK(bco_a_sh.block_groups().at("ObjectAShell") ==
+        std::unordered_set<std::string>{"ObjectAShell0"});
+  CHECK(bco_a_sh.initial_extents()[0] == std::array<size_t, 3>{4, 8, 15});
+  CHECK(bco_a_sh.initial_refinement_levels()[0] ==
+        std::array<size_t, 3>{2, 0, 0});
+
+  const auto domain_a_sh = bco_a_sh.create_domain();
+  const auto& blocks_a_sh = domain_a_sh.blocks();
+  REQUIRE(blocks_a_sh.size() == 39);
+  CHECK(blocks_a_sh[0].neighbors().count(Direction<3>::lower_xi()) == 0);
+  CHECK(blocks_a_sh[0].neighbors().count(Direction<3>::upper_xi()) == 1);
+  CHECK(blocks_a_sh[0].neighbors().at(Direction<3>::upper_xi()).ids().size() ==
+        6);
+  for (size_t i = 1; i <= 6; ++i) {
+    CAPTURE(i);
+    CHECK(blocks_a_sh[i].neighbors().count(Direction<3>::lower_zeta()) == 1);
+    CHECK(*blocks_a_sh[i]
+               .neighbors()
+               .at(Direction<3>::lower_zeta())
+               .ids()
+               .begin() == 0);
+  }
+  const auto bcs_a_sh = bco_a_sh.external_boundary_conditions();
+  REQUIRE(bcs_a_sh.size() == 39);
+  CHECK(bcs_a_sh[0].count(Direction<3>::lower_xi()) == 1);
+  CHECK(bcs_a_sh[0].count(Direction<3>::lower_zeta()) == 0);
+
+  const domain::creators::BinaryCompactObject bco_b_sh{
+      Object{
+          0.3, 1.0, 3.0, {{create_inner_boundary_condition()}}, false, false},
+      Object{
+          0.5, 1.0, -3.0, {{create_inner_boundary_condition()}}, false, true},
+      std::array<double, 2>{{0.0, 0.0}},
+      25.5,
+      32.4,
+      1.0,
+      RefinementMap{{"ObjectAShell", std::array<size_t, 3>{1, 1, 1}},
+                    {"ObjectACube", std::array<size_t, 3>{1, 1, 1}},
+                    {"ObjectBShell", size_t{2}},
+                    {"ObjectBCube", std::array<size_t, 3>{1, 1, 1}},
+                    {"Envelope", std::array<size_t, 3>{1, 1, 1}},
+                    {"OuterShell0", std::array<size_t, 3>{1, 1, 2}}},
+      GridPointsMap{{"ObjectAShell", std::array<size_t, 3>{3, 3, 3}},
+                    {"ObjectACube", std::array<size_t, 3>{3, 3, 3}},
+                    {"ObjectBShell", std::array<size_t, 2>{4, 7}},
+                    {"ObjectBCube", std::array<size_t, 3>{3, 3, 3}},
+                    {"Envelope", std::array<size_t, 3>{3, 3, 3}},
+                    {"OuterShell0", std::array<size_t, 3>{3, 3, 3}}},
+      true,
+      Distribution::Projective,
+      std::vector<double>{},
+      Distribution::Linear,
+      120.0,
+      false,
+      false,
+      std::nullopt,
+      create_outer_boundary_condition()};
+
+  CHECK(bco_b_sh.block_names().size() == 39);
+  CHECK(bco_b_sh.block_names()[12] == "ObjectBShell0");
+  CHECK(bco_b_sh.initial_extents()[12] == std::array<size_t, 3>{4, 8, 15});
+  CHECK(bco_b_sh.initial_refinement_levels()[12] ==
+        std::array<size_t, 3>{2, 0, 0});
+  const auto bcs_b_sh = bco_b_sh.external_boundary_conditions();
+  REQUIRE(bcs_b_sh.size() == 39);
+  CHECK(bcs_b_sh[12].count(Direction<3>::lower_xi()) == 1);
+  CHECK(bcs_b_sh[12].count(Direction<3>::lower_zeta()) == 0);
+
+  const domain::creators::BinaryCompactObject bco_both_sh{
+      Object{0.3, 1.0, 3.0, {{create_inner_boundary_condition()}}, false, true},
+      Object{
+          0.5, 1.0, -3.0, {{create_inner_boundary_condition()}}, false, true},
+      std::array<double, 2>{{0.0, 0.0}},
+      25.5,
+      32.4,
+      1.0,
+      RefinementMap{{"ObjectAShell", size_t{1}},
+                    {"ObjectACube", std::array<size_t, 3>{1, 1, 1}},
+                    {"ObjectBShell", size_t{1}},
+                    {"ObjectBCube", std::array<size_t, 3>{1, 1, 1}},
+                    {"Envelope", std::array<size_t, 3>{1, 1, 1}},
+                    {"OuterShell0", size_t{2}}},
+      GridPointsMap{{"ObjectAShell", std::array<size_t, 2>{4, 7}},
+                    {"ObjectACube", std::array<size_t, 3>{3, 3, 3}},
+                    {"ObjectBShell", std::array<size_t, 2>{4, 7}},
+                    {"ObjectBCube", std::array<size_t, 3>{3, 3, 3}},
+                    {"Envelope", std::array<size_t, 3>{3, 3, 3}},
+                    {"OuterShell0", std::array<size_t, 2>{4, 7}}},
+      true,
+      Distribution::Projective,
+      std::vector<double>{},
+      Distribution::Linear,
+      120.0,
+      true,
+      false,
+      std::nullopt,
+      create_outer_boundary_condition()};
+
+  CHECK(bco_both_sh.block_names().size() == 25);
+  CHECK(bco_both_sh.block_names()[0] == "ObjectAShell0");
+  CHECK(bco_both_sh.block_names()[7] == "ObjectBShell0");
+  CHECK(bco_both_sh.block_names()[24] == "OuterShell0");
+  CHECK(not bco_both_sh.block_groups().contains("OuterShell0"));
+
+  CHECK_THROWS_WITH(
+      domain::creators::BinaryCompactObject(
+          Object{0.3, 1.0, 3.0, false, false, true},
+          Object{0.5, 1.0, -3.0, true, false, false},
+          std::array<double, 2>{{0.0, 0.0}}, 25.5, 32.4, 1.0, 0_st, 4_st, true,
+          Distribution::Projective, std::vector<double>{}, Distribution::Linear,
+          120.0, false, false, std::nullopt, nullptr,
+          Options::Context{false, {}, 1, 1}),
+      Catch::Matchers::ContainsSubstring("requires excising Object A"));
+  CHECK_THROWS_WITH(
+      domain::creators::BinaryCompactObject(
+          Object{0.3, 1.0, 3.0, true, false, true},
+          Object{0.5, 1.0, -3.0, true, false, false},
+          std::array<double, 2>{{0.0, 0.0}}, 25.5, 32.4, 1.2, 0_st, 4_st, true,
+          Distribution::Projective, std::vector<double>{}, Distribution::Linear,
+          120.0, false, false, std::nullopt, nullptr,
+          Options::Context{false, {}, 1, 1}),
+      Catch::Matchers::ContainsSubstring("requires CubeScale to be 1.0"));
+
+  const auto sh_time_dep_creator =
+      TestHelpers::test_option_tag<domain::OptionTags::DomainCreator<3>,
+                                   Metavariables<3, true>>(create_option_string(
+          true, true, true, false, true, 0, 0, 0, 120.0, true, true, false));
+  REQUIRE(sh_time_dep_creator != nullptr);
+  CHECK_NOTHROW(sh_time_dep_creator->create_domain());
+  CHECK(not sh_time_dep_creator->functions_of_time().empty());
+}
+
 template <domain::ObjectLabel Object>
 using HardcodedShape =
     domain::creators::time_dependent_options::ShapeMapOptions<true, Object>;
@@ -1420,5 +1623,6 @@ SPECTRE_TEST_CASE("Unit.Domain.Creators.BinaryCompactObject",
   test_binary_factory();
   test_parse_errors();
   test_spherical_harmonics_wavezone();
+  test_spherical_harmonics_object_shells();
   test_kerr_horizon_conforming();
 }
