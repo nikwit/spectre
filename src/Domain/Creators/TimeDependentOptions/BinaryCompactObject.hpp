@@ -298,7 +298,9 @@ struct TimeDependentMapOptions {
    * a shape map or not. If it's false, pass a `std::optional<size_t>`. If this
    * has a value, then it includes a shape map. The `size_t` represents the
    * relative block number around each object in the BinaryCompactObject domain.
-   * It should go from 0 to 11 for the 12 blocks surrounding each object.
+   * It should go from 0 to 11 for the 12 wedge blocks surrounding each object.
+   * The value 12 is reserved for a single spherical-harmonic object-shell
+   * block.
    */
   using IncludeDistortedMapType =
       tmpl::conditional_t<IsCylindrical, bool, std::optional<size_t>>;
