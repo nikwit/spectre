@@ -84,6 +84,7 @@ DomainCreator:
         ExciseWithBoundaryCondition:
           DemandOutgoingCharSpeeds:
       UseLogarithmicMap: true
+      UseSphericalHarmonics: false
     ObjectB:
       InnerRadius: &ExcisionRadiusB {{ ExcisionRadiusB }}
       # Found that the max allowable value for the OuterRadius is 6.0. Higher
@@ -94,6 +95,7 @@ DomainCreator:
         ExciseWithBoundaryCondition:
           DemandOutgoingCharSpeeds:
       UseLogarithmicMap: true
+      UseSphericalHarmonics: false
     CenterOfMassOffset:
       - &YOffset {{ CenterOfMassOffset_y }}
       - &ZOffset {{ CenterOfMassOffset_z }}
