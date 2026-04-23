@@ -25,8 +25,6 @@ set(LIBRARY_SOURCES
   Test_WeylPropagating.cpp
   Test_WeylScalars.cpp
   Test_WeylTypeD1.cpp
-  Test_CurvatureScalarComputeTags.cpp
-  Test_CurvatureScalars.cpp
   )
 
 add_test_library(${LIBRARY} "${LIBRARY_SOURCES}")

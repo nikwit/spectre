@@ -189,16 +189,14 @@ Shape<Label>::functions_of_time(const std::unordered_map<std::string, double>&
 
 template <domain::ObjectLabel Label>
 auto Shape<Label>::grid_to_inertial_map() const -> GridToInertialMap {
-  return GridToInertialMap{ShapeMap{center_, l_max_, l_max_,
-                                    transition_func_->get_clone(),
+  return GridToInertialMap{ShapeMap{center_, 0.0, transition_func_->get_clone(),
                                     function_of_time_name_}};
 }
 
 template <domain::ObjectLabel Label>
 auto Shape<Label>::grid_to_distorted_map() const -> GridToDistortedMap {
-  return GridToDistortedMap{ShapeMap{center_, l_max_, l_max_,
-                                     transition_func_->get_clone(),
-                                     function_of_time_name_}};
+  return GridToDistortedMap{ShapeMap{
+      center_, 0.0, transition_func_->get_clone(), function_of_time_name_}};
 }
 
 template <domain::ObjectLabel Label>

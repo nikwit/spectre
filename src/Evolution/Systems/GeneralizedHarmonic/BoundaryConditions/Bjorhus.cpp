@@ -361,7 +361,7 @@ std::optional<std::string> ConstraintPreservingBjorhus<Dim>::dg_time_derivative(
         inverse_spacetime_metric, three_index_constraint,
         char_projected_rhs_dt_v_psi, char_projected_rhs_dt_v_minus,
         constraint_char_zero_plus, constraint_char_zero_minus, phi, d_phi, d_pi,
-        char_speeds, incoming_wave_profile_.get());
+        char_speeds);
   } else {
     ERROR(
         "Failed to set dtVMinus. Input option must be one of "

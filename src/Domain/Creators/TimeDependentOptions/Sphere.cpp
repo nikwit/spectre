@@ -108,8 +108,9 @@ void TimeDependentMapOptions::build_maps(
     const double outer_radius) {
   filled_ = filled;
   if (shape_map_options_.has_value()) {
-    const size_t l_max = time_dependent_options::l_max_from_shape_options(
-        shape_map_options_.value());
+    const double coefficient_truncation_limit =
+        time_dependent_options::coefficient_truncation_limit_from_shape_options(
+            shape_map_options_.value());
     std::unique_ptr<domain::CoordinateMaps::ShapeMapTransitionFunctions::
                         ShapeMapTransitionFunction>
         transition_func;
@@ -150,9 +151,9 @@ void TimeDependentMapOptions::build_maps(
               /* outer_sphericity */ 1.0,
               static_cast<WedgeTransition::Axis>(gsl::at(axes, j % 6)));
         }
-        gsl::at(shape_maps_, j) =
-            ShapeMap{center,     l_max,    l_max, std::move(transition_func),
-                     shape_name, size_name};
+        gsl::at(shape_maps_, j) = ShapeMap{
+            center, coefficient_truncation_limit, std::move(transition_func),
+            shape_name, size_name};
       }
     } else {
       // Shape map transitions from 1 to 0 from the inner radius to the first
@@ -164,18 +165,18 @@ void TimeDependentMapOptions::build_maps(
           std::make_unique<domain::CoordinateMaps::ShapeMapTransitionFunctions::
                                SphereTransition>(inner_radius,
                                                  shape_outer_radius);
-      shape_maps_[0] =
-          ShapeMap{center,     l_max,    l_max, std::move(transition_func),
-                   shape_name, size_name};
+      shape_maps_[0] = ShapeMap{center, coefficient_truncation_limit,
+                                std::move(transition_func), shape_name,
+                                size_name};
 
       // Interior map
       transition_func =
           std::make_unique<domain::CoordinateMaps::ShapeMapTransitionFunctions::
                                SphereTransition>(
               inner_radius, shape_outer_radius, false, true);
-      shape_maps_[1] =
-          ShapeMap{center,     l_max,    l_max, std::move(transition_func),
-                   shape_name, size_name};
+      shape_maps_[1] = ShapeMap{center, coefficient_truncation_limit,
+                                std::move(transition_func), shape_name,
+                                size_name};
     }
   }
 

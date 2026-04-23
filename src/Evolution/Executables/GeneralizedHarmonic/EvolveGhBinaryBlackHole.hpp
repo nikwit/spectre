@@ -447,10 +447,10 @@ struct EvolutionMetavars {
                                                   Frame::Inertial>,
               gr::Tags::PontryaginScalarCompute<DataVector, 3, Frame::Inertial>,
               gr::Tags::GaussBonnetScalarCompute<DataVector>,
-              gr::Tags::CubicInvariantEebCompute<DataVector, 3,
-                                                 Frame::Inertial>,
-              gr::Tags::CubicInvariantBbeCompute<DataVector, 3,
-                                                 Frame::Inertial>,
+              gr::Tags::CubicInvariantRealCompute<DataVector, 3,
+                                                  Frame::Inertial>,
+              gr::Tags::CubicInvariantImagCompute<DataVector, 3,
+                                                  Frame::Inertial>,
               gr::Tags::WeylTypeD1Compute<DataVector, 3, Frame::Inertial>,
               gr::Tags::WeylTypeD1ScalarCompute<DataVector, 3, Frame::Inertial>,
               gr::Tags::Psi4RealCompute<Frame::Inertial>>,
@@ -613,7 +613,7 @@ struct EvolutionMetavars {
           Actions::MutateApply<evolution::dg::CleanMortarHistory<volume_dim>>,
           tmpl::list<>>,
       dg::Actions::Filter<
-          Filters::Exponential<0>,
+          Filters::Exponential<volume_dim, 0>,
           tmpl::list<gr::Tags::SpacetimeMetric<DataVector, volume_dim>,
                      gh::Tags::Pi<DataVector, volume_dim>,
                      gh::Tags::Phi<DataVector, volume_dim>>>>;
@@ -737,7 +737,8 @@ struct EvolutionMetavars {
             evolution::dg::Tags::Quadrature,
             Tags::StepperErrors<typename system::variables_tag>,
             SelfStart::Tags::InitialValue<typename system::variables_tag>,
-            SelfStart::Tags::InitialValue<Tags::TimeStep>>,
+            SelfStart::Tags::InitialValue<Tags::TimeStep>,
+            Filters::Tags::Filter<Filters::Exponential<volume_dim, 0>>>,
         ::amr::projectors::CopyFromCreatorOrLeaveAsIs<tmpl::push_back<
             tmpl::append<
                 typename control_system::Actions::InitializeMeasurements<
