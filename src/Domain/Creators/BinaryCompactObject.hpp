@@ -153,11 +153,16 @@ create_grid_anchors(const std::array<double, 3>& center_a,
  * template parameter of `false` to
  * `domain::creators::bco::TimeDependentMapOptions`.
  *
- * The `UseWorldtube` template parameter is set to false by default. When set to
- * true, some of the functions of time will be `IntegratedFunctionOfTime` used
- * to control the orbit of the worldtube.
+ * The `UseWorldtube` template parameter is set to false by default. When set
+ * to true, some of the functions of time will be `IntegratedFunctionOfTime`
+ * used to control the orbit of the worldtube.
+ *
+ * The `EnforceObjectBGaussBonnet` template parameter is set to false by
+ * default. When set to true, the constructor enforces that Object B is the
+ * `Object` variant, has an excised spherical interior, and does not specify a
+ * Shape map (to keep Object B spherical).
  */
-template <bool UseWorldtube = false>
+template <bool UseWorldtube = false, bool EnforceObjectBGaussBonnet = false>
 class BinaryCompactObject : public DomainCreator<3> {
  private:
   // Time-independent maps

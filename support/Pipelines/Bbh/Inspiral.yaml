@@ -148,15 +148,8 @@ DomainCreator:
       TranslationMap:
         H5Filename: "{{ FotFilename }}"
         SubfileName: "{{ IdSubfile }}"
-      SkewMap:
-        H5Filename: "{{ FotFilename }}"
-        SubfileName: "{{ IdSubfile }}"
+      SkewMap: None
       ShapeMapA:
-        H5Filename: "{{ FotFilename }}"
-        SubfileName: "{{ IdSubfile }}"
-        LMax: Auto
-        TransitionEndsAtCube: True
-      ShapeMapB:
         H5Filename: "{{ FotFilename }}"
         SubfileName: "{{ IdSubfile }}"
         LMax: Auto
@@ -173,9 +166,7 @@ DomainCreator:
         InitialAngularVelocity: [0.0, 0.0, {{ InitialAngularVelocity }}]
       TranslationMap:
         InitialValues: [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
-      SkewMap:
-        InitialValuesY: [0.0, 0.0, 0.0]
-        InitialValuesZ: [0.0, 0.0, 0.0]
+      SkewMap: None
       ShapeMapA:
         LMax: &ShapeLMax 10
   {% if SpecDataDirectory is defined %}
@@ -187,20 +178,6 @@ DomainCreator:
             - {{ ExcisionAShapeSpin_x }}
             - {{ ExcisionAShapeSpin_y }}
             - {{ ExcisionAShapeSpin_z }}
-  {% endif %}
-        SizeInitialValues: [0.0, 0.0, 0.0]
-        TransitionEndsAtCube: true
-      ShapeMapB:
-        LMax: *ShapeLMax
-  {% if SpecDataDirectory is defined %}
-        InitialValues: Spherical
-  {% else %}
-        InitialValues:
-          Mass: {{ ExcisionBShapeMass }}
-          Spin:
-            - {{ ExcisionBShapeSpin_x }}
-            - {{ ExcisionBShapeSpin_y }}
-            - {{ ExcisionBShapeSpin_z }}
   {% endif %}
         SizeInitialValues: [0.0, 0.0, 0.0]
         TransitionEndsAtCube: true
@@ -401,7 +378,6 @@ EventsAndTriggersAtSlabs:
           Offset: 0
     Events:
       - ObservationAhA
-      - ObservationAhB
       - ObservationExcisionBoundaryA
       - ObservationExcisionBoundaryB
   # Observe volume data for visualization and debugging
@@ -538,16 +514,6 @@ ApparentHorizons:
     Verbosity: Quiet
     MaxComputeCoordsRetries: 3
     BlocksForHorizonFind: ["ObjectAShell", "ObjectACube"]
-  ObservationAhB: &AhB
-    Criteria:
-    InitialGuess:
-      LMax: *ObsLMax
-      Radius: {{ ExcisionRadiusB * 1.5 }}
-      Center: [*XCoordB, *YOffset, *ZOffset]
-    FastFlow: *DefaultFastFlow
-    Verbosity: Quiet
-    MaxComputeCoordsRetries: 3
-    BlocksForHorizonFind: ["ObjectBShell", "ObjectBCube"]
   ObservationAhC:
     Criteria:
     InitialGuess:
@@ -564,9 +530,7 @@ ApparentHorizons:
       - "ObjectBCube"
       - "Envelope"
   ControlSystemAhA: *AhA
-  ControlSystemAhB: *AhB
   ControlSystemCharSpeedAhA: *AhA
-  ControlSystemCharSpeedAhB: *AhB
 
 InterpolationTargets:
   BondiSachsInterpolation:
@@ -584,8 +548,8 @@ InterpolationTargets:
     Center: [*XCoordB, *YOffset, *ZOffset]
     Radius: *ExcisionRadiusB
     AngularOrdering: "Strahlkorper"
+  ControlSystemGaussBonnetDipoleB: *ExBdryB
   ControlSystemCharSpeedExcisionA: *ExBdryA
-  ControlSystemCharSpeedExcisionB: *ExBdryB
 
 ControlSystems:
   WriteDataToDisk: true
@@ -610,18 +574,6 @@ ControlSystems:
     ControlError:
   Rotation: *KinematicControlSystem
   Translation: *KinematicControlSystem
-  Skew:
-    Averager: *KinematicAverager
-    Controller: *KinematicController
-    TimescaleTuner:
-      InitialTimescales: {{ SkewTimescale }}
-      MinTimescale: {{ MinSkewTimescale }}
-      MaxTimescale: *MaxTimescale
-      IncreaseThreshold: *IncreaseThreshold
-      DecreaseThreshold: *DecreaseThreshold
-      IncreaseFactor: *IncreaseFactor
-      DecreaseFactor: *DecreaseFactor
-    ControlError:
   ShapeA:
     Averager: &SizeShapeAverager
       AverageTimescaleFraction: *AvgTimescaleFrac
@@ -629,18 +581,6 @@ ControlSystems:
     Controller: *KinematicController
     TimescaleTuner:
       InitialTimescales: {{ ShapeATimescale }}
-      MinTimescale: *MinTimescale
-      MaxTimescale: *MaxTimescale
-      IncreaseThreshold: *IncreaseThreshold
-      DecreaseThreshold: *DecreaseThreshold
-      IncreaseFactor: *IncreaseFactor
-      DecreaseFactor: *DecreaseFactor
-    ControlError:
-  ShapeB:
-    Averager: *SizeShapeAverager
-    Controller: *KinematicController
-    TimescaleTuner:
-      InitialTimescales: {{ ShapeBTimescale }}
       MinTimescale: *MinTimescale
       MaxTimescale: *MaxTimescale
       IncreaseThreshold: *IncreaseThreshold
@@ -666,29 +606,6 @@ ControlSystems:
       InitialState: Initial
       SmootherTuner:
         InitialTimescales: *SizeATimescale
-        MinTimescale: *MinTimescale
-        MaxTimescale: *MaxTimescale
-        IncreaseThreshold: *IncreaseThreshold
-        DecreaseThreshold: *DecreaseThreshold
-        IncreaseFactor: *IncreaseFactor
-        DecreaseFactor: *DecreaseFactor
-  SizeB:
-    Averager: *SizeShapeAverager
-    Controller: *SizeController
-    TimescaleTuner:
-      InitialTimescales: &SizeBTimescale {{ SizeBTimescale }}
-      MinTimescale: *SizeMinTimescale
-      MaxTimescale: {{ SizeBMaxTimescale }}
-      IncreaseThreshold: *SizeIncreaseThreshold
-      IncreaseFactor: *IncreaseFactor
-    ControlError:
-      MaxNumTimesForZeroCrossingPredictor: 4
-      SmoothAvgTimescaleFraction: 0.25
-      DeltaRDriftOutwardOptions: None
-      DeltaRDriftInwardOptions: None
-      InitialState: Initial
-      SmootherTuner:
-        InitialTimescales: *SizeBTimescale
         MinTimescale: *MinTimescale
         MaxTimescale: *MaxTimescale
         IncreaseThreshold: *IncreaseThreshold

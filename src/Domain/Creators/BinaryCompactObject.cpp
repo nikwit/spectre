@@ -77,29 +77,33 @@ create_grid_anchors(const std::array<double, 3>& center_a,
 }
 }  // namespace bco
 
-template <bool UseWorldtube>
-bool BinaryCompactObject<UseWorldtube>::Object::is_excised() const {
+template <bool UseWorldtube, bool EnforceObjectBGaussBonnet>
+bool BinaryCompactObject<
+    UseWorldtube, EnforceObjectBGaussBonnet>::Object::is_excised() const {
   return inner_boundary_condition.has_value();
 }
 
-template <bool UseWorldtube>
-BinaryCompactObject<UseWorldtube>::BinaryCompactObject(
-    typename ObjectA::type object_A, typename ObjectB::type object_B,
-    std::array<double, 2> center_of_mass_offset, const double envelope_radius,
-    const double outer_radius, const double cube_scale,
-    const typename InitialRefinement::type& initial_refinement,
-    const typename InitialGridPoints::type& initial_number_of_grid_points,
-    const bool use_equiangular_map,
-    const CoordinateMaps::Distribution radial_distribution_envelope,
-    const std::vector<double>& radial_partitioning_outer_shell,
-    const typename RadialDistributionOuterShell::type&
-        radial_distribution_outer_shell,
-    const double opening_angle_in_degrees,
-    const bool spherical_harmonics_in_wavezone,
-    std::optional<bco::TimeDependentMapOptions<false>> time_dependent_options,
-    std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>
-        outer_boundary_condition,
-    const Options::Context& context)
+template <bool UseWorldtube, bool EnforceObjectBGaussBonnet>
+BinaryCompactObject<UseWorldtube, EnforceObjectBGaussBonnet>::
+    BinaryCompactObject(
+        typename ObjectA::type object_A, typename ObjectB::type object_B,
+        std::array<double, 2> center_of_mass_offset,
+        const double envelope_radius, const double outer_radius,
+        const double cube_scale,
+        const typename InitialRefinement::type& initial_refinement,
+        const typename InitialGridPoints::type& initial_number_of_grid_points,
+        const bool use_equiangular_map,
+        const CoordinateMaps::Distribution radial_distribution_envelope,
+        const std::vector<double>& radial_partitioning_outer_shell,
+        const typename RadialDistributionOuterShell::type&
+            radial_distribution_outer_shell,
+        const double opening_angle_in_degrees,
+        const bool spherical_harmonics_in_wavezone,
+        std::optional<bco::TimeDependentMapOptions<false>>
+            time_dependent_options,
+        std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>
+            outer_boundary_condition,
+        const Options::Context& context)
     : object_A_(std::move(object_A)),
       object_B_(std::move(object_B)),
       center_of_mass_offset_(center_of_mass_offset),
@@ -130,6 +134,26 @@ BinaryCompactObject<UseWorldtube>::BinaryCompactObject(
   spherical_harmonics_in_object_b_shell_ =
       not use_single_block_b_ and
       std::get<Object>(object_B_).use_spherical_harmonics;
+
+  if constexpr (EnforceObjectBGaussBonnet) {
+    if (use_single_block_b_) {
+      PARSE_ERROR(context,
+                  "ObjectB must use the spherical-shell Object variant when "
+                  "EnforceObjectBGaussBonnet is enabled.");
+    }
+    if (not is_excised_b_) {
+      PARSE_ERROR(
+          context,
+          "ObjectB must be excised when EnforceObjectBGaussBonnet is enabled.");
+    }
+    if (time_dependent_options_.has_value() and
+        time_dependent_options_->has_distorted_frame_options(
+            domain::ObjectLabel::B)) {
+      PARSE_ERROR(context,
+                  "ShapeMapB must be None when EnforceObjectBGaussBonnet is "
+                  "enabled.");
+    }
+  }
 
   const bool any_spherical_harmonic_shells =
       spherical_harmonics_in_object_a_shell_ or
@@ -668,8 +692,9 @@ BinaryCompactObject<UseWorldtube>::BinaryCompactObject(
   }
 }
 
-template <bool UseWorldtube>
-Domain<3> BinaryCompactObject<UseWorldtube>::create_domain() const {
+template <bool UseWorldtube, bool EnforceObjectBGaussBonnet>
+Domain<3> BinaryCompactObject<
+    UseWorldtube, EnforceObjectBGaussBonnet>::create_domain() const {
   const double inner_sphericity_A = is_excised_a_ ? 1.0 : 0.0;
   const double inner_sphericity_B = is_excised_b_ ? 1.0 : 0.0;
 
@@ -1338,10 +1363,12 @@ Domain<3> BinaryCompactObject<UseWorldtube>::create_domain() const {
   return domain;
 }
 
-template <bool UseWorldtube>
+template <bool UseWorldtube, bool EnforceObjectBGaussBonnet>
 std::vector<DirectionMap<
     3, std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>>>
-BinaryCompactObject<UseWorldtube>::external_boundary_conditions() const {
+BinaryCompactObject<UseWorldtube,
+                    EnforceObjectBGaussBonnet>::external_boundary_conditions()
+    const {
   if (outer_boundary_condition_ == nullptr) {
     return {};
   }
@@ -1400,10 +1427,10 @@ BinaryCompactObject<UseWorldtube>::external_boundary_conditions() const {
   return boundary_conditions;
 }
 
-template <bool UseWorldtube>
+template <bool UseWorldtube, bool EnforceObjectBGaussBonnet>
 std::unordered_map<std::string,
                    std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>
-BinaryCompactObject<UseWorldtube>::functions_of_time(
+BinaryCompactObject<UseWorldtube, EnforceObjectBGaussBonnet>::functions_of_time(
     const std::unordered_map<std::string, double>& initial_expiration_times)
     const {
   return time_dependent_options_.has_value()
@@ -1414,6 +1441,7 @@ BinaryCompactObject<UseWorldtube>::functions_of_time(
                    std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>{};
 }
 
-template class BinaryCompactObject<true>;
-template class BinaryCompactObject<false>;
+template class BinaryCompactObject<true, false>;
+template class BinaryCompactObject<false, false>;
+template class BinaryCompactObject<false, true>;
 }  // namespace domain::creators
