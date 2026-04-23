@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "Domain/Creators/Tags/FunctionsOfTime.hpp"
 #include "Domain/Tags.hpp"
 #include "Evolution/Actions/RunEventsAndTriggers.hpp"
 #include "Evolution/Executables/GeneralizedHarmonic/Batched/Actions.hpp"
@@ -71,6 +72,10 @@ struct GhKokkosBatchedDriver {
       Parallel::PhaseActions<
           Parallel::Phase::Evolve,
           tmpl::list<
+              Actions::MutateApply<
+                  gh::Batched::Actions::UpdateFrameFieldsBatched>,
+              Actions::MutateApply<
+                  gh::Batched::Actions::UpdateConstraintDampingBatched>,
               evolution::Actions::RunEventsAndTriggers<
                   Metavariables::local_time_stepping>,
               Actions::MutateApply<
@@ -148,6 +153,7 @@ struct EvolutionMetavarsKokkosBatched {
   using const_global_cache_tags =
       tmpl::list<gh::gauges::Tags::GaugeCondition,
                  evolution::initial_data::Tags::InitialData,
+                 domain::Tags::FunctionsOfTimeInitialize,
                  gh::Tags::DampingFunctionGamma0<volume_dim, Frame::Grid>,
                  gh::Tags::DampingFunctionGamma1<volume_dim, Frame::Grid>,
                  gh::Tags::DampingFunctionGamma2<volume_dim, Frame::Grid>,

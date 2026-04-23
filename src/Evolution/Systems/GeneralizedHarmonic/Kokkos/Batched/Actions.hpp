@@ -12,3 +12,5 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/InitializeBoundaryBatchMetadata.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/LiftInternalBoundaryTermsBatched.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/PackageLocalFacesBatched.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/UpdateConstraintDampingBatched.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/UpdateFrameFieldsBatched.hpp"

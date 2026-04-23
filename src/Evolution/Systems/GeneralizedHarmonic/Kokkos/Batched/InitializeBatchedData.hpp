@@ -6,6 +6,7 @@
 #include <cstddef>
 
 #include "Domain/Creators/Tags/Domain.hpp"
+#include "Domain/Creators/Tags/FunctionsOfTime.hpp"
 #include "Evolution/Initialization/InitialData.hpp"
 #include "Evolution/Kokkos/PackedTags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/KokkosTimeStepperTags.hpp"
@@ -43,11 +44,13 @@ struct InitializeBatchedData {
                  device_constraint_gamma2_tag>;
   using argument_tags =
       tmpl::list<packed_topology_tag, ::domain::Tags::Domain<volume_dim>,
+                 ::domain::Tags::FunctionsOfTimeInitialize,
                  evolution::initial_data::Tags::InitialData, ::Tags::Time,
                  damping_function_gamma0_tag, damping_function_gamma1_tag,
                  damping_function_gamma2_tag>;
   using const_global_cache_tags =
       tmpl::list<::domain::Tags::Domain<volume_dim>,
+                 ::domain::Tags::FunctionsOfTimeInitialize,
                  evolution::initial_data::Tags::InitialData,
                  damping_function_gamma0_tag, damping_function_gamma1_tag,
                  damping_function_gamma2_tag>;
@@ -64,6 +67,7 @@ struct InitializeBatchedData {
           device_constraint_gamma2,
       const typename packed_topology_tag::type& packed_topology,
       const Domain<volume_dim>& domain,
+      const domain::FunctionsOfTimeMap& functions_of_time,
       const evolution::initial_data::InitialData& initial_data,
       double initial_time,
       const typename damping_function_gamma0_tag::DampingFunctionType&

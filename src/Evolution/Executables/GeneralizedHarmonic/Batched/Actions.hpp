@@ -10,6 +10,9 @@ namespace gh::Batched::Actions {
 
 template <typename Metavariables>
 using InitializeDriver = gh::Actions::InitializeBatchedData;
+using UpdateFrameFieldsBatched = gh::Actions::UpdateFrameFieldsBatched;
+using UpdateConstraintDampingBatched =
+    gh::Actions::UpdateConstraintDampingBatched;
 using InitializeBoundaryBatchMetadata =
     gh::Actions::InitializeBoundaryBatchMetadata;
 using ComputeTimeDerivativeBatched = gh::Actions::ComputeTimeDerivativeBatched;

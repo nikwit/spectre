@@ -67,10 +67,19 @@ struct PackedGeometry {
   using device_inertial_coordinates_type =
       typename evolution::Kokkos::Tags::DeviceInertialCoordinates<
           volume_dim>::type;
+  using device_mesh_velocity_type =
+      typename evolution::Kokkos::Tags::DeviceInertialCoordinates<
+          volume_dim>::type;
   using device_inverse_jacobian_type =
       ::Kokkos::View<double***, ::Kokkos::LayoutRight>;
+  using host_inverse_jacobian_cache_type =
+      ::Kokkos::View<double***, ::Kokkos::LayoutRight, ::Kokkos::HostSpace>;
+  std::array<DataVector, volume_dim> grid_coordinates_host{};
   std::array<DataVector, volume_dim> inertial_coordinates_host{};
+  std::array<DataVector, volume_dim> mesh_velocity_host{};
+  host_inverse_jacobian_cache_type logical_to_grid_inverse_jacobian_host{};
   device_inertial_coordinates_type inertial_coordinates_device{};
+  device_mesh_velocity_type mesh_velocity_device{};
   device_inverse_jacobian_type element_inverse_jacobian_device{};
 
   // NOLINTNEXTLINE(google-runtime-references)
