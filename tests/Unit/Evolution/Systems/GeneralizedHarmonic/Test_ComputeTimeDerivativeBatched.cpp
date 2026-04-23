@@ -61,7 +61,9 @@ dt_variables_type compute_host_reference(
     const double time,
     const tnsr::I<DataVector, Dim, Frame::Inertial>& inertial_coords,
     const InverseJacobian<DataVector, Dim, Frame::ElementLogical,
-                          Frame::Inertial>& inverse_jacobian) {
+                          Frame::Inertial>& inverse_jacobian,
+    const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
+        mesh_velocity) {
   const size_t num_points = mesh.number_of_grid_points();
 
   Variables<derivative_variables_tags> host_partial_derivs{num_points};
@@ -134,8 +136,7 @@ dt_variables_type compute_host_reference(
       get<d_pi_tag>(host_partial_derivs), get<d_phi_tag>(host_partial_derivs),
       get<spacetime_metric_tag>(vars), get<pi_tag>(vars), get<phi_tag>(vars),
       gamma0, gamma1, gamma2, gauge_condition, mesh, time, inertial_coords,
-      inverse_jacobian,
-      std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>{std::nullopt});
+      inverse_jacobian, mesh_velocity);
 
   dt_variables_type dt_reference{num_points, 0.0};
   get<::Tags::dt<spacetime_metric_tag>>(dt_reference) =
@@ -145,7 +146,8 @@ dt_variables_type compute_host_reference(
   return dt_reference;
 }
 
-void test_compute_time_derivative_batched_matches_host() {
+void test_compute_time_derivative_batched_matches_host(
+    const std::optional<std::array<double, Dim>>& mesh_velocity_values) {
   const Mesh<Dim> mesh{std::array<size_t, Dim>{{4, 3, 5}},
                        Spectral::Basis::Legendre,
                        Spectral::Quadrature::GaussLobatto};
@@ -189,6 +191,16 @@ void test_compute_time_derivative_batched_matches_host() {
   get(host_gamma1) = -0.1 + 0.04 * inertial_coords.get(2);
   get(host_gamma2) =
       0.5 + 0.07 * inertial_coords.get(0) + 0.02 * inertial_coords.get(1);
+  tnsr::I<DataVector, Dim, Frame::Inertial> mesh_velocity{num_points};
+  for (size_t d = 0; d < Dim; ++d) {
+    mesh_velocity.get(d) = DataVector{num_points, 0.0};
+  }
+  if (mesh_velocity_values.has_value()) {
+    for (size_t d = 0; d < Dim; ++d) {
+      mesh_velocity.get(d) =
+          DataVector{num_points, mesh_velocity_values->at(d)};
+    }
+  }
 
   evolution::Kokkos::PackedTopology<system> packed_topology{};
   packed_topology.local_element_ids.push_back(element.id());
@@ -217,6 +229,15 @@ void test_compute_time_derivative_batched_matches_host() {
     }
     ::Kokkos::deep_copy(packed_geometry.inertial_coordinates_device.get(d),
                         host_coords_component);
+    packed_geometry.mesh_velocity_device.get(d) =
+        ::Kokkos::View<double*>("TestGhBatchedMeshVelocity", num_points);
+    auto host_mesh_velocity_component = ::Kokkos::create_mirror_view(
+        packed_geometry.mesh_velocity_device.get(d));
+    for (size_t s = 0; s < num_points; ++s) {
+      host_mesh_velocity_component(s) = mesh_velocity.get(d)[s];
+    }
+    ::Kokkos::deep_copy(packed_geometry.mesh_velocity_device.get(d),
+                        host_mesh_velocity_component);
   }
   packed_geometry.element_inverse_jacobian_device =
       typename evolution::Kokkos::PackedGeometry<
@@ -268,9 +289,11 @@ void test_compute_time_derivative_batched_matches_host() {
   dt_variables_type dt_batched{num_points, 0.0};
   copy_to_host(make_not_null(&dt_batched),
                packed_evolution_state.device_dt_variables);
-  const dt_variables_type dt_reference =
-      compute_host_reference(host_vars, host_gamma0, host_gamma1, host_gamma2,
-                             mesh, time, inertial_coords, inverse_jacobian);
+  const dt_variables_type dt_reference = compute_host_reference(
+      host_vars, host_gamma0, host_gamma1, host_gamma2, mesh, time,
+      inertial_coords, inverse_jacobian,
+      mesh_velocity_values.has_value() ? std::optional{mesh_velocity}
+                                       : std::nullopt);
 
   const Approx approx = Approx::custom().epsilon(1e-12).scale(1.0);
   CHECK_ITERABLE_CUSTOM_APPROX(
@@ -286,5 +309,7 @@ void test_compute_time_derivative_batched_matches_host() {
 SPECTRE_TEST_CASE(
     "Unit.Evolution.Systems.GeneralizedHarmonic.ComputeTimeDerivativeBatched",
     "[Unit][Evolution]") {
-  test_compute_time_derivative_batched_matches_host();
+  test_compute_time_derivative_batched_matches_host(std::nullopt);
+  test_compute_time_derivative_batched_matches_host(
+      std::array<double, Dim>{{0.25, -0.1, 0.05}});
 }

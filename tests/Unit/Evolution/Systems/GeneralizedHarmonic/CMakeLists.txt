@@ -20,6 +20,7 @@ set(LIBRARY_SOURCES
   Test_BbhCompletionCriteria.cpp
   Test_BbhCompletionSingleton.cpp
   Test_ApplyBoundaryCorrectionsToTimeDerivativeKokkos.cpp
+  Test_BoundaryActionsBatched.cpp
   Test_Characteristics.cpp
   Test_ComputeTimeDerivativeBatched.cpp
   Test_ComputeTimeDerivativeKokkos.cpp
@@ -33,6 +34,7 @@ set(LIBRARY_SOURCES
   Test_SyncKokkosToHostEvent.cpp
   Test_Tags.cpp
   Test_TensorYlmTransforms.cpp
+  Test_UpdateFrameFieldsAndConstraintDampingBatched.cpp
   )
 
 add_test_library(${LIBRARY} "${LIBRARY_SOURCES}")
