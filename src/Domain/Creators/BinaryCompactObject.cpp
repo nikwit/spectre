@@ -249,6 +249,34 @@ BinaryCompactObject::BinaryCompactObject(
     std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>
         outer_boundary_condition,
     const Options::Context& context)
+    : BinaryCompactObject(
+          std::move(object_A), std::move(object_B), center_of_mass_offset,
+          envelope_radius, outer_radius, cube_scale, initial_refinement,
+          initial_number_of_grid_points, use_equiangular_map,
+          radial_distribution_envelope, radial_partitioning_outer_shell,
+          radial_distribution_outer_shell, opening_angle_in_degrees,
+          spherical_harmonics_in_wavezone, use_worldtube,
+          std::move(time_dependent_options), std::move(outer_boundary_condition),
+          ObjectBGaussBonnetRequirement::None, context) {}
+
+BinaryCompactObject::BinaryCompactObject(
+    typename ObjectA::type object_A, typename ObjectB::type object_B,
+    std::array<double, 2> center_of_mass_offset, const double envelope_radius,
+    const double outer_radius, const double cube_scale,
+    const typename InitialRefinement::type& initial_refinement,
+    const typename InitialGridPoints::type& initial_number_of_grid_points,
+    const bool use_equiangular_map,
+    const CoordinateMaps::Distribution radial_distribution_envelope,
+    const std::vector<double>& radial_partitioning_outer_shell,
+    const typename RadialDistributionOuterShell::type&
+        radial_distribution_outer_shell,
+    const double opening_angle_in_degrees,
+    const bool spherical_harmonics_in_wavezone, const bool use_worldtube,
+    std::optional<bco::TimeDependentMapOptions<false>> time_dependent_options,
+    std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>
+        outer_boundary_condition,
+    const ObjectBGaussBonnetRequirement object_b_gauss_bonnet_requirement,
+    const Options::Context& context)
     : object_A_(std::move(object_A)),
       object_B_(std::move(object_B)),
       center_of_mass_offset_(center_of_mass_offset),
@@ -274,6 +302,26 @@ BinaryCompactObject::BinaryCompactObject(
       opening_angle_(M_PI * opening_angle_in_degrees / 180.0),
       spherical_harmonics_in_wavezone_(spherical_harmonics_in_wavezone),
       use_worldtube_(use_worldtube) {
+  if (object_b_gauss_bonnet_requirement ==
+      ObjectBGaussBonnetRequirement::Enforce) {
+    if (use_single_block_b_) {
+      PARSE_ERROR(context,
+                  "ObjectB must use the spherical-shell Object variant when "
+                  "EnforceObjectBGaussBonnet is enabled.");
+    }
+    if (not is_excised_b_) {
+      PARSE_ERROR(
+          context,
+          "ObjectB must be excised when EnforceObjectBGaussBonnet is enabled.");
+    }
+    if (time_dependent_options_.has_value() and
+        time_dependent_options_->has_distorted_frame_options(
+            domain::ObjectLabel::B)) {
+      PARSE_ERROR(context,
+                  "ShapeMapB must be None when EnforceObjectBGaussBonnet is "
+                  "enabled.");
+    }
+  }
   // Determination of parameters for domain construction:
   const double tan_half_opening_angle = tan(0.5 * opening_angle_);
   translation_ = 0.5 * (x_coord_a_ + x_coord_b_);
@@ -678,6 +726,33 @@ BinaryCompactObject::BinaryCompactObject(
         envelope_radius_, outer_radius_);
   }
 }
+
+GaussBonnetBinaryCompactObject::GaussBonnetBinaryCompactObject(
+    typename ObjectA::type object_A, typename ObjectB::type object_B,
+    std::array<double, 2> center_of_mass_offset, const double envelope_radius,
+    const double outer_radius, const double cube_scale,
+    const typename InitialRefinement::type& initial_refinement,
+    const typename InitialGridPoints::type& initial_number_of_grid_points,
+    const bool use_equiangular_map,
+    const CoordinateMaps::Distribution radial_distribution_envelope,
+    const std::vector<double>& radial_partitioning_outer_shell,
+    const typename RadialDistributionOuterShell::type&
+        radial_distribution_outer_shell,
+    const double opening_angle_in_degrees,
+    const bool spherical_harmonics_in_wavezone, const bool use_worldtube,
+    std::optional<bco::TimeDependentMapOptions<false>> time_dependent_options,
+    std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>
+        outer_boundary_condition,
+    const Options::Context& context)
+    : BinaryCompactObject(
+          std::move(object_A), std::move(object_B), center_of_mass_offset,
+          envelope_radius, outer_radius, cube_scale, initial_refinement,
+          initial_number_of_grid_points, use_equiangular_map,
+          radial_distribution_envelope, radial_partitioning_outer_shell,
+          radial_distribution_outer_shell, opening_angle_in_degrees,
+          spherical_harmonics_in_wavezone, use_worldtube,
+          std::move(time_dependent_options), std::move(outer_boundary_condition),
+          ObjectBGaussBonnetRequirement::Enforce, context) {}
 
 std::vector<std::array<size_t, 3>> BinaryCompactObject::initial_extents()
     const {

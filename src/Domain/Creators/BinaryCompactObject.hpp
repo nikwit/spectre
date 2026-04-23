@@ -596,6 +596,28 @@ class BinaryCompactObject : public DomainCreator<3> {
           std::string,
           std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>> override;
 
+ protected:
+  enum class ObjectBGaussBonnetRequirement { None, Enforce };
+
+  BinaryCompactObject(
+      typename ObjectA::type object_A, typename ObjectB::type object_B,
+      std::array<double, 2> center_of_mass_offset, double envelope_radius,
+      double outer_radius, double cube_scale,
+      const typename InitialRefinement::type& initial_refinement,
+      const typename InitialGridPoints::type& initial_number_of_grid_points,
+      bool use_equiangular_map,
+      CoordinateMaps::Distribution radial_distribution_envelope,
+      const std::vector<double>& radial_partitioning_outer_shell,
+      const typename RadialDistributionOuterShell::type&
+          radial_distribution_outer_shell,
+      double opening_angle_in_degrees,
+      bool spherical_harmonics_in_wavezone, bool use_worldtube,
+      std::optional<bco::TimeDependentMapOptions<false>> time_dependent_options,
+      std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>
+          outer_boundary_condition,
+      ObjectBGaussBonnetRequirement object_b_gauss_bonnet_requirement,
+      const Options::Context& context);
+
  private:
   typename ObjectA::type object_A_{Object{}};
   typename ObjectB::type object_B_{Object{}};
@@ -644,6 +666,36 @@ class BinaryCompactObject : public DomainCreator<3> {
   double opening_angle_ = std::numeric_limits<double>::signaling_NaN();
   bool spherical_harmonics_in_wavezone_ = false;
   bool use_worldtube_ = false;
+};
+
+/*! \brief `BinaryCompactObject` restricted to a spherical, excised Object B.
+ *
+ * This domain creator has the same input-file name and options as
+ * `BinaryCompactObject`, but rejects a Cartesian-cube Object B, a filled
+ * Object B, or a ShapeMapB. It is registered only by the GH binary-black-hole
+ * executable that tracks Object B with the Gauss-Bonnet center.
+ */
+class GaussBonnetBinaryCompactObject final : public BinaryCompactObject {
+ public:
+  static std::string name() { return "BinaryCompactObject"; }
+
+  GaussBonnetBinaryCompactObject(
+      typename ObjectA::type object_A, typename ObjectB::type object_B,
+      std::array<double, 2> center_of_mass_offset, double envelope_radius,
+      double outer_radius, double cube_scale,
+      const typename InitialRefinement::type& initial_refinement,
+      const typename InitialGridPoints::type& initial_number_of_grid_points,
+      bool use_equiangular_map,
+      CoordinateMaps::Distribution radial_distribution_envelope,
+      const std::vector<double>& radial_partitioning_outer_shell,
+      const typename RadialDistributionOuterShell::type&
+          radial_distribution_outer_shell,
+      double opening_angle_in_degrees,
+      bool spherical_harmonics_in_wavezone, bool use_worldtube,
+      std::optional<bco::TimeDependentMapOptions<false>> time_dependent_options,
+      std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>
+          outer_boundary_condition,
+      const Options::Context& context);
 };
 
 namespace bco {
