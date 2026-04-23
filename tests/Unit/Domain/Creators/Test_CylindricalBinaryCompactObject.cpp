@@ -260,10 +260,12 @@ std::string create_option_string(
                              "      LMax: 8\n"
                              "      InitialValues: Spherical\n"
                              "      SizeInitialValues: [1.1, 0.0, 0.0]\n"
+                             "      CoefficientTruncationLimit: 0.0\n"
                              "    ShapeMapB:\n"
                              "      LMax: 8\n"
                              "      InitialValues: Spherical\n"
-                             "      SizeInitialValues: [1.2, 0.0, 0.0]\n")
+                             "      SizeInitialValues: [1.2, 0.0, 0.0]\n"
+                             "      CoefficientTruncationLimit: 0.0\n")
                           : "  TimeDependentMaps: None\n"};
 
   const std::string boundary_conditions{
