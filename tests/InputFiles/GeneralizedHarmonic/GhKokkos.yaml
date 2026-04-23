@@ -16,7 +16,7 @@ ResourceInfo:
   Singletons:
     MemoryMonitor:
       Proc: Auto
-      Exclusive: true
+      Exclusive: false
 
 
 Evolution:
@@ -163,7 +163,7 @@ EventsAndTriggersAtSlabs:
   - Trigger:
       Slabs:
         Specified:
-          Values: [100]
+          Values: [2]
     Events:
       - Completion
 

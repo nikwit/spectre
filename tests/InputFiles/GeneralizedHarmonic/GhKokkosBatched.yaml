@@ -34,8 +34,8 @@ DomainCreator:
       ExciseWithBoundaryCondition:
         DirichletAnalytic:
           AnalyticPrescription: *InitialData
-    InitialRefinement: 0
-    InitialGridPoints: 8
+    InitialRefinement: 1
+    InitialGridPoints: 14
     UseEquiangularMap: true
     EquatorialCompression: None
     RadialPartitioning: [10., 30., 60., 100., 150., 200., 250.]
@@ -83,28 +83,28 @@ SpatialDiscretization:
     Quadrature: GaussLobatto
 
 EventsAndTriggersAtSlabs:
-  - Trigger:
-      Slabs:
-        EvenlySpaced:
-          Interval: 10
-          Offset: 10000
-    Events:
-      - ObserveNormsBatched:
-          SubfileName: Norms
-          TensorsToObserve:
-            - Name: SpacetimeMetric
-              NormType: L2Norm
-              Components: Sum
-            - Name: Pi
-              NormType: L2Norm
-              Components: Sum
-            - Name: Phi
-              NormType: L2Norm
-              Components: Sum
+  #- Trigger:
+  #    Slabs:
+  #      EvenlySpaced:
+  #        Interval: 10
+  #        Offset: 10000
+  #  Events:
+  #    - ObserveNormsBatched:
+  #        SubfileName: Norms
+  #        TensorsToObserve:
+  #          - Name: SpacetimeMetric
+  #            NormType: L2Norm
+  #            Components: Sum
+  #          - Name: Pi
+  #            NormType: L2Norm
+  #            Components: Sum
+  #          - Name: Phi
+  #            NormType: L2Norm
+  #            Components: Sum
   - Trigger:
       Slabs:
         Specified:
-          Values: [1]
+          Values: [1000]
     Events:
       - CompletionBatched
 
