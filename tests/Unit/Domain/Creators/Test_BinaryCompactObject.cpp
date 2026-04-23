@@ -59,8 +59,10 @@ using CartesianCubeAtXCoord =
     domain::creators::BinaryCompactObject::CartesianCubeAtXCoord;
 using Excision = domain::creators::BinaryCompactObject::Excision;
 using Distribution = domain::CoordinateMaps::Distribution;
+using GhEnforcedBco = domain::creators::GaussBonnetBinaryCompactObject;
 
-template <size_t Dim, bool WithBoundaryConditions>
+template <size_t Dim, bool WithBoundaryConditions,
+          bool EnforceObjectBGaussBonnet = false>
 struct Metavariables {
   using system = tmpl::conditional_t<WithBoundaryConditions,
                                      TestHelpers::domain::BoundaryConditions::
@@ -69,8 +71,12 @@ struct Metavariables {
                                          SystemWithoutBoundaryConditions<Dim>>;
   struct factory_creation
       : tt::ConformsTo<Options::protocols::FactoryCreation> {
-    using factory_classes = tmpl::map<tmpl::pair<
-        DomainCreator<3>, tmpl::list<::domain::creators::BinaryCompactObject>>>;
+    using Bco = tmpl::conditional_t<
+        EnforceObjectBGaussBonnet,
+        ::domain::creators::GaussBonnetBinaryCompactObject,
+        ::domain::creators::BinaryCompactObject>;
+    using factory_classes =
+        tmpl::map<tmpl::pair<DomainCreator<3>, tmpl::list<Bco>>>;
   };
 };
 
@@ -1311,6 +1317,72 @@ void test_spherical_harmonics_wavezone() {
           "only valid for spherical-harmonic shell blocks"));
 }
 
+void test_object_b_gauss_bonnet_enforcement() {
+  using EnforcedObject = GhEnforcedBco::Object;
+  using EnforcedCube = GhEnforcedBco::CartesianCubeAtXCoord;
+  using EnforcedExcision = GhEnforcedBco::Excision;
+  using GhEnforcedMetavars = Metavariables<3, true, true>;
+
+  CHECK_THROWS_WITH(
+      GhEnforcedBco(EnforcedObject{0.5, 0.8, 1.0,
+                                   std::make_optional(EnforcedExcision{
+                                       create_inner_boundary_condition()}),
+                                   false},
+                    EnforcedCube{-1.0}, std::array<double, 2>{{0.1, 0.2}}, 25.5,
+                    32.4, 1.0, 2_st, 6_st, true, Distribution::Projective,
+                    std::vector<double>{}, Distribution::Linear, 120.0, false,
+                    false, std::nullopt, create_outer_boundary_condition(),
+                    Options::Context{false, {}, 1, 1}),
+      Catch::Matchers::ContainsSubstring(
+          "ObjectB must use the spherical-shell Object variant"));
+
+  CHECK_THROWS_WITH(
+      GhEnforcedBco(EnforcedObject{0.5, 0.8, 1.0,
+                                   std::make_optional(EnforcedExcision{
+                                       create_inner_boundary_condition()}),
+                                   false},
+                    EnforcedObject{0.3, 0.8, -1.0, std::nullopt, false},
+                    std::array<double, 2>{{0.1, 0.2}}, 25.5, 32.4, 1.0, 2_st,
+                    6_st, true, Distribution::Projective, std::vector<double>{},
+                    Distribution::Linear, 120.0, false, false, std::nullopt,
+                    create_outer_boundary_condition(),
+                    Options::Context{false, {}, 1, 1}),
+      Catch::Matchers::ContainsSubstring("ObjectB must be excised"));
+
+  CHECK_THROWS_WITH(
+      (TestHelpers::test_option_tag<domain::OptionTags::DomainCreator<3>,
+                                    GhEnforcedMetavars>(create_option_string(
+          true, true, true, false, true, 0, 0, 0, 90.0, true))),
+      Catch::Matchers::ContainsSubstring("ShapeMapB must be None"));
+
+  const GhEnforcedBco enforced_bco{
+      EnforcedObject{0.5, 0.8, 1.0,
+                     std::make_optional(
+                         EnforcedExcision{create_inner_boundary_condition()}),
+                     false},
+      EnforcedObject{0.3, 0.8, -1.0,
+                     std::make_optional(
+                         EnforcedExcision{create_inner_boundary_condition()}),
+                     false},
+      std::array<double, 2>{{0.1, 0.2}},
+      25.5,
+      32.4,
+      1.0,
+      2_st,
+      6_st,
+      true,
+      Distribution::Projective,
+      std::vector<double>{},
+      Distribution::Linear,
+      120.0,
+      false,
+      false,
+      std::nullopt,
+      create_outer_boundary_condition(),
+      Options::Context{false, {}, 1, 1}};
+  TestHelpers::domain::creators::test_domain_creator(enforced_bco, true);
+}
+
 template <domain::ObjectLabel Object>
 using HardcodedShape =
     domain::creators::time_dependent_options::ShapeMapOptions<true, Object>;
@@ -1420,5 +1492,6 @@ SPECTRE_TEST_CASE("Unit.Domain.Creators.BinaryCompactObject",
   test_binary_factory();
   test_parse_errors();
   test_spherical_harmonics_wavezone();
+  test_object_b_gauss_bonnet_enforcement();
   test_kerr_horizon_conforming();
 }
