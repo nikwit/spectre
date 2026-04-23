@@ -76,7 +76,8 @@ KOKKOS_INLINE_FUNCTION void compute_packaged_boundary_data_at_point(
     const tnsr::iaa<double, VolumeDim, Frame::Inertial>& phi,
     const double gamma1, const double gamma2,
     const tnsr::i<double, VolumeDim, Frame::Inertial>&
-        unnormalized_normal_covector) {
+        unnormalized_normal_covector,
+    const tnsr::I<double, VolumeDim, Frame::Inertial>& mesh_velocity) {
   tnsr::II<double, VolumeDim, Frame::Inertial> inverse_spatial_metric{};
   double det_spatial_metric = 0.0;
   inverse_spatial_metric_and_det<VolumeDim>(
@@ -118,15 +119,18 @@ KOKKOS_INLINE_FUNCTION void compute_packaged_boundary_data_at_point(
   }
 
   double shift_dot_normal = 0.0;
+  double normal_dot_mesh_velocity = 0.0;
   for (size_t i = 0; i < VolumeDim; ++i) {
     shift_dot_normal += shift.get(i) * normal_covector.get(i);
+    normal_dot_mesh_velocity += mesh_velocity.get(i) * normal_covector.get(i);
   }
   shift_dot_normal *= -1.0;
 
-  char_speeds->get(0) = (1.0 + gamma1) * shift_dot_normal;
-  char_speeds->get(1) = shift_dot_normal;
-  char_speeds->get(2) = lapse + shift_dot_normal;
-  char_speeds->get(3) = -lapse + shift_dot_normal;
+  char_speeds->get(0) =
+      (1.0 + gamma1) * (shift_dot_normal - normal_dot_mesh_velocity);
+  char_speeds->get(1) = shift_dot_normal - normal_dot_mesh_velocity;
+  char_speeds->get(2) = lapse + shift_dot_normal - normal_dot_mesh_velocity;
+  char_speeds->get(3) = -lapse + shift_dot_normal - normal_dot_mesh_velocity;
 
   for (size_t a = 0; a < VolumeDim + 1; ++a) {
     for (size_t b = a; b < VolumeDim + 1; ++b) {

@@ -746,6 +746,13 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
              packed_geometry.inertial_coordinates_device.get(2).extent(0) ==
                  total_points,
          "Packed inertial device coordinates size mismatch with total points.");
+  ASSERT(
+      packed_geometry.mesh_velocity_device.get(0).extent(0) == total_points and
+          packed_geometry.mesh_velocity_device.get(1).extent(0) ==
+              total_points and
+          packed_geometry.mesh_velocity_device.get(2).extent(0) == total_points,
+      "Packed mesh-velocity device coordinates size mismatch with total "
+      "points.");
 
   auto& device_gauge_data = packed_boundary_scratch->volume_gauge_data;
   if (device_gauge_data.number_of_grid_points() != total_points) {
@@ -809,6 +816,7 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
       get<device_d_spacetime_metric_tag>(partial_derivatives_all_elements);
   const auto d_pi = get<device_d_pi_tag>(partial_derivatives_all_elements);
   const auto d_phi = get<device_d_phi_tag>(partial_derivatives_all_elements);
+  const auto mesh_velocity = packed_geometry.mesh_velocity_device;
   const auto gauge_h = get<device_gauge_h_tag>(device_gauge_data);
   const auto spacetime_deriv_gauge_h =
       get<device_spacetime_deriv_gauge_h_tag>(device_gauge_data);
@@ -855,6 +863,7 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
         const double gamma1_plus_1 = 1.0 + gamma1;
 
         const auto shift_at_s = make_at_index(cached_shift, s);
+        const auto mesh_velocity_at_s = make_at_index(mesh_velocity, s);
         const auto phi_at_s = make_at_index(phi, s);
         const auto pi_at_s = make_at_index(pi, s);
         const double lapse_at_s = get(make_at_index(cached_lapse, s));
@@ -864,247 +873,124 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
             constexpr int nu = mu + (int)off_c;
             double dt_piece = -lapse_at_s * get<mu, nu>(pi_at_s);
             double sum = 0.0;
+            double mesh_sum = 0.0;
             static_for<dim>([&](auto m_c) {
               constexpr int m = m_c;
               dt_piece += get<m>(shift_at_s) * get<m, mu, nu>(phi_at_s);
               sum += get<m>(shift_at_s) *
                      (get<m, mu, nu>(d_spacetime_metric)[point] -
                       get<m, mu, nu>(phi_at_s));
+              mesh_sum += get<m>(mesh_velocity_at_s) *
+                          (get<m, mu, nu>(d_spacetime_metric)[point] -
+                           get<m, mu, nu>(phi_at_s));
             });
 
             get<mu, nu>(dt_spacetime_metric)[point] =
-                dt_piece + gamma1_plus_1 * sum;
+                dt_piece + gamma1_plus_1 * sum + gamma1 * mesh_sum;
           });
         });
       });
 
-::Kokkos::parallel_for(
-    "GhBatchedComputeTimeDerivativeDtPi", total_points,
-    KOKKOS_LAMBDA(const int s) {
-      constexpr int int_dim = 3;
-      constexpr int int_dim_plus_one = 4;
+  ::Kokkos::parallel_for(
+      "GhBatchedComputeTimeDerivativeDtPi", total_points,
+      KOKKOS_LAMBDA(const int s) {
+        constexpr int int_dim = 3;
+        constexpr int int_dim_plus_one = 4;
 
-      // -------------------------
-      // Inputs
-      // -------------------------
-      const auto inverse_spatial_metric =
-          make_at_index(cached_inverse_spatial_metric, s);
-      const double lapse = get(make_at_index(cached_lapse, s));
-      const auto shift = make_at_index(cached_shift, s);
-      const double gamma0 = get(make_at_index(device_constraint_gamma0, s));
-      const double gamma1 = get(make_at_index(device_constraint_gamma1, s));
-      const double gamma2 = get(make_at_index(device_constraint_gamma2, s));
+        // -------------------------
+        // Inputs
+        // -------------------------
+        const auto inverse_spatial_metric =
+            make_at_index(cached_inverse_spatial_metric, s);
+        const double lapse = get(make_at_index(cached_lapse, s));
+        const auto shift = make_at_index(cached_shift, s);
+        const auto mesh_velocity_at_s = make_at_index(mesh_velocity, s);
+        const double gamma0 = get(make_at_index(device_constraint_gamma0, s));
+        const double gamma1 = get(make_at_index(device_constraint_gamma1, s));
+        const double gamma2 = get(make_at_index(device_constraint_gamma2, s));
 
-      // -------------------------
-      // Inverse spacetime metric
-      // -------------------------
-      double lapse_squared = -get<0, 0>(spacetime_metric)[s];
-      static_for<int_dim>([&](auto i_c) {
-        constexpr int i = (int)i_c;
-        lapse_squared += get<i>(shift) * get<0, i + 1>(spacetime_metric)[s];
-      });
-      const double inv_lapse_squared = 1.0 / lapse_squared;
-
-      tnsr::AA<double, 3, Frame::Inertial> inverse_spacetime_metric{};
-      get<0, 0>(inverse_spacetime_metric) = -inv_lapse_squared;
-      static_for<int_dim>([&](auto i_c) {
-        constexpr int i = (int)i_c;
-        get<0, i + 1>(inverse_spacetime_metric) =
-            get<i>(shift) * inv_lapse_squared;
-        static_for<int_dim - i>([&](auto off_c) {
-          constexpr int j = i + (int)off_c;
-          get<i + 1, j + 1>(inverse_spacetime_metric) =
-              get<i, j>(inverse_spatial_metric) -
-              get<i>(shift) * get<j>(shift) * inv_lapse_squared;
+        // -------------------------
+        // Inverse spacetime metric
+        // -------------------------
+        double lapse_squared = -get<0, 0>(spacetime_metric)[s];
+        static_for<int_dim>([&](auto i_c) {
+          constexpr int i = (int)i_c;
+          lapse_squared += get<i>(shift) * get<0, i + 1>(spacetime_metric)[s];
         });
-      });
+        const double inv_lapse_squared = 1.0 / lapse_squared;
 
-      // -------------------------
-      // Normal^A
-      // -------------------------
-      tnsr::A<double, 3, Frame::Inertial> normal_spacetime_vector{};
-      const double inv_lapse = 1.0 / lapse;
-      get<0>(normal_spacetime_vector) = inv_lapse;
-      static_for<int_dim>([&](auto i_c) {
-        constexpr int i = (int)i_c;
-        get<i + 1>(normal_spacetime_vector) = -get<i>(shift) * inv_lapse;
-      });
+        tnsr::AA<double, 3, Frame::Inertial> inverse_spacetime_metric{};
+        get<0, 0>(inverse_spacetime_metric) = -inv_lapse_squared;
+        static_for<int_dim>([&](auto i_c) {
+          constexpr int i = (int)i_c;
+          get<0, i + 1>(inverse_spacetime_metric) =
+              get<i>(shift) * inv_lapse_squared;
+          static_for<int_dim - i>([&](auto off_c) {
+            constexpr int j = i + (int)off_c;
+            get<i + 1, j + 1>(inverse_spacetime_metric) =
+                get<i, j>(inverse_spatial_metric) -
+                get<i>(shift) * get<j>(shift) * inv_lapse_squared;
+          });
+        });
 
-      const double gamma1gamma2 = gamma1 * gamma2;
-      const double minus_gamma0_lapse = -gamma0 * lapse;
+        // -------------------------
+        // Normal^A
+        // -------------------------
+        tnsr::A<double, 3, Frame::Inertial> normal_spacetime_vector{};
+        const double inv_lapse = 1.0 / lapse;
+        get<0>(normal_spacetime_vector) = inv_lapse;
+        static_for<int_dim>([&](auto i_c) {
+          constexpr int i = (int)i_c;
+          get<i + 1>(normal_spacetime_vector) = -get<i>(shift) * inv_lapse;
+        });
 
-      // =====================================================================
-      // Phase B: gauge_constraint + shift_dot_three_index_constraint
-      // =====================================================================
-      tnsr::a<double, 3, Frame::Inertial> gauge_constraint{};
-      tnsr::aa<double, 3, Frame::Inertial> shift_dot_three_index_constraint{};
-      double normal_dot_gauge_constraint = 0.0;
+        const double gamma1gamma2 = gamma1 * gamma2;
+        const double minus_gamma0_lapse = -gamma0 * lapse;
 
-      {
-        tnsr::iaa<double, 3, Frame::Inertial> three_index_constraint{};
-        static_for<int_dim>([&](auto n_c) {
-          constexpr int n = (int)n_c;  // 0..2
-          static_for<int_dim_plus_one>([&](auto mu_c) {
-            constexpr int mu = (int)mu_c;  // 0..3
-            static_for<int_dim_plus_one - mu>([&](auto off_c) {
-              constexpr int nu = mu + (int)off_c;  // mu..3
-              get<n, mu, nu>(three_index_constraint) =
-                  d_spacetime_metric.get(n, mu, nu)[s] -
-                  get<n, mu, nu>(phi)[s];
+        // =====================================================================
+        // Phase B: gauge_constraint + shift_dot_three_index_constraint
+        // =====================================================================
+        tnsr::a<double, 3, Frame::Inertial> gauge_constraint{};
+        tnsr::aa<double, 3, Frame::Inertial> shift_dot_three_index_constraint{};
+        tnsr::aa<double, 3, Frame::Inertial>
+            mesh_velocity_dot_three_index_constraint{};
+        double normal_dot_gauge_constraint = 0.0;
+
+        {
+          tnsr::iaa<double, 3, Frame::Inertial> three_index_constraint{};
+          static_for<int_dim>([&](auto n_c) {
+            constexpr int n = (int)n_c;  // 0..2
+            static_for<int_dim_plus_one>([&](auto mu_c) {
+              constexpr int mu = (int)mu_c;  // 0..3
+              static_for<int_dim_plus_one - mu>([&](auto off_c) {
+                constexpr int nu = mu + (int)off_c;  // mu..3
+                get<n, mu, nu>(three_index_constraint) =
+                    d_spacetime_metric.get(n, mu, nu)[s] -
+                    get<n, mu, nu>(phi)[s];
+              });
             });
           });
-        });
 
-        auto dt_g = [&](auto a_c, auto b_c) -> double {
-          constexpr int a = (int)decltype(a_c)::value;  // 0..3
-          constexpr int b = (int)decltype(b_c)::value;  // 0..3
-          double v = -lapse * get<a, b>(pi)[s];
-          static_for<int_dim>([&](auto m_c) {
-            constexpr int m = (int)m_c;  // 0..2
-            v += get<m>(shift) * get<m, a, b>(phi)[s];
-          });
-          return v;
-        };
-
-        auto d_g = [&](auto i_c, auto a_c, auto b_c) -> double {
-          constexpr int i = (int)decltype(i_c)::value;  // 0..2
-          constexpr int a = (int)decltype(a_c)::value;  // 0..3
-          constexpr int b = (int)decltype(b_c)::value;  // 0..3
-          return get<i, a, b>(phi)[s];
-        };
-
-        auto dslot_g = [&](auto slot_c, auto a_c, auto b_c) -> double {
-          constexpr int slot = (int)decltype(slot_c)::value;  // 0..3
-          if constexpr (slot == 0) {
-            return dt_g(a_c, b_c);
-          } else {
-            return d_g(std::integral_constant<int, slot - 1>{}, a_c, b_c);
-          }
-        };
-
-        tnsr::a<double, 3, Frame::Inertial> trace_christoffel{};
-        static_for<int_dim_plus_one>([&](auto a_c) {
-          double tr = 0.0;
-          static_for<int_dim_plus_one>([&](auto b_c) {
-            static_for<int_dim_plus_one>([&](auto c_c) {
-              const double Gamma_abc =
-                  0.5 * (dslot_g(b_c, c_c, a_c) + dslot_g(c_c, b_c, a_c) -
-                         dslot_g(a_c, b_c, c_c));
-              tr += Gamma_abc * get<(int)b_c, (int)c_c>(inverse_spacetime_metric);
-            });
-          });
-          get<(int)a_c>(trace_christoffel) = tr;
-        });
-
-        static_for<int_dim_plus_one>([&](auto mu_c) {
-          constexpr int mu = (int)mu_c;
-
-          get<mu>(gauge_constraint) =
-              get<mu>(trace_christoffel) + get<mu>(gauge_h)[s];
-
-          static_for<int_dim_plus_one - mu>([&](auto off_c) {
-            constexpr int nu = mu + (int)off_c;
-            double sd = 0.0;
-            static_for<int_dim>([&](auto m_c) {
-              constexpr int m = (int)m_c;
-              sd += get<m>(shift) * get<m, mu, nu>(three_index_constraint);
-            });
-            get<mu, nu>(shift_dot_three_index_constraint) = sd;
-          });
-        });
-
-        static_for<int_dim_plus_one>([&](auto mu_c) {
-          constexpr int mu = (int)mu_c;
-          normal_dot_gauge_constraint +=
-              get<mu>(normal_spacetime_vector) * get<mu>(gauge_constraint);
-        });
-      }
-
-      normal_dot_gauge_constraint *= gamma0;
-
-      // =====================================================================
-      // Phase C: pi_one_normal and half_pi_two_normals
-      // =====================================================================
-      tnsr::a<double, 3, Frame::Inertial> pi_one_normal{};
-      static_for<int_dim_plus_one>([&](auto mu_c) {
-        constexpr int mu = (int)mu_c;
-        double v = 0.0;
-        static_for<int_dim_plus_one>([&](auto nu_c) {
-          constexpr int nu = (int)nu_c;
-          v += get<nu>(normal_spacetime_vector) * get<nu, mu>(pi)[s];
-        });
-        get<mu>(pi_one_normal) = v;
-      });
-
-      double half_pi_two_normals = 0.0;
-      static_for<int_dim_plus_one>([&](auto mu_c) {
-        constexpr int mu = (int)mu_c;
-        half_pi_two_normals +=
-            get<mu>(normal_spacetime_vector) * get<mu>(pi_one_normal);
-      });
-      half_pi_two_normals *= 0.5;
-
-      // =====================================================================
-      // Phase D: dt_pi prefill
-      // =====================================================================
-      {
-        static_for<int_dim>([&](auto m_c) {
-          constexpr int m = (int)m_c;
-          constexpr int i = m + 1;
-          get<0, i>(dt_pi)[s] =
-              minus_gamma0_lapse * get<i>(gauge_constraint) -
-              normal_dot_gauge_constraint * get<0, i>(spacetime_metric)[s];
-        });
-        get<0, 0>(dt_pi)[s] =
-            2.0 * minus_gamma0_lapse * get<0>(gauge_constraint) -
-            normal_dot_gauge_constraint * get<0, 0>(spacetime_metric)[s];
-
-        static_for<int_dim>([&](auto mu0_c) {
-          constexpr int mu = (int)mu0_c + 1;
-          static_for<int_dim_plus_one - mu>([&](auto off_c) {
-            constexpr int nu = mu + (int)off_c;
-            get<mu, nu>(dt_pi)[s] =
-                -normal_dot_gauge_constraint * get<mu, nu>(spacetime_metric)[s];
-          });
-        });
-      }
-
-      // =====================================================================
-      // Phase E: streamed dt_pi accumulation per (mu,nu)
-      //   Implements (1): REMOVE pi2_up/phi1_up/phi3_up arrays.
-      // =====================================================================
-      static_for<int_dim_plus_one>([&](auto mu_c) {
-        constexpr int mu = (int)mu_c;
-
-        static_for<int_dim_plus_one - mu>([&](auto off_c) {
-          constexpr int nu = mu + (int)off_c;
-          const auto nu_c = std::integral_constant<int, nu>{};
-
-          double acc = get<mu, nu>(dt_pi)[s];
-
-          acc -= half_pi_two_normals * get<mu, nu>(pi)[s];
-          acc -= get<mu, nu>(spacetime_deriv_gauge_h)[s] +
-                 get<nu, mu>(spacetime_deriv_gauge_h)[s];
-
-          // ---- Local metric-derivative accessors (as in your Phase E) ----
           auto dt_g = [&](auto a_c, auto b_c) -> double {
-            constexpr int a = (int)decltype(a_c)::value;
-            constexpr int b = (int)decltype(b_c)::value;
+            constexpr int a = (int)decltype(a_c)::value;  // 0..3
+            constexpr int b = (int)decltype(b_c)::value;  // 0..3
             double v = -lapse * get<a, b>(pi)[s];
-            static_for<int_dim>([&](auto m_c2) {
-              constexpr int m2 = (int)m_c2;
-              v += get<m2>(shift) * get<m2, a, b>(phi)[s];
+            static_for<int_dim>([&](auto m_c) {
+              constexpr int m = (int)m_c;  // 0..2
+              v += get<m>(shift) * get<m, a, b>(phi)[s];
             });
             return v;
           };
+
           auto d_g = [&](auto i_c, auto a_c, auto b_c) -> double {
-            constexpr int i = (int)decltype(i_c)::value;
-            constexpr int a = (int)decltype(a_c)::value;
-            constexpr int b = (int)decltype(b_c)::value;
+            constexpr int i = (int)decltype(i_c)::value;  // 0..2
+            constexpr int a = (int)decltype(a_c)::value;  // 0..3
+            constexpr int b = (int)decltype(b_c)::value;  // 0..3
             return get<i, a, b>(phi)[s];
           };
+
           auto dslot_g = [&](auto slot_c, auto a_c, auto b_c) -> double {
-            constexpr int slot = (int)decltype(slot_c)::value;
+            constexpr int slot = (int)decltype(slot_c)::value;  // 0..3
             if constexpr (slot == 0) {
               return dt_g(a_c, b_c);
             } else {
@@ -1112,119 +998,256 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
             }
           };
 
-          // ---- On-demand contractions (NO ARRAYS) ----
-
-          // pi2_up(delta) = inv_g^{delta beta} * pi_{nu beta}
-          auto pi2_up = [&](auto delta_c2) -> double {
-            constexpr int delta = (int)decltype(delta_c2)::value;
-            double v = 0.0;
-            static_for<int_dim_plus_one>([&](auto beta_c) {
-              constexpr int beta = (int)beta_c;
-              v += get<delta, beta>(inverse_spacetime_metric) *
-                   get<nu, beta>(pi)[s];
+          tnsr::a<double, 3, Frame::Inertial> trace_christoffel{};
+          static_for<int_dim_plus_one>([&](auto a_c) {
+            double tr = 0.0;
+            static_for<int_dim_plus_one>([&](auto b_c) {
+              static_for<int_dim_plus_one>([&](auto c_c) {
+                const double Gamma_abc =
+                    0.5 * (dslot_g(b_c, c_c, a_c) + dslot_g(c_c, b_c, a_c) -
+                           dslot_g(a_c, b_c, c_c));
+                tr += Gamma_abc *
+                      get<(int)b_c, (int)c_c>(inverse_spacetime_metric);
+              });
             });
-            return v;
-          };
+            get<(int)a_c>(trace_christoffel) = tr;
+          });
 
-          // phi1_up(m,delta) = inv_spatial^{m n} * phi_{n mu delta}
-          auto phi1_up = [&](auto m_c2, auto delta_c2) -> double {
-            constexpr int m = (int)decltype(m_c2)::value;        // 0..2
-            constexpr int delta = (int)decltype(delta_c2)::value; // 0..3
-            double v = 0.0;
-            static_for<int_dim>([&](auto n_c2) {
-              constexpr int n = (int)n_c2; // 0..2
-              v += get<m, n>(inverse_spatial_metric) *
-                   get<n, mu, delta>(phi)[s];
-            });
-            return v;
-          };
+          static_for<int_dim_plus_one>([&](auto mu_c) {
+            constexpr int mu = (int)mu_c;
 
-          // phi3_up(m,alpha) = inv_g^{alpha beta} * phi_{m nu beta}
-          auto phi3_up = [&](auto m_c2, auto alpha_c2) -> double {
-            constexpr int m = (int)decltype(m_c2)::value;        // 0..2
-            constexpr int alpha = (int)decltype(alpha_c2)::value; // 0..3
-            double v = 0.0;
-            static_for<int_dim_plus_one>([&](auto beta_c) {
-              constexpr int beta = (int)beta_c;
-              v += get<alpha, beta>(inverse_spacetime_metric) *
-                   get<m, nu, beta>(phi)[s];
-            });
-            return v;
-          };
+            get<mu>(gauge_constraint) =
+                get<mu>(trace_christoffel) + get<mu>(gauge_h)[s];
 
-          // Γ^delta_{mu nu} = inv_g^{delta alpha} * Γ_{alpha mu nu}
-          auto Gamma2 = [&](auto delta_c2) -> double {
-            constexpr int delta = (int)decltype(delta_c2)::value;
-            double v = 0.0;
-            static_for<int_dim_plus_one>([&](auto alpha_c) {
-              const double Gamma1 =
-                  0.5 * (dslot_g(mu_c, nu_c, alpha_c) +
-                         dslot_g(nu_c, mu_c, alpha_c) -
-                         dslot_g(alpha_c, mu_c, nu_c));
-              v += get<delta, (int)alpha_c>(inverse_spacetime_metric) * Gamma1;
-            });
-            return v;
-          };
-
-          auto Gamma1 = [&](auto k_c, auto i_c, auto j_c) -> double {
-            return 0.5 * (dslot_g(i_c, j_c, k_c) + dslot_g(j_c, i_c, k_c) -
-                          dslot_g(k_c, i_c, j_c));
-          };
-
-          auto Gamma1_3up = [&](auto k_c, auto i_c, auto up_c) -> double {
-            constexpr int up = (int)decltype(up_c)::value;
-            double v = 0.0;
-            static_for<int_dim_plus_one>([&](auto beta_c) {
-              v += get<up, (int)beta_c>(inverse_spacetime_metric) *
-                   Gamma1(k_c, i_c, beta_c);
-            });
-            return v;
-          };
-
-          // ---- Main delta loop ----
-          static_for<int_dim_plus_one>([&](auto delta_c) {
-            constexpr int delta = (int)delta_c;
-
-            acc -= 2.0 * get<mu, delta>(pi)[s] * pi2_up(delta_c);
-            acc += 2.0 * Gamma2(delta_c) * get<delta>(gauge_h)[s];
-
-            // acc += 2 * sum_n phi1_up(n,delta) * phi3_up(n,delta)
-            static_for<int_dim>([&](auto n_c) {
-              acc += 2.0 * phi1_up(n_c, delta_c) * phi3_up(n_c, delta_c);
-            });
-
-            static_for<int_dim_plus_one>([&](auto alpha_c) {
-              acc -= 2.0 * Gamma1_3up(mu_c, alpha_c, delta_c) *
-                     Gamma1_3up(nu_c, delta_c, alpha_c);
+            static_for<int_dim_plus_one - mu>([&](auto off_c) {
+              constexpr int nu = mu + (int)off_c;
+              double sd = 0.0;
+              double md = 0.0;
+              static_for<int_dim>([&](auto m_c) {
+                constexpr int m = (int)m_c;
+                sd += get<m>(shift) * get<m, mu, nu>(three_index_constraint);
+                md += get<m>(mesh_velocity_at_s) *
+                      get<m, mu, nu>(three_index_constraint);
+              });
+              get<mu, nu>(shift_dot_three_index_constraint) = sd;
+              get<mu, nu>(mesh_velocity_dot_three_index_constraint) = md;
             });
           });
 
-          // Remaining m,n loops (replace phi1_up[m][nu] with on-demand)
+          static_for<int_dim_plus_one>([&](auto mu_c) {
+            constexpr int mu = (int)mu_c;
+            normal_dot_gauge_constraint +=
+                get<mu>(normal_spacetime_vector) * get<mu>(gauge_constraint);
+          });
+        }
+
+        normal_dot_gauge_constraint *= gamma0;
+
+        // =====================================================================
+        // Phase C: pi_one_normal and half_pi_two_normals
+        // =====================================================================
+        tnsr::a<double, 3, Frame::Inertial> pi_one_normal{};
+        static_for<int_dim_plus_one>([&](auto mu_c) {
+          constexpr int mu = (int)mu_c;
+          double v = 0.0;
+          static_for<int_dim_plus_one>([&](auto nu_c) {
+            constexpr int nu = (int)nu_c;
+            v += get<nu>(normal_spacetime_vector) * get<nu, mu>(pi)[s];
+          });
+          get<mu>(pi_one_normal) = v;
+        });
+
+        double half_pi_two_normals = 0.0;
+        static_for<int_dim_plus_one>([&](auto mu_c) {
+          constexpr int mu = (int)mu_c;
+          half_pi_two_normals +=
+              get<mu>(normal_spacetime_vector) * get<mu>(pi_one_normal);
+        });
+        half_pi_two_normals *= 0.5;
+
+        // =====================================================================
+        // Phase D: dt_pi prefill
+        // =====================================================================
+        {
           static_for<int_dim>([&](auto m_c) {
             constexpr int m = (int)m_c;
-            constexpr int mp1 = m + 1;
+            constexpr int i = m + 1;
+            get<0, i>(dt_pi)[s] =
+                minus_gamma0_lapse * get<i>(gauge_constraint) -
+                normal_dot_gauge_constraint * get<0, i>(spacetime_metric)[s];
+          });
+          get<0, 0>(dt_pi)[s] =
+              2.0 * minus_gamma0_lapse * get<0>(gauge_constraint) -
+              normal_dot_gauge_constraint * get<0, 0>(spacetime_metric)[s];
 
-            acc -= get<mp1>(pi_one_normal) * phi1_up(m_c, nu_c);
-
-            static_for<int_dim>([&](auto n_c) {
-              acc -= get<m, (int)n_c>(inverse_spatial_metric) *
-                     get<m, (int)n_c, mu, nu>(d_phi)[s];
+          static_for<int_dim>([&](auto mu0_c) {
+            constexpr int mu = (int)mu0_c + 1;
+            static_for<int_dim_plus_one - mu>([&](auto off_c) {
+              constexpr int nu = mu + (int)off_c;
+              get<mu, nu>(dt_pi)[s] = -normal_dot_gauge_constraint *
+                                      get<mu, nu>(spacetime_metric)[s];
             });
           });
+        }
 
-          // finalize
-          acc *= lapse;
-          acc += gamma1gamma2 * get<mu, nu>(shift_dot_three_index_constraint);
+        // =====================================================================
+        // Phase E: streamed dt_pi accumulation per (mu,nu)
+        //   Implements (1): REMOVE pi2_up/phi1_up/phi3_up arrays.
+        // =====================================================================
+        static_for<int_dim_plus_one>([&](auto mu_c) {
+          constexpr int mu = (int)mu_c;
 
-          static_for<int_dim>([&](auto m_c) {
-            constexpr int m = (int)m_c;
-            acc += get<m>(shift) * get<m, mu, nu>(d_pi)[s];
+          static_for<int_dim_plus_one - mu>([&](auto off_c) {
+            constexpr int nu = mu + (int)off_c;
+            const auto nu_c = std::integral_constant<int, nu>{};
+
+            double acc = get<mu, nu>(dt_pi)[s];
+
+            acc -= half_pi_two_normals * get<mu, nu>(pi)[s];
+            acc -= get<mu, nu>(spacetime_deriv_gauge_h)[s] +
+                   get<nu, mu>(spacetime_deriv_gauge_h)[s];
+
+            // ---- Local metric-derivative accessors (as in your Phase E) ----
+            auto dt_g = [&](auto a_c, auto b_c) -> double {
+              constexpr int a = (int)decltype(a_c)::value;
+              constexpr int b = (int)decltype(b_c)::value;
+              double v = -lapse * get<a, b>(pi)[s];
+              static_for<int_dim>([&](auto m_c2) {
+                constexpr int m2 = (int)m_c2;
+                v += get<m2>(shift) * get<m2, a, b>(phi)[s];
+              });
+              return v;
+            };
+            auto d_g = [&](auto i_c, auto a_c, auto b_c) -> double {
+              constexpr int i = (int)decltype(i_c)::value;
+              constexpr int a = (int)decltype(a_c)::value;
+              constexpr int b = (int)decltype(b_c)::value;
+              return get<i, a, b>(phi)[s];
+            };
+            auto dslot_g = [&](auto slot_c, auto a_c, auto b_c) -> double {
+              constexpr int slot = (int)decltype(slot_c)::value;
+              if constexpr (slot == 0) {
+                return dt_g(a_c, b_c);
+              } else {
+                return d_g(std::integral_constant<int, slot - 1>{}, a_c, b_c);
+              }
+            };
+
+            // ---- On-demand contractions (NO ARRAYS) ----
+
+            // pi2_up(delta) = inv_g^{delta beta} * pi_{nu beta}
+            auto pi2_up = [&](auto delta_c2) -> double {
+              constexpr int delta = (int)decltype(delta_c2)::value;
+              double v = 0.0;
+              static_for<int_dim_plus_one>([&](auto beta_c) {
+                constexpr int beta = (int)beta_c;
+                v += get<delta, beta>(inverse_spacetime_metric) *
+                     get<nu, beta>(pi)[s];
+              });
+              return v;
+            };
+
+            // phi1_up(m,delta) = inv_spatial^{m n} * phi_{n mu delta}
+            auto phi1_up = [&](auto m_c2, auto delta_c2) -> double {
+              constexpr int m = (int)decltype(m_c2)::value;          // 0..2
+              constexpr int delta = (int)decltype(delta_c2)::value;  // 0..3
+              double v = 0.0;
+              static_for<int_dim>([&](auto n_c2) {
+                constexpr int n = (int)n_c2;  // 0..2
+                v += get<m, n>(inverse_spatial_metric) *
+                     get<n, mu, delta>(phi)[s];
+              });
+              return v;
+            };
+
+            // phi3_up(m,alpha) = inv_g^{alpha beta} * phi_{m nu beta}
+            auto phi3_up = [&](auto m_c2, auto alpha_c2) -> double {
+              constexpr int m = (int)decltype(m_c2)::value;          // 0..2
+              constexpr int alpha = (int)decltype(alpha_c2)::value;  // 0..3
+              double v = 0.0;
+              static_for<int_dim_plus_one>([&](auto beta_c) {
+                constexpr int beta = (int)beta_c;
+                v += get<alpha, beta>(inverse_spacetime_metric) *
+                     get<m, nu, beta>(phi)[s];
+              });
+              return v;
+            };
+
+            // Γ^delta_{mu nu} = inv_g^{delta alpha} * Γ_{alpha mu nu}
+            auto Gamma2 = [&](auto delta_c2) -> double {
+              constexpr int delta = (int)decltype(delta_c2)::value;
+              double v = 0.0;
+              static_for<int_dim_plus_one>([&](auto alpha_c) {
+                const double Gamma1 = 0.5 * (dslot_g(mu_c, nu_c, alpha_c) +
+                                             dslot_g(nu_c, mu_c, alpha_c) -
+                                             dslot_g(alpha_c, mu_c, nu_c));
+                v +=
+                    get<delta, (int)alpha_c>(inverse_spacetime_metric) * Gamma1;
+              });
+              return v;
+            };
+
+            auto Gamma1 = [&](auto k_c, auto i_c, auto j_c) -> double {
+              return 0.5 * (dslot_g(i_c, j_c, k_c) + dslot_g(j_c, i_c, k_c) -
+                            dslot_g(k_c, i_c, j_c));
+            };
+
+            auto Gamma1_3up = [&](auto k_c, auto i_c, auto up_c) -> double {
+              constexpr int up = (int)decltype(up_c)::value;
+              double v = 0.0;
+              static_for<int_dim_plus_one>([&](auto beta_c) {
+                v += get<up, (int)beta_c>(inverse_spacetime_metric) *
+                     Gamma1(k_c, i_c, beta_c);
+              });
+              return v;
+            };
+
+            // ---- Main delta loop ----
+            static_for<int_dim_plus_one>([&](auto delta_c) {
+              constexpr int delta = (int)delta_c;
+
+              acc -= 2.0 * get<mu, delta>(pi)[s] * pi2_up(delta_c);
+              acc += 2.0 * Gamma2(delta_c) * get<delta>(gauge_h)[s];
+
+              // acc += 2 * sum_n phi1_up(n,delta) * phi3_up(n,delta)
+              static_for<int_dim>([&](auto n_c) {
+                acc += 2.0 * phi1_up(n_c, delta_c) * phi3_up(n_c, delta_c);
+              });
+
+              static_for<int_dim_plus_one>([&](auto alpha_c) {
+                acc -= 2.0 * Gamma1_3up(mu_c, alpha_c, delta_c) *
+                       Gamma1_3up(nu_c, delta_c, alpha_c);
+              });
+            });
+
+            // Remaining m,n loops (replace phi1_up[m][nu] with on-demand)
+            static_for<int_dim>([&](auto m_c) {
+              constexpr int m = (int)m_c;
+              constexpr int mp1 = m + 1;
+
+              acc -= get<mp1>(pi_one_normal) * phi1_up(m_c, nu_c);
+
+              static_for<int_dim>([&](auto n_c) {
+                acc -= get<m, (int)n_c>(inverse_spatial_metric) *
+                       get<m, (int)n_c, mu, nu>(d_phi)[s];
+              });
+            });
+
+            // finalize
+            acc *= lapse;
+            acc += gamma1gamma2 * get<mu, nu>(shift_dot_three_index_constraint);
+            acc += gamma1gamma2 *
+                   get<mu, nu>(mesh_velocity_dot_three_index_constraint);
+
+            static_for<int_dim>([&](auto m_c) {
+              constexpr int m = (int)m_c;
+              acc += get<m>(shift) * get<m, mu, nu>(d_pi)[s];
+            });
+
+            get<mu, nu>(dt_pi)[s] = acc;
           });
-
-          get<mu, nu>(dt_pi)[s] = acc;
         });
       });
-    });
 
   ::Kokkos::parallel_for(
       "GhBatchedComputeTimeDerivativeDtPhi", total_points,

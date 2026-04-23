@@ -355,12 +355,18 @@ void ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
       packed_topology.element_point_offsets_device;
   const auto& inertial_coordinates =
       packed_geometry.inertial_coordinates_device;
+  const auto& mesh_velocity = packed_geometry.mesh_velocity_device;
   const auto& gamma1 = device_gamma1;
   const auto& gamma2 = device_gamma2;
   const auto& packaged_face_data_for_all_elements =
       packed_boundary_scratch.packaged_face_data_for_all_elements;
   const auto& external_face_mask_for_all_elements =
       packed_boundary_metadata.external_face_mask_for_all_elements;
+  ASSERT(mesh_velocity.get(0).extent(0) == packed_topology.total_points and
+             mesh_velocity.get(1).extent(0) == packed_topology.total_points and
+             mesh_velocity.get(2).extent(0) == packed_topology.total_points,
+         "ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched requires "
+         "packed mesh velocity with one entry per packed volume point.");
 
   auto& dt_vars = packed_evolution_state->device_dt_variables;
   const auto dt_spacetime_metric =
@@ -420,6 +426,11 @@ void ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
           const size_t local_volume_index =
               element_point_offsets_device(element_index) +
               local_volume_index_in_element;
+          tnsr::I<double, volume_dim, Frame::Inertial> mesh_velocity_at_s{};
+          for (size_t d = 0; d < volume_dim; ++d) {
+            mesh_velocity_at_s.get(d) =
+                mesh_velocity.get(d)(local_volume_index);
+          }
 
           tnsr::i<double, volume_dim, Frame::Inertial>
               unnormalized_normal_covector{};
@@ -518,7 +529,7 @@ void ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
               make_not_null(&remote_gamma2_v_spacetime_metric),
               make_not_null(&remote_char_speeds), exterior_spacetime_metric,
               exterior_pi, exterior_phi, get(gamma1_at_s), get(gamma2_at_s),
-              exterior_unnormalized_normal_covector);
+              exterior_unnormalized_normal_covector, mesh_velocity_at_s);
 
           tnsr::aa<double, volume_dim, Frame::Inertial>
               dt_spacetime_metric_correction{};

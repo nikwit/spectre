@@ -85,8 +85,14 @@ void PackageLocalFacesBatched::apply(
   const auto& gamma2 = device_gamma2;
   const auto& inverse_jacobian =
       packed_geometry.element_inverse_jacobian_device;
+  const auto& mesh_velocity = packed_geometry.mesh_velocity_device;
   const auto& element_point_offsets_device =
       packed_topology.element_point_offsets_device;
+  ASSERT(mesh_velocity.get(0).extent(0) == packed_topology.total_points and
+             mesh_velocity.get(1).extent(0) == packed_topology.total_points and
+             mesh_velocity.get(2).extent(0) == packed_topology.total_points,
+         "PackageLocalFacesBatched requires packed mesh velocity with one "
+         "entry per packed volume point.");
 
   for (size_t d = 0; d < volume_dim; ++d) {
     for (size_t side_i = 0; side_i < 2; ++side_i) {
@@ -126,6 +132,11 @@ void PackageLocalFacesBatched::apply(
             const auto vars_at_s = make_at_index(vars, local_volume_index);
             const auto gamma1_at_s = make_at_index(gamma1, local_volume_index);
             const auto gamma2_at_s = make_at_index(gamma2, local_volume_index);
+            tnsr::I<double, volume_dim, Frame::Inertial> mesh_velocity_at_s{};
+            for (size_t i = 0; i < volume_dim; ++i) {
+              mesh_velocity_at_s.get(i) =
+                  mesh_velocity.get(i)(local_volume_index);
+            }
 
             tnsr::aa<double, volume_dim, Frame::Inertial> v_spacetime_metric{};
             tnsr::iaa<double, volume_dim, Frame::Inertial> v_zero{};
@@ -151,7 +162,7 @@ void PackageLocalFacesBatched::apply(
                 get<::Tags::AtIndex<::Tags::MirrorView<pi_tag>>>(vars_at_s),
                 get<::Tags::AtIndex<::Tags::MirrorView<phi_tag>>>(vars_at_s),
                 get(gamma1_at_s), get(gamma2_at_s),
-                unnormalized_normal_covector);
+                unnormalized_normal_covector, mesh_velocity_at_s);
 
             size_t component_offset = 0;
             for (size_t c = 0; c < v_spacetime_metric.size(); ++c) {
