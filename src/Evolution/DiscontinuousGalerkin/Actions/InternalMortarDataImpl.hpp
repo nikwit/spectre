@@ -250,11 +250,10 @@ void internal_mortar_data_impl(
       // If we only have one conforming neighbor in this direction, we may or
       // may not have to do any projection. If we don't have to do projection,
       // then we can use the local_mortar_data itself to calculate the
-      // dg_package_data. However, if we need to project, then we hae to use
+      // dg_package_data. However, if we need to project, then we have to use
       // the packaged_data_buffer that was passed in.
       if (neighbors_in_direction.are_conforming() and
           Spectral::needs_projection(face_mesh, mortar_mesh, mortar_size)) {
-        // Have to use packaged_data_buffer
         // The face mesh will be assigned below along with ensuring the size of
         // the mortar data is correct
         packaged_data.set_data_ref(packaged_data_buffer->data(),
