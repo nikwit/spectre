@@ -189,7 +189,7 @@ bool receive_boundary_data(
     const auto& element = db::get<domain::Tags::Element<volume_dim>>(*box);
     const auto expected_messages = static_cast<size_t>(alg::accumulate(
         mortar_next_time_step_ids, 0,
-        [&mortar_infos, &element, &time_to_process](size_t total,
+        [&mortar_infos, &element, &time_to_process](const size_t total,
                                                     const auto& entry) {
           if (entry.second != *time_to_process) {
             return total;
@@ -494,8 +494,10 @@ bool receive_boundary_data(
                               static_cast<ptrdiff_t>(
                                   volume_mesh.slice_away(direction.dimension())
                                       .number_of_grid_points()),
-                          [](double v) { return std::isnan(v); }),
-             "Not all points were interpolated");
+                          [](const double v) { return std::isnan(v); }),
+             "Not all points were interpolated.  Direction = "
+                 << direction << " ElementId = " << element.id() << "\n"
+                 << "target_mortar_data = " << target_mortar_data);
     }
 
     inbox_data.erase(messages_to_process);

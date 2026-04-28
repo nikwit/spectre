@@ -757,12 +757,9 @@ void ComputeTimeDerivative<Dim, EvolutionSystem, DgStepChoosers,
                 *all_mortar_data.at(mortar_id).local().mortar_data.value();
             const auto& interpolator =
                 mortar_info.at(mortar_id).interpolator().value();
-            const auto& host_data =
-                *all_mortar_data.at(mortar_id).local().mortar_data.value();
-            // neighbor_boundary_data_on_mortar =
-            //     interpolator.interpolate_to_neighbor(host_data);
             interpolated_boundary_data = InterpolatedBoundaryData<Dim>{
-                {.data = interpolator.interpolate_to_neighbor(host_data),
+                {.data = interpolator.interpolate_to_neighbor(
+                     neighbor_boundary_data_on_mortar),
                  .target_mesh = interpolator.neighbor_mortar_mesh(),
                  .offsets = interpolator.interpolated_neighbor_data_offsets()}};
           } else {
