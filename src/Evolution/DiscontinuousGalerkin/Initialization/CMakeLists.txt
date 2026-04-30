@@ -5,6 +5,7 @@ spectre_target_headers(
   ${LIBRARY}
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
+  DisableLtsOnNonconformingBoundaries.hpp
   Mortars.hpp
   QuadratureTag.hpp
   )
@@ -12,5 +13,6 @@ spectre_target_headers(
 spectre_target_sources(
   ${LIBRARY}
   PRIVATE
+  DisableLtsOnNonconformingBoundaries.cpp
   Mortars.cpp
   )

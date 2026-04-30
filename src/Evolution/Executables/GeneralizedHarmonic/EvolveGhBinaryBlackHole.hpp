@@ -37,6 +37,7 @@
 #include "Evolution/ComputeTags.hpp"
 #include "Evolution/DiscontinuousGalerkin/Actions/ApplyBoundaryCorrections.hpp"
 #include "Evolution/DiscontinuousGalerkin/Actions/ComputeTimeDerivative.hpp"
+#include "Evolution/DiscontinuousGalerkin/Initialization/DisableLtsOnNonconformingBoundaries.hpp"
 #include "Evolution/DiscontinuousGalerkin/CleanMortarHistory.hpp"
 #include "Evolution/DiscontinuousGalerkin/DgElementArray.hpp"
 #include "Evolution/DiscontinuousGalerkin/Initialization/Mortars.hpp"
@@ -181,6 +182,7 @@
 #include "Time/CleanHistory.hpp"
 #include "Time/RecordTimeStepperData.hpp"
 #include "Time/StepChoosers/Factory.hpp"
+#include "Time/StepChoosers/FixedLtsRatio.hpp"
 #include "Time/StepChoosers/StepChooser.hpp"
 #include "Time/Tags/StepperErrors.hpp"
 #include "Time/Tags/Time.hpp"
@@ -534,7 +536,12 @@ struct EvolutionMetavars {
                    StepChoosers::standard_step_choosers<system>>,
         tmpl::pair<
             StepChooser<StepChooserUse::Slab>,
-            StepChoosers::standard_slab_choosers<system, local_time_stepping>>,
+            tmpl::append<StepChoosers::standard_slab_choosers<
+                             system, local_time_stepping>,
+                         tmpl::conditional_t<
+                             local_time_stepping,
+                             tmpl::list<StepChoosers::FixedLtsRatio>,
+                             tmpl::list<>>>>,
         tmpl::pair<TimeSequence<double>,
                    TimeSequences::all_time_sequences<double>>,
         tmpl::pair<TimeSequence<std::uint64_t>,
@@ -626,6 +633,9 @@ struct EvolutionMetavars {
       Initialization::Actions::AddSimpleTags<
           gh::bbh::Actions::InitializeElementCompletionRequested>,
       ::evolution::dg::Initialization::Mortars<volume_dim>,
+      Initialization::Actions::InitializeItems<
+          evolution::dg::Initialization::
+              DisableLtsOnNonconformingBoundaries<volume_dim>>,
       intrp::Actions::ElementInitInterpPoints<volume_dim,
                                               interpolation_target_tags>,
       evolution::Actions::InitializeRunEventsAndDenseTriggers,
@@ -738,6 +748,7 @@ struct EvolutionMetavars {
                     tmpl::bind<intrp::Tags::PointInfo, tmpl::_1,
                                tmpl::pin<tmpl::size_t<volume_dim>>>>>,
             gh::bbh::Tags::ElementCompletionRequested,
+            Tags::FixedLtsRatio,
             Tags::ChangeSlabSize::NumberOfExpectedMessages,
             Tags::ChangeSlabSize::NewSlabSize>>>;
     static constexpr bool keep_coarse_grids = false;
