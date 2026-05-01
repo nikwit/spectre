@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <memory>
 #include <optional>
+#include <type_traits>
 
 #include "ControlSystem/CombinedName.hpp"
 #include "ControlSystem/Metafunctions.hpp"
@@ -86,12 +87,13 @@ struct LimitTimeStep {
   using const_global_cache_tags = tmpl::list<::Tags::MinimumTimeStep>;
 
   template <typename DbTagsList, typename... InboxTags, typename Metavariables,
-            size_t Dim, typename ActionList, typename ParallelComponent>
+            typename ArrayIndex, typename ActionList,
+            typename ParallelComponent>
   static Parallel::iterable_action_return_t apply(
       db::DataBox<DbTagsList>& box,
       const tuples::TaggedTuple<InboxTags...>& /*inboxes*/,
       Parallel::GlobalCache<Metavariables>& cache,
-      const ElementId<Dim>& array_index, ActionList /*meta*/,
+      const ArrayIndex& array_index, ActionList /*meta*/,
       const ParallelComponent* const /*meta*/) {
     const auto& time_step_id = db::get<::Tags::TimeStepId>(box);
     if (time_step_id.substep() != 0) {
@@ -145,10 +147,13 @@ struct LimitTimeStep {
                 // discard a lot of callbacks that we need. Alternatively, the
                 // callback could do a broadcast to all elements on the
                 // nodegroup.
+                constexpr size_t element_dim =
+                    std::decay_t<decltype(array_index)>::volume_dim;
                 const auto element_location = static_cast<int>(
                     Parallel::local_synchronous_action<
                         ::Parallel::Actions::GetItemFromDistributedOject<
-                            Parallel::Tags::ElementLocations<Dim>>>(proxy)
+                            Parallel::Tags::ElementLocations<element_dim>>>(
+                        proxy)
                         ->at(array_index));
                 return ready ? std::unique_ptr<Parallel::Callback>{}
                              : std::unique_ptr<Parallel::Callback>(
@@ -204,10 +209,12 @@ struct LimitTimeStep {
               // discard a lot of callbacks that we need. Alternatively, the
               // callback could do a broadcast to all elements on the
               // nodegroup.
+              constexpr size_t element_dim =
+                  std::decay_t<decltype(array_index)>::volume_dim;
               const auto element_location = static_cast<int>(
                   Parallel::local_synchronous_action<
                       ::Parallel::Actions::GetItemFromDistributedOject<
-                          Parallel::Tags::ElementLocations<Dim>>>(proxy)
+                          Parallel::Tags::ElementLocations<element_dim>>>(proxy)
                       ->at(array_index));
               return ready
                          ? std::unique_ptr<Parallel::Callback>{}
