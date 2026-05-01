@@ -49,12 +49,14 @@ DomainCreator:
       XCoord: *x_right
       Interior: Auto
       UseLogarithmicMap: False
+      UseSphericalHarmonics: false
     ObjectB:
       InnerRadius: 4.
       OuterRadius: *star_radius
       XCoord: *x_left
       Interior: Auto
       UseLogarithmicMap: False
+      UseSphericalHarmonics: false
     CenterOfMassOffset: [*y_offset, *z_offset]
     Envelope:
       Radius: &outer_shell_inner_radius 120.

@@ -509,12 +509,16 @@ std::string create_option_string(
          interior_A +
          "    UseLogarithmicMap: " + stringize(use_logarithmic_map_AB) +
          "\n"
+         "    UseSphericalHarmonics: false" +
+         "\n"
          "  ObjectB:\n"
          "    InnerRadius: 0.2\n"
          "    OuterRadius: 1.0\n"
          "    XCoord: -2.0\n" +
          interior_B +
          "    UseLogarithmicMap: " + stringize(use_logarithmic_map_AB) +
+         "\n"
+         "    UseSphericalHarmonics: false" +
          "\n"
          "  CenterOfMassOffset: [0.1, 0.2]\n"
          "  Envelope:\n"
@@ -1208,6 +1212,184 @@ template <domain::ObjectLabel Object>
 using HardcodedShape =
     domain::creators::time_dependent_options::ShapeMapOptions<true, Object>;
 
+void test_spherical_harmonics_object_shells() {
+  INFO("Test BinaryCompactObject with spherical-harmonic object shells");
+  using GridPointsMap = std::unordered_map<
+      std::string, std::variant<std::array<size_t, 3>, std::array<size_t, 2>>>;
+  using RefinementMap =
+      std::unordered_map<std::string,
+                         std::variant<std::array<size_t, 3>, size_t>>;
+
+  const auto make_creator = [](const bool sh_a, const bool sh_b) {
+    RefinementMap refinement{
+        {"ObjectAShell", sh_a ? std::variant<std::array<size_t, 3>, size_t>{2_st}
+                              : std::variant<std::array<size_t, 3>, size_t>{
+                                    std::array<size_t, 3>{1, 1, 1}}},
+        {"ObjectACube", std::array<size_t, 3>{1, 1, 1}},
+        {"ObjectBShell", sh_b ? std::variant<std::array<size_t, 3>, size_t>{2_st}
+                              : std::variant<std::array<size_t, 3>, size_t>{
+                                    std::array<size_t, 3>{1, 1, 1}}},
+        {"ObjectBCube", std::array<size_t, 3>{1, 1, 1}},
+        {"Envelope", std::array<size_t, 3>{1, 1, 1}},
+        {"OuterShell0", std::array<size_t, 3>{1, 1, 1}}};
+    GridPointsMap grid_points{
+        {"ObjectAShell",
+         sh_a ? std::variant<std::array<size_t, 3>, std::array<size_t, 2>>{
+                    std::array<size_t, 2>{4, 7}}
+              : std::variant<std::array<size_t, 3>, std::array<size_t, 2>>{
+                    std::array<size_t, 3>{3, 3, 3}}},
+        {"ObjectACube", std::array<size_t, 3>{3, 3, 3}},
+        {"ObjectBShell",
+         sh_b ? std::variant<std::array<size_t, 3>, std::array<size_t, 2>>{
+                    std::array<size_t, 2>{5, 8}}
+              : std::variant<std::array<size_t, 3>, std::array<size_t, 2>>{
+                    std::array<size_t, 3>{3, 3, 3}}},
+        {"ObjectBCube", std::array<size_t, 3>{3, 3, 3}},
+        {"Envelope", std::array<size_t, 3>{3, 3, 3}},
+        {"OuterShell0", std::array<size_t, 3>{3, 3, 3}}};
+    return domain::creators::BinaryCompactObject{
+        Object{0.3, 1.0, 3.0, true, false, sh_a},
+        Object{0.5, 1.0, -3.0, true, false, sh_b},
+        std::array<double, 2>{{0.0, 0.0}},
+        25.5,
+        32.4,
+        1.0,
+        refinement,
+        grid_points,
+        true,
+        Distribution::Projective,
+        std::vector<double>{},
+        Distribution::Linear,
+        120.0,
+        false,
+        std::nullopt,
+        nullptr};
+  };
+
+  const auto check_creator = [&make_creator](const bool sh_a, const bool sh_b,
+                                             const size_t expected_blocks) {
+    const auto creator = make_creator(sh_a, sh_b);
+    CHECK(creator.block_names().size() == expected_blocks);
+    if (sh_a) {
+      CHECK(creator.block_names()[0] == "ObjectAShell");
+      CHECK(not creator.block_groups().contains("ObjectAShell"));
+      CHECK(creator.initial_extents()[0] == std::array<size_t, 3>{4, 8, 15});
+      CHECK(creator.initial_refinement_levels()[0] ==
+            std::array<size_t, 3>{2, 0, 0});
+    }
+    const size_t object_b_shell = sh_a ? 7_st : 12_st;
+    if (sh_b) {
+      CHECK(creator.block_names()[object_b_shell] == "ObjectBShell");
+      CHECK(not creator.block_groups().contains("ObjectBShell"));
+      CHECK(creator.initial_extents()[object_b_shell] ==
+            std::array<size_t, 3>{5, 9, 17});
+      CHECK(creator.initial_refinement_levels()[object_b_shell] ==
+            std::array<size_t, 3>{2, 0, 0});
+    }
+
+    const auto domain = creator.create_domain();
+    const auto& blocks = domain.blocks();
+    REQUIRE(blocks.size() == expected_blocks);
+    if (sh_a) {
+      CHECK(domain.excision_spheres()
+                .at("ExcisionSphereA")
+                .abutting_directions()
+                .at(0) == Direction<3>::lower_xi());
+      CHECK(blocks[0].neighbors().count(Direction<3>::upper_xi()) == 1);
+      CHECK(blocks[0].neighbors().at(Direction<3>::upper_xi()).ids().size() ==
+            6);
+      for (size_t i = 1; i < 7; ++i) {
+        CAPTURE(i);
+        CHECK(blocks[i].neighbors().count(Direction<3>::lower_zeta()) == 1);
+        CHECK(*blocks[i]
+                   .neighbors()
+                   .at(Direction<3>::lower_zeta())
+                   .ids()
+                   .begin() == 0);
+      }
+    }
+    if (sh_b) {
+      CHECK(domain.excision_spheres()
+                .at("ExcisionSphereB")
+                .abutting_directions()
+                .at(object_b_shell) == Direction<3>::lower_xi());
+      CHECK(blocks[object_b_shell].neighbors().count(Direction<3>::upper_xi()) ==
+            1);
+      CHECK(blocks[object_b_shell]
+                .neighbors()
+                .at(Direction<3>::upper_xi())
+                .ids()
+                .size() == 6);
+      for (size_t i = object_b_shell + 1; i < object_b_shell + 7; ++i) {
+        CAPTURE(i);
+        CHECK(blocks[i].neighbors().count(Direction<3>::lower_zeta()) == 1);
+        CHECK(*blocks[i]
+                   .neighbors()
+                   .at(Direction<3>::lower_zeta())
+                   .ids()
+                   .begin() == object_b_shell);
+      }
+    }
+  };
+
+  check_creator(true, false, 39);
+  check_creator(false, true, 39);
+  check_creator(true, true, 34);
+
+  CHECK_THROWS_WITH(
+      domain::creators::BinaryCompactObject(
+          Object{0.3, 1.0, 3.0, false, false, true},
+          Object{0.5, 1.0, -3.0, true, false, false},
+          std::array<double, 2>{{0.0, 0.0}}, 25.5, 32.4, 1.0, 1_st, 3_st,
+          true, Distribution::Projective, std::vector<double>{},
+          Distribution::Linear, 120.0, false, std::nullopt, nullptr,
+          Options::Context{false, {}, 1, 1}),
+      Catch::Matchers::ContainsSubstring(
+          "requires excising the interior of Object A"));
+
+  CHECK_THROWS_WITH(
+      domain::creators::BinaryCompactObject(
+          Object{0.3, 1.0, 3.0, true, false, true},
+          Object{0.5, 1.0, -3.0, true, false, false},
+          std::array<double, 2>{{0.0, 0.0}}, 25.5, 32.4, 1.0,
+          RefinementMap{{"ObjectAShell", std::array<size_t, 3>{1, 1, 1}},
+                        {"ObjectACube", std::array<size_t, 3>{1, 1, 1}},
+                        {"ObjectBShell", std::array<size_t, 3>{1, 1, 1}},
+                        {"ObjectBCube", std::array<size_t, 3>{1, 1, 1}},
+                        {"Envelope", std::array<size_t, 3>{1, 1, 1}},
+                        {"OuterShell0", std::array<size_t, 3>{1, 1, 1}}},
+          GridPointsMap{{"ObjectAShell", std::array<size_t, 2>{4, 7}},
+                        {"ObjectACube", std::array<size_t, 2>{4, 7}},
+                        {"ObjectBShell", std::array<size_t, 3>{3, 3, 3}},
+                        {"ObjectBCube", std::array<size_t, 3>{3, 3, 3}},
+                        {"Envelope", std::array<size_t, 3>{3, 3, 3}},
+                        {"OuterShell0", std::array<size_t, 3>{3, 3, 3}}},
+          true, Distribution::Projective, std::vector<double>{},
+          Distribution::Linear, 120.0, false, std::nullopt, nullptr,
+          Options::Context{false, {}, 1, 1}),
+      Catch::Matchers::ContainsSubstring(
+          "Specifying 2 grid points (block 'ObjectACube') is only valid for "
+          "spherical-harmonic shell blocks"));
+
+  CHECK_THROWS_WITH(
+      domain::creators::BinaryCompactObject(
+          Object{0.3, 1.0, 3.0, true, false, true},
+          Object{0.5, 1.0, -3.0, true, false, false},
+          std::array<double, 2>{{0.0, 0.0}}, 25.5, 32.4, 1.0, 1_st, 3_st,
+          true, Distribution::Projective, std::vector<double>{},
+          Distribution::Linear, 120.0, false,
+          domain::creators::bco::TimeDependentMapOptions<false>{
+              0., std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+              HardcodedShape<domain::ObjectLabel::A>{
+                  8_st, std::nullopt, std::array<double, 3>{0.0, 0.0, 0.0},
+                  0.0, true},
+              std::nullopt, std::nullopt},
+          nullptr, Options::Context{false, {}, 1, 1}),
+      Catch::Matchers::ContainsSubstring(
+          "Shape-map falloff to the cubical boundary is not supported for "
+          "spherical-harmonic object shells"));
+}
+
 void test_kerr_horizon_conforming() {
   INFO(
       "Check that inner radius is deformed to constant Boyer-Lindquist radius");
@@ -1312,5 +1494,6 @@ SPECTRE_TEST_CASE("Unit.Domain.Creators.BinaryCompactObject",
   test_binary_factory();
   test_parse_errors();
   test_spherical_harmonics_wavezone();
+  test_spherical_harmonics_object_shells();
   test_kerr_horizon_conforming();
 }

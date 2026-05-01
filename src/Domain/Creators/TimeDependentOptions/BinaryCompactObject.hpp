@@ -282,7 +282,9 @@ struct TimeDependentMapOptions {
       const std::optional<std::array<double, IsCylindrical ? 2 : 3>>&
           object_B_radii,
       bool object_A_filled, bool object_B_filled, double envelope_radius,
-      double domain_outer_radius);
+      double domain_outer_radius,
+      bool object_A_uses_spherical_harmonics = false,
+      bool object_B_uses_spherical_harmonics = false);
 
   /*!
    * \brief Check whether options were specified in the constructor for the
