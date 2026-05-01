@@ -30,6 +30,7 @@ set(LIBRARY_SOURCES
   Test_FilterKokkos.cpp
   Test_FilterKokkosBatched.cpp
   Test_Fluxes.cpp
+  Test_HostElementViewBatched.cpp
   Test_System.cpp
   Test_SyncKokkosToHostEvent.cpp
   Test_Tags.cpp

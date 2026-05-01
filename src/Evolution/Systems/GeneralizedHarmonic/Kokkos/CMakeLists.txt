@@ -13,6 +13,7 @@ spectre_target_sources(
   Batched/ComputeInternalBoundaryTermsBatched.cpp
   Batched/ComputeTimeDerivativeBatched.cpp
   Batched/FilterKokkosBatched.cpp
+  Batched/HostElementView.cpp
   Batched/InitializeBatchedData.cpp
   Batched/LiftInternalBoundaryTermsBatched.cpp
   Batched/UpdateConstraintDampingBatched.cpp
@@ -34,6 +35,7 @@ spectre_target_headers(
   Batched/ComputeTimeDerivativeBatched.hpp
   Batched/DriverState.hpp
   Batched/FilterKokkosBatched.hpp
+  Batched/HostElementView.hpp
   Batched/InitializeBatchedData.hpp
   Batched/InitializeBoundaryBatchMetadata.hpp
   Batched/LiftInternalBoundaryTermsBatched.hpp
@@ -61,6 +63,7 @@ target_link_libraries(
   Domain
   ErrorHandling
   GeneralizedHarmonic
+  LinearOperators
   Parallel
   Serialization
   Time
