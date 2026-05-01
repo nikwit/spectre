@@ -16,7 +16,9 @@
 
 namespace gh::Actions {
 
-struct UpdateConstraintDampingBatched {
+template <typename FunctionsOfTimeTag,
+          bool AddFunctionsOfTimeToConstGlobalCache = true>
+struct UpdateConstraintDampingBatchedWithTag {
  private:
   static constexpr size_t volume_dim = 3;
   using system = gh::System<volume_dim>;
@@ -36,13 +38,15 @@ struct UpdateConstraintDampingBatched {
       tmpl::list<device_constraint_gamma0_tag, device_constraint_gamma1_tag,
                  device_constraint_gamma2_tag>;
   using argument_tags =
-      tmpl::list<packed_geometry_tag, ::domain::Tags::FunctionsOfTimeInitialize,
-                 ::Tags::Time, damping_function_gamma0_tag,
-                 damping_function_gamma1_tag, damping_function_gamma2_tag>;
-  using const_global_cache_tags =
-      tmpl::list<::domain::Tags::FunctionsOfTimeInitialize,
+      tmpl::list<packed_geometry_tag, FunctionsOfTimeTag, ::Tags::Time,
                  damping_function_gamma0_tag, damping_function_gamma1_tag,
                  damping_function_gamma2_tag>;
+  using const_global_cache_tags = tmpl::conditional_t<
+      AddFunctionsOfTimeToConstGlobalCache,
+      tmpl::list<FunctionsOfTimeTag, damping_function_gamma0_tag,
+                 damping_function_gamma1_tag, damping_function_gamma2_tag>,
+      tmpl::list<damping_function_gamma0_tag, damping_function_gamma1_tag,
+                 damping_function_gamma2_tag>>;
 
   static void apply(
       gsl::not_null<typename device_constraint_gamma0_tag::type*>
@@ -60,5 +64,8 @@ struct UpdateConstraintDampingBatched {
       const typename damping_function_gamma2_tag::DampingFunctionType&
           damping_function_gamma2);
 };
+
+using UpdateConstraintDampingBatched = UpdateConstraintDampingBatchedWithTag<
+    ::domain::Tags::FunctionsOfTimeInitialize>;
 
 }  // namespace gh::Actions

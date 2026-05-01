@@ -6,8 +6,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <string>
 
+#include "Domain/Creators/OptionTags.hpp"
 #include "Domain/Creators/Tags/FunctionsOfTime.hpp"
+#include "Domain/Structure/ObjectLabel.hpp"
 #include "Domain/Tags.hpp"
 #include "Evolution/Actions/RunEventsAndTriggers.hpp"
 #include "Evolution/Executables/GeneralizedHarmonic/Batched/Actions.hpp"
@@ -16,6 +20,7 @@
 #include "Evolution/Kokkos/CleanHistory.hpp"
 #include "Evolution/Kokkos/RecordTimeStepperData.hpp"
 #include "Evolution/Kokkos/UpdateU.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/FindApparentHorizonBatchedEvent.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/ObserveTimeStepBatchedEvent.hpp"
 #include "Evolution/Tags/Filter.hpp"
 #include "IO/Observer/ObserverComponent.hpp"
@@ -29,6 +34,14 @@
 #include "ParallelAlgorithms/Actions/InitializeItems.hpp"
 #include "ParallelAlgorithms/Actions/MutateApply.hpp"
 #include "ParallelAlgorithms/Actions/TerminatePhase.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/FailedHorizonFind.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/ObserveFieldsOnHorizon.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/ObserveTimeSeriesOnHorizon.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/Component.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/Destination.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/HorizonAliases.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/Protocols/HorizonMetavars.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/Tags.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/Event.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/LogicalTriggers.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/Tags.hpp"
@@ -72,10 +85,11 @@ struct GhKokkosBatchedDriver {
       Parallel::PhaseActions<
           Parallel::Phase::Evolve,
           tmpl::list<
+              Actions::MutateApply<gh::Batched::Actions::
+                                       UpdateFrameFieldsBatched<Metavariables>>,
               Actions::MutateApply<
-                  gh::Batched::Actions::UpdateFrameFieldsBatched>,
-              Actions::MutateApply<
-                  gh::Batched::Actions::UpdateConstraintDampingBatched>,
+                  gh::Batched::Actions::UpdateConstraintDampingBatched<
+                      Metavariables>>,
               evolution::Actions::RunEventsAndTriggers<
                   Metavariables::local_time_stepping>,
               Actions::MutateApply<
@@ -121,13 +135,41 @@ struct EvolutionMetavarsKokkosBatched {
   static constexpr bool local_time_stepping = false;
   static constexpr bool use_dg_element_collection = false;
 
+  template <::domain::ObjectLabel Horizon>
+  struct Ah : tt::ConformsTo<ah::protocols::HorizonMetavars> {
+    static constexpr size_t index = 10 + static_cast<size_t>(Horizon);
+
+    using time_tag = ah::Tags::ObservationTime<index>;
+    using frame = ::Frame::Inertial;
+    using horizon_find_callbacks =
+        tmpl::list<ah::callbacks::ObserveFieldsOnHorizon<
+                       ::ah::surface_tags_for_observing, Ah>,
+                   ah::callbacks::ObserveTimeSeriesOnHorizon<
+                       ::ah::tags_for_observing<frame>, Ah>>;
+    using horizon_find_failure_callbacks =
+        tmpl::list<ah::callbacks::FailedHorizonFind<Ah, false>>;
+    using compute_tags_on_element =
+        tmpl::list<ah::Tags::ObservationTimeCompute<index>>;
+
+    static constexpr ah::Destination destination = ah::Destination::Observation;
+
+    static std::string name() {
+      return "BatchedObservationAh" + ::domain::name(Horizon);
+    }
+  };
+
+  using AhA = Ah<::domain::ObjectLabel::A>;
+  using AhB = Ah<::domain::ObjectLabel::B>;
+
   struct factory_creation
       : tt::ConformsTo<Options::protocols::FactoryCreation> {
     using factory_classes = tmpl::map<
         tmpl::pair<DomainCreator<volume_dim>, domain_creators<volume_dim>>,
-        tmpl::pair<Event,
-                   tmpl::flatten<tmpl::list<gh::Events::CompletionBatched,
-                                            gh::Events::ObserveNormsBatched>>>,
+        tmpl::pair<Event, tmpl::flatten<tmpl::list<
+                              gh::Events::CompletionBatched,
+                              gh::Events::FindApparentHorizonBatched<AhA>,
+                              gh::Events::FindApparentHorizonBatched<AhB>,
+                              gh::Events::ObserveNormsBatched>>>,
         tmpl::pair<
             gh::BoundaryConditions::BoundaryCondition<volume_dim>,
             gh::BoundaryConditions::standard_boundary_conditions<volume_dim>>,
@@ -153,19 +195,22 @@ struct EvolutionMetavarsKokkosBatched {
   using const_global_cache_tags =
       tmpl::list<gh::gauges::Tags::GaugeCondition,
                  evolution::initial_data::Tags::InitialData,
-                 domain::Tags::FunctionsOfTimeInitialize,
                  gh::Tags::DampingFunctionGamma0<volume_dim, Frame::Grid>,
                  gh::Tags::DampingFunctionGamma1<volume_dim, Frame::Grid>,
                  gh::Tags::DampingFunctionGamma2<volume_dim, Frame::Grid>,
                  Filters::Tags::Filter<Filters::Exponential<0>>,
                  ::Tags::EventsAndTriggers<Triggers::WhenToCheck::AtSlabs>>;
+  using mutable_global_cache_tags =
+      tmpl::list<domain::Tags::FunctionsOfTimeInitialize>;
 
   using batched_driver_component =
       GhKokkosBatchedDriver<EvolutionMetavarsKokkosBatched>;
 
-  using component_list =
+  using component_list = tmpl::flatten<
       tmpl::list<observers::ObserverWriter<EvolutionMetavarsKokkosBatched>,
-                 batched_driver_component>;
+                 ah::Component<EvolutionMetavarsKokkosBatched, AhA>,
+                 ah::Component<EvolutionMetavarsKokkosBatched, AhB>,
+                 batched_driver_component>>;
 
   static constexpr Options::String help{
       "Generalized Harmonic Kokkos batched scaffold executable.\n"

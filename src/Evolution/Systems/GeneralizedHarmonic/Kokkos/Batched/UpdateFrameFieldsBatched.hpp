@@ -15,7 +15,9 @@
 
 namespace gh::Actions {
 
-struct UpdateFrameFieldsBatched {
+template <typename FunctionsOfTimeTag,
+          bool AddFunctionsOfTimeToConstGlobalCache = true>
+struct UpdateFrameFieldsBatchedWithTag {
  private:
   static constexpr size_t volume_dim = 3;
   using system = gh::System<volume_dim>;
@@ -26,10 +28,11 @@ struct UpdateFrameFieldsBatched {
   using return_tags = tmpl::list<packed_geometry_tag>;
   using argument_tags =
       tmpl::list<packed_topology_tag, ::domain::Tags::Domain<volume_dim>,
-                 ::domain::Tags::FunctionsOfTimeInitialize, ::Tags::Time>;
-  using const_global_cache_tags =
-      tmpl::list<::domain::Tags::Domain<volume_dim>,
-                 ::domain::Tags::FunctionsOfTimeInitialize>;
+                 FunctionsOfTimeTag, ::Tags::Time>;
+  using const_global_cache_tags = tmpl::conditional_t<
+      AddFunctionsOfTimeToConstGlobalCache,
+      tmpl::list<::domain::Tags::Domain<volume_dim>, FunctionsOfTimeTag>,
+      tmpl::list<::domain::Tags::Domain<volume_dim>>>;
 
   static void apply(
       gsl::not_null<typename packed_geometry_tag::type*> packed_geometry,
@@ -37,5 +40,8 @@ struct UpdateFrameFieldsBatched {
       const Domain<volume_dim>& domain,
       const domain::FunctionsOfTimeMap& functions_of_time, double time);
 };
+
+using UpdateFrameFieldsBatched =
+    UpdateFrameFieldsBatchedWithTag<::domain::Tags::FunctionsOfTimeInitialize>;
 
 }  // namespace gh::Actions

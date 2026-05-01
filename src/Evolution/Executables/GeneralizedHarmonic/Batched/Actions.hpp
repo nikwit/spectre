@@ -3,16 +3,39 @@
 
 #pragma once
 
+#include "Domain/Creators/Tags/FunctionsOfTime.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/Actions.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
+#include "Parallel/GlobalCache.hpp"
+#include "Utilities/TMPL.hpp"
 
 namespace gh::Batched::Actions {
 
 template <typename Metavariables>
-using InitializeDriver = gh::Actions::InitializeBatchedData;
-using UpdateFrameFieldsBatched = gh::Actions::UpdateFrameFieldsBatched;
-using UpdateConstraintDampingBatched =
-    gh::Actions::UpdateConstraintDampingBatched;
+using functions_of_time_compute_tag =
+    Parallel::Tags::FromGlobalCache<domain::Tags::FunctionsOfTimeInitialize,
+                                    Metavariables>;
+
+template <typename Metavariables>
+struct InitializeDriver : gh::Actions::InitializeBatchedDataWithTag<
+                              domain::Tags::FunctionsOfTimeInitialize, false> {
+  using compute_tags = tmpl::list<functions_of_time_compute_tag<Metavariables>>;
+};
+
+template <typename Metavariables>
+struct UpdateFrameFieldsBatched
+    : gh::Actions::UpdateFrameFieldsBatchedWithTag<
+          domain::Tags::FunctionsOfTimeInitialize, false> {
+  using compute_tags = tmpl::list<functions_of_time_compute_tag<Metavariables>>;
+};
+
+template <typename Metavariables>
+struct UpdateConstraintDampingBatched
+    : gh::Actions::UpdateConstraintDampingBatchedWithTag<
+          domain::Tags::FunctionsOfTimeInitialize, false> {
+  using compute_tags = tmpl::list<functions_of_time_compute_tag<Metavariables>>;
+};
+
 using InitializeBoundaryBatchMetadata =
     gh::Actions::InitializeBoundaryBatchMetadata;
 using ComputeTimeDerivativeBatched = gh::Actions::ComputeTimeDerivativeBatched;

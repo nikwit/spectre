@@ -77,6 +77,7 @@ target_link_libraries(
   ${NO_BH_KOKKOS_BATCHED_EXECUTABLE}
   PRIVATE
   ${LIBS_TO_LINK}
+  ApparentHorizonFinder
   GeneralizedHarmonicKokkos
   )
 

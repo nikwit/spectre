@@ -35,6 +35,7 @@ spectre_target_headers(
   Batched/ComputeTimeDerivativeBatched.hpp
   Batched/DriverState.hpp
   Batched/FilterKokkosBatched.hpp
+  Batched/FindApparentHorizonBatchedEvent.hpp
   Batched/HostElementView.hpp
   Batched/InitializeBatchedData.hpp
   Batched/InitializeBoundaryBatchMetadata.hpp

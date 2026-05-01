@@ -87,11 +87,16 @@ void copy_host_array_to_device(
 
 }  // namespace
 
-void UpdateFrameFieldsBatched::apply(
-    const gsl::not_null<typename packed_geometry_tag::type*> packed_geometry,
-    const typename packed_topology_tag::type& packed_topology,
-    const Domain<volume_dim>& domain,
-    const domain::FunctionsOfTimeMap& functions_of_time, const double time) {
+template <typename FunctionsOfTimeTag,
+          bool AddFunctionsOfTimeToConstGlobalCache>
+void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
+                                     AddFunctionsOfTimeToConstGlobalCache>::
+    apply(const gsl::not_null<typename packed_geometry_tag::type*>
+              packed_geometry,
+          const typename packed_topology_tag::type& packed_topology,
+          const Domain<volume_dim>& domain,
+          const domain::FunctionsOfTimeMap& functions_of_time,
+          const double time) {
   const size_t total_points = packed_topology.total_points;
   if (total_points == 0) {
     return;
@@ -200,5 +205,10 @@ void UpdateFrameFieldsBatched::apply(
   ::Kokkos::deep_copy(packed_geometry->element_inverse_jacobian_device,
                       host_inverse_jacobian);
 }
+
+template struct UpdateFrameFieldsBatchedWithTag<
+    ::domain::Tags::FunctionsOfTimeInitialize>;
+template struct UpdateFrameFieldsBatchedWithTag<
+    ::domain::Tags::FunctionsOfTimeInitialize, false>;
 
 }  // namespace gh::Actions

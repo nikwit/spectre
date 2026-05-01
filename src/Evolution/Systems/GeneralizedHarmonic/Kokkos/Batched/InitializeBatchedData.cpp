@@ -38,27 +38,31 @@
 
 namespace gh::Actions {
 
-void InitializeBatchedData::apply(
-    const gsl::not_null<typename packed_geometry_tag::type*> packed_geometry,
-    const gsl::not_null<typename packed_evolution_state_tag::type*>
-        packed_evolution_state,
-    const gsl::not_null<typename device_constraint_gamma0_tag::type*>
-        device_constraint_gamma0,
-    const gsl::not_null<typename device_constraint_gamma1_tag::type*>
-        device_constraint_gamma1,
-    const gsl::not_null<typename device_constraint_gamma2_tag::type*>
-        device_constraint_gamma2,
-    const typename packed_topology_tag::type& packed_topology,
-    const Domain<volume_dim>& domain,
-    const domain::FunctionsOfTimeMap& functions_of_time,
-    const evolution::initial_data::InitialData& initial_data,
-    const double initial_time,
-    const typename damping_function_gamma0_tag::DampingFunctionType&
-        damping_function_gamma0,
-    const typename damping_function_gamma1_tag::DampingFunctionType&
-        damping_function_gamma1,
-    const typename damping_function_gamma2_tag::DampingFunctionType&
-        damping_function_gamma2) {
+template <typename FunctionsOfTimeTag,
+          bool AddFunctionsOfTimeToConstGlobalCache>
+void InitializeBatchedDataWithTag<FunctionsOfTimeTag,
+                                  AddFunctionsOfTimeToConstGlobalCache>::
+    apply(const gsl::not_null<typename packed_geometry_tag::type*>
+              packed_geometry,
+          const gsl::not_null<typename packed_evolution_state_tag::type*>
+              packed_evolution_state,
+          const gsl::not_null<typename device_constraint_gamma0_tag::type*>
+              device_constraint_gamma0,
+          const gsl::not_null<typename device_constraint_gamma1_tag::type*>
+              device_constraint_gamma1,
+          const gsl::not_null<typename device_constraint_gamma2_tag::type*>
+              device_constraint_gamma2,
+          const typename packed_topology_tag::type& packed_topology,
+          const Domain<volume_dim>& domain,
+          const domain::FunctionsOfTimeMap& functions_of_time,
+          const evolution::initial_data::InitialData& initial_data,
+          const double initial_time,
+          const typename damping_function_gamma0_tag::DampingFunctionType&
+              damping_function_gamma0,
+          const typename damping_function_gamma1_tag::DampingFunctionType&
+              damping_function_gamma1,
+          const typename damping_function_gamma2_tag::DampingFunctionType&
+              damping_function_gamma2) {
 #ifdef SPECTRE_KOKKOS
   const auto execution_space_name = ::Kokkos::DefaultExecutionSpace::name();
   const int execution_space_concurrency =
@@ -256,17 +260,27 @@ void InitializeBatchedData::apply(
   packed_evolution_state->device_variables = copy_to_device(host_vars);
   packed_evolution_state->device_step_start = copy_to_device(host_vars);
   packed_evolution_state->device_dt_variables = copy_to_device(host_dt_vars);
-  UpdateFrameFieldsBatched::apply(packed_geometry, packed_topology, domain,
-                                  functions_of_time, initial_time);
-  UpdateConstraintDampingBatched::apply(
-      device_constraint_gamma0, device_constraint_gamma1,
-      device_constraint_gamma2, *packed_geometry, functions_of_time,
-      initial_time, damping_function_gamma0, damping_function_gamma1,
-      damping_function_gamma2);
+  UpdateFrameFieldsBatchedWithTag<
+      FunctionsOfTimeTag,
+      AddFunctionsOfTimeToConstGlobalCache>::apply(packed_geometry,
+                                                   packed_topology, domain,
+                                                   functions_of_time,
+                                                   initial_time);
+  UpdateConstraintDampingBatchedWithTag<FunctionsOfTimeTag,
+                                        AddFunctionsOfTimeToConstGlobalCache>::
+      apply(device_constraint_gamma0, device_constraint_gamma1,
+            device_constraint_gamma2, *packed_geometry, functions_of_time,
+            initial_time, damping_function_gamma0, damping_function_gamma1,
+            damping_function_gamma2);
 
   if (packed_topology.total_points > 0) {
     ::Kokkos::deep_copy(packed_evolution_state->device_derivative_history, 0.0);
   }
 }
+
+template struct InitializeBatchedDataWithTag<
+    ::domain::Tags::FunctionsOfTimeInitialize>;
+template struct InitializeBatchedDataWithTag<
+    ::domain::Tags::FunctionsOfTimeInitialize, false>;
 
 }  // namespace gh::Actions

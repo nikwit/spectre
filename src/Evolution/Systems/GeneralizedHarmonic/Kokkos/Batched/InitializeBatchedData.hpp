@@ -19,7 +19,9 @@
 
 namespace gh::Actions {
 
-struct InitializeBatchedData {
+template <typename FunctionsOfTimeTag,
+          bool AddFunctionsOfTimeToConstGlobalCache = true>
+struct InitializeBatchedDataWithTag {
  private:
   static constexpr size_t volume_dim = 3;
   using system = gh::System<volume_dim>;
@@ -44,16 +46,19 @@ struct InitializeBatchedData {
                  device_constraint_gamma2_tag>;
   using argument_tags =
       tmpl::list<packed_topology_tag, ::domain::Tags::Domain<volume_dim>,
-                 ::domain::Tags::FunctionsOfTimeInitialize,
-                 evolution::initial_data::Tags::InitialData, ::Tags::Time,
-                 damping_function_gamma0_tag, damping_function_gamma1_tag,
-                 damping_function_gamma2_tag>;
-  using const_global_cache_tags =
-      tmpl::list<::domain::Tags::Domain<volume_dim>,
-                 ::domain::Tags::FunctionsOfTimeInitialize,
+                 FunctionsOfTimeTag, evolution::initial_data::Tags::InitialData,
+                 ::Tags::Time, damping_function_gamma0_tag,
+                 damping_function_gamma1_tag, damping_function_gamma2_tag>;
+  using const_global_cache_tags = tmpl::conditional_t<
+      AddFunctionsOfTimeToConstGlobalCache,
+      tmpl::list<::domain::Tags::Domain<volume_dim>, FunctionsOfTimeTag,
                  evolution::initial_data::Tags::InitialData,
                  damping_function_gamma0_tag, damping_function_gamma1_tag,
-                 damping_function_gamma2_tag>;
+                 damping_function_gamma2_tag>,
+      tmpl::list<::domain::Tags::Domain<volume_dim>,
+                 evolution::initial_data::Tags::InitialData,
+                 damping_function_gamma0_tag, damping_function_gamma1_tag,
+                 damping_function_gamma2_tag>>;
 
   static void apply(
       gsl::not_null<typename packed_geometry_tag::type*> packed_geometry,
@@ -77,5 +82,8 @@ struct InitializeBatchedData {
       const typename damping_function_gamma2_tag::DampingFunctionType&
           damping_function_gamma2);
 };
+
+using InitializeBatchedData =
+    InitializeBatchedDataWithTag<::domain::Tags::FunctionsOfTimeInitialize>;
 
 }  // namespace gh::Actions

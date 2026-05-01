@@ -14,21 +14,25 @@
 
 namespace gh::Actions {
 
-void UpdateConstraintDampingBatched::apply(
-    const gsl::not_null<typename device_constraint_gamma0_tag::type*>
-        device_constraint_gamma0,
-    const gsl::not_null<typename device_constraint_gamma1_tag::type*>
-        device_constraint_gamma1,
-    const gsl::not_null<typename device_constraint_gamma2_tag::type*>
-        device_constraint_gamma2,
-    const typename packed_geometry_tag::type& packed_geometry,
-    const domain::FunctionsOfTimeMap& functions_of_time, const double time,
-    const typename damping_function_gamma0_tag::DampingFunctionType&
-        damping_function_gamma0,
-    const typename damping_function_gamma1_tag::DampingFunctionType&
-        damping_function_gamma1,
-    const typename damping_function_gamma2_tag::DampingFunctionType&
-        damping_function_gamma2) {
+template <typename FunctionsOfTimeTag,
+          bool AddFunctionsOfTimeToConstGlobalCache>
+void UpdateConstraintDampingBatchedWithTag<
+    FunctionsOfTimeTag, AddFunctionsOfTimeToConstGlobalCache>::
+    apply(const gsl::not_null<typename device_constraint_gamma0_tag::type*>
+              device_constraint_gamma0,
+          const gsl::not_null<typename device_constraint_gamma1_tag::type*>
+              device_constraint_gamma1,
+          const gsl::not_null<typename device_constraint_gamma2_tag::type*>
+              device_constraint_gamma2,
+          const typename packed_geometry_tag::type& packed_geometry,
+          const domain::FunctionsOfTimeMap& functions_of_time,
+          const double time,
+          const typename damping_function_gamma0_tag::DampingFunctionType&
+              damping_function_gamma0,
+          const typename damping_function_gamma1_tag::DampingFunctionType&
+              damping_function_gamma1,
+          const typename damping_function_gamma2_tag::DampingFunctionType&
+              damping_function_gamma2) {
   const size_t total_points = packed_geometry.grid_coordinates_host[0].size();
   for (size_t d = 1; d < volume_dim; ++d) {
     ASSERT(packed_geometry.grid_coordinates_host[d].size() == total_points,
@@ -65,5 +69,10 @@ void UpdateConstraintDampingBatched::apply(
   *device_constraint_gamma2 =
       copy_to_device(host_gamma2, tmpl::type_<gamma2_space>{});
 }
+
+template struct UpdateConstraintDampingBatchedWithTag<
+    ::domain::Tags::FunctionsOfTimeInitialize>;
+template struct UpdateConstraintDampingBatchedWithTag<
+    ::domain::Tags::FunctionsOfTimeInitialize, false>;
 
 }  // namespace gh::Actions
