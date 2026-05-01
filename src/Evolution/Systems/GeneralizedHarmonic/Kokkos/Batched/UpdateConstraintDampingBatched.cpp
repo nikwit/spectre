@@ -5,6 +5,7 @@
 
 #include <cstddef>
 
+#include "ControlSystem/Tags/FunctionsOfTimeInitialize.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "DataStructures/VariablesKokkos.hpp"
@@ -74,5 +75,9 @@ template struct UpdateConstraintDampingBatchedWithTag<
     ::domain::Tags::FunctionsOfTimeInitialize>;
 template struct UpdateConstraintDampingBatchedWithTag<
     ::domain::Tags::FunctionsOfTimeInitialize, false>;
+template struct UpdateConstraintDampingBatchedWithTag<
+    ::control_system::Tags::FunctionsOfTimeInitialize>;
+template struct UpdateConstraintDampingBatchedWithTag<
+    ::control_system::Tags::FunctionsOfTimeInitialize, false>;
 
 }  // namespace gh::Actions

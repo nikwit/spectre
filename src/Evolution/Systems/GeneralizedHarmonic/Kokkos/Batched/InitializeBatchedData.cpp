@@ -9,6 +9,7 @@
 #include <tuple>
 #include <type_traits>
 
+#include "ControlSystem/Tags/FunctionsOfTimeInitialize.hpp"
 #include "DataStructures/DataBox/PrefixHelpers.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
@@ -282,5 +283,9 @@ template struct InitializeBatchedDataWithTag<
     ::domain::Tags::FunctionsOfTimeInitialize>;
 template struct InitializeBatchedDataWithTag<
     ::domain::Tags::FunctionsOfTimeInitialize, false>;
+template struct InitializeBatchedDataWithTag<
+    ::control_system::Tags::FunctionsOfTimeInitialize>;
+template struct InitializeBatchedDataWithTag<
+    ::control_system::Tags::FunctionsOfTimeInitialize, false>;
 
 }  // namespace gh::Actions

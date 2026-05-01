@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <tuple>
 
+#include "ControlSystem/Tags/FunctionsOfTimeInitialize.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Domain/ElementMap.hpp"
@@ -210,5 +211,9 @@ template struct UpdateFrameFieldsBatchedWithTag<
     ::domain::Tags::FunctionsOfTimeInitialize>;
 template struct UpdateFrameFieldsBatchedWithTag<
     ::domain::Tags::FunctionsOfTimeInitialize, false>;
+template struct UpdateFrameFieldsBatchedWithTag<
+    ::control_system::Tags::FunctionsOfTimeInitialize>;
+template struct UpdateFrameFieldsBatchedWithTag<
+    ::control_system::Tags::FunctionsOfTimeInitialize, false>;
 
 }  // namespace gh::Actions
