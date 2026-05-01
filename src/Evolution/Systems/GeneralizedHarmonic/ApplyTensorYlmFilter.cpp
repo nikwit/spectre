@@ -3,6 +3,7 @@
 
 #include "Evolution/Systems/GeneralizedHarmonic/ApplyTensorYlmFilter.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 
@@ -410,25 +411,34 @@ void TensorYlmFilter::operator()(
   ASSERT(mesh.basis(2) == Spectral::Basis::SphericalHarmonic,
          "TensorYlmFilter requires spherical harmonic basis in both "
          "angular directions.");
+  if (mesh.extents(1) == 0) {
+    return;
+  }
   const size_t radial_extents = mesh.extents(0);
   const size_t l_max = mesh.extents(1) - 1;
+  const size_t effective_num_modes_to_kill =
+      std::min(num_modes_to_kill_, l_max);
+  if (effective_num_modes_to_kill == 0) {
+    return;
+  }
 
   // Cache the filter matrices
   if (cached_l_max_ != l_max) {
     ylm::TensorYlm::fill_filter<Scalar<DataVector>::structure>(
-        make_not_null(&filter_matrix_scalar_), l_max, num_modes_to_kill_,
+        make_not_null(&filter_matrix_scalar_), l_max,
+        effective_num_modes_to_kill,
         half_power_, normalization_);
     ylm::TensorYlm::fill_filter<tnsr::i<DataVector, 3>::structure>(
-        make_not_null(&filter_matrix_i_), l_max, num_modes_to_kill_,
+        make_not_null(&filter_matrix_i_), l_max, effective_num_modes_to_kill,
         half_power_, normalization_);
     ylm::TensorYlm::fill_filter<tnsr::ii<DataVector, 3>::structure>(
-        make_not_null(&filter_matrix_ii_), l_max, num_modes_to_kill_,
+        make_not_null(&filter_matrix_ii_), l_max, effective_num_modes_to_kill,
         half_power_, normalization_);
     ylm::TensorYlm::fill_filter<tnsr::ij<DataVector, 3>::structure>(
-        make_not_null(&filter_matrix_ij_), l_max, num_modes_to_kill_,
+        make_not_null(&filter_matrix_ij_), l_max, effective_num_modes_to_kill,
         half_power_, normalization_);
     ylm::TensorYlm::fill_filter<tnsr::ijj<DataVector, 3>::structure>(
-        make_not_null(&filter_matrix_kii_), l_max, num_modes_to_kill_,
+        make_not_null(&filter_matrix_kii_), l_max, effective_num_modes_to_kill,
         half_power_, normalization_);
     cached_l_max_ = l_max;
   }

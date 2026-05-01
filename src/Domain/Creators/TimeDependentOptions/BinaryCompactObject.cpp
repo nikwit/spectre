@@ -279,7 +279,9 @@ void TimeDependentMapOptions<IsCylindrical>::build_maps(
     const std::optional<std::array<double, IsCylindrical ? 2 : 3>>&
         object_B_radii,
     const bool object_A_filled, const bool object_B_filled,
-    const double envelope_radius, const double domain_outer_radius) {
+    const double envelope_radius, const double domain_outer_radius,
+    const bool object_A_uses_spherical_harmonics,
+    const bool object_B_uses_spherical_harmonics) {
   if (expansion_map_options_.has_value() or rotation_map_options_.has_value() or
       translation_map_options_.has_value()) {
     rot_scale_trans_map_ = std::make_pair(
@@ -333,6 +335,9 @@ void TimeDependentMapOptions<IsCylindrical>::build_maps(
     }
     const auto& radii = radii_opt.value();
     const bool filled = i == 0 ? object_A_filled : object_B_filled;
+    const bool uses_spherical_harmonics =
+        i == 0 ? object_A_uses_spherical_harmonics
+               : object_B_uses_spherical_harmonics;
     // Store the inner radii for creating functions of time
     gsl::at(deformed_radii_, i) = filled ? radii[1] : radii[0];
 
@@ -387,6 +392,13 @@ void TimeDependentMapOptions<IsCylindrical>::build_maps(
                  : time_dependent_options::
                        transition_ends_at_cube_from_shape_options(
                            shape_options_B_.value());
+      if (uses_spherical_harmonics and transition_ends_at_cube) {
+        ERROR_NO_TRACE(
+            "Shape-map falloff to the cubical boundary is not supported for "
+            "spherical-harmonic object shells. Set TransitionEndsAtCube to "
+            "false for object "
+            << (i == 0 ? "A" : "B") << ".");
+      }
 
       // These centers must take in to account if we have an offset of the
       // center of the object and where the transition ends. The inner center
@@ -418,33 +430,50 @@ void TimeDependentMapOptions<IsCylindrical>::build_maps(
       }
 
       using Wedge = domain::CoordinateMaps::ShapeMapTransitionFunctions::Wedge;
-      for (size_t j = 0; j < 12; j++) {
-        if (filled and j < 6) {
-          // Reverse the transition function so the shape map goes to zero at
-          // the inner cube
-          transition_func = std::make_unique<Wedge>(
-              inner_center, radii[0], 0.0, outer_center, radii[1], 1.0,
-              static_cast<Wedge::Axis>(gsl::at(axes, j)), true);
-        } else {
-          transition_func = std::make_unique<Wedge>(
-              inner_center, inner_radius, inner_sphericity, outer_center,
-              outer_radius, outer_sphericity,
-              static_cast<Wedge::Axis>(gsl::at(axes, j % 6)));
-        }
-
-        // The shape map should be given the center of the excision always,
-        // regardless of if it is offset or not
-        gsl::at(gsl::at(shape_maps_, i), j) =
+      if (uses_spherical_harmonics) {
+        transition_func =
+            std::make_unique<domain::CoordinateMaps::
+                                 ShapeMapTransitionFunctions::SphereTransition>(
+                inner_radius, outer_radius);
+        gsl::at(gsl::at(shape_maps_, i), 0) =
             Shape{inner_center, coefficient_truncation_limit,
                   std::move(transition_func), gsl::at(shape_names, i),
                   gsl::at(size_names, i)};
+      } else {
+        for (size_t j = 0; j < 12; j++) {
+          if (filled and j < 6) {
+            // Reverse the transition function so the shape map goes to zero at
+            // the inner cube
+            transition_func = std::make_unique<Wedge>(
+                inner_center, radii[0], 0.0, outer_center, radii[1], 1.0,
+                static_cast<Wedge::Axis>(gsl::at(axes, j)), true);
+          } else {
+            transition_func = std::make_unique<Wedge>(
+                inner_center, inner_radius, inner_sphericity, outer_center,
+                outer_radius, outer_sphericity,
+                static_cast<Wedge::Axis>(gsl::at(axes, j % 6)));
+          }
+
+          // The shape map should be given the center of the excision always,
+          // regardless of if it is offset or not
+          gsl::at(gsl::at(shape_maps_, i), j) =
+              Shape{inner_center, coefficient_truncation_limit,
+                    std::move(transition_func), gsl::at(shape_names, i),
+                    gsl::at(size_names, i)};
+        }
       }
 
       // Add the interior maps if we are excised (aka not filled)
       if (not filled) {
-        transition_func = std::make_unique<Wedge>(
-            inner_center, inner_radius, inner_sphericity, outer_center,
-            outer_radius, outer_sphericity, Wedge::Axis::Interior);
+        if (uses_spherical_harmonics) {
+          transition_func = std::make_unique<
+              domain::CoordinateMaps::ShapeMapTransitionFunctions::
+                  SphereTransition>(inner_radius, outer_radius, false, true);
+        } else {
+          transition_func = std::make_unique<Wedge>(
+              inner_center, inner_radius, inner_sphericity, outer_center,
+              outer_radius, outer_sphericity, Wedge::Axis::Interior);
+        }
 
         gsl::at(gsl::at(shape_maps_, i), gsl::at(shape_maps_, i).size() - 1) =
             Shape{inner_center, coefficient_truncation_limit,
