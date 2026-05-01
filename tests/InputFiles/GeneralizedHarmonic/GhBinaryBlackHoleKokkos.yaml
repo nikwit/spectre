@@ -1,0 +1,147 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+Executable: EvolveGhBinaryBlackHoleKokkos
+Testing:
+  Check: parse
+
+---
+
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
+
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.0002
+  MinimumTimeStep: 1e-7
+  TimeStepper: Rk5Tsitouras
+
+InitialData: &InitialData
+  GeneralizedHarmonic(KerrSchild):
+    Mass: 1.0
+    Spin: [0.0, 0.0, 0.0]
+    Center: &AhCenter [3.0, 0.0, 0.0]
+    Velocity: [0.0, 0.0, 0.0]
+
+DomainCreator:
+  CylindricalBinaryCompactObject:
+    CenterA: &CenterA [3.0, 0.0, 0.0]
+    CenterB: &CenterB [-3.0, 0.0, 0.0]
+    RadiusA: &ObjectRadius 0.8
+    RadiusB: *ObjectRadius
+    IncludeInnerSphereA: true
+    IncludeInnerSphereB: true
+    IncludeOuterSphere: true
+    UseEquiangularMap: true
+    OuterRadius: 30.0
+    InitialRefinement: 0
+    InitialGridPoints: 5
+    BoundaryConditions:
+      InnerBoundary:
+        DemandOutgoingCharSpeeds:
+      OuterBoundary:
+        ConstraintPreservingBjorhus:
+          Type: ConstraintPreservingPhysical
+    TimeDependentMaps: None
+
+EvolutionSystem:
+  GeneralizedHarmonic:
+    GaugeCondition:
+      AnalyticChristoffel:
+        AnalyticPrescription: *InitialData
+    DampingFunctionGamma0:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 3.0
+        Width: 11.313708499
+        Center: *AhCenter
+    DampingFunctionGamma1:
+      GaussianPlusConstant:
+        Constant: -1.0
+        Amplitude: 0.0
+        Width: 11.313708499
+        Center: *AhCenter
+    DampingFunctionGamma2:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 1.0
+        Width: 11.313708499
+        Center: *AhCenter
+
+Filtering:
+  ExpFilter0:
+    Alpha: 36.0
+    HalfPower: 64
+    Enable: true
+    BlocksToFilter: All
+
+SpatialDiscretization:
+  DiscontinuousGalerkin:
+    Quadrature: GaussLobatto
+
+EventsAndTriggersAtSlabs:
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 1
+          Offset: 0
+    Events:
+      - FindApparentHorizonBatchedBatchedObservationAhA
+      - FindApparentHorizonBatchedBatchedObservationAhB
+      - ObserveNormsBatched:
+          SubfileName: Norms
+          TensorsToObserve:
+            - Name: SpacetimeMetric
+              NormType: L2Norm
+              Components: Sum
+            - Name: Pi
+              NormType: L2Norm
+              Components: Sum
+            - Name: Phi
+              NormType: L2Norm
+              Components: Sum
+  - Trigger:
+      Slabs:
+        Specified:
+          Values: [2]
+    Events:
+      - CompletionBatched
+
+Observers:
+  VolumeFileName: "GhBinaryBlackHoleKokkosVolume"
+  ReductionFileName: "GhBinaryBlackHoleKokkosReductions"
+  SurfaceFileName: "GhBinaryBlackHoleKokkosSurfaces"
+
+ApparentHorizons:
+  BatchedObservationAhA: &BatchedAh
+    InitialGuess:
+      LMax: &LMax 4
+      Radius: &AhRadius 2.2
+      Center: *AhCenter
+    FastFlow:
+      Flow: Fast
+      Alpha: 1.0
+      Beta: 0.5
+      AbsTol: 1e-12
+      TruncationTol: 1e-2
+      DivergenceTol: 1.2
+      DivergenceIter: 5
+      MaxIts: 100
+    Verbosity: Verbose
+    MaxComputeCoordsRetries: 3
+    BlocksForHorizonFind: All
+  BatchedObservationAhB: *BatchedAh
+  ControlSystemAhA: *BatchedAh
+  ControlSystemAhB: *BatchedAh
+
+ControlSystems:
+  WriteDataToDisk: false
+  MeasurementsPerUpdate: 4
+  Verbosity: Silent
+  Expansion: None
+  Rotation: None
+  Translation: None
+  Skew: None
+  ShapeA: None
+  ShapeB: None
