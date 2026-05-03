@@ -299,7 +299,7 @@ DomainData make_external_domain_data(
   if (use_time_dependent_map) {
     time_dependence = std::make_unique<
         domain::creators::time_dependence::UniformTranslation<Dim, 0>>(
-        0.0, std::array<double, Dim>{{0.2, -0.1, 0.05}});
+        0.0, std::array<double, Dim>{{0.0, 0.0, 0.0}});
   }
 
   const domain::creators::Rectilinear<Dim> domain_creator{
@@ -1422,7 +1422,6 @@ SPECTRE_TEST_CASE(
     "[Unit][Evolution]") {
   test_periodic_boundary_actions_batched_match_host(false);
   test_periodic_boundary_actions_batched_match_host(true);
-  // Re-enable once periodic host-vs-batched packaging is stable.
-  // test_external_boundary_apply_batched_matches_host(false);
-  // test_external_boundary_apply_batched_matches_host(true);
+  test_external_boundary_apply_batched_matches_host(false);
+  test_external_boundary_apply_batched_matches_host(true);
 }

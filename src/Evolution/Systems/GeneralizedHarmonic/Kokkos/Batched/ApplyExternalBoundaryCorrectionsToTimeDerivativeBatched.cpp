@@ -11,11 +11,14 @@
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/Tensor/AtIndex.hpp"
 #include "DataStructures/Variables.hpp"
+#include "DataStructures/VariablesKokkos.hpp"
 #include "Domain/Structure/Direction.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/Bjorhus.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/BoundaryCorrectionHelpers.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
+#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ConstraintDampingTags.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/Gsl.hpp"
@@ -34,6 +37,29 @@ using package_storage_type =
     typename Variables<device_package_field_tags>::storage_type;
 using spacetime_metric_tag =
     gr::Tags::SpacetimeMetric<DataVector, volume_dim, Frame::Inertial>;
+using pi_tag = gh::Tags::Pi<DataVector, volume_dim, Frame::Inertial>;
+using phi_tag = gh::Tags::Phi<DataVector, volume_dim, Frame::Inertial>;
+using dt_variables_type =
+    db::add_tag_prefix<::Tags::dt, typename system::variables_tag>::type;
+using d_spacetime_metric_tag =
+    ::Tags::deriv<spacetime_metric_tag, tmpl::size_t<volume_dim>,
+                  Frame::Inertial>;
+using d_pi_tag =
+    ::Tags::deriv<pi_tag, tmpl::size_t<volume_dim>, Frame::Inertial>;
+using d_phi_tag =
+    ::Tags::deriv<phi_tag, tmpl::size_t<volume_dim>, Frame::Inertial>;
+using host_derivative_tags =
+    tmpl::list<d_spacetime_metric_tag, d_pi_tag, d_phi_tag>;
+using gauge_h_tag = gh::Tags::GaugeH<DataVector, volume_dim>;
+using spacetime_deriv_gauge_h_tag =
+    gh::Tags::SpacetimeDerivGaugeH<DataVector, volume_dim>;
+using host_gauge_tags = tmpl::list<gauge_h_tag, spacetime_deriv_gauge_h_tag>;
+using inverse_spatial_metric_tag =
+    gr::Tags::InverseSpatialMetric<DataVector, volume_dim, Frame::Inertial>;
+using shift_tag = gr::Tags::Shift<DataVector, volume_dim, Frame::Inertial>;
+using lapse_tag = gr::Tags::Lapse<DataVector>;
+using host_three_plus_one_tags =
+    tmpl::list<inverse_spatial_metric_tag, shift_tag, lapse_tag>;
 
 constexpr size_t num_spacetime_metric_components =
     (volume_dim + 1) * (volume_dim + 2) / 2;
@@ -345,21 +371,20 @@ void ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
                               packed_topology.uniform_quadrature_host};
   const Mesh<volume_dim - 1> uniform_face_mesh = mesh.slice_away(0);
   const size_t num_face_points = uniform_face_mesh.number_of_grid_points();
+  const size_t total_points = packed_topology.total_points;
 
   const auto& elements = packed_topology.local_elements;
   const auto& face_to_volume_index_map =
       packed_topology.device_face_to_volume_index_map;
   const auto& inverse_jacobian =
       packed_geometry.element_inverse_jacobian_device;
+  const auto inverse_jacobian_host = ::Kokkos::create_mirror_view_and_copy(
+      ::Kokkos::HostSpace{}, inverse_jacobian);
   const auto& element_point_offsets_device =
       packed_topology.element_point_offsets_device;
   const auto& inertial_coordinates =
       packed_geometry.inertial_coordinates_device;
   const auto& mesh_velocity = packed_geometry.mesh_velocity_device;
-  const auto& gamma1 = device_gamma1;
-  const auto& gamma2 = device_gamma2;
-  const auto& packaged_face_data_for_all_elements =
-      packed_boundary_scratch.packaged_face_data_for_all_elements;
   const auto& external_face_mask_for_all_elements =
       packed_boundary_metadata.external_face_mask_for_all_elements;
   ASSERT(mesh_velocity.get(0).extent(0) == packed_topology.total_points and
@@ -368,200 +393,327 @@ void ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
          "ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched requires "
          "packed mesh velocity with one entry per packed volume point.");
 
-  auto& dt_vars = packed_evolution_state->device_dt_variables;
-  const auto dt_spacetime_metric =
-      get<::Tags::MirrorView<::Tags::dt<spacetime_metric_tag>>>(dt_vars);
-  const auto dt_pi = get<::Tags::MirrorView<
-      ::Tags::dt<gh::Tags::Pi<DataVector, volume_dim, Frame::Inertial>>>>(
-      dt_vars);
-  const auto dt_phi = get<::Tags::MirrorView<
-      ::Tags::dt<gh::Tags::Phi<DataVector, volume_dim, Frame::Inertial>>>>(
-      dt_vars);
+  typename system::variables_tag::type host_vars{total_points};
+  dt_variables_type host_dt_vars{total_points};
+  Variables<host_derivative_tags> host_derivatives{total_points};
+  Variables<host_gauge_tags> host_gauge_data{total_points};
+  Variables<host_three_plus_one_tags> host_three_plus_one_data{total_points};
+  copy_to_host(make_not_null(&host_vars),
+               packed_evolution_state->device_variables);
+  copy_to_host(make_not_null(&host_dt_vars),
+               packed_evolution_state->device_dt_variables);
+  copy_to_host(make_not_null(&host_derivatives),
+               packed_boundary_scratch.volume_partial_derivatives);
+  copy_to_host(make_not_null(&host_gauge_data),
+               packed_boundary_scratch.volume_gauge_data);
+  copy_to_host(make_not_null(&host_three_plus_one_data),
+               packed_boundary_scratch.volume_three_plus_one_data);
+
+  DataVector gamma1_host{total_points, 0.0};
+  DataVector gamma2_host{total_points, 0.0};
+  {
+    const auto gamma1_device = device_gamma1.get();
+    const auto gamma2_device = device_gamma2.get();
+    const auto gamma1_mirror = ::Kokkos::create_mirror_view_and_copy(
+        ::Kokkos::HostSpace{}, gamma1_device);
+    const auto gamma2_mirror = ::Kokkos::create_mirror_view_and_copy(
+        ::Kokkos::HostSpace{}, gamma2_device);
+    for (size_t p = 0; p < total_points; ++p) {
+      gamma1_host[p] = gamma1_mirror(p);
+      gamma2_host[p] = gamma2_mirror(p);
+    }
+  }
+
+  const auto& spacetime_metric = get<spacetime_metric_tag>(host_vars);
+  const auto& pi = get<pi_tag>(host_vars);
+  const auto& phi = get<phi_tag>(host_vars);
+  auto& dt_spacetime_metric =
+      get<::Tags::dt<spacetime_metric_tag>>(host_dt_vars);
+  auto& dt_pi = get<::Tags::dt<pi_tag>>(host_dt_vars);
+  auto& dt_phi = get<::Tags::dt<phi_tag>>(host_dt_vars);
+  const auto& d_spacetime_metric =
+      get<d_spacetime_metric_tag>(host_derivatives);
+  const auto& d_pi = get<d_pi_tag>(host_derivatives);
+  const auto& d_phi = get<d_phi_tag>(host_derivatives);
+  const auto& gauge_h = get<gauge_h_tag>(host_gauge_data);
+  const auto& spacetime_deriv_gauge_h =
+      get<spacetime_deriv_gauge_h_tag>(host_gauge_data);
+  const auto& inverse_spatial_metric =
+      get<inverse_spatial_metric_tag>(host_three_plus_one_data);
+  const auto& shift = get<shift_tag>(host_three_plus_one_data);
+  const auto& lapse = get<lapse_tag>(host_three_plus_one_data);
+
+  const auto fill_aa_face =
+      [](const gsl::not_null<tnsr::aa<DataVector, volume_dim, Frame::Inertial>*>
+             face_tensor,
+         const tnsr::aa<DataVector, volume_dim, Frame::Inertial>& volume_tensor,
+         const std::vector<size_t>& volume_indices) {
+        for (size_t a = 0; a < volume_dim + 1; ++a) {
+          for (size_t b = a; b < volume_dim + 1; ++b) {
+            for (size_t p = 0; p < volume_indices.size(); ++p) {
+              face_tensor->get(a, b)[p] =
+                  volume_tensor.get(a, b)[volume_indices[p]];
+            }
+          }
+        }
+      };
+  const auto fill_iaa_face =
+      [](const gsl::not_null<
+             tnsr::iaa<DataVector, volume_dim, Frame::Inertial>*>
+             face_tensor,
+         const tnsr::iaa<DataVector, volume_dim, Frame::Inertial>&
+             volume_tensor,
+         const std::vector<size_t>& volume_indices) {
+        for (size_t i = 0; i < volume_dim; ++i) {
+          for (size_t a = 0; a < volume_dim + 1; ++a) {
+            for (size_t b = a; b < volume_dim + 1; ++b) {
+              for (size_t p = 0; p < volume_indices.size(); ++p) {
+                face_tensor->get(i, a, b)[p] =
+                    volume_tensor.get(i, a, b)[volume_indices[p]];
+              }
+            }
+          }
+        }
+      };
+  const auto fill_ijaa_face =
+      [](const gsl::not_null<
+             tnsr::ijaa<DataVector, volume_dim, Frame::Inertial>*>
+             face_tensor,
+         const tnsr::ijaa<DataVector, volume_dim, Frame::Inertial>&
+             volume_tensor,
+         const std::vector<size_t>& volume_indices) {
+        for (size_t i = 0; i < volume_dim; ++i) {
+          for (size_t j = 0; j < volume_dim; ++j) {
+            for (size_t a = 0; a < volume_dim + 1; ++a) {
+              for (size_t b = a; b < volume_dim + 1; ++b) {
+                for (size_t p = 0; p < volume_indices.size(); ++p) {
+                  face_tensor->get(i, j, a, b)[p] =
+                      volume_tensor.get(i, j, a, b)[volume_indices[p]];
+                }
+              }
+            }
+          }
+        }
+      };
 
   const size_t num_elements = elements.size();
+  const gh::BoundaryConditions::ConstraintPreservingBjorhus<volume_dim>
+      cp_physical_boundary_condition{
+          gh::BoundaryConditions::detail::ConstraintPreservingBjorhusType::
+              ConstraintPreservingPhysical};
+
   for (size_t local_face_id = 0; local_face_id < 2 * volume_dim;
        ++local_face_id) {
     const size_t sliced_dim = local_face_id / 2;
     const size_t side_i = local_face_id % 2;
     const Side side = side_i == 0 ? Side::Lower : Side::Upper;
-    const auto packaged_face_data_view =
-        packaged_face_data_for_all_elements[local_face_id].view();
-    ASSERT(
-        packaged_face_data_view.extent(1) == packaged_boundary_data_components,
-        "Unexpected number of packaged boundary components for GH batched "
-        "external boundary corrections.");
-    ASSERT(packaged_face_data_for_all_elements[local_face_id]
-                   .number_of_grid_points() == num_elements * num_face_points,
-           "PackageLocalFacesBatched must run before external boundary "
-           "corrections.");
-    const auto external_face_mask =
-        external_face_mask_for_all_elements[local_face_id];
-    ASSERT(external_face_mask.extent(0) == num_elements,
+    const auto external_face_mask = ::Kokkos::create_mirror_view_and_copy(
+        ::Kokkos::HostSpace{},
+        external_face_mask_for_all_elements[local_face_id]);
+    ASSERT(static_cast<size_t>(external_face_mask.extent(0)) == num_elements,
            "External-face mask extent mismatch. "
            "InitializeBoundaryBatchMetadata must run before external "
            "boundary corrections.");
 
-    const auto local_face_to_volume_index =
+    const auto local_face_to_volume_index_device =
         side == Side::Upper
             ? gsl::at(face_to_volume_index_map, sliced_dim).second
             : gsl::at(face_to_volume_index_map, sliced_dim).first;
+    const auto local_face_to_volume_index =
+        ::Kokkos::create_mirror_view_and_copy(
+            ::Kokkos::HostSpace{}, local_face_to_volume_index_device);
     const double outward = outward_sign(side);
     const double lift_prefactor =
         -0.5 *
         static_cast<double>(extents[sliced_dim] * (extents[sliced_dim] - 1));
 
-    ::Kokkos::parallel_for(
-        "ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched",
-        num_elements * num_face_points,
-        KOKKOS_LAMBDA(const int linear_index_int) {
-          const size_t linear_index = static_cast<size_t>(linear_index_int);
-          const size_t face_index_on_face = linear_index % num_face_points;
-          const size_t element_index = linear_index / num_face_points;
-          if (external_face_mask(element_index) == 0) {
-            return;
+    for (size_t element_index = 0; element_index < num_elements;
+         ++element_index) {
+      if (external_face_mask(element_index) == 0) {
+        continue;
+      }
+      std::vector<size_t> volume_indices(num_face_points);
+      std::vector<size_t> local_volume_indices(num_face_points);
+      for (size_t p = 0; p < num_face_points; ++p) {
+        local_volume_indices[p] = local_face_to_volume_index(p);
+        volume_indices[p] =
+            packed_topology.element_point_offsets_host[element_index] +
+            local_volume_indices[p];
+      }
+
+      tnsr::aa<DataVector, volume_dim, Frame::Inertial> face_spacetime_metric{
+          num_face_points};
+      tnsr::aa<DataVector, volume_dim, Frame::Inertial> face_pi{
+          num_face_points};
+      tnsr::iaa<DataVector, volume_dim, Frame::Inertial> face_phi{
+          num_face_points};
+      tnsr::aa<DataVector, volume_dim, Frame::Inertial>
+          face_dt_spacetime_metric{num_face_points};
+      tnsr::aa<DataVector, volume_dim, Frame::Inertial> face_dt_pi{
+          num_face_points};
+      tnsr::iaa<DataVector, volume_dim, Frame::Inertial> face_dt_phi{
+          num_face_points};
+      tnsr::iaa<DataVector, volume_dim, Frame::Inertial>
+          face_d_spacetime_metric{num_face_points};
+      tnsr::iaa<DataVector, volume_dim, Frame::Inertial> face_d_pi{
+          num_face_points};
+      tnsr::ijaa<DataVector, volume_dim, Frame::Inertial> face_d_phi{
+          num_face_points};
+      tnsr::I<DataVector, volume_dim, Frame::Inertial> face_coords{
+          num_face_points};
+      tnsr::I<DataVector, volume_dim, Frame::Inertial> face_mesh_velocity{
+          num_face_points};
+      tnsr::i<DataVector, volume_dim, Frame::Inertial> normal_covector{
+          num_face_points};
+      tnsr::I<DataVector, volume_dim, Frame::Inertial> normal_vector{
+          num_face_points};
+      tnsr::AA<DataVector, volume_dim, Frame::Inertial>
+          face_inverse_spacetime_metric{num_face_points};
+      tnsr::A<DataVector, volume_dim, Frame::Inertial>
+          face_spacetime_unit_normal_vector{num_face_points};
+      tnsr::iaa<DataVector, volume_dim, Frame::Inertial> three_index_constraint{
+          num_face_points};
+      tnsr::a<DataVector, volume_dim, Frame::Inertial> face_gauge_h{
+          num_face_points};
+      tnsr::ab<DataVector, volume_dim, Frame::Inertial>
+          face_spacetime_deriv_gauge_h{num_face_points};
+      Scalar<DataVector> face_gamma1{num_face_points};
+      Scalar<DataVector> face_gamma2{num_face_points};
+      Scalar<DataVector> face_lapse{num_face_points};
+      tnsr::I<DataVector, volume_dim, Frame::Inertial> face_shift{
+          num_face_points};
+      tnsr::II<DataVector, volume_dim, Frame::Inertial>
+          face_inverse_spatial_metric{num_face_points};
+      DataVector normal_magnitude{num_face_points, 0.0};
+
+      fill_aa_face(make_not_null(&face_spacetime_metric), spacetime_metric,
+                   volume_indices);
+      fill_aa_face(make_not_null(&face_pi), pi, volume_indices);
+      fill_iaa_face(make_not_null(&face_phi), phi, volume_indices);
+      fill_aa_face(make_not_null(&face_dt_spacetime_metric),
+                   dt_spacetime_metric, volume_indices);
+      fill_aa_face(make_not_null(&face_dt_pi), dt_pi, volume_indices);
+      fill_iaa_face(make_not_null(&face_dt_phi), dt_phi, volume_indices);
+      fill_iaa_face(make_not_null(&face_d_spacetime_metric), d_spacetime_metric,
+                    volume_indices);
+      fill_iaa_face(make_not_null(&face_d_pi), d_pi, volume_indices);
+      fill_ijaa_face(make_not_null(&face_d_phi), d_phi, volume_indices);
+
+      for (size_t p = 0; p < num_face_points; ++p) {
+        const size_t volume_index = volume_indices[p];
+        get(face_gamma1)[p] = gamma1_host[volume_index];
+        get(face_gamma2)[p] = gamma2_host[volume_index];
+        get(face_lapse)[p] = get(lapse)[volume_index];
+        for (size_t d = 0; d < volume_dim; ++d) {
+          face_coords.get(d)[p] =
+              packed_geometry.inertial_coordinates_host[d][volume_index];
+          face_mesh_velocity.get(d)[p] =
+              packed_geometry.mesh_velocity_host[d][volume_index];
+          face_shift.get(d)[p] = shift.get(d)[volume_index];
+          face_gauge_h.get(d + 1)[p] = gauge_h.get(d + 1)[volume_index];
+          for (size_t j = d; j < volume_dim; ++j) {
+            face_inverse_spatial_metric.get(d, j)[p] =
+                inverse_spatial_metric.get(d, j)[volume_index];
           }
-
-          const size_t local_volume_index_in_element =
-              local_face_to_volume_index(face_index_on_face);
-          const size_t local_volume_index =
-              element_point_offsets_device(element_index) +
-              local_volume_index_in_element;
-          tnsr::I<double, volume_dim, Frame::Inertial> mesh_velocity_at_s{};
-          for (size_t d = 0; d < volume_dim; ++d) {
-            mesh_velocity_at_s.get(d) =
-                mesh_velocity.get(d)(local_volume_index);
+        }
+        face_gauge_h.get(0)[p] = gauge_h.get(0)[volume_index];
+        for (size_t a = 0; a < volume_dim + 1; ++a) {
+          for (size_t b = 0; b < volume_dim + 1; ++b) {
+            face_spacetime_deriv_gauge_h.get(a, b)[p] =
+                spacetime_deriv_gauge_h.get(a, b)[volume_index];
           }
+        }
 
-          tnsr::i<double, volume_dim, Frame::Inertial>
-              unnormalized_normal_covector{};
-          double normal_magnitude_squared = 0.0;
-          for (size_t d = 0; d < volume_dim; ++d) {
-            const double component =
-                outward * inverse_jacobian(element_index,
-                                           local_volume_index_in_element,
-                                           sliced_dim * volume_dim + d);
-            unnormalized_normal_covector.get(d) = component;
-            normal_magnitude_squared += component * component;
+        for (size_t d = 0; d < volume_dim; ++d) {
+          normal_covector.get(d)[p] =
+              outward * inverse_jacobian_host(element_index,
+                                              local_volume_indices[p],
+                                              sliced_dim * volume_dim + d);
+        }
+        double normal_magnitude_squared = 0.0;
+        for (size_t i = 0; i < volume_dim; ++i) {
+          double component = 0.0;
+          for (size_t j = 0; j < volume_dim; ++j) {
+            component += face_inverse_spatial_metric.get(i, j)[p] *
+                         normal_covector.get(j)[p];
           }
-          const double normal_magnitude = sqrt(normal_magnitude_squared);
+          normal_vector.get(i)[p] = component;
+          normal_magnitude_squared += component * normal_covector.get(i)[p];
+        }
+        normal_magnitude[p] = sqrt(normal_magnitude_squared);
+        for (size_t i = 0; i < volume_dim; ++i) {
+          normal_covector.get(i)[p] /= normal_magnitude[p];
+          normal_vector.get(i)[p] /= normal_magnitude[p];
+        }
 
-          tnsr::aa<double, volume_dim, Frame::Inertial>
-              local_v_spacetime_metric{};
-          tnsr::iaa<double, volume_dim, Frame::Inertial> local_v_zero{};
-          tnsr::aa<double, volume_dim, Frame::Inertial> local_v_plus{};
-          tnsr::aa<double, volume_dim, Frame::Inertial> local_v_minus{};
-          tnsr::iaa<double, volume_dim, Frame::Inertial>
-              local_normal_times_v_plus{};
-          tnsr::iaa<double, volume_dim, Frame::Inertial>
-              local_normal_times_v_minus{};
-          tnsr::aa<double, volume_dim, Frame::Inertial>
-              local_gamma2_v_spacetime_metric{};
-          tnsr::a<double, volume_dim, Frame::Inertial> local_char_speeds{};
-          load_aa_from_packaged_data(make_not_null(&local_v_spacetime_metric),
-                                     packaged_face_data_view, linear_index,
-                                     offset_v_spacetime_metric);
-          load_iaa_from_packaged_data(make_not_null(&local_v_zero),
-                                      packaged_face_data_view, linear_index,
-                                      offset_v_zero);
-          load_aa_from_packaged_data(make_not_null(&local_v_plus),
-                                     packaged_face_data_view, linear_index,
-                                     offset_v_plus);
-          load_aa_from_packaged_data(make_not_null(&local_v_minus),
-                                     packaged_face_data_view, linear_index,
-                                     offset_v_minus);
-          load_iaa_from_packaged_data(make_not_null(&local_normal_times_v_plus),
-                                      packaged_face_data_view, linear_index,
-                                      offset_normal_times_v_plus);
-          load_iaa_from_packaged_data(
-              make_not_null(&local_normal_times_v_minus),
-              packaged_face_data_view, linear_index,
-              offset_normal_times_v_minus);
-          load_aa_from_packaged_data(
-              make_not_null(&local_gamma2_v_spacetime_metric),
-              packaged_face_data_view, linear_index,
-              offset_gamma2_v_spacetime_metric);
-          load_a_from_packaged_data(make_not_null(&local_char_speeds),
-                                    packaged_face_data_view, linear_index,
-                                    offset_char_speeds);
-
-          tnsr::I<double, volume_dim, Frame::Inertial> inertial_coords{};
-          for (size_t d = 0; d < volume_dim; ++d) {
-            inertial_coords.get(d) =
-                inertial_coordinates.get(d)(local_volume_index);
+        const double lapse_at_point = get(face_lapse)[p];
+        const double inv_lapse_squared =
+            1.0 / (lapse_at_point * lapse_at_point);
+        face_inverse_spacetime_metric.get(0, 0)[p] = -inv_lapse_squared;
+        face_spacetime_unit_normal_vector.get(0)[p] = 1.0 / lapse_at_point;
+        for (size_t i = 0; i < volume_dim; ++i) {
+          face_inverse_spacetime_metric.get(0, i + 1)[p] =
+              face_shift.get(i)[p] * inv_lapse_squared;
+          face_spacetime_unit_normal_vector.get(i + 1)[p] =
+              -face_shift.get(i)[p] / lapse_at_point;
+          for (size_t j = i; j < volume_dim; ++j) {
+            face_inverse_spacetime_metric.get(i + 1, j + 1)[p] =
+                face_inverse_spatial_metric.get(i, j)[p] -
+                face_shift.get(i)[p] * face_shift.get(j)[p] * inv_lapse_squared;
           }
-
-          tnsr::aa<double, volume_dim, Frame::Inertial>
-              exterior_spacetime_metric{};
-          tnsr::aa<double, volume_dim, Frame::Inertial> exterior_pi{};
-          tnsr::iaa<double, volume_dim, Frame::Inertial> exterior_phi{};
-          compute_hardcoded_schwarzschild_gh_fields(
-              make_not_null(&exterior_spacetime_metric),
-              make_not_null(&exterior_pi), make_not_null(&exterior_phi),
-              inertial_coords);
-
-          tnsr::i<double, volume_dim, Frame::Inertial>
-              exterior_unnormalized_normal_covector{};
-          for (size_t d = 0; d < volume_dim; ++d) {
-            exterior_unnormalized_normal_covector.get(d) =
-                -unnormalized_normal_covector.get(d);
-          }
-
-          const auto gamma1_at_s = make_at_index(gamma1, local_volume_index);
-          const auto gamma2_at_s = make_at_index(gamma2, local_volume_index);
-          tnsr::aa<double, volume_dim, Frame::Inertial>
-              remote_v_spacetime_metric{};
-          tnsr::iaa<double, volume_dim, Frame::Inertial> remote_v_zero{};
-          tnsr::aa<double, volume_dim, Frame::Inertial> remote_v_plus{};
-          tnsr::aa<double, volume_dim, Frame::Inertial> remote_v_minus{};
-          tnsr::iaa<double, volume_dim, Frame::Inertial>
-              remote_normal_times_v_plus{};
-          tnsr::iaa<double, volume_dim, Frame::Inertial>
-              remote_normal_times_v_minus{};
-          tnsr::aa<double, volume_dim, Frame::Inertial>
-              remote_gamma2_v_spacetime_metric{};
-          tnsr::a<double, volume_dim, Frame::Inertial> remote_char_speeds{};
-          detail::compute_packaged_boundary_data_at_point<volume_dim>(
-              make_not_null(&remote_v_spacetime_metric),
-              make_not_null(&remote_v_zero), make_not_null(&remote_v_plus),
-              make_not_null(&remote_v_minus),
-              make_not_null(&remote_normal_times_v_plus),
-              make_not_null(&remote_normal_times_v_minus),
-              make_not_null(&remote_gamma2_v_spacetime_metric),
-              make_not_null(&remote_char_speeds), exterior_spacetime_metric,
-              exterior_pi, exterior_phi, get(gamma1_at_s), get(gamma2_at_s),
-              exterior_unnormalized_normal_covector, mesh_velocity_at_s);
-
-          tnsr::aa<double, volume_dim, Frame::Inertial>
-              dt_spacetime_metric_correction{};
-          tnsr::aa<double, volume_dim, Frame::Inertial> dt_pi_correction{};
-          tnsr::iaa<double, volume_dim, Frame::Inertial> dt_phi_correction{};
-          detail::compute_boundary_terms_at_point<volume_dim>(
-              make_not_null(&dt_spacetime_metric_correction),
-              make_not_null(&dt_pi_correction),
-              make_not_null(&dt_phi_correction), local_v_spacetime_metric,
-              local_v_zero, local_v_plus, local_v_minus,
-              local_normal_times_v_plus, local_normal_times_v_minus,
-              local_gamma2_v_spacetime_metric, local_char_speeds,
-              remote_v_spacetime_metric, remote_v_zero, remote_v_plus,
-              remote_v_minus, remote_normal_times_v_plus,
-              remote_normal_times_v_minus, remote_gamma2_v_spacetime_metric,
-              remote_char_speeds);
-
-          const double lifted_factor = lift_prefactor * normal_magnitude;
+        }
+        for (size_t i = 0; i < volume_dim; ++i) {
           for (size_t a = 0; a < volume_dim + 1; ++a) {
             for (size_t b = a; b < volume_dim + 1; ++b) {
-              dt_spacetime_metric.get(a, b)[local_volume_index] +=
-                  lifted_factor * dt_spacetime_metric_correction.get(a, b);
-              dt_pi.get(a, b)[local_volume_index] +=
-                  lifted_factor * dt_pi_correction.get(a, b);
-              for (size_t d = 0; d < volume_dim; ++d) {
-                dt_phi.get(d, a, b)[local_volume_index] +=
-                    lifted_factor * dt_phi_correction.get(d, a, b);
-              }
+              three_index_constraint.get(i, a, b)[p] =
+                  face_d_spacetime_metric.get(i, a, b)[p] -
+                  face_phi.get(i, a, b)[p];
             }
           }
-        });
+        }
+      }
+
+      tnsr::aa<DataVector, volume_dim, Frame::Inertial>
+          dt_spacetime_metric_correction{num_face_points, 0.0};
+      tnsr::aa<DataVector, volume_dim, Frame::Inertial> dt_pi_correction{
+          num_face_points, 0.0};
+      tnsr::iaa<DataVector, volume_dim, Frame::Inertial> dt_phi_correction{
+          num_face_points, 0.0};
+      const auto error = cp_physical_boundary_condition.dg_time_derivative(
+          make_not_null(&dt_spacetime_metric_correction),
+          make_not_null(&dt_pi_correction), make_not_null(&dt_phi_correction),
+          std::optional<tnsr::I<DataVector, volume_dim, Frame::Inertial>>{
+              face_mesh_velocity},
+          normal_covector, normal_vector, face_spacetime_metric, face_pi,
+          face_phi, face_coords, face_gamma1, face_gamma2, face_lapse,
+          face_shift, face_inverse_spacetime_metric,
+          face_spacetime_unit_normal_vector, three_index_constraint,
+          face_gauge_h, face_spacetime_deriv_gauge_h, face_dt_spacetime_metric,
+          face_dt_pi, face_dt_phi, face_d_spacetime_metric, face_d_pi,
+          face_d_phi);
+      ASSERT(not error.has_value(),
+             "Hard-coded CP Physical GH batched outer boundary failed: "
+                 << error.value());
+
+      for (size_t p = 0; p < num_face_points; ++p) {
+        const size_t volume_index = volume_indices[p];
+        const double lifted_factor = lift_prefactor * normal_magnitude[p];
+        for (size_t a = 0; a < volume_dim + 1; ++a) {
+          for (size_t b = a; b < volume_dim + 1; ++b) {
+            dt_spacetime_metric.get(a, b)[volume_index] +=
+                lifted_factor * dt_spacetime_metric_correction.get(a, b)[p];
+            dt_pi.get(a, b)[volume_index] +=
+                lifted_factor * dt_pi_correction.get(a, b)[p];
+            for (size_t d = 0; d < volume_dim; ++d) {
+              dt_phi.get(d, a, b)[volume_index] +=
+                  lifted_factor * dt_phi_correction.get(d, a, b)[p];
+            }
+          }
+        }
+      }
+    }
   }
+  packed_evolution_state->device_dt_variables = copy_to_device(host_dt_vars);
 }
 
 }  // namespace gh::Actions
