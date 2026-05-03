@@ -293,6 +293,219 @@ tuples::tagged_tuple_from_typelist<FieldTagsList> scatter_element_data(
   return element_data;
 }
 
+// Synchronous counterpart of `ReadAllVolumeDataAndDistribute` for drivers
+// that own their elements locally instead of receiving the data through a
+// Charm++ inbox.
+template <size_t Dim, typename FieldTagsList>
+std::unordered_map<ElementId<Dim>,
+                   tuples::tagged_tuple_from_typelist<FieldTagsList>>
+read_volume_data_for_elements(
+    const ImporterOptions& options,
+    const std::unordered_map<
+        ElementId<Dim>,
+        std::pair<tnsr::I<DataVector, Dim, Frame::Inertial>, Mesh<Dim>>>&
+        target_elements,
+    const tuples::tagged_tuple_from_typelist<
+        db::wrap_tags_in<Tags::Selected, FieldTagsList>>& selected_fields) {
+  using element_data = tuples::tagged_tuple_from_typelist<FieldTagsList>;
+  std::unordered_map<ElementId<Dim>, element_data> result{};
+  if (target_elements.empty()) {
+    return result;
+  }
+
+  const std::string& file_glob = get<OptionTags::FileGlob>(options);
+  const std::vector<std::string> file_paths = file_system::glob(file_glob);
+  if (file_paths.empty()) {
+    ERROR_NO_TRACE("The file glob '" << file_glob << "' matches no files.");
+  }
+  const spectre::Exporter::ObservationVariant observation =
+      observation_variant(get<OptionTags::ObservationValue>(options),
+                          get<OptionTags::ObservationValueEpsilon>(options));
+
+  if (not get<OptionTags::ElementsAreIdentical>(options)) {
+    std::vector<ElementId<Dim>> target_ids{};
+    std::vector<size_t> target_starts{};
+    std::vector<size_t> target_num_points{};
+    target_ids.reserve(target_elements.size());
+    target_starts.reserve(target_elements.size());
+    target_num_points.reserve(target_elements.size());
+    size_t total_num_points = 0;
+    for (const auto& [target_id, target_points_and_mesh] : target_elements) {
+      const size_t num_points = target_points_and_mesh.first.begin()->size();
+      target_ids.push_back(target_id);
+      target_starts.push_back(total_num_points);
+      target_num_points.push_back(num_points);
+      total_num_points += num_points;
+    }
+    tnsr::I<DataVector, Dim, Frame::Inertial> all_target_points{
+        total_num_points};
+    for (size_t e = 0; e < target_ids.size(); ++e) {
+      const auto& target_points = target_elements.at(target_ids[e]).first;
+      for (size_t d = 0; d < Dim; ++d) {
+        for (size_t i = 0; i < target_num_points[e]; ++i) {
+          all_target_points.get(d)[target_starts[e] + i] =
+              target_points.get(d)[i];
+        }
+      }
+    }
+
+    std::vector<std::string> tensor_components{};
+    tmpl::for_each<FieldTagsList>([&tensor_components,
+                                   &selected_fields](auto field_tag_v) {
+      using field_tag = tmpl::type_from<decltype(field_tag_v)>;
+      const auto& selection = get<Tags::Selected<field_tag>>(selected_fields);
+      if (not selection.has_value()) {
+        return;
+      }
+      using TensorType = typename field_tag::type;
+      for (size_t i = 0; i < TensorType::size(); ++i) {
+        tensor_components.push_back(selection.value() +
+                                    TensorType::component_suffix(i));
+      }
+    });
+
+    std::vector<DataVector> interpolated_data{};
+    spectre::Exporter::interpolate_to_points(
+        make_not_null(&interpolated_data), file_paths,
+        "/" + get<OptionTags::Subgroup>(options), observation,
+        tensor_components, all_target_points,
+        get<OptionTags::ExtrapolateIntoExcisions>(options),
+        /*error_on_missing_points=*/true, get<OptionTags::NumThreads>(options));
+    for (size_t e = 0; e < target_ids.size(); ++e) {
+      result.emplace(target_ids[e], scatter_element_data<FieldTagsList>(
+                                        interpolated_data, target_starts[e],
+                                        target_num_points[e], selected_fields));
+    }
+    return result;
+  }
+
+  std::unordered_set<ElementId<Dim>> remaining_target_ids{};
+  for (const auto& [target_id, target_points_and_mesh] : target_elements) {
+    (void)target_points_and_mesh;
+    remaining_target_ids.insert(target_id);
+  }
+  std::optional<size_t> previous_observation_id{};
+  double observation_value = std::numeric_limits<double>::signaling_NaN();
+  std::optional<Domain<Dim>> source_domain{};
+  domain::FunctionsOfTimeMap source_domain_functions_of_time{};
+  for (const std::string& file_name : file_paths) {
+    h5::H5File<h5::AccessType::ReadOnly> h5file(file_name);
+    constexpr size_t version_number = 0;
+    const auto& volume_file = h5file.get<h5::VolumeData>(
+        "/" + get<OptionTags::Subgroup>(options), version_number);
+    const size_t observation_id = std::visit(
+        spectre::Exporter::SelectObservation{volume_file}, observation);
+    if (previous_observation_id.has_value() and
+        previous_observation_id.value() != observation_id) {
+      ERROR("Inconsistent selection of observation ID in file "
+            << file_name
+            << ". Make sure all files select the same observation ID.");
+    }
+    previous_observation_id = observation_id;
+    observation_value = volume_file.get_observation_value(observation_id);
+
+    std::optional<element_data> all_tensor_data{};
+    const auto source_grid_names = volume_file.get_grid_names(observation_id);
+    const auto source_extents = volume_file.get_extents(observation_id);
+    const auto source_bases = volume_file.get_bases(observation_id);
+    const auto source_quadratures = volume_file.get_quadratures(observation_id);
+    const std::optional<std::vector<char>> serialized_domain =
+        volume_file.get_domain();
+    if (serialized_domain.has_value()) {
+      if (source_domain.has_value()) {
+#ifdef SPECTRE_DEBUG
+        const auto deserialized_domain =
+            deserialize<Domain<Dim>>(serialized_domain->data());
+        if (*source_domain != deserialized_domain) {
+          ERROR_NO_TRACE(
+              "The domain in all volume files must be the same. Domain in "
+              "file '"
+              << file_name << volume_file.subfile_path()
+              << "' differs from a previously read file.");
+        }
+#endif
+      } else {
+        source_domain = deserialize<Domain<Dim>>(serialized_domain->data());
+      }
+    } else {
+      Parallel::printf(
+          "WARNING: No serialized domain found in file. "
+          "Verification that elements in the source and target domain "
+          "match will be skipped.\n");
+    }
+    if (source_domain_functions_of_time.empty() and
+        source_domain.has_value() and
+        alg::any_of(source_domain->blocks(), [](const auto& block) {
+          return block.is_time_dependent();
+        })) {
+      const std::optional<std::vector<char>> serialized_functions_of_time =
+          volume_file.get_functions_of_time(observation_id);
+      if (not serialized_functions_of_time.has_value()) {
+        ERROR_NO_TRACE("No domain functions of time found in file '"
+                       << file_name << volume_file.subfile_path()
+                       << "'. The functions of time are needed to verify the "
+                          "inertial coordinates with time-dependent maps.");
+      }
+      source_domain_functions_of_time = deserialize<domain::FunctionsOfTimeMap>(
+          serialized_functions_of_time->data());
+    }
+
+    std::unordered_set<ElementId<Dim>> completed_target_ids{};
+    for (const auto& target_id : remaining_target_ids) {
+      const auto target_grid_name = get_output(target_id);
+      if (std::find(source_grid_names.begin(), source_grid_names.end(),
+                    target_grid_name) == source_grid_names.end()) {
+        continue;
+      }
+      if (not all_tensor_data.has_value()) {
+        all_tensor_data = read_tensor_data<FieldTagsList>(
+            volume_file, observation_id, selected_fields);
+      }
+      const auto& [target_points, target_mesh] = target_elements.at(target_id);
+      const auto source_mesh = h5::mesh_for_grid<Dim>(
+          target_grid_name, source_grid_names, source_extents, source_bases,
+          source_quadratures);
+      const auto element_data_offset_and_length =
+          h5::offset_and_length_for_grid(target_grid_name, source_grid_names,
+                                         source_extents);
+      auto source_element_data = extract_element_data<FieldTagsList>(
+          element_data_offset_and_length, *all_tensor_data, selected_fields);
+      if (source_domain.has_value()) {
+        verify_inertial_coordinates(*source_domain, observation_value,
+                                    source_domain_functions_of_time, target_id,
+                                    target_mesh, target_points);
+      }
+      element_data target_element_data{};
+      if (source_mesh == target_mesh) {
+        target_element_data = std::move(source_element_data);
+      } else {
+        interpolate_selected_fields<FieldTagsList>(
+            make_not_null(&target_element_data), source_element_data,
+            source_mesh, target_mesh, selected_fields);
+      }
+      result.emplace(target_id, std::move(target_element_data));
+      completed_target_ids.insert(target_id);
+    }
+    for (const auto& completed_target_id : completed_target_ids) {
+      remaining_target_ids.erase(completed_target_id);
+    }
+    if (remaining_target_ids.empty()) {
+      break;
+    }
+  }
+  if (not remaining_target_ids.empty()) {
+    ERROR_NO_TRACE("The following "
+                   << remaining_target_ids.size()
+                   << " element(s) were not found in the source volume data "
+                      "files:\n"
+                   << remaining_target_ids
+                   << "\nMake sure the source and target domains match when "
+                      "'ElementsAreIdentical' is enabled, or set it to "
+                      "'False' to interpolate between the grids.");
+  }
+  return result;
+}
+
 }  // namespace detail
 
 namespace Actions {

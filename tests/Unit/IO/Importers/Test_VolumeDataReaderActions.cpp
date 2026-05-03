@@ -257,6 +257,46 @@ void test_actions(const std::variant<double, importers::ObservationSelector>&
     volume_data.write_volume_data(0, 0., all_element_data[i]);
   }
 
+  std::unordered_map<
+      ElementId<2>, std::pair<tnsr::I<DataVector, 2, Frame::Inertial>, Mesh<2>>>
+      helper_target_elements{};
+  for (const auto& id : element_ids) {
+    const Mesh<2> target_mesh =
+        p_refine
+            ? Mesh<2>{3,
+                      subcell_is_active ? Spectral::Basis::FiniteDifference
+                                        : Spectral::Basis::Legendre,
+                      subcell_is_active ? Spectral::Quadrature::FaceCentered
+                                        : Spectral::Quadrature::GaussLobatto}
+            : source_mesh;
+    helper_target_elements.emplace(
+        id, std::make_pair(all_coords.at(id), target_mesh));
+  }
+  tuples::tagged_tuple_from_typelist<
+      db::wrap_tags_in<importers::Tags::Selected, import_tags_list>>
+      helper_selected_fields{};
+  get<importers::Tags::Selected<VectorTag>>(helper_selected_fields) = "V";
+  get<importers::Tags::Selected<TensorTag>>(helper_selected_fields) = "T";
+  const auto helper_result =
+      importers::detail::read_volume_data_for_elements<2, import_tags_list>(
+          importers::ImporterOptions{
+              "TestVolumeData*.h5", "element_data", observation_selection,
+              Options::Auto<double>{}, true, false, Options::Auto<size_t>{}},
+          helper_target_elements, helper_selected_fields);
+  for (const auto& id : element_ids) {
+    CAPTURE(id);
+    REQUIRE(helper_result.contains(id));
+    if (p_refine) {
+      CHECK(get<0>(get<VectorTag>(helper_result.at(id)))[0] ==
+            get<0>(get<VectorTag>(all_sample_data.at(id)))[0]);
+    } else {
+      CHECK(get<VectorTag>(helper_result.at(id)) ==
+            get<VectorTag>(all_sample_data.at(id)));
+      CHECK(get<TensorTag>(helper_result.at(id)) ==
+            get<TensorTag>(all_sample_data.at(id)));
+    }
+  }
+
   ActionTesting::set_phase(make_not_null(&runner), Parallel::Phase::Testing);
 
   bool first_invocation = true;
