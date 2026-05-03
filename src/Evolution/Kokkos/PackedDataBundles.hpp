@@ -75,9 +75,16 @@ struct PackedGeometry {
   using host_inverse_jacobian_cache_type =
       ::Kokkos::View<double***, ::Kokkos::LayoutRight, ::Kokkos::HostSpace>;
   std::array<DataVector, volume_dim> grid_coordinates_host{};
+  std::array<DataVector, volume_dim> distorted_coordinates_host{};
   std::array<DataVector, volume_dim> inertial_coordinates_host{};
   std::array<DataVector, volume_dim> mesh_velocity_host{};
+  std::array<DataVector, volume_dim> grid_to_distorted_frame_velocity_host{};
   host_inverse_jacobian_cache_type logical_to_grid_inverse_jacobian_host{};
+  host_inverse_jacobian_cache_type logical_to_distorted_inverse_jacobian_host{};
+  host_inverse_jacobian_cache_type grid_to_distorted_inverse_jacobian_host{};
+  host_inverse_jacobian_cache_type distorted_to_inertial_jacobian_host{};
+  host_inverse_jacobian_cache_type
+      distorted_to_inertial_inverse_jacobian_host{};
   device_inertial_coordinates_type inertial_coordinates_device{};
   device_mesh_velocity_type mesh_velocity_device{};
   device_inverse_jacobian_type element_inverse_jacobian_device{};

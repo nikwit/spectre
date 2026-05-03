@@ -9,6 +9,7 @@
 #include "Domain/Creators/Tags/FunctionsOfTime.hpp"
 #include "Evolution/Initialization/InitialData.hpp"
 #include "Evolution/Kokkos/PackedTags.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Tags/GaugeCondition.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/KokkosTimeStepperTags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ConstraintDampingTags.hpp"
@@ -47,18 +48,19 @@ struct InitializeBatchedDataWithTag {
   using argument_tags =
       tmpl::list<packed_topology_tag, ::domain::Tags::Domain<volume_dim>,
                  FunctionsOfTimeTag, evolution::initial_data::Tags::InitialData,
-                 ::Tags::Time, damping_function_gamma0_tag,
-                 damping_function_gamma1_tag, damping_function_gamma2_tag>;
+                 ::Tags::Time, gh::gauges::Tags::GaugeCondition,
+                 damping_function_gamma0_tag, damping_function_gamma1_tag,
+                 damping_function_gamma2_tag>;
   using const_global_cache_tags = tmpl::conditional_t<
       AddFunctionsOfTimeToConstGlobalCache,
       tmpl::list<::domain::Tags::Domain<volume_dim>, FunctionsOfTimeTag,
                  evolution::initial_data::Tags::InitialData,
-                 damping_function_gamma0_tag, damping_function_gamma1_tag,
-                 damping_function_gamma2_tag>,
+                 gh::gauges::Tags::GaugeCondition, damping_function_gamma0_tag,
+                 damping_function_gamma1_tag, damping_function_gamma2_tag>,
       tmpl::list<::domain::Tags::Domain<volume_dim>,
                  evolution::initial_data::Tags::InitialData,
-                 damping_function_gamma0_tag, damping_function_gamma1_tag,
-                 damping_function_gamma2_tag>>;
+                 gh::gauges::Tags::GaugeCondition, damping_function_gamma0_tag,
+                 damping_function_gamma1_tag, damping_function_gamma2_tag>>;
 
   static void apply(
       gsl::not_null<typename packed_geometry_tag::type*> packed_geometry,
@@ -74,7 +76,7 @@ struct InitializeBatchedDataWithTag {
       const Domain<volume_dim>& domain,
       const domain::FunctionsOfTimeMap& functions_of_time,
       const evolution::initial_data::InitialData& initial_data,
-      double initial_time,
+      double initial_time, const gh::gauges::GaugeCondition& gauge_condition,
       const typename damping_function_gamma0_tag::DampingFunctionType&
           damping_function_gamma0,
       const typename damping_function_gamma1_tag::DampingFunctionType&

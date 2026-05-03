@@ -30,8 +30,18 @@ struct HostElementView {
   Mesh<3> mesh{};
   typename system::variables_tag::type evolved_vars{};
   tnsr::I<DataVector, 3, Frame::Grid> grid_coordinates{};
+  tnsr::I<DataVector, 3, Frame::Distorted> distorted_coordinates{};
   tnsr::I<DataVector, 3, Frame::Inertial> inertial_coordinates{};
   tnsr::I<DataVector, 3, Frame::Inertial> mesh_velocity{};
+  tnsr::I<DataVector, 3, Frame::Distorted> grid_to_distorted_frame_velocity{};
+  InverseJacobian<DataVector, 3, Frame::ElementLogical, Frame::Distorted>
+      logical_to_distorted_inverse_jacobian{};
+  InverseJacobian<DataVector, 3, Frame::Grid, Frame::Distorted>
+      grid_to_distorted_inverse_jacobian{};
+  Jacobian<DataVector, 3, Frame::Distorted, Frame::Inertial>
+      distorted_to_inertial_jacobian{};
+  InverseJacobian<DataVector, 3, Frame::Distorted, Frame::Inertial>
+      distorted_to_inertial_inverse_jacobian{};
   InverseJacobian<DataVector, 3, Frame::ElementLogical, Frame::Inertial>
       logical_to_inertial_inverse_jacobian{};
 };
@@ -62,12 +72,19 @@ void for_each_host_element_view(
     ASSERT(gsl::at(geometry.grid_coordinates_host, d).size() ==
                topology.total_points,
            "Packed grid coordinates do not match total points.");
+    ASSERT(gsl::at(geometry.distorted_coordinates_host, d).size() ==
+               topology.total_points,
+           "Packed distorted coordinates do not match total points.");
     ASSERT(gsl::at(geometry.inertial_coordinates_host, d).size() ==
                topology.total_points,
            "Packed inertial coordinates do not match total points.");
     ASSERT(
         gsl::at(geometry.mesh_velocity_host, d).size() == topology.total_points,
         "Packed mesh velocity does not match total points.");
+    ASSERT(gsl::at(geometry.grid_to_distorted_frame_velocity_host, d).size() ==
+               topology.total_points,
+           "Packed grid-to-distorted frame velocity does not match total "
+           "points.");
   }
 
   host_variables_type host_vars{topology.total_points};
@@ -94,10 +111,26 @@ void for_each_host_element_view(
            "Packed element point count does not match reconstructed mesh.");
     view.evolved_vars = host_variables_type{element_points};
     view.grid_coordinates = tnsr::I<DataVector, 3, Frame::Grid>{element_points};
+    view.distorted_coordinates =
+        tnsr::I<DataVector, 3, Frame::Distorted>{element_points};
     view.inertial_coordinates =
         tnsr::I<DataVector, 3, Frame::Inertial>{element_points};
     view.mesh_velocity =
         tnsr::I<DataVector, 3, Frame::Inertial>{element_points};
+    view.grid_to_distorted_frame_velocity =
+        tnsr::I<DataVector, 3, Frame::Distorted>{element_points};
+    view.logical_to_distorted_inverse_jacobian =
+        InverseJacobian<DataVector, 3, Frame::ElementLogical, Frame::Distorted>{
+            element_points};
+    view.grid_to_distorted_inverse_jacobian =
+        InverseJacobian<DataVector, 3, Frame::Grid, Frame::Distorted>{
+            element_points};
+    view.distorted_to_inertial_jacobian =
+        Jacobian<DataVector, 3, Frame::Distorted, Frame::Inertial>{
+            element_points};
+    view.distorted_to_inertial_inverse_jacobian =
+        InverseJacobian<DataVector, 3, Frame::Distorted, Frame::Inertial>{
+            element_points};
     view.logical_to_inertial_inverse_jacobian =
         InverseJacobian<DataVector, 3, Frame::ElementLogical, Frame::Inertial>{
             element_points};
@@ -115,10 +148,14 @@ void for_each_host_element_view(
       for (size_t p = 0; p < element_points; ++p) {
         view.grid_coordinates.get(d)[p] =
             gsl::at(geometry.grid_coordinates_host, d)[point_begin + p];
+        view.distorted_coordinates.get(d)[p] =
+            gsl::at(geometry.distorted_coordinates_host, d)[point_begin + p];
         view.inertial_coordinates.get(d)[p] =
             gsl::at(geometry.inertial_coordinates_host, d)[point_begin + p];
         view.mesh_velocity.get(d)[p] =
             gsl::at(geometry.mesh_velocity_host, d)[point_begin + p];
+        view.grid_to_distorted_frame_velocity.get(d)[p] = gsl::at(
+            geometry.grid_to_distorted_frame_velocity_host, d)[point_begin + p];
       }
     }
     for (size_t logical_d = 0; logical_d < 3; ++logical_d) {
@@ -127,6 +164,26 @@ void for_each_host_element_view(
           view.logical_to_inertial_inverse_jacobian.get(logical_d,
                                                         inertial_d)[p] =
               host_inverse_jacobian(e, p, logical_d * 3 + inertial_d);
+        }
+      }
+    }
+    for (size_t source_d = 0; source_d < 3; ++source_d) {
+      for (size_t target_d = 0; target_d < 3; ++target_d) {
+        for (size_t p = 0; p < element_points; ++p) {
+          view.logical_to_distorted_inverse_jacobian.get(source_d,
+                                                         target_d)[p] =
+              geometry.logical_to_distorted_inverse_jacobian_host(
+                  e, p, source_d * 3 + target_d);
+          view.grid_to_distorted_inverse_jacobian.get(source_d, target_d)[p] =
+              geometry.grid_to_distorted_inverse_jacobian_host(
+                  e, p, source_d * 3 + target_d);
+          view.distorted_to_inertial_jacobian.get(source_d, target_d)[p] =
+              geometry.distorted_to_inertial_jacobian_host(
+                  e, p, source_d * 3 + target_d);
+          view.distorted_to_inertial_inverse_jacobian.get(source_d,
+                                                          target_d)[p] =
+              geometry.distorted_to_inertial_inverse_jacobian_host(
+                  e, p, source_d * 3 + target_d);
         }
       }
     }

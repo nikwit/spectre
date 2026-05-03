@@ -13,6 +13,7 @@
 #include "Domain/Creators/Rectilinear.hpp"
 #include "Domain/Creators/TimeDependence/UniformTranslation.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/AnalyticChristoffel.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/DriverState.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/InitializeBatchedData.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/UpdateConstraintDampingBatched.hpp"
@@ -204,6 +205,8 @@ void test_update_frame_fields_and_constraint_damping_batched() {
   const std::array<double, 3> zero_spin{{0.0, 0.0, 0.0}};
   const std::array<double, 3> zero_center{{0.0, 0.0, 0.0}};
   const hardcoded_solution solution{1.0, zero_spin, zero_center};
+  const gh::gauges::AnalyticChristoffel gauge_condition{
+      std::make_unique<hardcoded_solution>(solution)};
 
   constexpr double gamma0_constant = 0.4;
   constexpr double gamma1_constant = -0.7;
@@ -219,7 +222,8 @@ void test_update_frame_fields_and_constraint_damping_batched() {
       make_not_null(&packed_geometry), make_not_null(&packed_evolution_state),
       make_not_null(&device_gamma0), make_not_null(&device_gamma1),
       make_not_null(&device_gamma2), packed_topology, domain, functions_of_time,
-      solution, 0.0, damping_gamma0, damping_gamma1, damping_gamma2);
+      solution, 0.0, gauge_condition, damping_gamma0, damping_gamma1,
+      damping_gamma2);
   const auto domain_static_cache_snapshot =
       snapshot_domain_static_caches(packed_geometry);
 
