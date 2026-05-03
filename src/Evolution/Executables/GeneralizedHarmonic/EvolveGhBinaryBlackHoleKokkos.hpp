@@ -17,12 +17,16 @@
 #include "ControlSystem/Actions/LimitTimeStep.hpp"
 #include "ControlSystem/CombinedName.hpp"
 #include "ControlSystem/Component.hpp"
+#include "ControlSystem/ControlErrors/Size/Factory.hpp"
+#include "ControlSystem/ControlErrors/Size/State.hpp"
 #include "ControlSystem/FutureMeasurements.hpp"
 #include "ControlSystem/Measurements/BothHorizons.hpp"
+#include "ControlSystem/Measurements/CharSpeed.hpp"
 #include "ControlSystem/Metafunctions.hpp"
 #include "ControlSystem/Systems/Expansion.hpp"
 #include "ControlSystem/Systems/Rotation.hpp"
 #include "ControlSystem/Systems/Shape.hpp"
+#include "ControlSystem/Systems/Size.hpp"
 #include "ControlSystem/Systems/Skew.hpp"
 #include "ControlSystem/Systems/Translation.hpp"
 #include "ControlSystem/Tags/FunctionsOfTimeInitialize.hpp"
@@ -73,6 +77,7 @@
 #include "ParallelAlgorithms/EventsAndTriggers/Tags.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/Trigger.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/WhenToCheck.hpp"
+#include "ParallelAlgorithms/Interpolation/Targets/Sphere.hpp"
 #include "Time/Actions/AdvanceTime.hpp"
 #include "Time/Slab.hpp"
 #include "Time/Tags/TimeStep.hpp"
@@ -99,6 +104,8 @@ struct ControlSystemMeasurements {
       control_system::metafunctions::control_systems_with_measurement_t<
           typename Metavariables::control_systems,
           control_system::measurements::BothHorizons>;
+  using horizon_metavars =
+      control_system::metafunctions::horizon_metavars<control_system_group>;
   using future_measurements_tag =
       control_system::Tags::FutureMeasurements<control_system_group>;
 
@@ -148,13 +155,93 @@ struct ControlSystemMeasurements {
     // Wire up the dense trigger with one batched event per control-system
     // horizon metavar.
     std::vector<std::unique_ptr<Event>> events;
-    tmpl::for_each<typename Metavariables::control_system_horizon_metavars>(
-        [&events](auto hmv) {
-          using HM = tmpl::type_from<decltype(hmv)>;
-          events.push_back(
-              std::make_unique<
-                  gh::Events::SendHorizonDataBatchedForControlSystem<HM>>());
-        });
+    tmpl::for_each<horizon_metavars>([&events](auto hmv) {
+      using HM = tmpl::type_from<decltype(hmv)>;
+      events.push_back(
+          std::make_unique<
+              gh::Events::SendHorizonDataBatchedForControlSystem<HM>>());
+    });
+    events_and_dense_triggers->add_trigger_and_events(
+        std::make_unique<control_system::Trigger<control_system_group>>(),
+        std::move(events));
+
+    double earliest_expiration = std::numeric_limits<double>::infinity();
+    for (const auto& function_of_time :
+         Parallel::get<control_system::Tags::FunctionsOfTimeInitialize>(
+             *cache)) {
+      earliest_expiration = std::min(earliest_expiration,
+                                     function_of_time.second->time_bounds()[1]);
+    }
+    const auto start_time = time_step->slab().start();
+    if ((start_time + *time_step).value() > earliest_expiration) {
+      *time_step = Slab(start_time.value(), earliest_expiration).duration();
+    }
+  }
+};
+
+template <typename Metavariables, ::domain::ObjectLabel Object>
+struct SizeControlMeasurements {
+ private:
+  using measurement = control_system::measurements::CharSpeed<Object>;
+  using control_system_group =
+      control_system::metafunctions::control_systems_with_measurement_t<
+          typename Metavariables::control_systems, measurement>;
+  using future_measurements_tag =
+      control_system::Tags::FutureMeasurements<control_system_group>;
+  using horizon_metavars =
+      control_system::metafunctions::horizon_metavars<control_system_group>;
+
+ public:
+  using simple_tags = tmpl::list<future_measurements_tag>;
+  using simple_tags_from_options = tmpl::list<>;
+  using compute_tags = tmpl::list<>;
+  using const_global_cache_tags =
+      tmpl::list<control_system::Tags::MeasurementsPerUpdate>;
+  using mutable_global_cache_tags =
+      tmpl::list<control_system::Tags::MeasurementTimescales>;
+  using return_tags =
+      tmpl::push_back<simple_tags, ::Tags::EventsAndDenseTriggers,
+                      ::Tags::TimeStep>;
+  using argument_tags = tmpl::list<::Tags::Time, ::Tags::TimeStep,
+                                   Parallel::Tags::GlobalCache<Metavariables>>;
+
+  static void apply(
+      const gsl::not_null<control_system::FutureMeasurements*>
+          future_measurements,
+      const gsl::not_null<EventsAndDenseTriggers*> events_and_dense_triggers,
+      const gsl::not_null<TimeDelta*> time_step, const double initial_time,
+      const TimeDelta& initial_time_step,
+      const Parallel::GlobalCache<Metavariables>* const& cache) {
+    *time_step = initial_time_step;
+
+    const auto& measurement_timescales =
+        Parallel::get<control_system::Tags::MeasurementTimescales>(*cache);
+    const auto& measurement_timescale = *measurement_timescales.at(
+        control_system::combined_name<control_system_group>());
+    const double initial_measurement_timescale =
+        measurement_timescale.func(initial_time)[0][0];
+    const bool active = initial_measurement_timescale !=
+                        std::numeric_limits<double>::infinity();
+    *future_measurements = control_system::FutureMeasurements{
+        static_cast<size_t>(
+            active ? Parallel::get<control_system::Tags::MeasurementsPerUpdate>(
+                         *cache)
+                   : 1),
+        active ? initial_time : std::numeric_limits<double>::infinity()};
+    if (active) {
+      future_measurements->update(measurement_timescale);
+    }
+
+    std::vector<std::unique_ptr<Event>> events;
+    tmpl::for_each<horizon_metavars>([&events](auto hmv) {
+      using HM = tmpl::type_from<decltype(hmv)>;
+      events.push_back(
+          std::make_unique<
+              gh::Events::SendHorizonDataBatchedForControlSystem<HM>>());
+    });
+    events.push_back(
+        std::make_unique<gh::Events::SendExcisionDataBatchedForSizeControl<
+            Object, control_system_group>>());
     events_and_dense_triggers->add_trigger_and_events(
         std::make_unique<control_system::Trigger<control_system_group>>(),
         std::move(events));
@@ -190,7 +277,11 @@ struct GhBinaryBlackHoleKokkosDriver {
                       Metavariables, typename Metavariables::TimeStepperBase>,
                   gh::Batched::Initialization::DriverState,
                   gh::Batched::Initialization::ControlSystemMeasurements<
-                      Metavariables>>,
+                      Metavariables>,
+                  gh::Batched::Initialization::SizeControlMeasurements<
+                      Metavariables, ::domain::ObjectLabel::A>,
+                  gh::Batched::Initialization::SizeControlMeasurements<
+                      Metavariables, ::domain::ObjectLabel::B>>,
               Actions::MutateApply<gh::Batched::Actions::InitializeDriver<
                   Metavariables, functions_of_time_tag>>,
               Actions::MutateApply<
@@ -290,11 +381,27 @@ struct EvolutionMetavarsBinaryBlackHoleKokkos {
                  control_system::Systems::Shape<::domain::ObjectLabel::A, 2,
                                                 both_horizons>,
                  control_system::Systems::Shape<::domain::ObjectLabel::B, 2,
-                                                both_horizons>>;
+                                                both_horizons>,
+                 control_system::Systems::Size<::domain::ObjectLabel::A, 2>,
+                 control_system::Systems::Size<::domain::ObjectLabel::B, 2>>;
   static constexpr bool use_control_systems =
       tmpl::size<control_systems>::value > 0;
+  using SizeA = control_system::Systems::Size<::domain::ObjectLabel::A, 2>;
+  using SizeB = control_system::Systems::Size<::domain::ObjectLabel::B, 2>;
+  using size_control_systems = tmpl::list<SizeA, SizeB>;
+  using size_excision_target_tags =
+      control_system::metafunctions::interpolation_target_tags<
+          size_control_systems>;
   using control_system_horizon_metavars =
       control_system::metafunctions::horizon_metavars<control_systems>;
+  using char_speed_a_control_systems =
+      control_system::metafunctions::control_systems_with_measurement_t<
+          control_systems,
+          control_system::measurements::CharSpeed<::domain::ObjectLabel::A>>;
+  using char_speed_b_control_systems =
+      control_system::metafunctions::control_systems_with_measurement_t<
+          control_systems,
+          control_system::measurements::CharSpeed<::domain::ObjectLabel::B>>;
   using control_components =
       control_system::control_components<EvolutionMetavarsBinaryBlackHoleKokkos,
                                          control_systems>;
@@ -312,6 +419,10 @@ struct EvolutionMetavarsBinaryBlackHoleKokkos {
                 gh::Events::FindApparentHorizonBatched<AhA>,
                 gh::Events::FindApparentHorizonBatched<AhB>,
                 gh::Events::ObserveNormsBatched,
+                gh::Events::SendExcisionDataBatchedForSizeControl<
+                    ::domain::ObjectLabel::A, char_speed_a_control_systems>,
+                gh::Events::SendExcisionDataBatchedForSizeControl<
+                    ::domain::ObjectLabel::B, char_speed_b_control_systems>,
                 tmpl::transform<
                     control_system_horizon_metavars,
                     tmpl::bind<
@@ -321,6 +432,8 @@ struct EvolutionMetavarsBinaryBlackHoleKokkos {
             gh::BoundaryConditions::BoundaryCondition<volume_dim>,
             gh::BoundaryConditions::standard_boundary_conditions<volume_dim>>,
         tmpl::pair<gh::gauges::GaugeCondition, gh::gauges::all_gauges>,
+        tmpl::pair<control_system::size::State,
+                   control_system::size::States::factory_creatable_states>,
         tmpl::pair<evolution::initial_data::InitialData,
                    tmpl::append<gh::Solutions::all_solutions<volume_dim>,
                                 tmpl::list<gh::NumericInitialData>>>,
@@ -339,14 +452,16 @@ struct EvolutionMetavarsBinaryBlackHoleKokkos {
       observers::collect_reduction_data_tags<tmpl::push_back<
           tmpl::at<typename factory_creation::factory_classes, Event>>>;
 
-  using const_global_cache_tags =
+  using const_global_cache_tags = tmpl::flatten<tmpl::list<
       tmpl::list<gh::gauges::Tags::GaugeCondition,
                  evolution::initial_data::Tags::InitialData,
                  gh::Tags::DampingFunctionGamma0<volume_dim, Frame::Grid>,
                  gh::Tags::DampingFunctionGamma1<volume_dim, Frame::Grid>,
                  gh::Tags::DampingFunctionGamma2<volume_dim, Frame::Grid>,
                  Filters::Tags::Filter<Filters::Exponential<0>>,
-                 ::Tags::EventsAndTriggers<Triggers::WhenToCheck::AtSlabs>>;
+                 ::Tags::EventsAndTriggers<Triggers::WhenToCheck::AtSlabs>>,
+      tmpl::transform<size_excision_target_tags,
+                      tmpl::bind<intrp::Tags::Sphere, tmpl::_1>>>>;
   using mutable_global_cache_tags =
       tmpl::list<control_system::Tags::FunctionsOfTimeInitialize>;
 

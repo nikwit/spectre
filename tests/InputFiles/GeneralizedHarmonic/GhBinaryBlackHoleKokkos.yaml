@@ -134,6 +134,20 @@ ApparentHorizons:
   BatchedObservationAhB: *BatchedAh
   ControlSystemAhA: *BatchedAh
   ControlSystemAhB: *BatchedAh
+  ControlSystemCharSpeedAhA: *BatchedAh
+  ControlSystemCharSpeedAhB: *BatchedAh
+
+InterpolationTargets:
+  ControlSystemCharSpeedExcisionA:
+    LMax: *LMax
+    Radius: *ObjectRadius
+    Center: *CenterA
+    AngularOrdering: Strahlkorper
+  ControlSystemCharSpeedExcisionB:
+    LMax: *LMax
+    Radius: *ObjectRadius
+    Center: *CenterB
+    AngularOrdering: Strahlkorper
 
 ControlSystems:
   WriteDataToDisk: false
@@ -145,3 +159,5 @@ ControlSystems:
   Skew: None
   ShapeA: None
   ShapeB: None
+  SizeA: None
+  SizeB: None
