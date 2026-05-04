@@ -560,7 +560,8 @@ BinaryCompactObject<UseWorldtube, EnforceObjectBGaussBonnet>::
                                 std::variant<std::array<size_t, 3>, size_t>>>) {
             // Convert size_t entries to {r, 0, 0} for spherical harmonic
             // blocks; array<3> entries are used unchanged.
-            const auto converted = [&v]() {
+            const auto converted = [&v, &spherical_harmonic_block_names,
+                                    &context]() {
               std::unordered_map<std::string, std::array<size_t, 3>> result;
               for (const auto& [name, val] : v) {
                 if (std::holds_alternative<size_t>(val)) {
@@ -593,7 +594,8 @@ BinaryCompactObject<UseWorldtube, EnforceObjectBGaussBonnet>::
             // Convert array<2>{r, L_max} entries to
             // {r, n_theta_points(L_max), n_phi_points(L_max)} for spherical
             // harmonic blocks; array<3> entries are used unchanged.
-            const auto converted = [&v]() {
+            const auto converted = [&v, &spherical_harmonic_block_names,
+                                    &context]() {
               std::unordered_map<std::string, std::array<size_t, 3>> result;
               for (const auto& [name, val] : v) {
                 if (std::holds_alternative<std::array<size_t, 2>>(val)) {
