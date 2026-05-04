@@ -218,14 +218,6 @@ BinaryCompactObject<UseWorldtube>::BinaryCompactObject(
     number_of_blocks_++;
   }
 
-  // For each of the object replaced by a single block, remove (12-1)=11
-  if (use_single_block_a_) {
-    number_of_blocks_ -= 11;
-  }
-  if (use_single_block_b_) {
-    number_of_blocks_ -= 11;
-  }
-
   if (x_coord_a_ <= 0.0) {
     PARSE_ERROR(
         context,
@@ -507,7 +499,8 @@ BinaryCompactObject<UseWorldtube>::BinaryCompactObject(
                                 std::variant<std::array<size_t, 3>, size_t>>>) {
             // Convert size_t entries to {r, 0, 0} for spherical harmonic
             // blocks; array<3> entries are used unchanged.
-            const auto converted = [&v]() {
+            const auto converted = [&v, &spherical_harmonic_block_names,
+                                    &context]() {
               std::unordered_map<std::string, std::array<size_t, 3>> result;
               for (const auto& [name, val] : v) {
                 if (std::holds_alternative<size_t>(val)) {
@@ -550,7 +543,8 @@ BinaryCompactObject<UseWorldtube>::BinaryCompactObject(
             // Convert array<2>{r, L_max} entries to
             // {r, n_theta_points(L_max), n_phi_points(L_max)} for spherical
             // harmonic blocks; array<3> entries are used unchanged.
-            const auto converted = [&v]() {
+            const auto converted = [&v, &spherical_harmonic_block_names,
+                                    &context]() {
               std::unordered_map<std::string, std::array<size_t, 3>> result;
               for (const auto& [name, val] : v) {
                 if (std::holds_alternative<std::array<size_t, 2>>(val)) {
@@ -946,7 +940,7 @@ Domain<3> BinaryCompactObject<UseWorldtube>::create_domain() const {
                                       {object_A_shell_block_ + 4,
                                        Direction<3>::lower_zeta()},
                                       {object_A_shell_block_ + 5,
-                                       Direction<3>::lower_zeta()}}}});
+                                       Direction<3>::lower_zeta()}}});
     }
   }
   if (not use_single_block_b_) {
@@ -1008,7 +1002,7 @@ Domain<3> BinaryCompactObject<UseWorldtube>::create_domain() const {
                                       {object_B_shell_block_ + 4,
                                        Direction<3>::lower_zeta()},
                                       {object_B_shell_block_ + 5,
-                                       Direction<3>::lower_zeta()}}}});
+                                       Direction<3>::lower_zeta()}}});
     }
   }
 
