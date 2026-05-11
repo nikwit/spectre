@@ -426,8 +426,7 @@ void TensorYlmFilter::operator()(
   if (cached_l_max_ != l_max) {
     ylm::TensorYlm::fill_filter<Scalar<DataVector>::structure>(
         make_not_null(&filter_matrix_scalar_), l_max,
-        effective_num_modes_to_kill,
-        half_power_, normalization_);
+        effective_num_modes_to_kill, half_power_, normalization_);
     ylm::TensorYlm::fill_filter<tnsr::i<DataVector, 3>::structure>(
         make_not_null(&filter_matrix_i_), l_max, effective_num_modes_to_kill,
         half_power_, normalization_);

@@ -61,9 +61,10 @@ std::vector<Block<2>> make_blocks() {
 void check_element(const Element<2>& element,
                    const std::optional<size_t>& expected_ratio) {
   const Slab slab{2.0, 10.0};
-  auto box = db::create<db::AddSimpleTags<
-      Tags::FixedLtsRatio, domain::Tags::Element<2>, Tags::TimeStep>>(
-      std::optional<size_t>{}, element, slab.duration() / 8);
+  auto box =
+      db::create<db::AddSimpleTags<Tags::FixedLtsRatio,
+                                   domain::Tags::Element<2>, Tags::TimeStep>>(
+          std::optional<size_t>{}, element, slab.duration() / 8);
 
   db::mutate_apply<
       evolution::dg::Initialization::DisableLtsOnNonconformingBoundaries<2>>(
@@ -83,15 +84,15 @@ SPECTRE_TEST_CASE(
 
   check_element(
       domain::create_initial_element(
-          ElementId<2>{0, std::array{SegmentId{1, 1}, SegmentId{0, 0}}},
-          blocks, initial_refinement_levels),
+          ElementId<2>{0, std::array{SegmentId{1, 1}, SegmentId{0, 0}}}, blocks,
+          initial_refinement_levels),
       8_st);
   check_element(
       domain::create_initial_element(
-          ElementId<2>{1, std::array{SegmentId{0, 0}, SegmentId{1, 0}}},
-          blocks, initial_refinement_levels),
+          ElementId<2>{1, std::array{SegmentId{0, 0}, SegmentId{1, 0}}}, blocks,
+          initial_refinement_levels),
       8_st);
   check_element(domain::create_initial_element(ElementId<2>{3}, blocks,
-                                              initial_refinement_levels),
+                                               initial_refinement_levels),
                 std::nullopt);
 }

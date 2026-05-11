@@ -49,7 +49,6 @@ struct DisableLtsOnNonconformingBoundaries {
       tmpl::list<domain::Tags::Element<Dim>, ::Tags::TimeStep>;
 
   static void apply(gsl::not_null<std::optional<size_t>*> fixed_lts_ratio,
-                    const Element<Dim>& element,
-                    const TimeDelta& time_step);
+                    const Element<Dim>& element, const TimeDelta& time_step);
 };
 }  // namespace evolution::dg::Initialization

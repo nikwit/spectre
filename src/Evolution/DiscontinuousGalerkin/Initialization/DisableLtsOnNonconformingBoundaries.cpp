@@ -47,8 +47,7 @@ void DisableLtsOnNonconformingBoundaries<Dim>::apply(
 
   const auto ratio = denominator / positive_numerator;
   const auto ratio_as_size_t = static_cast<size_t>(ratio);
-  if (ratio <= 0 or
-      static_cast<decltype(ratio)>(ratio_as_size_t) != ratio) {
+  if (ratio <= 0 or static_cast<decltype(ratio)>(ratio_as_size_t) != ratio) {
     ERROR("Invalid fixed LTS ratio " << ratio << " from time step "
                                      << time_step);
   }
