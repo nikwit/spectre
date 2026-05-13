@@ -370,7 +370,7 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
   *dt_spacetime_metric_correction =
       get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(dt_evolved_vars);
 
-  if (face_mesh_velocity.has_value()) {
+  /*if (face_mesh_velocity.has_value()) {
     const auto radial_mesh_velocity =
         get(dot_product(normal_covector, *face_mesh_velocity));
     // we use 1e-10 instead of 0 below to allow for purely tangentially
@@ -383,7 +383,7 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
           "domain. Its unclear if proper boundary conditions are "
           "imposed in this case."};
     }
-  }
+  }*/
 
   return {};
 }

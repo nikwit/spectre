@@ -1345,6 +1345,7 @@ void test_spherical_harmonics_object_shells() {
   REQUIRE(bcs_a_sh.size() == 39);
   CHECK(bcs_a_sh[0].count(Direction<3>::lower_xi()) == 1);
   CHECK(bcs_a_sh[0].count(Direction<3>::lower_zeta()) == 0);
+  test_initial_domain(domain_a_sh, bco_a_sh.initial_refinement_levels());
 
   const domain::creators::BinaryCompactObject bco_b_sh{
       Object{
@@ -1385,6 +1386,8 @@ void test_spherical_harmonics_object_shells() {
   REQUIRE(bcs_b_sh.size() == 39);
   CHECK(bcs_b_sh[12].count(Direction<3>::lower_xi()) == 1);
   CHECK(bcs_b_sh[12].count(Direction<3>::lower_zeta()) == 0);
+  test_initial_domain(bco_b_sh.create_domain(),
+                      bco_b_sh.initial_refinement_levels());
 
   const domain::creators::BinaryCompactObject bco_both_sh{
       Object{0.3, 1.0, 3.0, {{create_inner_boundary_condition()}}, false, true},
@@ -1420,6 +1423,8 @@ void test_spherical_harmonics_object_shells() {
   CHECK(bco_both_sh.block_names()[7] == "ObjectBShell0");
   CHECK(bco_both_sh.block_names()[24] == "OuterShell0");
   CHECK(not bco_both_sh.block_groups().contains("OuterShell0"));
+  test_initial_domain(bco_both_sh.create_domain(),
+                      bco_both_sh.initial_refinement_levels());
 
   CHECK_THROWS_WITH(
       domain::creators::BinaryCompactObject(
@@ -1430,15 +1435,35 @@ void test_spherical_harmonics_object_shells() {
           120.0, false, std::nullopt, nullptr,
           Options::Context{false, {}, 1, 1}),
       Catch::Matchers::ContainsSubstring("requires excising Object A"));
-  CHECK_THROWS_WITH(
-      domain::creators::BinaryCompactObject(
-          Object{0.3, 1.0, 3.0, true, false, true},
-          Object{0.5, 1.0, -3.0, true, false, false},
-          std::array<double, 2>{{0.0, 0.0}}, 25.5, 32.4, 1.2, 0_st, 4_st, true,
-          Distribution::Projective, std::vector<double>{}, Distribution::Linear,
-          120.0, false, std::nullopt, nullptr,
-          Options::Context{false, {}, 1, 1}),
-      Catch::Matchers::ContainsSubstring("requires CubeScale to be 1.0"));
+  const domain::creators::BinaryCompactObject bco_sh_cube_scale{
+      Object{0.3, 1.0, 3.0, {{create_inner_boundary_condition()}}, false, true},
+      Object{
+          0.5, 1.0, -3.0, {{create_inner_boundary_condition()}}, false, false},
+      std::array<double, 2>{{0.0, 0.0}},
+      25.5,
+      32.4,
+      1.2,
+      RefinementMap{{"ObjectAShell", size_t{2}},
+                    {"ObjectACube", std::array<size_t, 3>{1, 1, 1}},
+                    {"ObjectBShell", std::array<size_t, 3>{1, 1, 1}},
+                    {"ObjectBCube", std::array<size_t, 3>{1, 1, 1}},
+                    {"Envelope", std::array<size_t, 3>{1, 1, 1}},
+                    {"OuterShell0", std::array<size_t, 3>{1, 1, 2}}},
+      GridPointsMap{{"ObjectAShell", std::array<size_t, 2>{4, 7}},
+                    {"ObjectACube", std::array<size_t, 3>{3, 3, 3}},
+                    {"ObjectBShell", std::array<size_t, 3>{3, 3, 3}},
+                    {"ObjectBCube", std::array<size_t, 3>{3, 3, 3}},
+                    {"Envelope", std::array<size_t, 3>{3, 3, 3}},
+                    {"OuterShell0", std::array<size_t, 3>{3, 3, 3}}},
+      true,
+      Distribution::Projective,
+      std::vector<double>{},
+      Distribution::Linear,
+      120.0,
+      false,
+      std::nullopt,
+      create_outer_boundary_condition()};
+  CHECK_NOTHROW(bco_sh_cube_scale.create_domain());
 
   const auto sh_time_dep_creator =
       TestHelpers::test_option_tag<domain::OptionTags::DomainCreator<3>,
@@ -1447,6 +1472,14 @@ void test_spherical_harmonics_object_shells() {
   REQUIRE(sh_time_dep_creator != nullptr);
   CHECK_NOTHROW(sh_time_dep_creator->create_domain());
   CHECK(not sh_time_dep_creator->functions_of_time().empty());
+
+  const auto sh_time_dep_cube_scale_creator =
+      TestHelpers::test_option_tag<domain::OptionTags::DomainCreator<3>,
+                                   Metavariables<3, true>>(create_option_string(
+          true, true, true, false, true, 0, 0, 0, 90.0, true, true, false));
+  REQUIRE(sh_time_dep_cube_scale_creator != nullptr);
+  CHECK_NOTHROW(sh_time_dep_cube_scale_creator->create_domain());
+  CHECK(not sh_time_dep_cube_scale_creator->functions_of_time().empty());
 }
 
 template <domain::ObjectLabel Object>

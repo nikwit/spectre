@@ -382,14 +382,6 @@ BinaryCompactObject<UseWorldtube, EnforceObjectBGaussBonnet>::
           "or neither.");
     }
   }
-  if ((spherical_harmonics_in_object_a_shell_ or
-       spherical_harmonics_in_object_b_shell_) and
-      not equal_within_roundoff(cube_scale, 1.0)) {
-    PARSE_ERROR(
-        context,
-        "Using spherical-harmonic object shells currently requires CubeScale "
-        "to be 1.0.");
-  }
   const bool filled_excision_a = not(use_single_block_a_ or is_excised_a_);
   const bool filled_excision_b = not(use_single_block_b_ or is_excised_b_);
   if ((filled_excision_a or filled_excision_b) and
@@ -688,7 +680,8 @@ BinaryCompactObject<UseWorldtube, EnforceObjectBGaussBonnet>::
         std::array{translation_, center_of_mass_offset[0],
                    center_of_mass_offset[1]},
         radii_A, radii_B, not is_excised_a_, not is_excised_b_,
-        envelope_radius_, outer_radius_);
+        envelope_radius_, outer_radius_, spherical_harmonics_in_object_a_shell_,
+        spherical_harmonics_in_object_b_shell_);
   }
 }
 
@@ -725,9 +718,21 @@ Domain<3> BinaryCompactObject<
              1.0 + center_of_mass_offset_[0]},
       Affine{-1.0, 1.0, -1.0 + center_of_mass_offset_[1],
              1.0 + center_of_mass_offset_[1]}};
+  const Affine3D translation_A_object{
+      Affine{-1.0, 1.0, -1.0 + x_coord_a_, 1.0 + x_coord_a_},
+      Affine{-1.0, 1.0, -1.0 + center_of_mass_offset_[0],
+             1.0 + center_of_mass_offset_[0]},
+      Affine{-1.0, 1.0, -1.0 + center_of_mass_offset_[1],
+             1.0 + center_of_mass_offset_[1]}};
   const Affine3D translation_B{
       Affine{-1.0, 1.0, -1.0 + x_coord_b_ - offset_x_coord_b_,
              1.0 + x_coord_b_ - offset_x_coord_b_},
+      Affine{-1.0, 1.0, -1.0 + center_of_mass_offset_[0],
+             1.0 + center_of_mass_offset_[0]},
+      Affine{-1.0, 1.0, -1.0 + center_of_mass_offset_[1],
+             1.0 + center_of_mass_offset_[1]}};
+  const Affine3D translation_B_object{
+      Affine{-1.0, 1.0, -1.0 + x_coord_b_, 1.0 + x_coord_b_},
       Affine{-1.0, 1.0, -1.0 + center_of_mass_offset_[0],
              1.0 + center_of_mass_offset_[0]},
       Affine{-1.0, 1.0, -1.0 + center_of_mass_offset_[1],
@@ -1013,7 +1018,7 @@ Domain<3> BinaryCompactObject<
           Direction<3>::self()}}};
     const auto outer_wedges_to_shell = shell_to_outer_wedges.inverse_map();
     const OrientationMap<3> object_shell_to_cube{
-        {{Direction<3>::lower_zeta(), Direction<3>::self(),
+        {{Direction<3>::upper_zeta(), Direction<3>::self(),
           Direction<3>::self()}}};
     const auto cube_to_object_shell = object_shell_to_cube.inverse_map();
     const auto aligned = OrientationMap<3>::create_aligned();
@@ -1075,7 +1080,8 @@ Domain<3> BinaryCompactObject<
                         -1.0, 1.0, object_a.inner_radius, object_a.outer_radius,
                         object_A_radial_distribution[0], 0.0},
                     CoordinateMaps::Identity<2>{}},
-                CoordinateMaps::SphericalToCartesianPfaffian{}, translation_A);
+                CoordinateMaps::SphericalToCartesianPfaffian{},
+                translation_A_object);
         std::unordered_set<size_t> cube_ids{};
         std::unordered_map<size_t, OrientationMap<3>> cube_orientations{};
         for (size_t i = 0; i < 6; ++i) {
@@ -1104,7 +1110,8 @@ Domain<3> BinaryCompactObject<
                         -1.0, 1.0, object_b.inner_radius, object_b.outer_radius,
                         object_B_radial_distribution[0], 0.0},
                     CoordinateMaps::Identity<2>{}},
-                CoordinateMaps::SphericalToCartesianPfaffian{}, translation_B);
+                CoordinateMaps::SphericalToCartesianPfaffian{},
+                translation_B_object);
         std::unordered_set<size_t> cube_ids{};
         std::unordered_map<size_t, OrientationMap<3>> cube_orientations{};
         for (size_t i = 0; i < 6; ++i) {
