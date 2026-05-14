@@ -7,6 +7,8 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
+#include <string>
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/LeviCivitaIterator.hpp"
@@ -25,10 +27,51 @@
 #include "PointwiseFunctions/GeneralRelativity/WeylScalars.hpp"
 #include "Utilities/ContainerHelpers.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
 #include "Utilities/Gsl.hpp"
 
 namespace gh::BoundaryConditions::Bjorhus {
+namespace {
+void error_if_not_finite(const DataVector& quantity,
+                         const std::string& quantity_name) {
+  for (size_t i = 0; i < quantity.size(); ++i) {
+    if (not std::isfinite(quantity[i])) {
+      ERROR("Invalid WorldtubeTypeD invariant '"
+            << quantity_name << "' at collocation point " << i << ": "
+            << quantity[i]);
+    }
+  }
+}
+
+void error_if_negative(const DataVector& quantity,
+                       const std::string& quantity_name) {
+  error_if_not_finite(quantity, quantity_name);
+  const double min_quantity = min(quantity);
+  if (min_quantity < 0.0) {
+    ERROR("Invalid WorldtubeTypeD invariant '" << quantity_name
+                                               << "': expected non-negative "
+                                                  "value before a real sqrt, "
+                                                  "but min="
+                                               << min_quantity
+                                               << ", max=" << max(quantity));
+  }
+}
+
+void error_if_too_small(const DataVector& quantity,
+                        const std::string& quantity_name) {
+  error_if_not_finite(quantity, quantity_name);
+  const double min_quantity = min(quantity);
+  if (min_quantity <= 10.0 * std::numeric_limits<double>::epsilon()) {
+    ERROR("Invalid WorldtubeTypeD invariant '" << quantity_name
+                                               << "': denominator magnitude is "
+                                                  "too small, with min="
+                                               << min_quantity
+                                               << ", max=" << max(quantity));
+  }
+}
+}  // namespace
+
 template <size_t VolumeDim, typename DataType>
 void constraint_preserving_corrections_dt_v_psi(
     const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
@@ -123,8 +166,11 @@ void worldtube_weyl_scalar_diagnostics(
       gr::weyl_magnetic_scalar(weyl_magnetic, inverse_spatial_metric);
   diagnostics->gauss_bonnet_scalar = gr::gauss_bonnet_scalar_in_vacuum(
       weyl_electric_scalar, weyl_magnetic_scalar);
+  error_if_negative(get(diagnostics->gauss_bonnet_scalar),
+                    "Gauss-Bonnet scalar");
   get(diagnostics->psi2_kinnersley) =
       sqrt(get(diagnostics->gauss_bonnet_scalar) / 48.0);
+  error_if_too_small(abs(get(diagnostics->psi2_kinnersley)), "psi2_kinnersley");
 
   const auto weyl_scalars_and_m =
       gr::weyl_scalars(weyl_electric, weyl_magnetic, spatial_metric,
@@ -134,10 +180,12 @@ void worldtube_weyl_scalar_diagnostics(
 
   const auto& weyl_psi1 = diagnostics->weyl_scalars[1];
   const auto& weyl_psi2 = diagnostics->weyl_scalars[2];
-  const auto x =
-      (-6. + sqrt(36. - 24. * (1. - get(weyl_psi2) /
-                                       get(diagnostics->psi2_kinnersley)))) /
-      12.;
+  const auto x_radicand =
+      36. - 24. * (1. - get(weyl_psi2) / get(diagnostics->psi2_kinnersley));
+  error_if_not_finite(real(x_radicand), "real part of Type-D x radicand");
+  error_if_not_finite(imag(x_radicand), "imaginary part of Type-D x radicand");
+  const auto x = (-6. + sqrt(x_radicand)) / 12.;
+  error_if_too_small(abs(1. + 2. * x), "1 + 2*x");
   const auto y =
       get(weyl_psi1) / (3. * get(diagnostics->psi2_kinnersley) * (1. + 2. * x));
   get(diagnostics->inferred_psi0) =
@@ -714,6 +762,7 @@ void add_physical_terms_to_dt_v_minus_worldtube(
   const auto weyl_electric = gr::weyl_electric(
       ricci_3_clean, extrinsic_curvature, inverse_spatial_metric);
   const auto det_spatial_metric = determinant(spatial_metric);
+  error_if_negative(get(det_spatial_metric), "spatial metric determinant");
   Scalar<DataType> sqrt_det_spatial_metric{};
   get(sqrt_det_spatial_metric) = sqrt(get(det_spatial_metric));
   if constexpr (VolumeDim == 3) {
