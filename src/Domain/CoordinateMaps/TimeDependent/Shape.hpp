@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -15,6 +16,7 @@
 #include "Domain/CoordinateMaps/TimeDependent/ShapeMapTransitionFunctions/ShapeMapTransitionFunction.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/SpherepackIterator.hpp"
+#include "DataStructures/Matrix.hpp"
 #include "Parallel/FifoCache.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TypeTraits/RemoveReferenceWrapper.hpp"
@@ -218,6 +220,18 @@ DataVector truncate_coefs(const DataVector& coefs,
  * mutated concurrently. It is up to the user to guarantee that
  * the cache is in a valid state while threads are calling the map methods.
  * Special care needs to be taken when using move and copy assignment.
+ * `coords_frame_velocity_jacobian` additionally keeps a mutable
+ * interpolation-matrix cache: the matrix of spherical-harmonic basis-function
+ * values at the target angles, with which the five interpolations of that
+ * function reduce to two small matrix products. Unlike the spherepack cache
+ * this cache is internally synchronized: access goes through a try-lock (a
+ * caller that does not get the lock simply uses the matrix-free path) and the
+ * matrix is handed out as an immutable shared_ptr snapshot, so concurrent
+ * calls on a shared map instance (e.g. the interpolation framework calling a
+ * Block's map from several threads) are safe. The matrix is rebuilt when the
+ * truncated l_max or the target points change, and only once the same key has
+ * been seen twice in a row, so callers evaluating at ever-changing points
+ * never pay the build cost. Neither cache is serialized.
  */
 class Shape {
  public:
@@ -303,6 +317,39 @@ class Shape {
   // NOLINTNEXTLINE(spectre-mutable)
   mutable SpherepackCache spherepack_cache_{cache_capacity_};
 
+  // Cache for the interpolation (basis) matrix used by
+  // `coords_frame_velocity_jacobian`: basis_matrix(p, k) is the k-th
+  // spherical-harmonic basis function evaluated at the angles of target point
+  // p, so interpolating spectral coefficients c to the target points is the
+  // matrix-vector product basis_matrix * c. The matrix depends only on the
+  // target angles and the truncated l_max, which are almost always identical
+  // between successive calls on an element, and is overwritten when either
+  // changes. `pending_*` hold the key of the previous miss: the matrix is
+  // only built when the same key is seen twice in a row. Not serialized;
+  // rebuilt on demand.
+  struct InterpolationMatrixCache {
+    size_t l_max = 0;
+    std::array<DataVector, 2> target_angles{};
+    std::shared_ptr<const Matrix> basis_matrix{};
+    size_t pending_l_max = 0;
+    std::array<DataVector, 2> pending_target_angles{};
+  };
+  // NOLINTNEXTLINE(spectre-mutable)
+  mutable InterpolationMatrixCache interpolation_matrix_cache_{};
+  // Guards interpolation_matrix_cache_. Accessed with try_lock only, so no
+  // caller ever blocks; see get_interpolation_matrix.
+  // NOLINTNEXTLINE(spectre-mutable)
+  mutable std::mutex interpolation_matrix_mutex_{};
+
+  // Returns the cached basis matrix for interpolating onto `theta_phis`, or
+  // nullptr if the cache is cold or another thread holds the cache lock (the
+  // caller must then use the InterpolationInfo-based path). The returned
+  // matrix is an immutable snapshot: a concurrent rebuild replaces the
+  // shared_ptr and never mutates a matrix already handed out.
+  std::shared_ptr<const Matrix> get_interpolation_matrix(
+      const std::array<DataVector, 2>& theta_phis, size_t l_max,
+      const ylm::Spherepack& ylm) const;
+
   template <typename T>
   std::array<tt::remove_cvref_wrap_t<T>, 3> center_coordinates(
       const std::array<T, 3>& coords) const {
@@ -320,12 +367,14 @@ class Shape {
   }
 
   template <typename T>
+  // Exactly one of `interpolation_info` and `interpolation_matrix` must be
+  // non-null; the matrix path is only supported for T = DataVector.
   void jacobian_helper(
       gsl::not_null<tnsr::Ij<T, 3, Frame::NoFrame>*> result,
-      const ylm::Spherepack::InterpolationInfo<T>& interpolation_info,
-      const DataVector& extended_coefs, const std::array<T, 3>& centered_coords,
-      const T& radial_distortion, const T& transition_func,
-      const ylm::Spherepack& ylm) const;
+      const ylm::Spherepack::InterpolationInfo<T>* interpolation_info,
+      const Matrix* interpolation_matrix, const DataVector& extended_coefs,
+      const std::array<T, 3>& centered_coords, const T& radial_distortion,
+      const T& transition_func, const ylm::Spherepack& ylm) const;
 
   void check_size(const gsl::not_null<DataVector*>& coefs,
                   const FunctionsOfTimeMap& functions_of_time, double time,

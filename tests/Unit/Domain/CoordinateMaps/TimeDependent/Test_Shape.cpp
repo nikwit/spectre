@@ -605,6 +605,7 @@ void test_combined_call(const TransitionFunction& transition_func, size_t l_max,
   const auto single_jacobian =
       map.jacobian(target_data, time, functions_of_time);
 
+  const std::array<DataVector, 3> source_data = target_data;
   std::array<DataVector, 3> combined_frame_velocity{};
   tnsr::Ij<DataVector, 3, Frame::NoFrame> combined_jacobian{};
 
@@ -615,6 +616,51 @@ void test_combined_call(const TransitionFunction& transition_func, size_t l_max,
   CHECK_ITERABLE_APPROX(target_data, single_coords);
   CHECK_ITERABLE_APPROX(combined_frame_velocity, single_frame_velocity);
   CHECK_ITERABLE_APPROX(combined_jacobian, single_jacobian);
+
+  // Repeat the combined call with the same source points: the first call
+  // above used the matrix-free path and recorded the cache key, the second
+  // call builds the interpolation-matrix cache, and the third uses the cached
+  // matrix. All must agree with the matrix-free result to roundoff.
+  const Approx cache_approx = Approx::custom().epsilon(1.0e-11).scale(1.0);
+  for (size_t repeat = 0; repeat < 2; ++repeat) {
+    auto repeat_coords = source_data;
+    std::array<DataVector, 3> repeat_frame_velocity{};
+    tnsr::Ij<DataVector, 3, Frame::NoFrame> repeat_jacobian{};
+    map.coords_frame_velocity_jacobian(make_not_null(&repeat_coords),
+                                       make_not_null(&repeat_frame_velocity),
+                                       make_not_null(&repeat_jacobian), time,
+                                       functions_of_time);
+    CHECK_ITERABLE_CUSTOM_APPROX(repeat_coords, target_data, cache_approx);
+    CHECK_ITERABLE_CUSTOM_APPROX(repeat_frame_velocity,
+                                 combined_frame_velocity, cache_approx);
+    CHECK_ITERABLE_CUSTOM_APPROX(repeat_jacobian, combined_jacobian,
+                                 cache_approx);
+  }
+
+  // Changing the target points must invalidate the cache: evaluate at
+  // shifted points (three times, so the last call runs on a rebuilt cache)
+  // and compare against the independent single-function calls.
+  auto shifted_source = source_data;
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(shifted_source, i) *= 1.01;
+  }
+  const auto shifted_coords_expected =
+      map(shifted_source, time, functions_of_time);
+  const auto shifted_jacobian_expected =
+      map.jacobian(shifted_source, time, functions_of_time);
+  for (size_t repeat = 0; repeat < 3; ++repeat) {
+    auto shifted_coords = shifted_source;
+    std::array<DataVector, 3> shifted_frame_velocity{};
+    tnsr::Ij<DataVector, 3, Frame::NoFrame> shifted_jacobian{};
+    map.coords_frame_velocity_jacobian(make_not_null(&shifted_coords),
+                                       make_not_null(&shifted_frame_velocity),
+                                       make_not_null(&shifted_jacobian), time,
+                                       functions_of_time);
+    CHECK_ITERABLE_CUSTOM_APPROX(shifted_coords, shifted_coords_expected,
+                                 cache_approx);
+    CHECK_ITERABLE_CUSTOM_APPROX(shifted_jacobian, shifted_jacobian_expected,
+                                 cache_approx);
+  }
 }
 }  // namespace
 

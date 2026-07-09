@@ -3,10 +3,12 @@
 
 #include "Domain/CoordinateMaps/TimeDependent/Shape.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <optional>
 #include <pup.h>
@@ -16,11 +18,13 @@
 #include <unordered_set>
 
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/Matrix.hpp"
 #include "DataStructures/Tags/TempTensor.hpp"
 #include "DataStructures/Tensor/EagerMath/DeterminantAndInverse.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/ShapeMapTransitionFunctions/ShapeMapTransitionFunction.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/SpherepackIterator.hpp"
+#include "Utilities/Blas.hpp"
 #include "Utilities/ContainerHelpers.hpp"
 #include "Utilities/DereferenceWrapper.hpp"
 #include "Utilities/EqualWithinRoundoff.hpp"
@@ -80,10 +84,13 @@ void cartesian_to_spherical(gsl::not_null<std::array<T, 2>*> result,
 template <typename T>
 void Shape::jacobian_helper(
     gsl::not_null<tnsr::Ij<T, 3, Frame::NoFrame>*> result,
-    const ylm::Spherepack::InterpolationInfo<T>& interpolation_info,
-    const DataVector& extended_coefs, const std::array<T, 3>& centered_coords,
-    const T& radial_distortion, const T& transition_func,
-    const Spherepack& ylm) const {
+    const ylm::Spherepack::InterpolationInfo<T>* interpolation_info,
+    const Matrix* interpolation_matrix, const DataVector& extended_coefs,
+    const std::array<T, 3>& centered_coords, const T& radial_distortion,
+    const T& transition_func, const Spherepack& ylm) const {
+  ASSERT((interpolation_info == nullptr) != (interpolation_matrix == nullptr),
+         "Exactly one of interpolation_info and interpolation_matrix must be "
+         "non-null.");
   const auto angular_gradient = ylm.gradient_from_coefs(extended_coefs);
   tnsr::i<DataVector, 3, Frame::Inertial> cartesian_gradient(
       ylm.physical_size());
@@ -120,11 +127,36 @@ void Shape::jacobian_helper(
     } else {
       gsl::at(target_gradient, i) = result->get(2, i);
     }
-
-    // interpolate the cartesian gradient to the thetas and phis of the
-    // `source_coords`
-    ylm.interpolate(make_not_null(&gsl::at(target_gradient, i)),
-                    cartesian_gradient.get(i).data(), interpolation_info);
+    if (interpolation_info != nullptr) {
+      // interpolate the cartesian gradient to the thetas and phis of the
+      // `source_coords`
+      ylm.interpolate(make_not_null(&gsl::at(target_gradient, i)),
+                      cartesian_gradient.get(i).data(), *interpolation_info);
+    }
+  }
+  if constexpr (std::is_same_v<T, DataVector>) {
+    if (interpolation_matrix != nullptr) {
+      // transform the cartesian gradient to spectral coefficients (cheap on
+      // the small collocation grid), then evaluate all three components at
+      // the target points with a single matrix product
+      const size_t num_coefs = ylm.spectral_size();
+      const size_t num_points = get_size(radial_distortion);
+      DataVector gradient_coefs{3 * num_coefs};
+      for (size_t i = 0; i < 3; i++) {
+        ylm.phys_to_spec(make_not_null(gradient_coefs.data() + i * num_coefs),
+                         cartesian_gradient.get(i).data());
+      }
+      DataVector target_buffer{3 * num_points};
+      dgemm_<true>('N', 'N', num_points, 3, num_coefs, 1.0,
+                   interpolation_matrix->data(),
+                   interpolation_matrix->spacing(), gradient_coefs.data(),
+                   num_coefs, 0.0, target_buffer.data(), num_points);
+      for (size_t i = 0; i < 3; i++) {
+        std::copy(target_buffer.data() + i * num_points,
+                  target_buffer.data() + (i + 1) * num_points,
+                  gsl::at(target_gradient, i).data());
+      }
+    }
   }
 
   // G / r
@@ -362,8 +394,9 @@ tnsr::Ij<tt::remove_cvref_wrap_t<T>, 3, Frame::NoFrame> Shape::jacobian(
   tnsr::Ij<tt::remove_cvref_wrap_t<T>, 3, Frame::NoFrame> result(
       get_size(centered_coords[0]));
 
-  jacobian_helper(make_not_null(&result), interpolation_info, truncated_coefs,
-                  centered_coords, radial_distortion, transition_func, ylm);
+  jacobian_helper(make_not_null(&result), &interpolation_info, nullptr,
+                  truncated_coefs, centered_coords, radial_distortion,
+                  transition_func, ylm);
   return result;
 }
 
@@ -416,26 +449,51 @@ void Shape::coords_frame_velocity_jacobian(
   check_size(make_not_null(&truncated_coefs), functions_of_time, time, false);
   check_size(make_not_null(&truncated_coef_derivs), functions_of_time, time,
              true);
-  const auto interpolation_info = ylm.set_up_interpolation_info(theta_phis);
+  const std::shared_ptr<const Matrix> interpolation_matrix =
+      get_interpolation_matrix(theta_phis, truncated_l_max, ylm);
+  std::optional<ylm::Spherepack::InterpolationInfo<DataVector>>
+      interpolation_info{};
   auto& radial_distortion = get(get<::Tags::TempScalar<0>>(temps));
-  // evaluate the spherical harmonic expansion at the angles of
-  // `source_coords`
-  ylm.interpolate_from_coefs(make_not_null(&radial_distortion), truncated_coefs,
-                             interpolation_info);
+  auto& radii_velocities = get<0, 1>(*jac);
+  if (interpolation_matrix != nullptr) {
+    // evaluate the spherical harmonic expansion and its time derivative at
+    // the angles of `source_coords` with a single matrix product
+    const size_t num_coefs = ylm.spectral_size();
+    DataVector coef_matrix{2 * num_coefs};
+    std::copy(truncated_coefs.begin(), truncated_coefs.end(),
+              coef_matrix.begin());
+    std::copy(truncated_coef_derivs.begin(), truncated_coef_derivs.end(),
+              coef_matrix.begin() + num_coefs);
+    DataVector target_buffer{2 * size};
+    dgemm_<true>('N', 'N', size, 2, num_coefs, 1.0,
+                 interpolation_matrix->data(), interpolation_matrix->spacing(),
+                 coef_matrix.data(), num_coefs, 0.0, target_buffer.data(),
+                 size);
+    std::copy(target_buffer.data(), target_buffer.data() + size,
+              radial_distortion.data());
+    std::copy(target_buffer.data() + size, target_buffer.data() + 2 * size,
+              radii_velocities.data());
+  } else {
+    interpolation_info.emplace(ylm.set_up_interpolation_info(theta_phis));
+    // evaluate the spherical harmonic expansion at the angles of
+    // `source_coords`
+    ylm.interpolate_from_coefs(make_not_null(&radial_distortion),
+                               truncated_coefs, *interpolation_info);
+    ylm.interpolate_from_coefs(make_not_null(&radii_velocities),
+                               truncated_coef_derivs, *interpolation_info);
+  }
 
   auto& transition_func = get(get<::Tags::TempScalar<1>>(temps));
   transition_func = transition_func_->operator()(centered_coords, std::nullopt);
   *source_and_target_coords =
       center_ + centered_coords * (1. - radial_distortion * transition_func);
 
-  auto& radii_velocities = get<0, 1>(*jac);
-  ylm.interpolate_from_coefs(make_not_null(&radii_velocities),
-                             truncated_coef_derivs, interpolation_info);
   *frame_vel = -centered_coords * radii_velocities * transition_func;
 
-  jacobian_helper<DataVector>(jac, interpolation_info, truncated_coefs,
-                              centered_coords, radial_distortion,
-                              transition_func, ylm);
+  jacobian_helper<DataVector>(
+      jac, interpolation_info.has_value() ? &*interpolation_info : nullptr,
+      interpolation_matrix.get(), truncated_coefs, centered_coords,
+      radial_distortion, transition_func, ylm);
 }
 
 template <typename T>
@@ -445,6 +503,76 @@ tnsr::Ij<tt::remove_cvref_wrap_t<T>, 3, Frame::NoFrame> Shape::inv_jacobian(
   return determinant_and_inverse(
              jacobian(source_coords, time, functions_of_time))
       .second;
+}
+
+std::shared_ptr<const Matrix> Shape::get_interpolation_matrix(
+    const std::array<DataVector, 2>& theta_phis, const size_t l_max,
+    const Spherepack& ylm) const {
+  // Never block: a map instance can be shared across threads (e.g. the
+  // interpolation framework calls the Block's map concurrently), and the
+  // matrix-free path is always a correct fallback.
+  const std::unique_lock lock{interpolation_matrix_mutex_, std::try_to_lock};
+  if (not lock.owns_lock()) {
+    return nullptr;
+  }
+  // The matrix has num_points x spectral_size ~ 2 N (l+1)^2 entries, so both
+  // its memory and its build cost grow quickly with l_max. Above this size
+  // the cache is disabled and the matrix-free path is used; at ~1000 target
+  // points the limit corresponds to l_max ~ 40. Note the build cost at the
+  // top of that range is of order seconds (one interpolation per basis
+  // function); it is paid once per element per change of the truncated
+  // l_max, which is amortized over the element lifetime, but building the
+  // matrix by direct recurrences would reduce it to milliseconds if runs
+  // spend significant time at high l_max.
+  static constexpr size_t max_basis_matrix_bytes = 32'000'000;
+  if (theta_phis[0].size() * ylm.spectral_size() * sizeof(double) >
+      max_basis_matrix_bytes) {
+    return nullptr;
+  }
+  auto& cache = interpolation_matrix_cache_;
+  const auto key_matches = [&theta_phis, l_max](
+                               const size_t cached_l_max,
+                               const std::array<DataVector, 2>& angles) {
+    return cached_l_max == l_max and
+           angles[0].size() == theta_phis[0].size() and
+           angles[0] == theta_phis[0] and angles[1] == theta_phis[1];
+  };
+  if (cache.basis_matrix != nullptr and
+      key_matches(cache.l_max, cache.target_angles)) {
+    return cache.basis_matrix;
+  }
+  if (not key_matches(cache.pending_l_max, cache.pending_target_angles)) {
+    // First occurrence of this key: remember it and let the caller use the
+    // matrix-free path. The matrix is only built when the same key is seen
+    // twice in a row, so evaluations at ever-changing points never pay the
+    // build cost.
+    cache.pending_l_max = l_max;
+    cache.pending_target_angles = theta_phis;
+    return nullptr;
+  }
+  // Same key twice in a row: (re)build the matrix by evaluating unit
+  // coefficient vectors. This costs of order a millisecond and is amortized
+  // over the element's lifetime.
+  const auto interpolation_info = ylm.set_up_interpolation_info(theta_phis);
+  const size_t num_points = theta_phis[0].size();
+  const size_t num_coefs = ylm.spectral_size();
+  const auto basis_matrix =
+      std::make_shared<Matrix>(num_points, num_coefs, 0.0);
+  DataVector unit_coefs{num_coefs, 0.0};
+  DataVector column{num_points};
+  for (size_t k = 0; k < num_coefs; ++k) {
+    unit_coefs[k] = 1.0;
+    ylm.interpolate_from_coefs(make_not_null(&column), unit_coefs,
+                               interpolation_info);
+    for (size_t p = 0; p < num_points; ++p) {
+      (*basis_matrix)(p, k) = column[p];
+    }
+    unit_coefs[k] = 0.0;
+  }
+  cache.l_max = l_max;
+  cache.target_angles = theta_phis;
+  cache.basis_matrix = basis_matrix;
+  return basis_matrix;
 }
 
 size_t Shape::find_truncated_l_max(const DataVector& coefs,
