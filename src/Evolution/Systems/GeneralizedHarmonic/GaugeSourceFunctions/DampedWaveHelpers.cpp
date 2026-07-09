@@ -9,7 +9,6 @@
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tags/TempTensor.hpp"
 #include "DataStructures/TempBuffer.hpp"
-#include "DataStructures/Tensor/EagerMath/DotProduct.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/SpacetimeDerivOfDetSpatialMetric.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/SpatialDerivOfLapse.hpp"
@@ -26,8 +25,11 @@ template <typename DataType, size_t SpatialDim, typename Frame>
 void spatial_weight_function(const gsl::not_null<Scalar<DataType>*> weight,
                              const tnsr::I<DataType, SpatialDim, Frame>& coords,
                              const double sigma_r) {
-  const auto r_squared = dot_product(coords, coords);
-  get(*weight) = exp(-get(r_squared) / pow<2>(sigma_r));
+  get(*weight) = square(get<0>(coords));
+  for (size_t i = 1; i < SpatialDim; ++i) {
+    get(*weight) += square(coords.get(i));
+  }
+  get(*weight) = exp(-get(*weight) / pow<2>(sigma_r));
 }
 
 template <typename DataType, size_t SpatialDim, typename Frame>

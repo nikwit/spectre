@@ -100,9 +100,15 @@ namespace gh {
  * `evolution::dg::Actions::detail::volume_terms()`.
  *
  * \warning When using harmonic gauge,
- * gr::Tags::SqrtDetSpatialMetric<DataVector> and
- * gr::Tags::SpacetimeChristoffelSecondKind<Dim, Frame::Inertial, DataVector>
- * are not computed. In Debug mode, they are filled with with signaling NaNs.
+ * gr::Tags::SqrtDetSpatialMetric<DataVector> is not computed. In Debug mode,
+ * it is filled with signaling NaNs.
+ *
+ * For gauge conditions that only use pointwise data (harmonic and damped
+ * harmonic), passing a nonzero `block_size` evaluates the time derivative in
+ * blocks of grid points so the temporaries stay resident in the core-private
+ * cache. The result is identical to an un-blocked evaluation. The default
+ * (`block_size = 0`) evaluates the whole grid at once, which measured faster
+ * on Apple M4; the blocked path is kept for evaluation on cluster hardware.
  */
 template <class AllSolutionsForChristoffelAnalytic, size_t Dim>
 struct TimeDerivative {
@@ -125,7 +131,6 @@ struct TimeDerivative {
       gr::Tags::SqrtDetSpatialMetric<DataVector>,
       gr::Tags::InverseSpacetimeMetric<DataVector, Dim>,
       gr::Tags::SpacetimeChristoffelFirstKind<DataVector, Dim>,
-      gr::Tags::SpacetimeChristoffelSecondKind<DataVector, Dim>,
       gr::Tags::TraceSpacetimeChristoffelFirstKind<DataVector, Dim>,
       gr::Tags::SpacetimeNormalVector<DataVector, Dim>>;
   using argument_tags =
@@ -172,7 +177,60 @@ struct TimeDerivative {
       gsl::not_null<Scalar<DataVector>*> sqrt_det_spatial_metric,
       gsl::not_null<tnsr::AA<DataVector, Dim>*> inverse_spacetime_metric,
       gsl::not_null<tnsr::abb<DataVector, Dim>*> christoffel_first_kind,
-      gsl::not_null<tnsr::Abb<DataVector, Dim>*> christoffel_second_kind,
+      gsl::not_null<tnsr::a<DataVector, Dim>*> trace_christoffel,
+      gsl::not_null<tnsr::A<DataVector, Dim>*> normal_spacetime_vector,
+      const tnsr::iaa<DataVector, Dim>& d_spacetime_metric,
+      const tnsr::iaa<DataVector, Dim>& d_pi,
+      const tnsr::ijaa<DataVector, Dim>& d_phi,
+      const tnsr::aa<DataVector, Dim>& spacetime_metric,
+      const tnsr::aa<DataVector, Dim>& pi,
+      const tnsr::iaa<DataVector, Dim>& phi, const Scalar<DataVector>& gamma0,
+      const Scalar<DataVector>& gamma1, const Scalar<DataVector>& gamma2,
+      const gauges::GaugeCondition& gauge_condition, const Mesh<Dim>& mesh,
+      double time,
+      const tnsr::I<DataVector, Dim, Frame::Inertial>& inertial_coords,
+      const InverseJacobian<DataVector, Dim, Frame::ElementLogical,
+                            Frame::Inertial>& inverse_jacobian,
+      const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
+          mesh_velocity,
+      size_t block_size = 0);
+
+ private:
+  // The un-blocked implementation; `apply` calls this either on the whole
+  // grid or on cache-sized blocks of it.
+  static evolution::dg::TimeDerivativeDecisions<Dim> apply_impl(
+      gsl::not_null<tnsr::aa<DataVector, Dim>*> dt_spacetime_metric,
+      gsl::not_null<tnsr::aa<DataVector, Dim>*> dt_pi,
+      gsl::not_null<tnsr::iaa<DataVector, Dim>*> dt_phi,
+      gsl::not_null<Scalar<DataVector>*> temp_gamma1,
+      gsl::not_null<Scalar<DataVector>*> temp_gamma2,
+      gsl::not_null<tnsr::a<DataVector, Dim>*> temp_gauge_function,
+      gsl::not_null<tnsr::ab<DataVector, Dim>*>
+          temp_spacetime_deriv_gauge_function,
+      gsl::not_null<Scalar<DataVector>*> gamma1gamma2,
+      gsl::not_null<Scalar<DataVector>*> half_half_pi_two_normals,
+      gsl::not_null<Scalar<DataVector>*> normal_dot_gauge_constraint,
+      gsl::not_null<Scalar<DataVector>*> gamma1_plus_1,
+      gsl::not_null<tnsr::a<DataVector, Dim>*> pi_one_normal,
+      gsl::not_null<tnsr::a<DataVector, Dim>*> gauge_constraint,
+      gsl::not_null<tnsr::i<DataVector, Dim>*> half_phi_two_normals,
+      gsl::not_null<tnsr::aa<DataVector, Dim>*>
+          shift_dot_three_index_constraint,
+      gsl::not_null<tnsr::aa<DataVector, Dim>*>
+          mesh_velocity_dot_three_index_constraint,
+      gsl::not_null<tnsr::ia<DataVector, Dim>*> phi_one_normal,
+      gsl::not_null<tnsr::aB<DataVector, Dim>*> pi_2_up,
+      gsl::not_null<tnsr::iaa<DataVector, Dim>*> three_index_constraint,
+      gsl::not_null<tnsr::Iaa<DataVector, Dim>*> phi_1_up,
+      gsl::not_null<tnsr::iaB<DataVector, Dim>*> phi_3_up,
+      gsl::not_null<tnsr::abC<DataVector, Dim>*> christoffel_first_kind_3_up,
+      gsl::not_null<Scalar<DataVector>*> lapse,
+      gsl::not_null<tnsr::I<DataVector, Dim>*> shift,
+      gsl::not_null<tnsr::II<DataVector, Dim>*> inverse_spatial_metric,
+      gsl::not_null<Scalar<DataVector>*> det_spatial_metric,
+      gsl::not_null<Scalar<DataVector>*> sqrt_det_spatial_metric,
+      gsl::not_null<tnsr::AA<DataVector, Dim>*> inverse_spacetime_metric,
+      gsl::not_null<tnsr::abb<DataVector, Dim>*> christoffel_first_kind,
       gsl::not_null<tnsr::a<DataVector, Dim>*> trace_christoffel,
       gsl::not_null<tnsr::A<DataVector, Dim>*> normal_spacetime_vector,
       const tnsr::iaa<DataVector, Dim>& d_spacetime_metric,
