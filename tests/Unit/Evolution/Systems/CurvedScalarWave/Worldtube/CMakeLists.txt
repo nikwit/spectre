@@ -20,6 +20,7 @@ set(LIBRARY_SOURCES
   SingletonActions/Test_ChangeSlabSize.cpp
   SingletonActions/Test_InitializeElementFacesGridCoordinates.cpp
   SingletonActions/Test_InitializeEvolvedVariables.cpp
+  SingletonActions/Test_InitializeSpacetimeTags.cpp
   SingletonActions/Test_IterateAccelerationTerms.cpp
   SingletonActions/Test_ObserveWorldtubeSolution.cpp
   SingletonActions/Test_UpdateAcceleration.cpp

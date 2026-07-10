@@ -1,23 +1,33 @@
 // Distributed under the MIT License.
 // See LICENSE.txt for details.
-#include <array>
-#include <memory>
-#include "DataStructures/DataBox/DataBox.hpp"
-#include "DataStructures/Tensor/Tensor.hpp"
-#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/InitializeEvolvedVariables.hpp"
+
 #include "Framework/TestingFramework.hpp"
+
+#include <array>
+#include <cstddef>
+#include <memory>
+
+#include "DataStructures/DataBox/DataBox.hpp"
+#include "DataStructures/DataVector.hpp"
+#include "DataStructures/Tensor/Tensor.hpp"
+#include "Domain/ExcisionSphere.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/InitializeEvolvedVariables.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/Tags.hpp"
 #include "Time/Tags/HistoryEvolvedVariables.hpp"
 #include "Time/Tags/Time.hpp"
 #include "Time/Tags/TimeStepper.hpp"
 #include "Time/TimeSteppers/AdamsBashforth.hpp"
 #include "Time/TimeSteppers/TimeStepper.hpp"
+#include "Utilities/TMPL.hpp"
+
 namespace CurvedScalarWave::Worldtube {
 namespace {
 SPECTRE_TEST_CASE(
     "Unit.Evolution.Systems.CSW.Worldtube.InitializeEvolvedVariables",
     "[Unit][Evolution]") {
   using variables_tag = ::Tags::Variables<
-      tmpl::list<Tags::EvolvedPosition<3>, Tags::EvolvedVelocity<3>>>;
+      tmpl::list<Tags::EvolvedPosition<3>, Tags::EvolvedVelocity<3>, Tags::Psi0,
+                 Tags::dtPsi0>>;
   using dt_variables_tag = db::add_tag_prefix<::Tags::dt, variables_tag>;
   const tnsr::I<double, 3> initial_pos{{1., 2., 3.}};
   const tnsr::I<double, 3, Frame::Grid> initial_excision_pos{{1., 2., 3.}};
@@ -47,13 +57,21 @@ SPECTRE_TEST_CASE(
 
   db::mutate_apply<Initialization::InitializeEvolvedVariables>(
       make_not_null(&box));
-  const auto vars = db::get<variables_tag>(box);
+  const auto& vars = db::get<variables_tag>(box);
   for (size_t i = 0; i < 3; ++i) {
     CHECK(get<Tags::EvolvedPosition<3>>(vars).get(i)[0] == initial_pos.get(i));
     CHECK(get<Tags::EvolvedVelocity<3>>(vars).get(i)[0] == initial_vel.get(i));
   }
+  // Psi0 and dtPsi0 are scalars of size 1 initialized to zero
+  CHECK(get(get<Tags::Psi0>(vars)) == DataVector(1, 0.));
+  CHECK(get(get<Tags::dtPsi0>(vars)) == DataVector(1, 0.));
+  // all time derivatives are initialized to zero
   CHECK(db::get<dt_variables_tag>(box) ==
         dt_variables_tag::type(size_t(1), 0.));
+  CHECK(get(get<::Tags::dt<Tags::Psi0>>(db::get<dt_variables_tag>(box))) ==
+        DataVector(1, 0.));
+  CHECK(get(get<::Tags::dt<Tags::dtPsi0>>(db::get<dt_variables_tag>(box))) ==
+        DataVector(1, 0.));
   CHECK(db::get<::Tags::HistoryEvolvedVariables<variables_tag>>(box) ==
         TimeSteppers::History<variables_tag::type>(1));
   CHECK(get<Tags::CurrentIteration>(box) == 0);
