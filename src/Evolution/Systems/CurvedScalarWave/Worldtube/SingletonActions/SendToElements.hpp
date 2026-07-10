@@ -15,12 +15,12 @@
 #include "Domain/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Inboxes.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Tags.hpp"
+#include "NumericalAlgorithms/LinearOperators/PartialDerivatives.hpp"
 #include "NumericalAlgorithms/Strahlkorper/Tags.hpp"
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/GlobalCache.hpp"
-#include "ParallelAlgorithms/Initialization/MutateAssign.hpp"
+#include "Parallel/Invoke.hpp"
 #include "Time/TimeStepId.hpp"
-#include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -32,15 +32,23 @@ struct TimeStepId;
 
 namespace CurvedScalarWave::Worldtube::Actions {
 /*!
- * \brief Sends the regular field coefficients to each element abutting the
- * worldtube.
+ * \brief Sends the regular field to each element abutting the worldtube,
+ * evaluated at the grid coordinates of each face.
+ *
+ * \details The regular field is expanded as a Taylor series in the co-moving
+ * grid frame in which the worldtube is at rest. At expansion order 2, the
+ * trace of the second-order coefficient is reconstructed from the evolved
+ * monopole `Tags::Psi0` and added back to the trace-free quadrupole
+ * coefficient.
  */
 template <typename Metavariables>
 struct SendToElements {
   static constexpr size_t Dim = Metavariables::volume_dim;
   using psi_tag = CurvedScalarWave::Tags::Psi;
   using dt_psi_tag = ::Tags::dt<CurvedScalarWave::Tags::Psi>;
-  using tags_to_send = tmpl::list<psi_tag, dt_psi_tag>;
+  using di_psi_tag = ::Tags::deriv<CurvedScalarWave::Tags::Psi,
+                                   tmpl::size_t<Dim>, Frame::Grid>;
+  using tags_to_send = tmpl::list<psi_tag, dt_psi_tag, di_psi_tag>;
 
   template <typename DbTagsList, typename... InboxTags, typename ArrayIndex,
             typename ActionList, typename ParallelComponent>
@@ -56,32 +64,64 @@ struct SendToElements {
     const auto& faces_grid_coords =
         get<Tags::ElementFacesGridCoordinates<Dim>>(box);
     const auto& psi_l0 =
-        get<Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Inertial>>(
-            box);
+        get<Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Grid>>(box);
     const auto& dt_psi_l0 =
         get<Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim,
-                                 Frame::Inertial>>(box);
+                                 Frame::Grid>>(box);
     const auto& psi_l1 =
-        get<Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Inertial>>(
-            box);
+        get<Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>>(box);
     const auto& dt_psi_l1 =
         get<Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim,
-                                 Frame::Inertial>>(box);
-    const size_t num_coefs = order == 0 ? 1 : 4;
-    Variables<tags_to_send> vars_to_send(num_coefs);
-    get(get<psi_tag>(vars_to_send))[0] = get(psi_l0);
-    get(get<dt_psi_tag>(vars_to_send))[0] = get(dt_psi_l0);
-    if (order > 0) {
-      for (size_t i = 0; i < Dim; ++i) {
-        get(get<psi_tag>(vars_to_send))[i + 1] = psi_l1.get(i);
-        get(get<dt_psi_tag>(vars_to_send))[i + 1] = dt_psi_l1.get(i);
+                                 Frame::Grid>>(box);
+    const auto& psi_l2 =
+        get<Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim, Frame::Grid>>(box);
+    const auto& dt_psi_l2 =
+        get<Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 2, Dim,
+                                 Frame::Grid>>(box);
+    const auto& psi_0 = get<Tags::Psi0>(box);
+    const double wt_radius = db::get<Tags::WorldtubeRadius>(box);
+    // at second order the monopole of the regular field on the worldtube
+    // boundary contains a contribution of the trace of the second-order
+    // coefficient which is reconstructed here from the evolved value of the
+    // constant coefficient Psi0, see Eq. (33a) of
+    // https://arxiv.org/abs/2304.05329
+    const double trace_psi_2_over_3 =
+        (get(psi_l0) - get(psi_0)[0]) / wt_radius / wt_radius;
+    for (const auto& [element_id, grid_coords] : faces_grid_coords) {
+      const size_t grid_size = get<0>(grid_coords).size();
+      Variables<tags_to_send> vars_to_send(grid_size);
+      get(get<psi_tag>(vars_to_send)) = get(psi_l0);
+      get(get<dt_psi_tag>(vars_to_send)) = get(dt_psi_l0);
+      if (order > 0) {
+        for (size_t i = 0; i < Dim; ++i) {
+          get(get<psi_tag>(vars_to_send)) += psi_l1.get(i) * grid_coords.get(i);
+          get(get<dt_psi_tag>(vars_to_send)) +=
+              dt_psi_l1.get(i) * grid_coords.get(i);
+          get<di_psi_tag>(vars_to_send).get(i) = psi_l1.get(i);
+        }
+        if (order > 1) {
+          for (size_t i = 0; i < Dim; ++i) {
+            get<di_psi_tag>(vars_to_send).get(i) +=
+                2. * trace_psi_2_over_3 * grid_coords.get(i);
+            for (size_t j = 0; j < Dim; ++j) {
+              get(get<psi_tag>(vars_to_send)) +=
+                  psi_l2.get(i, j) * grid_coords.get(i) * grid_coords.get(j);
+              get(get<dt_psi_tag>(vars_to_send)) +=
+                  dt_psi_l2.get(i, j) * grid_coords.get(i) * grid_coords.get(j);
+              get<di_psi_tag>(vars_to_send).get(i) +=
+                  2. * psi_l2.get(i, j) * grid_coords.get(j);
+            }
+          }
+        }
+      } else {
+        for (size_t i = 0; i < Dim; ++i) {
+          // at 0th order the spatial derivative is just zero
+          get<di_psi_tag>(vars_to_send).get(i) = 0.;
+        }
       }
-    }
-    for (const auto& [element_id, _] : faces_grid_coords) {
-      auto vars_to_send_copy = vars_to_send;
       Parallel::receive_data<Tags::RegularFieldInbox<Dim>>(
           element_proxies[element_id], db::get<::Tags::TimeStepId>(box),
-          std::move(vars_to_send_copy));
+          std::move(vars_to_send));
     }
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }

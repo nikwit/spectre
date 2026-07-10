@@ -28,7 +28,8 @@ namespace CurvedScalarWave::Worldtube::Initialization {
 struct InitializeEvolvedVariables {
   static constexpr size_t Dim = 3;
   using variables_tag = ::Tags::Variables<
-      tmpl::list<Tags::EvolvedPosition<Dim>, Tags::EvolvedVelocity<Dim>>>;
+      tmpl::list<Tags::EvolvedPosition<Dim>, Tags::EvolvedVelocity<Dim>,
+                 Tags::Psi0, Tags::dtPsi0>>;
   using dt_variables_tag = db::add_tag_prefix<::Tags::dt, variables_tag>;
 
   using simple_tags =
@@ -46,11 +47,13 @@ struct InitializeEvolvedVariables {
                                    ::Tags::Time, Tags::ExcisionSphere<Dim>>;
   static void apply(
       const gsl::not_null<Variables<
-          tmpl::list<Tags::EvolvedPosition<Dim>, Tags::EvolvedVelocity<Dim>>>*>
+          tmpl::list<Tags::EvolvedPosition<Dim>, Tags::EvolvedVelocity<Dim>,
+                     Tags::Psi0, Tags::dtPsi0>>*>
           evolved_vars,
-      const gsl::not_null<
-          Variables<tmpl::list<::Tags::dt<Tags::EvolvedPosition<Dim>>,
-                               ::Tags::dt<Tags::EvolvedVelocity<Dim>>>>*>
+      const gsl::not_null<Variables<
+          tmpl::list<::Tags::dt<Tags::EvolvedPosition<Dim>>,
+                     ::Tags::dt<Tags::EvolvedVelocity<Dim>>,
+                     ::Tags::dt<Tags::Psi0>, ::Tags::dt<Tags::dtPsi0>>>*>
           dt_evolved_vars,
       const gsl::not_null<size_t*> current_iteration,
       const gsl::not_null<double*> expiration_time,

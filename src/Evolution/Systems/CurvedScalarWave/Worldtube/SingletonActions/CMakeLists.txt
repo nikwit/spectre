@@ -5,6 +5,7 @@
 spectre_target_sources(
   ${LIBRARY}
   PRIVATE
+  InitializeSpacetimeTags.cpp
   IterateAccelerationTerms.cpp
   UpdateAcceleration.cpp
   )
@@ -16,6 +17,7 @@ spectre_target_headers(
   ChangeSlabSize.hpp
   InitializeElementFacesGridCoordinates.hpp
   InitializeEvolvedVariables.hpp
+  InitializeSpacetimeTags.hpp
   IterateAccelerationTerms.hpp
   ObserveWorldtubeSolution.hpp
   ReceiveElementData.hpp

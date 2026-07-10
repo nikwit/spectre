@@ -10,6 +10,7 @@
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/ChangeSlabSize.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/InitializeElementFacesGridCoordinates.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/InitializeEvolvedVariables.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/InitializeSpacetimeTags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/IterateAccelerationTerms.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/ObserveWorldtubeSolution.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/ReceiveElementData.hpp"
@@ -78,6 +79,7 @@ struct WorldtubeSingleton {
       ::Initialization::Actions::InitializeItems<
           ::Initialization::TimeStepping<Metavariables, TimeStepperBase, false>,
           Initialization::InitializeEvolvedVariables,
+          Initialization::InitializeSpacetimeTags,
           Initialization::InitializeElementFacesGridCoordinates<Dim>>,
       ::Initialization::Actions::AddComputeTags<
           tmpl::list<Tags::EvolvedParticlePositionVelocityCompute<Dim>,
