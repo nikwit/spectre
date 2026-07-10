@@ -1186,8 +1186,12 @@ Domain<3> BinaryCompactObject::create_domain() const {
         {{Direction<3>::upper_zeta(), Direction<3>::self(),
           Direction<3>::self()}}};
     const auto outer_wedges_to_shell = shell_to_outer_wedges.inverse_map();
+    // The object shell's radial logical axis (+xi, pointing outward) is
+    // aligned with the surrounding cube wedges' +zeta axis (also pointing
+    // outward), just like the wavezone shell relative to the envelope
+    // wedges. The angular axes use self() (no discrete rotation).
     const OrientationMap<3> object_shell_to_cube{
-        {{Direction<3>::lower_zeta(), Direction<3>::self(),
+        {{Direction<3>::upper_zeta(), Direction<3>::self(),
           Direction<3>::self()}}};
     const auto cube_to_object_shell = object_shell_to_cube.inverse_map();
     const auto aligned = OrientationMap<3>::create_aligned();
