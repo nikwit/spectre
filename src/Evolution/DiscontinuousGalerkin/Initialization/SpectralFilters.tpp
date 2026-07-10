@@ -44,6 +44,7 @@ void SpectralFilters<Dim, TagList>::apply(
   if (*spectral_filter == nullptr) {
     ERROR("No filter found for element "
           << element.id() << " with basis " << mesh.basis()
+          << " and quadrature " << mesh.quadrature()
           << ". You can specify the None filter to disable filtering in an "
              "element.");
   }

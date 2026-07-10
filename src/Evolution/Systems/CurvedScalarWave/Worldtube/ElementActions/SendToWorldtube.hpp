@@ -4,6 +4,7 @@
 #pragma once
 
 #include <boost/math/special_functions/spherical_harmonic.hpp>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <vector>
@@ -27,14 +28,18 @@
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonChare.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Tags.hpp"
 #include "NumericalAlgorithms/LinearOperators/DefiniteIntegral.hpp"
+#include "NumericalAlgorithms/Spectral/Basis.hpp"
 #include "NumericalAlgorithms/LinearOperators/PartialDerivatives.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/RealSphericalHarmonics.hpp"
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "Parallel/Invoke.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
+#include "Utilities/ConstantExpressions.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Gsl.hpp"
+#include "Utilities/Spherepack.hpp"
 #include "Utilities/TMPL.hpp"
 
 /// \cond
@@ -135,8 +140,44 @@ struct SendToWorldtube {
     const auto& dt_psi_puncture =
         get<::Tags::dt<CurvedScalarWave::Tags::Psi>>(puncture_field);
 
+    // A spherical-harmonic shell block covers the entire worldtube boundary
+    // with a single element. In that case the projection integrals are
+    // evaluated with the Gauss quadrature of the spherical-harmonic
+    // collocation grid, which is spectrally exact. The Gauss weights include
+    // the sin(theta) of the area element, so the euclidean area element is
+    // replaced by the quadrature weights times the squared worldtube radius.
+    const bool spherical_harmonic_face =
+        face_mesh.basis(0) == Spectral::Basis::SphericalHarmonic;
+    DataVector s2_integration_weights{};
+    if (spherical_harmonic_face) {
+      const size_t n_theta = face_mesh.extents(0);
+      const size_t n_phi = face_mesh.extents(1);
+      std::vector<double> gauss_points(n_theta + 1);
+      std::vector<double> gauss_weights(n_theta + 1);
+      std::vector<double> gaqd_work(n_theta);
+      int gaqd_err = 0;
+      gaqd_(static_cast<int>(n_theta), gauss_points.data(),
+            gauss_weights.data(), gaqd_work.data(),
+            static_cast<int>(gauss_weights.size()), &gaqd_err);
+      if (UNLIKELY(gaqd_err != 0)) {
+        ERROR("gaqd error " << gaqd_err << " in SendToWorldtube");
+      }
+      s2_integration_weights = DataVector(face_size);
+      const double phi_weight_times_r_squared =
+          2. * M_PI / static_cast<double>(n_phi) *
+          square(excision_sphere.radius());
+      for (size_t j = 0; j < n_phi; ++j) {
+        for (size_t i = 0; i < n_theta; ++i) {
+          s2_integration_weights[i + j * n_theta] =
+              gauss_weights[i] * phi_weight_times_r_squared;
+        }
+      }
+    }
+    const DataVector& integration_weight =
+        spherical_harmonic_face ? s2_integration_weights : get(area_element);
+
     psi_regular_times_det =
-        (get(psi_numerical_face) - get(psi_puncture)) * get(area_element);
+        (get(psi_numerical_face) - get(psi_puncture)) * integration_weight;
 
     const auto& mesh_velocity = db::get<domain::Tags::MeshVelocity<Dim>>(box);
     ASSERT(mesh_velocity.has_value(),
@@ -167,7 +208,7 @@ struct SendToWorldtube {
     dt_psi_regular_times_det =
         (get(dt_psi_numerical_face) - get(dt_psi_puncture) +
          get(db::get<Tags::RegularFieldAdvectiveTerm<Dim>>(box))) *
-        get(area_element);
+        integration_weight;
     const auto& centered_face_coords =
         db::get<Tags::FaceCoordinates<Dim, Frame::Grid, true>>(box);
     ASSERT(centered_face_coords.has_value(),
@@ -188,12 +229,26 @@ struct SendToWorldtube {
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       for (int m = -l; m <= static_cast<int>(l); ++m, ++index) {
         spherical_harmonic = ylm::real_spherical_harmonic(theta, phi, l, m);
-        get(get<CurvedScalarWave::Tags::Psi>(Ylm_coefs)).at(index) =
-            definite_integral(psi_regular_times_det * spherical_harmonic,
-                              face_mesh);
-        get(get<::Tags::dt<CurvedScalarWave::Tags::Psi>>(Ylm_coefs)).at(index) =
-            definite_integral(dt_psi_regular_times_det * spherical_harmonic,
-                              face_mesh);
+        if (spherical_harmonic_face) {
+          // the quadrature weights are already included in the integrands
+          double psi_coef = 0.;
+          double dt_psi_coef = 0.;
+          for (size_t k = 0; k < face_size; ++k) {
+            psi_coef += psi_regular_times_det[k] * spherical_harmonic[k];
+            dt_psi_coef += dt_psi_regular_times_det[k] * spherical_harmonic[k];
+          }
+          get(get<CurvedScalarWave::Tags::Psi>(Ylm_coefs)).at(index) = psi_coef;
+          get(get<::Tags::dt<CurvedScalarWave::Tags::Psi>>(Ylm_coefs))
+              .at(index) = dt_psi_coef;
+        } else {
+          get(get<CurvedScalarWave::Tags::Psi>(Ylm_coefs)).at(index) =
+              definite_integral(psi_regular_times_det * spherical_harmonic,
+                                face_mesh);
+          get(get<::Tags::dt<CurvedScalarWave::Tags::Psi>>(Ylm_coefs))
+              .at(index) =
+              definite_integral(dt_psi_regular_times_det * spherical_harmonic,
+                                face_mesh);
+        }
       }
     }
     ASSERT(index == num_modes, "Internal indexing error. "
