@@ -195,29 +195,7 @@ struct EvolutionMetavars {
     using interpolating_component = typename metavariables::dg_element_array;
   };
 
-  template <size_t Number>
-  struct PsiAlongAxis
-      : tt::ConformsTo<intrp::protocols::InterpolationTargetTag> {
-    static std::string name() {
-      return "PsiAlongAxis" + std::to_string(Number);
-    }
-    using temporal_id = ::Tags::Time;
-    using vars_to_interpolate_to_target =
-        tmpl::list<CurvedScalarWave::Tags::Psi,
-                   domain::Tags::Coordinates<volume_dim, Frame::Inertial>>;
-    using compute_items_on_target = tmpl::list<>;
-    using compute_target_points =
-        intrp::TargetPoints::LineSegment<PsiAlongAxis<Number>, volume_dim,
-                                         Frame::Grid>;
-    using post_interpolation_callbacks =
-        tmpl::list<intrp::callbacks::ObserveLineSegment<
-            vars_to_interpolate_to_target, PsiAlongAxis<Number>>>;
-    template <typename metavariables>
-    using interpolating_component = typename metavariables::dg_element_array;
-  };
-
-  using interpolation_target_tags =
-      tmpl::list<Spheres, PsiAlongAxis<1>, PsiAlongAxis<2>>;
+  using interpolation_target_tags = tmpl::list<Spheres>;
   using interpolator_source_vars =
       tmpl::list<CurvedScalarWave::Tags::Psi,
                  domain::Tags::Coordinates<volume_dim, Frame::Inertial>>;
@@ -240,10 +218,6 @@ struct EvolutionMetavars {
                 Events::time_events<system>, Events::Completion,
                 intrp::Events::InterpolateWithoutInterpComponent<
                     volume_dim, Spheres, interpolator_source_vars>,
-                intrp::Events::InterpolateWithoutInterpComponent<
-                    volume_dim, PsiAlongAxis<1>, interpolator_source_vars>,
-                intrp::Events::InterpolateWithoutInterpComponent<
-                    volume_dim, PsiAlongAxis<2>, interpolator_source_vars>,
                 dg::Events::field_observations<volume_dim, observe_fields,
                                                non_tensor_compute_tags>>>>,
         tmpl::pair<evolution::BoundaryCorrection,
@@ -403,8 +377,6 @@ struct EvolutionMetavars {
       observers::Observer<EvolutionMetavars>,
       observers::ObserverWriter<EvolutionMetavars>,
       intrp::InterpolationTarget<EvolutionMetavars, Spheres>,
-      intrp::InterpolationTarget<EvolutionMetavars, PsiAlongAxis<1>>,
-      intrp::InterpolationTarget<EvolutionMetavars, PsiAlongAxis<2>>,
       CurvedScalarWave::Worldtube::WorldtubeSingleton<EvolutionMetavars>,
       dg_element_array>>;
 
