@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <tuple>
@@ -11,6 +12,7 @@
 #include "DataStructures/DataBox/DataBox.hpp"
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/Variables.hpp"
+#include "Domain/ExcisionSphere.hpp"
 #include "Domain/Structure/ElementId.hpp"
 #include "Domain/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Inboxes.hpp"
@@ -21,6 +23,7 @@
 #include "Parallel/GlobalCache.hpp"
 #include "Parallel/Invoke.hpp"
 #include "Time/TimeStepId.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -80,6 +83,19 @@ struct SendToElements {
                                  Frame::Grid>>(box);
     const auto& psi_0 = get<Tags::Psi0>(box);
     const double wt_radius = db::get<Tags::WorldtubeRadius>(box);
+    const double wt_radius_grid =
+        db::get<Tags::ExcisionSphere<Dim>>(box).radius();
+    if (UNLIKELY(std::abs(wt_radius - wt_radius_grid) >
+                 1e-10 * wt_radius_grid)) {
+      ERROR(
+          "The grid-frame worldtube scheme requires the inertial worldtube "
+          "radius ("
+          << wt_radius << ") to equal the grid excision radius ("
+          << wt_radius_grid
+          << "). Configure `WorldtubeRadiusOptions` with `Amplitude` equal to "
+             "the grid excision radius and a `TransitionRadius` much smaller "
+             "than the orbital radius so the worldtube is rigid.");
+    }
     // at second order the monopole of the regular field on the worldtube
     // boundary contains a contribution of the trace of the second-order
     // coefficient which is reconstructed here from the evolved value of the
