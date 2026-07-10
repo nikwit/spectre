@@ -1051,6 +1051,33 @@ void test_parse_errors() {
   // test_connectivity function.
 }
 
+// Verify that the neighbor graph is two-sided: for every neighbor entry
+// A->B in direction `d` with orientation `O`, block B must have the reverse
+// entry B->A in direction `O(d).opposite()` with orientation
+// `O.inverse_map()`.
+void check_two_sided_neighbor_consistency(const Domain<3>& domain) {
+  const auto& blocks = domain.blocks();
+  for (const auto& block : blocks) {
+    for (const auto& [direction, block_neighbors] : block.neighbors()) {
+      for (const size_t neighbor_id : block_neighbors.ids()) {
+        CAPTURE(block.id());
+        CAPTURE(direction);
+        CAPTURE(neighbor_id);
+        const auto& orientation = block_neighbors.orientation(neighbor_id);
+        const auto direction_in_neighbor = orientation(direction).opposite();
+        CAPTURE(direction_in_neighbor);
+        const auto& neighbor = blocks[neighbor_id];
+        REQUIRE(neighbor.neighbors().count(direction_in_neighbor) == 1);
+        const auto& reverse_neighbors =
+            neighbor.neighbors().at(direction_in_neighbor);
+        REQUIRE(reverse_neighbors.ids().count(block.id()) == 1);
+        CHECK(reverse_neighbors.orientation(block.id()) ==
+              orientation.inverse_map());
+      }
+    }
+  }
+}
+
 void test_spherical_harmonics_wavezone() {
   INFO("Test BinaryCompactObject with SphericalHarmonicsInWavezone=true");
   // Both objects excised, no radial partitioning -> 1 SH outer shell block.
@@ -1116,6 +1143,7 @@ void test_spherical_harmonics_wavezone() {
 
   // Verify the domain can be constructed and inspect neighbor topology.
   const auto domain_sh = bco_sh.create_domain();
+  check_two_sided_neighbor_consistency(domain_sh);
   const auto& blocks = domain_sh.blocks();
   REQUIRE(blocks.size() == 35);
 
@@ -1188,6 +1216,7 @@ void test_spherical_harmonics_wavezone() {
       create_outer_boundary_condition()};
 
   const auto domain_sh2 = bco_sh2.create_domain();
+  check_two_sided_neighbor_consistency(domain_sh2);
   const auto& blocks2 = domain_sh2.blocks();
   REQUIRE(blocks2.size() == 36);
 
@@ -1389,20 +1418,30 @@ void test_spherical_harmonics_object_shells() {
         std::array<size_t, 3>{2, 0, 0});
 
   const auto domain_a_sh = bco_a_sh.create_domain();
+  check_two_sided_neighbor_consistency(domain_a_sh);
   const auto& blocks_a_sh = domain_a_sh.blocks();
   REQUIRE(blocks_a_sh.size() == 39);
   CHECK(blocks_a_sh[0].neighbors().count(Direction<3>::lower_xi()) == 0);
   CHECK(blocks_a_sh[0].neighbors().count(Direction<3>::upper_xi()) == 1);
   CHECK(blocks_a_sh[0].neighbors().at(Direction<3>::upper_xi()).ids().size() ==
         6);
+  // The shell's radial +xi axis is aligned with the cube wedges' radial
+  // +zeta axis (both point outward); angular axes use self().
+  const OrientationMap<3> expected_shell_to_cube{
+      {{Direction<3>::upper_zeta(), Direction<3>::self(),
+        Direction<3>::self()}}};
+  const auto expected_cube_to_shell = expected_shell_to_cube.inverse_map();
   for (size_t i = 1; i <= 6; ++i) {
     CAPTURE(i);
+    CHECK(blocks_a_sh[0]
+              .neighbors()
+              .at(Direction<3>::upper_xi())
+              .orientation(i) == expected_shell_to_cube);
     CHECK(blocks_a_sh[i].neighbors().count(Direction<3>::lower_zeta()) == 1);
-    CHECK(*blocks_a_sh[i]
-               .neighbors()
-               .at(Direction<3>::lower_zeta())
-               .ids()
-               .begin() == 0);
+    const auto& lower_zeta_neighbors =
+        blocks_a_sh[i].neighbors().at(Direction<3>::lower_zeta());
+    CHECK(*lower_zeta_neighbors.ids().begin() == 0);
+    CHECK(lower_zeta_neighbors.orientation(0) == expected_cube_to_shell);
   }
   const auto bcs_a_sh = bco_a_sh.external_boundary_conditions();
   REQUIRE(bcs_a_sh.size() == 39);
@@ -1445,6 +1484,7 @@ void test_spherical_harmonics_object_shells() {
   CHECK(bco_b_sh.initial_extents()[12] == std::array<size_t, 3>{4, 8, 15});
   CHECK(bco_b_sh.initial_refinement_levels()[12] ==
         std::array<size_t, 3>{2, 0, 0});
+  check_two_sided_neighbor_consistency(bco_b_sh.create_domain());
   const auto bcs_b_sh = bco_b_sh.external_boundary_conditions();
   REQUIRE(bcs_b_sh.size() == 39);
   CHECK(bcs_b_sh[12].count(Direction<3>::lower_xi()) == 1);
@@ -1485,6 +1525,7 @@ void test_spherical_harmonics_object_shells() {
   CHECK(bco_both_sh.block_names()[7] == "ObjectBShell0");
   CHECK(bco_both_sh.block_names()[24] == "OuterShell0");
   CHECK(not bco_both_sh.block_groups().contains("OuterShell0"));
+  check_two_sided_neighbor_consistency(bco_both_sh.create_domain());
 
   CHECK_THROWS_WITH(
       domain::creators::BinaryCompactObject(
