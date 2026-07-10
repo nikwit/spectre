@@ -1,0 +1,204 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+Executable: EvolveWorldtubeCurvedScalarWaveKerrSchild3D
+Testing:
+  Check: parse
+  Priority: High
+
+---
+
+Parallelization:
+  ElementDistribution: NumGridPoints
+
+InitialData:
+  ZerothOrderPuncture:
+    ParticlePosition: [&XCoordWorldtube 8.0, 0., 0.]
+    ParticleVelocity: [0., 0.3535533905932738, 0.]
+    ParticleCharge: &Charge 1.0
+
+BackgroundSpacetime:
+  KerrSchild:
+    Mass: 1.
+    Center: [0., 0., 0.]
+    Spin: [0., 0., 0.]
+    Velocity: [0., 0., 0.]
+
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
+
+PhaseChangeAndTriggers:
+
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.0001
+  MinimumTimeStep: 1e-7
+  TimeStepper: Rk5Tsitouras
+
+DomainCreator:
+  BinaryCompactObject:
+    InitialRefinement: 0
+    InitialGridPoints: 12
+    UseEquiangularMap: true
+    ObjectB:
+      InnerRadius: 1.9
+      OuterRadius: 2.2
+      XCoord: -1e-64
+      Interior:
+        ExciseWithBoundaryCondition: DemandOutgoingCharSpeeds
+      UseLogarithmicMap: false
+    ObjectA:
+      InnerRadius: 0.8
+      OuterRadius: 1.0
+      XCoord: *XCoordWorldtube
+      Interior:
+        ExciseWithBoundaryCondition: Worldtube
+      UseLogarithmicMap: false
+    CenterOfMassOffset: [0., 0.]
+    CubeScale: 1.0
+    Envelope:
+      RadialDistribution: Linear
+      Radius: 50.
+    OuterShell:
+      Radius: 400.
+      RadialPartitioning: []
+      RadialDistribution: Linear
+      OpeningAngle: 90.0
+      UseSphericalHarmonics: false
+      BoundaryCondition: ConstraintPreservingSphericalRadiation
+    UseWorldtube: true
+    TimeDependentMaps:
+      InitialTime: 0.
+      ExpansionMap:
+        InitialValues: [1., 0., 0.]
+        AsymptoticVelocityOuterBoundary: 0.
+        DecayTimescaleOuterBoundary: 1.
+      RotationMap:
+        InitialAngularVelocity: [0., 0., 0.0441941738241592]
+      TranslationMap: None
+      SkewMap: None
+      ShapeMapA:
+        LMax: 8
+        CoefficientTruncationLimit: 0.
+        InitialValues: Spherical
+        SizeInitialValues: [0., 0., 0.]
+        TransitionEndsAtCube: false
+      ShapeMapB:
+        LMax: 8
+        CoefficientTruncationLimit: 0.
+        InitialValues: Spherical
+        SizeInitialValues: [0., 0., 0.]
+        TransitionEndsAtCube: false
+      GridCenters: None
+
+SpatialDiscretization:
+  BoundaryCorrection:
+    UpwindPenalty:
+  DiscontinuousGalerkin:
+    Formulation: StrongInertial
+    Quadrature: GaussLobatto
+    Filtering:
+      - Hypercube:
+          HalfPower: 32
+          Enable: true
+          BlocksToFilter: All
+          VolumeFilterOnSubstep: true
+          BoundaryCorrectionFilterOnSubstep: false
+          VolumeFilterEveryNSteps: None
+          BoundaryCorrectionFilterEveryNSteps: None
+
+EventsAndTriggersAtCheckpoints:
+
+EventsAndTriggersAtSlabs:
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 5000
+          Offset: 0
+    Events:
+      - ObserveFields:
+          SubfileName: Volume
+          VariablesToObserve:
+            - Psi
+            - OneIndexConstraint
+          InterpolateToMesh: None
+          ProjectToMesh: None
+          CoordinatesFloatingPointType: Double
+          FloatingPointTypes: [Double]
+          BlocksToObserve: All
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 1000
+          Offset: 0
+    Events:
+      - Spheres
+      - PsiAlongAxis1
+      - PsiAlongAxis2
+  - Trigger:
+      TimeCompares:
+        Comparison: GreaterThan
+        Value: 4000.
+    Events:
+      - Completion
+  - Trigger:
+      Slabs:
+        Specified:
+          Values: [0]
+    Events:
+      - ChangeSlabSize:
+          DelayChange: 0
+          StepChoosers:
+            - Cfl:
+                SafetyFactor: 0.35
+
+Worldtube:
+  ExcisionSphere: ExcisionSphereA
+  PunctureField:
+    Schwarzschild:
+      ExpansionOrder: 1
+      BlackHoleMass: 1.0
+  Charge: *Charge
+  SelfForceOptions: None
+  WorldtubeRadiusOptions:
+    Amplitude: 0.8
+    TransitionRadius: 0.01
+    TransitionWidth: 0.05
+    Exponent: 1.
+  BlackHoleRadiusOptions:
+    Amplitude: 1.9
+    TransitionRadius: 0.01
+    TransitionWidth: 0.05
+    Exponent: 1.
+  ObserveCoefficientsTrigger:
+    Slabs:
+      EvenlySpaced:
+        Interval: 200
+        Offset: 0
+  Verbosity: Quiet
+
+Interpolator:
+  Verbosity: Silent
+
+InterpolationTargets:
+  Spheres:
+    LMax: 10
+    Center: [0.,0.,0.]
+    Radius: [400.]
+    AngularOrdering: Strahlkorper
+  PsiAlongAxis1:
+    Begin: [0., 0., 0.]
+    End: [0., 0., 400.]
+    NumberOfPoints: 1000
+  PsiAlongAxis2:
+    Begin: [0., 0., 0.]
+    End: [400., 0., 0.]
+    NumberOfPoints: 1000
+
+EventsAndDenseTriggers:
+
+Observers:
+  VolumeFileName: "Volume"
+  ReductionFileName: "Reductions"
+  SurfaceFileName: "Surfaces"
