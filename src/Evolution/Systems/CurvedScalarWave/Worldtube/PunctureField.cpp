@@ -81,9 +81,13 @@ void PunctureField::apply_puncture(
     puncture_field_1(result, centered_coords, particle_position,
                      particle_velocity, particle_acceleration,
                      black_hole_mass_);
+  } else if (expansion_order_ == 2) {
+    puncture_field_2(result, centered_coords, particle_position,
+                     particle_velocity, particle_acceleration,
+                     black_hole_mass_);
   } else {
     ERROR(
-        "The puncture field is only implemented up to expansion order 1 but "
+        "The puncture field is only implemented up to expansion order 2 but "
         "you requested order "
         << expansion_order_);
   }
@@ -117,9 +121,11 @@ void PunctureField::apply_acceleration_terms(
                          dt_Du_fx, dt_Du_fy, black_hole_mass_);
   } else {
     ERROR(
-        "The puncture field is only implemented up to expansion order 1 but "
-        "you requested order "
-        << expansion_order_);
+        "The acceleration terms of the puncture field are only implemented "
+        "up to expansion order 1 but you requested order "
+        << expansion_order_
+        << ". At expansion order 2 only geodesic orbits are supported, so "
+           "select `SelfForce: None`.");
   }
 }
 
