@@ -27,6 +27,7 @@ spectre_target_headers(
   Constraints.hpp
   Initialize.hpp
   PsiSquared.hpp
+  SpectralFilter.hpp
   System.hpp
   Tags.hpp
   TagsDeclarations.hpp

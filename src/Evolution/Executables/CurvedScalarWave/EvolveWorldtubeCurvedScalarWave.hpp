@@ -38,6 +38,7 @@
 #include "Evolution/Systems/CurvedScalarWave/Constraints.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Initialize.hpp"
 #include "Evolution/Systems/CurvedScalarWave/PsiSquared.hpp"
+#include "Evolution/Systems/CurvedScalarWave/SpectralFilter.hpp"
 #include "Evolution/Systems/CurvedScalarWave/System.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/InitializeConstraintGammas.hpp"
@@ -245,8 +246,7 @@ struct EvolutionMetavars {
                        Triggers::OrbitRadius, Triggers::InsideHorizon>>>,
         tmpl::pair<Filters::Filter<volume_dim,
                                    typename system::variables_tag::tags_list>,
-                   Filters::all_filters<
-                       volume_dim, typename system::variables_tag::tags_list>>>;
+                   CurvedScalarWave::all_filters<volume_dim>>>;
   };
   using observed_reduction_data_tags = observers::collect_reduction_data_tags<
       tmpl::at<typename factory_creation::factory_classes, Event>>;
