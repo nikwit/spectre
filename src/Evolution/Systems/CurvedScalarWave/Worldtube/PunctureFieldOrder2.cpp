@@ -39,11 +39,13 @@ void puncture_field_2(
   // The expressions below assume a circular equatorial geodesic orbit with
   // orbital frequency w. They were generated in terms of cos(w t) and
   // sin(w t) with the particle at r0 (cos(w t), sin(w t), 0), which we
-  // express through the particle position directly.
-  ASSERT(std::abs(get<2>(particle_position)) < 1e-12 * r0 and
+  // express through the particle position directly. The tolerances of this
+  // sanity check are lenient because the numerically evolved orbit is
+  // circular only up to time stepper accuracy.
+  ASSERT(std::abs(get<2>(particle_position)) < 1e-8 * r0 and
              std::abs(get<0>(particle_position) * get<0>(particle_velocity) +
                       get<1>(particle_position) * get<1>(particle_velocity)) <
-                 1e-10 * r0,
+                 1e-3 * r0 * get(magnitude(particle_velocity)),
          "The second-order puncture field is only implemented for circular "
              << "equatorial orbits, but the particle position is "
              << particle_position << " with velocity " << particle_velocity
