@@ -20,6 +20,7 @@ set(SPECTRE_FORMALINE_LOCATIONS
   citation.bib
   CITATION.cff
   CLAUDE.md
+  cluster-inputs
   cmake
   CMakeLists.txt
   containers
