@@ -26,3 +26,59 @@ if("${GoogleBenchmark_FOUND}" AND NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     Spectral
     )
 endif()
+
+if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+  set(executable GhTimeDerivativeBenchmark)
+
+  add_spectre_executable(
+    ${executable}
+    EXCLUDE_FROM_ALL
+    GhTimeDerivativeBenchmark.cpp
+    )
+
+  target_link_libraries(
+    ${executable}
+    PRIVATE
+    DataStructures
+    GeneralizedHarmonic
+    GeneralRelativity
+    GeneralRelativitySolutions
+    Spectral
+    Utilities
+    )
+
+  set(executable PartialDerivativesBenchmark)
+
+  add_spectre_executable(
+    ${executable}
+    EXCLUDE_FROM_ALL
+    PartialDerivativesBenchmark.cpp
+    )
+
+  target_link_libraries(
+    ${executable}
+    PRIVATE
+    DataStructures
+    LinearOperators
+    Spectral
+    Utilities
+    )
+
+  set(executable ShapeJacobianBenchmark)
+
+  add_spectre_executable(
+    ${executable}
+    EXCLUDE_FROM_ALL
+    ShapeJacobianBenchmark.cpp
+    )
+
+  target_link_libraries(
+    ${executable}
+    PRIVATE
+    DataStructures
+    Domain
+    FunctionsOfTime
+    SphericalHarmonics
+    Utilities
+    )
+endif()
