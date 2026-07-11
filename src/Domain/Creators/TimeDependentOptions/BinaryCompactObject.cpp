@@ -439,8 +439,27 @@ void TimeDependentMapOptions<IsCylindrical>::build_maps(
                   gsl::at(size_names, i)};
       }
 
-      // Add the interior maps if we are excised (aka not filled)
+      // Add the maps for a single spherical-harmonic shell block and the
+      // interior if we are excised (aka not filled)
       if (not filled) {
+        // Index 12: a single spherical-harmonic shell block covering the
+        // full sphere between the excision surface (radii[0]) and the shell
+        // outer radius (radii[1]). The transition function must fall off
+        // from 1 at the excision to 0 at the shell outer radius, where the
+        // (undeformed) cube blocks begin. This is only consistent if the
+        // transition ends at the sphere, not at the cube.
+        if (not transition_ends_at_cube) {
+          transition_func =
+              std::make_unique<domain::CoordinateMaps::
+                                   ShapeMapTransitionFunctions::
+                                       SphereTransition>(radii[0], radii[1]);
+
+          gsl::at(gsl::at(shape_maps_, i), 12) =
+              Shape{inner_center, coefficient_truncation_limit,
+                    std::move(transition_func), gsl::at(shape_names, i),
+                    gsl::at(size_names, i)};
+        }
+
         transition_func = std::make_unique<Wedge>(
             inner_center, inner_radius, inner_sphericity, outer_center,
             outer_radius, outer_sphericity, Wedge::Axis::Interior);
@@ -565,6 +584,12 @@ TimeDependentMapOptions<IsCylindrical>::grid_to_distorted_map(
       }
       shape =
           &gsl::at(gsl::at(shape_maps_, index), include_distorted_map.value());
+      if (include_distorted_map.value() == 12 and not shape->has_value()) {
+        ERROR_NO_TRACE(
+            "The single spherical-harmonic object-shell block requires a "
+            "shape-map transition that ends at the sphere. Set "
+            "'TransitionEndsAtCube' to 'false' for this object.");
+      }
     }
     ASSERT(shape->has_value(), "Shape map was requested but not built.");
     return std::make_unique<detail::gd_map<Shape>>(shape->value());
@@ -631,6 +656,13 @@ TimeDependentMapOptions<IsCylindrical>::grid_to_inertial_map(
           &gsl::at(gsl::at(shape_maps_, index),
                    return_excision_map ? gsl::at(shape_maps_, index).size() - 1
                                        : include_distorted_map.value());
+      if (not return_excision_map and include_distorted_map.value() == 12 and
+          not shape->has_value()) {
+        ERROR_NO_TRACE(
+            "The single spherical-harmonic object-shell block requires a "
+            "shape-map transition that ends at the sphere. Set "
+            "'TransitionEndsAtCube' to 'false' for this object.");
+      }
     }
     ASSERT(shape->has_value(), "Shape map was requested but not built.");
     // The skew map is only applied within the envelope, which is also where we
