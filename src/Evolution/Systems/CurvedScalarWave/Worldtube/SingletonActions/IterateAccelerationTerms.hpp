@@ -30,10 +30,12 @@ struct IterateAccelerationTerms {
   using argument_tags = tmpl::list<
       Tags::ParticlePositionVelocity<Dim>, Tags::BackgroundQuantities<Dim>,
       Tags::GeodesicAcceleration<Dim>,
-      Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Grid>,
-      Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim, Frame::Grid>,
-      Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>,
-      Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim, Frame::Grid>,
+      Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Inertial>,
+      Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim,
+                           Frame::Inertial>,
+      Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Inertial>,
+      Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim,
+                           Frame::Inertial>,
       Tags::Charge, Tags::Mass, ::Tags::Time, Tags::SelfForceTurnOnTime,
       Tags::SelfForceTurnOnInterval, Tags::CurrentIteration>;
   static void apply(
@@ -47,8 +49,8 @@ struct IterateAccelerationTerms {
           Tags::TimeDilationFactor>& background,
       const tnsr::I<double, Dim, Frame::Inertial>& geodesic_acc,
       const Scalar<double>& psi_monopole, const Scalar<double>& dt_psi_monopole,
-      const tnsr::i<double, Dim, Frame::Grid>& psi_dipole,
-      const tnsr::i<double, Dim, Frame::Grid>& dt_psi_dipole, double charge,
+      const tnsr::i<double, Dim, Frame::Inertial>& psi_dipole,
+      const tnsr::i<double, Dim, Frame::Inertial>& dt_psi_dipole, double charge,
       std::optional<double> mass, double time,
       std::optional<double> turn_on_time,
       std::optional<double> turn_on_interval, size_t iteration);

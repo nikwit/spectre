@@ -62,20 +62,17 @@ namespace CurvedScalarWave::Worldtube::Actions {
  * element. The worldtube adds up all integrals from the different elements to
  * obtain the integral over the entire sphere.
  *
- * The projection is done in the co-moving grid frame in which the worldtube
- * is at rest: the time derivative of the regular field is transformed to the
- * grid frame with an advective term coming from the mesh velocity, and the
- * spherical harmonics are evaluated at the grid frame coordinates of the
- * face. The Euclidean area element from `Tags::FaceQuantities` is computed in
- * the inertial frame, which agrees with the grid frame one because the
- * grid-to-inertial map of this scheme is a rigid rotation on the worldtube
- * boundary.
+ * The projection is done in the inertial frame: the time derivative of the
+ * regular field is the inertial-frame time derivative computed from the
+ * evolution equations, and the spherical harmonics are evaluated at the
+ * inertial coordinates of the face, centered on the current particle
+ * position.
  *
  * DataBox:
  * - Uses:
  *    - `tags_to_slice_on_face`
  *    - `Worldtube::Tags::ExpansionOrder`
- *    - `Worldtube::Tags::FaceCoordinates<Dim, Frame::Grid, true>`
+ *    - `Worldtube::Tags::FaceCoordinates<Dim, Frame::Inertial, true>`
  *    - `Worldtube::Tags::GeodesicPunctureField`
  *    - `Worldtube::Tags::ExcisionSphere`
  *    - `Tags::TimeStepId`
@@ -90,7 +87,6 @@ struct SendToWorldtube {
                  gr::Tags::Shift<DataVector, Dim>, gr::Tags::Lapse<DataVector>,
                  domain::Tags::InverseJacobian<Dim, Frame::ElementLogical,
                                                Frame::Inertial>>;
-  using simple_tags = tmpl::list<Tags::RegularFieldAdvectiveTerm<Dim>>;
 
   template <typename DbTagsList, typename... InboxTags, typename Metavariables,
             typename ArrayIndex, typename ActionList,
@@ -113,8 +109,7 @@ struct SendToWorldtube {
 
     Variables<tmpl::list<
         CurvedScalarWave::Tags::Psi, ::Tags::dt<CurvedScalarWave::Tags::Psi>,
-        ::Tags::TempScalar<0>, ::Tags::TempScalar<1>, ::Tags::TempScalar<2>,
-        ::Tags::Tempi<3, Dim>, ::Tags::TempI<4, Dim>>>
+        ::Tags::TempScalar<0>, ::Tags::TempScalar<1>, ::Tags::TempScalar<2>>>
         temporaries(face_size);
     auto& psi_regular_times_det =
         get(get<CurvedScalarWave::Tags::Psi>(temporaries));
@@ -123,8 +118,6 @@ struct SendToWorldtube {
     auto& theta = get(get<::Tags::TempScalar<0>>(temporaries));
     auto& phi = get(get<::Tags::TempScalar<1>>(temporaries));
     auto& spherical_harmonic = get(get<::Tags::TempScalar<2>>(temporaries));
-    auto& face_phi = get<::Tags::Tempi<3, Dim>>(temporaries);
-    auto& face_mesh_velocity = get<::Tags::TempI<4, Dim>>(temporaries);
     const auto& face_quantities = db::get<Tags::FaceQuantities>(box).value();
     const auto& psi_numerical_face =
         get<CurvedScalarWave::Tags::Psi>(face_quantities);
@@ -139,6 +132,14 @@ struct SendToWorldtube {
     const auto& psi_puncture = get<CurvedScalarWave::Tags::Psi>(puncture_field);
     const auto& dt_psi_puncture =
         get<::Tags::dt<CurvedScalarWave::Tags::Psi>>(puncture_field);
+    const auto& centered_face_coords =
+        db::get<Tags::FaceCoordinates<Dim, Frame::Inertial, true>>(box);
+    ASSERT(centered_face_coords.has_value(),
+           "Should be an abutting element here, but face coords are not "
+           "calculated!");
+    const auto& x = get<0>(centered_face_coords.value());
+    const auto& y = get<1>(centered_face_coords.value());
+    const auto& z = get<2>(centered_face_coords.value());
 
     // A spherical-harmonic shell block covers the entire worldtube boundary
     // with a single element. In that case the projection integrals are
@@ -150,6 +151,19 @@ struct SendToWorldtube {
         face_mesh.basis(0) == Spectral::Basis::SphericalHarmonic;
     DataVector s2_integration_weights{};
     if (spherical_harmonic_face) {
+      const double face_radius = hypot(x[0], y[0], z[0]);
+      if (UNLIKELY(std::abs(face_radius - excision_sphere.radius()) >
+                   1e-10 * excision_sphere.radius())) {
+        ERROR(
+            "The spherical-harmonic worldtube projection requires the "
+            "inertial worldtube radius ("
+            << face_radius << ") to equal the grid excision radius ("
+            << excision_sphere.radius()
+            << ") so the quadrature weights are exact. Configure "
+               "`WorldtubeRadiusOptions` with `Amplitude` equal to the grid "
+               "excision radius and a `TransitionRadius` much smaller than "
+               "the orbital radius, or use the wedge-based worldtube shell.");
+      }
       const size_t n_theta = face_mesh.extents(0);
       const size_t n_phi = face_mesh.extents(1);
       std::vector<double> gauss_points(n_theta + 1);
@@ -178,45 +192,9 @@ struct SendToWorldtube {
 
     psi_regular_times_det =
         (get(psi_numerical_face) - get(psi_puncture)) * integration_weight;
-
-    const auto& mesh_velocity = db::get<domain::Tags::MeshVelocity<Dim>>(box);
-    ASSERT(mesh_velocity.has_value(),
-           "Expected a moving grid for worldtube evolution.");
-    data_on_slice(make_not_null(&face_phi),
-                  db::get<CurvedScalarWave::Tags::Phi<Dim>>(box),
-                  mesh.extents(), direction.value().dimension(),
-                  index_to_slice_at(mesh.extents(), direction.value()));
-    data_on_slice(make_not_null(&face_mesh_velocity), mesh_velocity.value(),
-                  mesh.extents(), direction.value().dimension(),
-                  index_to_slice_at(mesh.extents(), direction.value()));
-    // The advective term transforms the time derivative of the regular field
-    // into the co-moving grid frame in which the worldtube is at rest. It is
-    // saved to the DataBox because it is used again in `ReceiveWorldtubeData`
-    // to transform the time derivative of the regular field sent back by the
-    // worldtube to the inertial frame.
-    db::mutate<Tags::RegularFieldAdvectiveTerm<Dim>>(
-        [&face_phi, &face_mesh_velocity,
-         &di_psi_puncture =
-             get<::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<3>,
-                               Frame::Inertial>>(puncture_field)](
-            const gsl::not_null<Scalar<DataVector>*> regular_advective_term) {
-          tenex::evaluate<>(regular_advective_term,
-                            (face_phi(ti::i) - di_psi_puncture(ti::i)) *
-                                face_mesh_velocity(ti::I));
-        },
-        make_not_null(&box));
     dt_psi_regular_times_det =
-        (get(dt_psi_numerical_face) - get(dt_psi_puncture) +
-         get(db::get<Tags::RegularFieldAdvectiveTerm<Dim>>(box))) *
+        (get(dt_psi_numerical_face) - get(dt_psi_puncture)) *
         integration_weight;
-    const auto& centered_face_coords =
-        db::get<Tags::FaceCoordinates<Dim, Frame::Grid, true>>(box);
-    ASSERT(centered_face_coords.has_value(),
-           "Should be an abutting element here, but face coords are not "
-           "calculated!");
-    const auto& x = get<0>(centered_face_coords.value());
-    const auto& y = get<1>(centered_face_coords.value());
-    const auto& z = get<2>(centered_face_coords.value());
 
     const size_t order = db::get<Worldtube::Tags::ExpansionOrder>(box);
     const size_t num_modes = (order + 1) * (order + 1);

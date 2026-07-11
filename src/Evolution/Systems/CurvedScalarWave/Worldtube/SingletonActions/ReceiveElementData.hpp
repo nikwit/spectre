@@ -53,15 +53,15 @@ namespace CurvedScalarWave::Worldtube::Actions {
  *    - `Worldtube::Tags::ElementFacesGridCoordinates`
  *    - `Tags::TimeStepId`
  * - Mutates:
- *    - `Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Grid>`
+ *    - `Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Inertial>`
  *    - `Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim,
- *                                     Frame::Grid>`
- *    - `Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>`
+ *                                     Frame::Inertial>`
+ *    - `Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Inertial>`
  *    - `Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim,
- *                                     Frame::Grid>`
- *    - `Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim, Frame::Grid>`
+ *                                     Frame::Inertial>`
+ *    - `Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim, Frame::Inertial>`
  *    - `Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 2, Dim,
- *                                     Frame::Grid>`
+ *                                     Frame::Inertial>`
  */
 struct ReceiveElementData {
   static constexpr size_t Dim = 3;
@@ -70,13 +70,15 @@ struct ReceiveElementData {
   using inbox_tags = tmpl::list<
       ::CurvedScalarWave::Worldtube::Tags::SphericalHarmonicsInbox<Dim>>;
   using simple_tags = tmpl::list<
-      Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Grid>,
-      Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim, Frame::Grid>,
-      Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>,
-      Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim, Frame::Grid>,
-      Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim, Frame::Grid>,
+      Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Inertial>,
+      Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim,
+                           Frame::Inertial>,
+      Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Inertial>,
+      Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim,
+                           Frame::Inertial>,
+      Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim, Frame::Inertial>,
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 2, Dim,
-                           Frame::Grid>>;
+                           Frame::Inertial>>;
 
   template <typename DbTagsList, typename... InboxTags, typename Metavariables,
             typename ArrayIndex, typename ActionList,
@@ -116,24 +118,24 @@ struct ReceiveElementData {
 
     const ModalVector psi_ylm_l0(&psi_ylm_coefs[0], 1);
     const ModalVector dt_psi_ylm_l0(&dt_psi_ylm_coefs[0], 1);
-    tnsr::i<double, Dim, Frame::Grid> psi_stf_l1{};
-    tnsr::i<double, Dim, Frame::Grid> dt_psi_stf_l1{};
-    tnsr::ii<double, Dim, Frame::Grid> psi_stf_l2{};
-    tnsr::ii<double, Dim, Frame::Grid> dt_psi_stf_l2{};
+    tnsr::i<double, Dim, Frame::Inertial> psi_stf_l1{};
+    tnsr::i<double, Dim, Frame::Inertial> dt_psi_stf_l1{};
+    tnsr::ii<double, Dim, Frame::Inertial> psi_stf_l2{};
+    tnsr::ii<double, Dim, Frame::Inertial> dt_psi_stf_l2{};
     if (order > 0) {
       ModalVector psi_ylm_l1(&psi_ylm_coefs[1], 3);
       ModalVector dt_psi_ylm_l1(&dt_psi_ylm_coefs[1], 3);
       psi_ylm_l1 /= wt_radius;
       dt_psi_ylm_l1 /= wt_radius;
-      psi_stf_l1 = ylm::ylm_to_stf_1<Frame::Grid>(psi_ylm_l1);
-      dt_psi_stf_l1 = ylm::ylm_to_stf_1<Frame::Grid>(dt_psi_ylm_l1);
+      psi_stf_l1 = ylm::ylm_to_stf_1<Frame::Inertial>(psi_ylm_l1);
+      dt_psi_stf_l1 = ylm::ylm_to_stf_1<Frame::Inertial>(dt_psi_ylm_l1);
       if (order > 1) {
         ModalVector psi_ylm_l2(&psi_ylm_coefs[4], 5);
         ModalVector dt_psi_ylm_l2(&dt_psi_ylm_coefs[4], 5);
         psi_ylm_l2 /= wt_radius * wt_radius;
         dt_psi_ylm_l2 /= wt_radius * wt_radius;
-        psi_stf_l2 = ylm::ylm_to_stf_2<Frame::Grid>(psi_ylm_l2);
-        dt_psi_stf_l2 = ylm::ylm_to_stf_2<Frame::Grid>(dt_psi_ylm_l2);
+        psi_stf_l2 = ylm::ylm_to_stf_2<Frame::Inertial>(psi_ylm_l2);
+        dt_psi_stf_l2 = ylm::ylm_to_stf_2<Frame::Inertial>(dt_psi_ylm_l2);
       }
     }
 

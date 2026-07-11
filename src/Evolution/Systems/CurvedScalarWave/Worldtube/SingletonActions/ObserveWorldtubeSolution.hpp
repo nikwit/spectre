@@ -67,10 +67,11 @@ struct ObserveWorldtubeSolution {
           db::get<::Tags::dt<Tags::EvolvedVelocity<Dim>>>(box);
       const size_t expansion_order = db::get<Tags::ExpansionOrder>(box);
       const auto& psi_monopole = db::get<
-          Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Grid>>(box);
+          Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim,
+                               Frame::Inertial>>(box);
       const auto& dt_psi_monopole =
           db::get<Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim,
-                                       Frame::Grid>>(box);
+                                       Frame::Inertial>>(box);
       const auto& psi_0 = db::get<Tags::Psi0>(box);
       const auto& dt_psi_0 = db::get<Tags::dtPsi0>(box);
 
@@ -96,10 +97,11 @@ struct ObserveWorldtubeSolution {
           expansion_order < 2 ? get(dt_psi_monopole) : get(dt_psi_0)[0];
       if (expansion_order > 0) {
         const auto& psi_dipole = db::get<
-            Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>>(box);
+            Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim,
+                                 Frame::Inertial>>(box);
         const auto& dt_psi_dipole =
             db::get<Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim,
-                                         Frame::Grid>>(box);
+                                         Frame::Inertial>>(box);
         for (size_t i = 0; i < Dim; ++i) {
           psi_coefs[1 + i + pos_offset] = psi_dipole.get(i);
           psi_coefs[num_coefs + 1 + i + pos_offset] = dt_psi_dipole.get(i);
@@ -109,15 +111,26 @@ struct ObserveWorldtubeSolution {
       // coefficient and add it back to the quadrupole (which is trace-less)
       if (expansion_order > 1) {
         const auto& psi_quadrupole = db::get<
-            Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim, Frame::Grid>>(box);
+            Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim,
+                                 Frame::Inertial>>(box);
         const auto& dt_psi_quadrupole =
             db::get<Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 2, Dim,
-                                         Frame::Grid>>(box);
+                                         Frame::Inertial>>(box);
         const double wt_radius = db::get<Tags::WorldtubeRadius>(box);
+        const auto& psi_dipole = db::get<
+            Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Inertial>>(
+            box);
+        // the constant coefficient of the time-derivative field differs from
+        // the time derivative of the constant coefficient by the motion of
+        // the expansion center: (dt Psi)_0 = dtPsi0 - Psi_i * v^i
+        double dt_psi_coef_0 = get(dt_psi_0)[0];
+        for (size_t i = 0; i < Dim; ++i) {
+          dt_psi_coef_0 -= psi_dipole.get(i) * particle_velocity.get(i)[0];
+        }
         const double trace_psi_2 =
             3. * (get(psi_monopole) - get(psi_0)[0]) / square(wt_radius);
         const double trace_dt_psi_2 =
-            3. * (get(dt_psi_monopole) - get(dt_psi_0)[0]) / square(wt_radius);
+            3. * (get(dt_psi_monopole) - dt_psi_coef_0) / square(wt_radius);
         size_t offset = 4 + pos_offset;
         for (size_t i = 0; i < Dim; ++i) {
           for (size_t j = i; j < Dim; ++j, ++offset) {

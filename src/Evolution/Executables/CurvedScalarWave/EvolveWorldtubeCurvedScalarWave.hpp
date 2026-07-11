@@ -309,8 +309,6 @@ struct EvolutionMetavars {
           CurvedScalarWave::Worldtube::Tags::ConstraintGamma1Compute,
           CurvedScalarWave::Worldtube::Tags::ConstraintGamma2Compute,
           CurvedScalarWave::Worldtube::Tags::FaceCoordinatesCompute<
-              volume_dim, Frame::Grid, true>,
-          CurvedScalarWave::Worldtube::Tags::FaceCoordinatesCompute<
               volume_dim, Frame::Inertial, true>,
           CurvedScalarWave::Worldtube::Tags::GeodesicAccelerationCompute<3>,
           CurvedScalarWave::Worldtube::Tags::GeodesicPunctureFieldCompute<

@@ -39,12 +39,13 @@ namespace CurvedScalarWave::Worldtube::Actions {
  * \brief Checks if the regular field has been received from the worldtube and
  * computes the retarded field for boundary conditions.
  *
- * \details This action checks whether values for the regular field have been
- * sent by the worldtube. If so, the time and spatial derivatives are
- * transformed from the co-moving grid frame to the inertial frame and the
- * puncture field is added to them to obtain the retarded field. This is
- * stored in \ref Tags::WorldtubeSolution which is used to formulate boundary
- * conditions in \ref CurvedScalarWave::BoundaryConditions::Worldtube.
+ * \details This action checks whether the coefficients of the Taylor series
+ * of the regular field have been sent by the worldtube. If so, the series is
+ * evaluated at the face coordinates in the inertial frame, centered on the
+ * particle, and the puncture field is added to it to obtain the retarded
+ * field. This is stored in \ref Tags::WorldtubeSolution which is used to
+ * formulate boundary conditions in
+ * \ref CurvedScalarWave::BoundaryConditions::Worldtube.
  */
 struct ReceiveWorldtubeData {
   static constexpr size_t Dim = 3;
@@ -53,15 +54,12 @@ struct ReceiveWorldtubeData {
   template <typename Frame>
   using di_psi_tag =
       ::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<Dim>, Frame>;
-  using received_tags =
-      tmpl::list<psi_tag, dt_psi_tag, di_psi_tag<Frame::Grid>>;
   using evolved_tags_list =
       typename CurvedScalarWave::System<Dim>::variables_tag::tags_list;
   using simple_tags = tmpl::list<Tags::WorldtubeSolution<Dim>>;
   using inbox_tags = tmpl::list<Tags::RegularFieldInbox<Dim>>;
-  using tags_to_slice_to_face = tmpl::list<
-      domain::Tags::InverseJacobian<Dim, Frame::Grid, Frame::Inertial>,
-      gr::Tags::Shift<DataVector, Dim>, gr::Tags::Lapse<DataVector>>;
+  using tags_to_slice_to_face =
+      tmpl::list<gr::Tags::Shift<DataVector, Dim>, gr::Tags::Lapse<DataVector>>;
 
   template <typename DbTagsList, typename... InboxTags, typename Metavariables,
             typename ArrayIndex, typename ActionList,
@@ -100,47 +98,79 @@ struct ReceiveWorldtubeData {
                           index_to_slice_at(mesh.extents(), direction.value()));
           });
       auto& received_data = inbox.at(time_step_id);
-      get(get<psi_tag>(received_data)) +=
-          get(get<psi_tag>(puncture_field.value()));
-
-      // the advective term transforms the time derivative of the regular
-      // field back into the inertial frame
-      get(get<dt_psi_tag>(received_data)) +=
-          get(get<dt_psi_tag>(puncture_field.value())) -
-          get(db::get<Tags::RegularFieldAdvectiveTerm<Dim>>(box));
+      const auto& centered_face_coords =
+          db::get<Tags::FaceCoordinates<Dim, Frame::Inertial, true>>(box)
+              .value();
 
       db::mutate<Tags::WorldtubeSolution<Dim>>(
-          [&received_data, &puncture_field,
-           &vars_on_face](const gsl::not_null<Variables<evolved_tags_list>*>
-                              worldtube_solution) {
+          [&received_data, &puncture_field, &vars_on_face,
+           &centered_face_coords,
+           &expansion_order = db::get<Tags::ExpansionOrder>(box)](
+              const gsl::not_null<Variables<evolved_tags_list>*>
+                  worldtube_solution) {
             worldtube_solution->initialize(
                 puncture_field.value().number_of_grid_points());
-            const auto& inv_jacobian = get<domain::Tags::InverseJacobian<
-                Dim, Frame::Grid, Frame::Inertial>>(vars_on_face);
-            auto& phi_inertial =
+
+            auto& psi = get<psi_tag>(*worldtube_solution);
+            auto& pi = get<CurvedScalarWave::Tags::Pi>(*worldtube_solution);
+            auto& phi =
                 get<CurvedScalarWave::Tags::Phi<Dim>>(*worldtube_solution);
+            const DataVector& psi_coefs = get(get<psi_tag>(received_data));
+            const DataVector& dt_psi_coefs =
+                get(get<dt_psi_tag>(received_data));
+
+            // the puncture field plus the monopole of the regular field
+            get(psi) = get(get<psi_tag>(puncture_field.value())) + psi_coefs[0];
+            get(pi) =
+                get(get<dt_psi_tag>(puncture_field.value())) + dt_psi_coefs[0];
             for (size_t i = 0; i < Dim; ++i) {
-              phi_inertial.get(i) =
-                  get<0>(get<di_psi_tag<Frame::Grid>>(received_data)) *
-                      inv_jacobian.get(0, i) +
-                  get<1>(get<di_psi_tag<Frame::Grid>>(received_data)) *
-                      inv_jacobian.get(1, i) +
-                  get<2>(get<di_psi_tag<Frame::Grid>>(received_data)) *
-                      inv_jacobian.get(2, i);
-              phi_inertial.get(i) +=
+              phi.get(i) =
                   get<di_psi_tag<Frame::Inertial>>(puncture_field.value())
                       .get(i);
             }
-
-            get<CurvedScalarWave::Tags::Psi>(*worldtube_solution) =
-                get<psi_tag>(received_data);
+            if (expansion_order > 0) {
+              // add on the dipole of the regular field
+              for (size_t i = 0; i < Dim; ++i) {
+                get(psi) += psi_coefs[i + 1] * centered_face_coords.get(i);
+                get(pi) += dt_psi_coefs[i + 1] * centered_face_coords.get(i);
+                phi.get(i) += psi_coefs[i + 1];
+              }
+            }
+            if (expansion_order > 1) {
+              // add on the quadrupole of the regular field. The coefficients
+              // hold the six independent components xx, xy, xz, yy, yz, zz
+              // of the full (trace-included) second-order coefficient.
+              size_t index = 4;
+              for (size_t i = 0; i < Dim; ++i) {
+                for (size_t j = i; j < Dim; ++j, ++index) {
+                  // the full symmetric double sum counts off-diagonal
+                  // components twice
+                  const double symmetry_factor = i == j ? 1. : 2.;
+                  get(psi) += symmetry_factor * psi_coefs[index] *
+                              centered_face_coords.get(i) *
+                              centered_face_coords.get(j);
+                  get(pi) += symmetry_factor * dt_psi_coefs[index] *
+                             centered_face_coords.get(i) *
+                             centered_face_coords.get(j);
+                  // d_k (c_ij Dx^i Dx^j) = 2 c_kj Dx^j summed over the full
+                  // symmetric tensor
+                  phi.get(i) += 2. * psi_coefs[index] *
+                                centered_face_coords.get(j);
+                  if (i != j) {
+                    phi.get(j) += 2. * psi_coefs[index] *
+                                  centered_face_coords.get(i);
+                  }
+                }
+              }
+            }
             const auto& shift =
                 get<gr::Tags::Shift<DataVector, Dim>>(vars_on_face);
             const auto& lapse = get<gr::Tags::Lapse<DataVector>>(vars_on_face);
-            auto& pi = get<CurvedScalarWave::Tags::Pi>(*worldtube_solution);
-            get(pi) = (-get(get<dt_psi_tag>(received_data)) +
-                       get(dot_product(shift, phi_inertial))) /
-                      get(lapse);
+
+            // convert dt_psi -> pi
+            get(pi) *= -1.;
+            get(pi) += get(dot_product(shift, phi));
+            get(pi) /= get(lapse);
           },
           make_not_null(&box));
       inbox.erase(time_step_id);

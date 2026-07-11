@@ -51,15 +51,18 @@ struct MockWorldtubeSingleton {
               db::AddSimpleTags<
                   ::Tags::Time, ::Tags::TimeStepId,
                   Tags::ObserveCoefficientsTrigger, Tags::Psi0, Tags::dtPsi0,
-                  Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim, Frame::Grid>,
+                  Stf::Tags::StfTensor<Tags::PsiWorldtube, 0, Dim,
+                                       Frame::Inertial>,
                   Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 0, Dim,
-                                       Frame::Grid>,
-                  Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim, Frame::Grid>,
+                                       Frame::Inertial>,
+                  Stf::Tags::StfTensor<Tags::PsiWorldtube, 1, Dim,
+                                       Frame::Inertial>,
                   Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim,
-                                       Frame::Grid>,
-                  Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim, Frame::Grid>,
+                                       Frame::Inertial>,
+                  Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim,
+                                       Frame::Inertial>,
                   Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 2, Dim,
-                                       Frame::Grid>,
+                                       Frame::Inertial>,
                   Tags::ExcisionSphere<Dim>, Tags::EvolvedPosition<Dim>,
                   Tags::EvolvedVelocity<Dim>,
                   ::Tags::dt<Tags::EvolvedVelocity<Dim>>>,
@@ -104,17 +107,17 @@ void check_observe_worldtube_solution(
   const auto dt_psi_monopole =
       make_with_random_values<Scalar<double>>(generator, dist, 1);
   const auto psi_dipole =
-      make_with_random_values<tnsr::i<double, Dim, Frame::Grid>>(generator,
-                                                                 dist, 1);
+      make_with_random_values<tnsr::i<double, Dim, Frame::Inertial>>(generator,
+                                                                     dist, 1);
   const auto dt_psi_dipole =
-      make_with_random_values<tnsr::i<double, Dim, Frame::Grid>>(generator,
-                                                                 dist, 1);
+      make_with_random_values<tnsr::i<double, Dim, Frame::Inertial>>(generator,
+                                                                     dist, 1);
   const auto psi_quadrupole =
-      make_with_random_values<tnsr::ii<double, Dim, Frame::Grid>>(generator,
-                                                                  dist, 1);
+      make_with_random_values<tnsr::ii<double, Dim, Frame::Inertial>>(generator,
+                                                                      dist, 1);
   const auto dt_psi_quadrupole =
-      make_with_random_values<tnsr::ii<double, Dim, Frame::Grid>>(generator,
-                                                                  dist, 1);
+      make_with_random_values<tnsr::ii<double, Dim, Frame::Inertial>>(generator,
+                                                                      dist, 1);
 
   const auto position =
       make_with_random_values<tnsr::I<DataVector, Dim, Frame::Inertial>>(
@@ -264,8 +267,16 @@ void check_observe_worldtube_solution(
     CHECK(data.at(0, 21) == get<0>(dt_psi_dipole));
     CHECK(data.at(0, 22) == get<1>(dt_psi_dipole));
     CHECK(data.at(0, 23) == get<2>(dt_psi_dipole));
+    // the constant coefficient of the time-derivative field is corrected by
+    // the motion of the expansion center: (dt Psi)_0 = dtPsi0 - Psi_i * v^i.
+    // The velocity is nonzero here, so this check is sensitive to the
+    // correction.
+    double dt_psi_coef_0 = get(dt_psi0)[0];
+    for (size_t i = 0; i < Dim; ++i) {
+      dt_psi_coef_0 -= psi_dipole.get(i) * velocity.get(i)[0];
+    }
     const double trace_dt_psi_2 =
-        3. * (get(dt_psi_monopole) - get(dt_psi0)[0]) / square(wt_radius);
+        3. * (get(dt_psi_monopole) - dt_psi_coef_0) / square(wt_radius);
     CHECK(data.at(0, 24) ==
           custom_approx(get<0, 0>(dt_psi_quadrupole) + trace_dt_psi_2));
     CHECK(data.at(0, 25) == get<0, 1>(dt_psi_quadrupole));

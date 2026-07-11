@@ -664,18 +664,6 @@ struct FaceCoordinatesCompute : FaceCoordinates<Dim, Frame, Centered>,
 };
 /// @}
 
-/*!
- * \brief Holds the advection term that is the scalar product of the
- * mesh velocity with the spatial derivative of the regular scalar field.
- *
- * \details This term converts the time derivative of the regular field
- * between the inertial and the co-moving grid frame.
- */
-template <size_t Dim>
-struct RegularFieldAdvectiveTerm : db::SimpleTag {
-  using type = Scalar<DataVector>;
-};
-
 /// @{
 /*!
  * \brief The value of the scalar field and its time derivative on element faces
