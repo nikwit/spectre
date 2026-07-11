@@ -1374,8 +1374,8 @@ Domain<3> BinaryCompactObject::create_domain() const {
       const size_t shell_block = first_object_shell_block_[object_index];
       if (use_sh_shell) {
         if (block_id == shell_block) {
-          // Use the dedicated interior shape-map transition for the single SH
-          // shell block.
+          // Use the dedicated full-sphere shape-map transition (excision
+          // radius -> shell outer radius) for the single SH shell block.
           return 12;
         }
         const size_t first_cube = first_object_cube_block_[object_index];
