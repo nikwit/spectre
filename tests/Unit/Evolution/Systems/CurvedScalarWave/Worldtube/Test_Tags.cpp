@@ -420,7 +420,7 @@ void test_constraint_gammas_compute() {
   }
   const auto centered_radii = magnitude(centered_coords);
   const auto gamma2_expected =
-      10. * exp(-square(0.1 * get(centered_radii))) + 1e-3;
+      3. * exp(-square(0.1 * get(centered_radii))) + 1e-3;
   const auto& gamma2 = db::get<CurvedScalarWave::Tags::ConstraintGamma2>(box);
   CHECK_ITERABLE_APPROX(gamma2_expected, get(gamma2));
 }
