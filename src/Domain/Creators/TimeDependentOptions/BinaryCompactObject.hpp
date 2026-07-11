@@ -383,9 +383,13 @@ struct TimeDependentMapOptions {
   std::optional<Rotation> rotation_map_{};
   std::optional<std::pair<RotScaleTrans, RotScaleTrans>> rot_scale_trans_map_{};
   std::optional<Skew> skew_map_{};
+  // For the non-cylindrical case, per object the entries are: 0-5 the six
+  // wedge blocks of the object shell, 6-11 the six cube blocks, 12 a single
+  // spherical-harmonic shell block covering the full sphere, and the last
+  // entry the interior of the excision.
   using ShapeMapType =
       tmpl::conditional_t<IsCylindrical, std::array<std::optional<Shape>, 4>,
-                          std::array<std::array<std::optional<Shape>, 13>, 2>>;
+                          std::array<std::array<std::optional<Shape>, 14>, 2>>;
   ShapeMapType shape_maps_{};
 
   // helper function that creates the functions of time used by the worldtube
