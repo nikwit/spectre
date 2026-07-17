@@ -48,6 +48,7 @@
 #include "Evolution/Kokkos/UpdateU.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Harmonic.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/FindApparentHorizonBatchedEvent.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/ObserveFieldsBatchedEvent.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/ObserveTimeStepBatchedEvent.hpp"
 #include "Evolution/Tags/Filter.hpp"
 #include "IO/Observer/ObserverComponent.hpp"
@@ -428,6 +429,7 @@ struct EvolutionMetavarsBinaryBlackHoleKokkos {
                 gh::Events::CompletionBatched,
                 gh::Events::FindApparentHorizonBatched<AhA>,
                 gh::Events::FindApparentHorizonBatched<AhB>,
+                gh::Events::ObserveFieldsBatched,
                 gh::Events::ObserveNormsBatched,
                 gh::Events::SendExcisionDataBatchedForSizeControl<
                     ::domain::ObjectLabel::A, char_speed_a_control_systems>,

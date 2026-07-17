@@ -22,6 +22,7 @@
 #include "Evolution/Kokkos/UpdateU.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Harmonic.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/FindApparentHorizonBatchedEvent.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/ObserveFieldsBatchedEvent.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/ObserveTimeStepBatchedEvent.hpp"
 #include "Evolution/Tags/Filter.hpp"
 #include "IO/Observer/ObserverComponent.hpp"
@@ -179,6 +180,7 @@ struct EvolutionMetavarsKokkosBatched {
                               gh::Events::CompletionBatched,
                               gh::Events::FindApparentHorizonBatched<AhA>,
                               gh::Events::FindApparentHorizonBatched<AhB>,
+                              gh::Events::ObserveFieldsBatched,
                               gh::Events::ObserveNormsBatched>>>,
         tmpl::pair<
             gh::BoundaryConditions::BoundaryCondition<volume_dim>,

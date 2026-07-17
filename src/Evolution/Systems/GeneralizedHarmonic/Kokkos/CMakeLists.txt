@@ -18,6 +18,7 @@ spectre_target_sources(
   Batched/LiftInternalBoundaryTermsBatched.cpp
   Batched/UpdateConstraintDampingBatched.cpp
   Batched/UpdateFrameFieldsBatched.cpp
+  Batched/ObserveFieldsBatchedEvent.cpp
   Batched/ObserveTimeStepBatchedEvent.cpp
   Batched/PackageLocalFacesBatched.cpp
   ComputeTimeDerivativeKokkos.cpp
@@ -40,6 +41,7 @@ spectre_target_headers(
   Batched/InitializeBatchedData.hpp
   Batched/InitializeBoundaryBatchMetadata.hpp
   Batched/LiftInternalBoundaryTermsBatched.hpp
+  Batched/ObserveFieldsBatchedEvent.hpp
   Batched/ObserveTimeStepBatchedEvent.hpp
   Batched/PackageLocalFacesBatched.hpp
   Batched/UpdateConstraintDampingBatched.hpp
