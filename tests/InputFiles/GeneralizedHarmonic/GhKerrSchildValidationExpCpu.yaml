@@ -1,0 +1,173 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+# CPU reference run of the batched-GPU validation pair. This input and
+# GhKerrSchildValidationKokkos.yaml configure the identical evolution
+# (domain, initial data, gauge, damping, filter, stepper, step size,
+# boundary conditions) on the production CPU executable and on the
+# batched Kokkos executable. Their Error(...) reduction norms must agree
+# far below truncation error; see agent-notes for the comparison recipe.
+
+Executable: EvolveGhNoBlackHole3D
+Testing:
+  Check: parse;execute
+  Timeout: 60
+
+---
+
+Parallelization:
+  ElementDistribution: NumGridPoints
+
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
+
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.0002
+  MinimumTimeStep: 1e-7
+  TimeStepper: Rk5Tsitouras
+
+Amr:
+  Criteria:
+  Policies:
+    EnforceTwoToOneBalanceInNormalDirection: true
+    Isotropy: Anisotropic
+    Limits:
+      RefinementLevel: Auto
+      NumGridPoints: Auto
+      ErrorBeyondLimits: False
+    AllowCoarsening: True
+  Verbosity: Quiet
+
+PhaseChangeAndTriggers:
+
+InitialData: &InitialData
+  GeneralizedHarmonic(KerrSchild):
+    Mass: 1.0
+    Spin: [0.0, 0.0, 0.0]
+    Center: [0.0, 0.0, 0.0]
+    Velocity: [0.0, 0.0, 0.0]
+
+DomainCreator:
+  Sphere:
+    InnerRadius: 1.9
+    OuterRadius: 2.3
+    Interior:
+      ExciseWithBoundaryCondition:
+        DemandOutgoingCharSpeeds:
+    InitialRefinement: 0
+    InitialGridPoints: 6
+    UseEquiangularMap: true
+    EquatorialCompression: None
+    RadialPartitioning: []
+    RadialDistribution: [Logarithmic]
+    WhichWedges: All
+    TimeDependentMaps:
+      CubicScale:
+        InitialTime: 0.0
+        OuterBoundary: 2.3
+        UseLinearScaling: true
+        InitialExpansion: [1.0, 1.0]
+        Velocity: [-0.005, -0.005]
+        Acceleration: [0.0, 0.0]
+    OuterBoundaryCondition:
+      ConstraintPreservingBjorhus:
+        Type: ConstraintPreservingPhysical
+
+EvolutionSystem:
+  GeneralizedHarmonic:
+    GaugeCondition:
+      Harmonic:
+    DampingFunctionGamma0:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 3.0
+        Width: 11.313708499
+        Center: [0.0, 0.0, 0.0]
+    DampingFunctionGamma1:
+      GaussianPlusConstant:
+        Constant: -1.0
+        Amplitude: 0.0
+        Width: 11.313708499
+        Center: [0.0, 0.0, 0.0]
+    DampingFunctionGamma2:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 1.0
+        Width: 11.313708499
+        Center: [0.0, 0.0, 0.0]
+
+Filtering:
+  ExpFilter0:
+    Alpha: 36.0
+    HalfPower: 64
+    Enable: true
+    BlocksToFilter: All
+
+SpatialDiscretization:
+  DiscontinuousGalerkin:
+    Formulation: StrongInertial
+    Quadrature: GaussLobatto
+  BoundaryCorrection:
+    UpwindPenalty:
+
+EventsAndTriggersAtSlabs:
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 1
+          Offset: 0
+    Events:
+      - ObserveNorms:
+          SubfileName: Norms
+          TensorsToObserve:
+            - Name: SpacetimeMetric
+              NormType: L2Norm
+              Components: Sum
+            - Name: Pi
+              NormType: L2Norm
+              Components: Sum
+            - Name: Phi
+              NormType: L2Norm
+              Components: Sum
+      - ObserveNorms:
+          SubfileName: Errors
+          TensorsToObserve:
+            - Name: Error(SpacetimeMetric)
+              NormType: L2Norm
+              Components: Sum
+            - Name: Error(Pi)
+              NormType: L2Norm
+              Components: Sum
+            - Name: Error(Phi)
+              NormType: L2Norm
+              Components: Sum
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 5
+          Offset: 0
+    Events:
+      - ObserveFields:
+          SubfileName: VolumeData
+          VariablesToObserve:
+            - SpacetimeMetric
+            - Pi
+            - Phi
+          InterpolateToMesh: None
+          CoordinatesFloatingPointType: Double
+          FloatingPointTypes: [Double]
+          BlocksToObserve: All
+  - Trigger:
+      Slabs:
+        Specified:
+          Values: [10]
+    Events:
+      - Completion
+
+EventsAndDenseTriggers:
+
+Observers:
+  VolumeFileName: "GhKerrSchildValidationExpCpuVolume"
+  ReductionFileName: "GhKerrSchildValidationExpCpuReductions"

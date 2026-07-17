@@ -101,10 +101,11 @@ struct PackedGeometry {
   // later group-by-map-kind launch optimization). Empty until built.
   std::vector<int> element_map_kind_host{};
   ::Kokkos::View<int*> element_map_kind_device{};
-  // Name of the single scalar function of time driving on-device rigid
-  // rotation blocks (empty if there are none). Its angle and angular velocity
-  // are staged to the device each stage.
-  std::string rotation_function_of_time_name{};
+  // Name of the single scalar function of time driving the on-device
+  // time-dependent map blocks (empty if there are none): the rotation angle for
+  // RigidRotationZ or the scale factor for UniformRadialScaling. Its value and
+  // first time derivative are staged to the device each stage.
+  std::string device_map_function_of_time_name{};
   bool map_plan_initialized{false};
 
   // NOLINTNEXTLINE(google-runtime-references)

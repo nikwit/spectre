@@ -36,6 +36,14 @@ enum class BatchedMapKind : int {
   /// function of time (the rotation angle). Evaluated on device from the
   /// staged angle and angular velocity; see rigid_rotation_z_frame_fields.
   RigidRotationZ = 2,
+  /// A uniform radial scaling about the origin, x^i = a(t) xi^i, driven by a
+  /// single scalar function of time a(t). This is
+  /// domain::CoordinateMaps::TimeDependent::CubicScale in its linear-scaling
+  /// mode (both expansion functions of time equal, e.g. the CubicScale time
+  /// dependence with UseLinearScaling). Evaluated on device from the staged
+  /// scale factor and its time derivative; see
+  /// uniform_radial_scaling_frame_fields.
+  UniformRadialScaling = 3,
 };
 
 /// \brief Closed-form grid-to-inertial frame fields for a rigid rotation about
@@ -82,6 +90,38 @@ KOKKOS_INLINE_FUNCTION void rigid_rotation_z_frame_fields(
   grid_to_inertial_inverse_jacobian[6] = 0.0;         // (z_grid, x_inertial)
   grid_to_inertial_inverse_jacobian[7] = 0.0;         // (z_grid, y_inertial)
   grid_to_inertial_inverse_jacobian[8] = 1.0;         // (z_grid, z_inertial)
+}
+
+/// \brief Closed-form grid-to-inertial frame fields for a uniform radial
+/// scaling about the origin, inertial = scale * grid.
+///
+/// Reproduces domain::CoordinateMaps::TimeDependent::CubicScale in its
+/// linear-scaling mode for a single grid point, given the scale factor
+/// \p scale and its time derivative \p scale_dot at the current time. Callable
+/// on both host (verification) and device (kernel). Outputs use the same
+/// conventions and row-major inverse-Jacobian layout as
+/// rigid_rotation_z_frame_fields; here d(grid_a)/d(inertial_b) =
+/// (1 / scale) delta_{ab}.
+KOKKOS_INLINE_FUNCTION void uniform_radial_scaling_frame_fields(
+    const double grid_x, const double grid_y, const double grid_z,
+    const double scale, const double scale_dot, double (&inertial_coords)[3],
+    double (&mesh_velocity)[3],
+    double (&grid_to_inertial_inverse_jacobian)[9]) {
+  inertial_coords[0] = scale * grid_x;
+  inertial_coords[1] = scale * grid_y;
+  inertial_coords[2] = scale * grid_z;
+
+  mesh_velocity[0] = scale_dot * grid_x;
+  mesh_velocity[1] = scale_dot * grid_y;
+  mesh_velocity[2] = scale_dot * grid_z;
+
+  const double inverse_scale = 1.0 / scale;
+  for (size_t i = 0; i < 9; ++i) {
+    grid_to_inertial_inverse_jacobian[i] = 0.0;
+  }
+  grid_to_inertial_inverse_jacobian[0] = inverse_scale;  // (x_grid, x_inertial)
+  grid_to_inertial_inverse_jacobian[4] = inverse_scale;  // (y_grid, y_inertial)
+  grid_to_inertial_inverse_jacobian[8] = inverse_scale;  // (z_grid, z_inertial)
 }
 
 /// \brief Classify a block's grid-to-inertial map for the batched device path.

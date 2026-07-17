@@ -188,7 +188,7 @@ void update_frame_fields_device(
         evolution::Kokkos::PackedGeometry<gh::System<VolumeDim>>*>
         packed_geometry,
     const size_t points_per_element, const size_t total_points,
-    const double theta, const double theta_dot) {
+    const double fot_value, const double fot_value_dot) {
   const auto grid_coordinates = packed_geometry->grid_coordinates_device;
   const auto inertial_coordinates =
       packed_geometry->inertial_coordinates_device;
@@ -200,13 +200,16 @@ void update_frame_fields_device(
   const auto element_map_kind = packed_geometry->element_map_kind_device;
   const size_t ppe = points_per_element;
   constexpr int static_kind = static_cast<int>(BatchedMapKind::Static);
+  constexpr int rigid_rotation_z_kind =
+      static_cast<int>(BatchedMapKind::RigidRotationZ);
   ::Kokkos::parallel_for(
       "GhUpdateFrameFields", total_points,
       KOKKOS_LAMBDA(const int linear_index_int) {
         const size_t s = static_cast<size_t>(linear_index_int);
         const size_t e = s / ppe;
         const size_t p = s % ppe;
-        if (element_map_kind(e) == static_kind) {
+        const int kind = element_map_kind(e);
+        if (kind == static_kind) {
           for (size_t d = 0; d < VolumeDim; ++d) {
             inertial_coordinates.get(d)(s) = grid_coordinates.get(d)(s);
             mesh_velocity.get(d)(s) = 0.0;
@@ -217,19 +220,26 @@ void update_frame_fields_device(
                 logical_to_grid_inverse_jacobian(e, p, component);
           }
         } else {
-          // BatchedMapKind::RigidRotationZ
           double inertial[3];
           double velocity[3];
           double grid_to_inertial_inv_jac[9];
-          rigid_rotation_z_frame_fields(
-              grid_coordinates.get(0)(s), grid_coordinates.get(1)(s),
-              grid_coordinates.get(2)(s), theta, theta_dot, inertial, velocity,
-              grid_to_inertial_inv_jac);
+          if (kind == rigid_rotation_z_kind) {
+            rigid_rotation_z_frame_fields(
+                grid_coordinates.get(0)(s), grid_coordinates.get(1)(s),
+                grid_coordinates.get(2)(s), fot_value, fot_value_dot, inertial,
+                velocity, grid_to_inertial_inv_jac);
+          } else {
+            // BatchedMapKind::UniformRadialScaling
+            uniform_radial_scaling_frame_fields(
+                grid_coordinates.get(0)(s), grid_coordinates.get(1)(s),
+                grid_coordinates.get(2)(s), fot_value, fot_value_dot, inertial,
+                velocity, grid_to_inertial_inv_jac);
+          }
           for (size_t d = 0; d < VolumeDim; ++d) {
             inertial_coordinates.get(d)(s) = inertial[d];
             mesh_velocity.get(d)(s) = velocity[d];
           }
-          // Compose logical->grid (static) with grid->inertial (rotation):
+          // Compose logical->grid (static) with grid->inertial (device map):
           // invjac(logical, inertial) = sum_grid L2G(logical, grid) *
           //                             G2I(grid, inertial).
           for (size_t logical_d = 0; logical_d < VolumeDim; ++logical_d) {
@@ -333,6 +343,70 @@ bool verify_rigid_rotation_z(
   return true;
 }
 
+// Verify that a block's grid-to-inertial map is, at the given time, the uniform
+// radial scaling closed form used by the device path
+// (uniform_radial_scaling_frame_fields with the scale factor and its derivative
+// from `fot_name`). Same safety-gate role as verify_rigid_rotation_z: a
+// non-scaling map (e.g. a rotation, or a non-uniform CubicScale) fails the
+// comparison and falls back to the host path.
+template <size_t VolumeDim>
+bool verify_uniform_radial_scaling(
+    const Block<VolumeDim>& block,
+    const tnsr::I<DataVector, VolumeDim, Frame::Grid>& grid_coords,
+    const std::string& fot_name, const double time,
+    const domain::FunctionsOfTimeMap& functions_of_time) {
+  const auto map_data =
+      block.moving_mesh_grid_to_inertial_map().coords_frame_velocity_jacobians(
+          grid_coords, time, functions_of_time);
+  const auto& inertial_coords = std::get<0>(map_data);
+  const auto& grid_to_inertial_inverse_jacobian = std::get<1>(map_data);
+  const auto& mesh_velocity = std::get<3>(map_data);
+
+  const auto scale_and_deriv =
+      functions_of_time.at(fot_name)->func_and_deriv(time);
+  if (scale_and_deriv[0].size() != 1 or scale_and_deriv[1].size() != 1) {
+    return false;
+  }
+  const double scale = scale_and_deriv[0][0];
+  const double scale_dot = scale_and_deriv[1][0];
+  if (scale <= 0.0) {
+    return false;
+  }
+
+  const double tolerance = 1.0e-11;
+  const auto within_tolerance = [tolerance](const double a, const double b) {
+    return std::abs(a - b) <= tolerance * (1.0 + std::abs(b));
+  };
+
+  const size_t num_points = grid_coords.get(0).size();
+  for (size_t p = 0; p < num_points; ++p) {
+    double inertial[3];
+    double velocity[3];
+    double grid_to_inertial_inv_jac[9];
+    uniform_radial_scaling_frame_fields(
+        grid_coords.get(0)[p], grid_coords.get(1)[p], grid_coords.get(2)[p],
+        scale, scale_dot, inertial, velocity, grid_to_inertial_inv_jac);
+    for (size_t d = 0; d < VolumeDim; ++d) {
+      if (not within_tolerance(inertial_coords.get(d)[p], inertial[d])) {
+        return false;
+      }
+      if (not within_tolerance(mesh_velocity.get(d)[p], velocity[d])) {
+        return false;
+      }
+    }
+    for (size_t grid_d = 0; grid_d < VolumeDim; ++grid_d) {
+      for (size_t inertial_d = 0; inertial_d < VolumeDim; ++inertial_d) {
+        if (not within_tolerance(
+                grid_to_inertial_inverse_jacobian.get(grid_d, inertial_d)[p],
+                grid_to_inertial_inv_jac[grid_d * VolumeDim + inertial_d])) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 // Build the per-element device map plan once: classify every element's block
 // as Static, RigidRotationZ (verified against the host map), or HostEvaluated,
 // record the shared rotation function-of-time name, and upload the per-element
@@ -364,10 +438,11 @@ void build_map_plan(
     } else {
       kind = classify_block_map(block);
       if (kind != BatchedMapKind::Static) {
-        // Attempt to recognize a device-supported time-dependent map. A rigid
-        // z-rotation has a single scalar function of time and no distorted
-        // frame; verify it against the host map before enabling the device
-        // path.
+        // Attempt to recognize a device-supported time-dependent map. The
+        // currently supported device maps (rigid z-rotation, uniform radial
+        // scaling) each have a single scalar function of time and no distorted
+        // frame; verify the candidate closed form against the host map at this
+        // time before enabling the device path, otherwise fall back to host.
         const auto& names =
             block.moving_mesh_grid_to_inertial_map().function_of_time_names();
         if (names.size() == 1 and not block.has_distorted_frame()) {
@@ -385,14 +460,20 @@ void build_map_plan(
           if (verify_rigid_rotation_z<VolumeDim>(block, grid_coords, name, time,
                                                  functions_of_time)) {
             kind = BatchedMapKind::RigidRotationZ;
-            if (packed_geometry->rotation_function_of_time_name.empty()) {
-              packed_geometry->rotation_function_of_time_name = name;
+          } else if (verify_uniform_radial_scaling<VolumeDim>(
+                         block, grid_coords, name, time, functions_of_time)) {
+            kind = BatchedMapKind::UniformRadialScaling;
+          }
+          if (kind != BatchedMapKind::HostEvaluated) {
+            if (packed_geometry->device_map_function_of_time_name.empty()) {
+              packed_geometry->device_map_function_of_time_name = name;
             } else {
-              ASSERT(packed_geometry->rotation_function_of_time_name == name,
-                     "Batched device rigid rotation currently requires a "
-                     "single shared rotation function of time, but found both '"
-                         << packed_geometry->rotation_function_of_time_name
-                         << "' and '" << name << "'.");
+              ASSERT(
+                  packed_geometry->device_map_function_of_time_name == name,
+                  "Batched device maps currently require a single shared "
+                  "scalar function of time, but found both '"
+                      << packed_geometry->device_map_function_of_time_name
+                      << "' and '" << name << "'.");
             }
           }
         }
@@ -482,18 +563,19 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
   if (not has_host_evaluated) {
     ensure_static_device_geometry<volume_dim>(
         packed_geometry, num_elements, points_per_element, total_points);
-    double theta = 0.0;
-    double theta_dot = 0.0;
-    if (not packed_geometry->rotation_function_of_time_name.empty()) {
-      const auto angle_and_deriv =
+    double fot_value = 0.0;
+    double fot_value_dot = 0.0;
+    if (not packed_geometry->device_map_function_of_time_name.empty()) {
+      const auto value_and_deriv =
           functions_of_time
-              .at(packed_geometry->rotation_function_of_time_name)
+              .at(packed_geometry->device_map_function_of_time_name)
               ->func_and_deriv(time);
-      theta = angle_and_deriv[0][0];
-      theta_dot = angle_and_deriv[1][0];
+      fot_value = value_and_deriv[0][0];
+      fot_value_dot = value_and_deriv[1][0];
     }
-    update_frame_fields_device<volume_dim>(
-        packed_geometry, points_per_element, total_points, theta, theta_dot);
+    update_frame_fields_device<volume_dim>(packed_geometry, points_per_element,
+                                           total_points, fot_value,
+                                           fot_value_dot);
     // For a static domain the host geometry arrays are constant and were set
     // during initialization, so leave them untouched. When a moving map is
     // evaluated on the device, refresh the host coordinate and mesh-velocity
