@@ -93,20 +93,63 @@ PackedFixture make_fixture() {
   fixture.geometry.grid_coordinates_host = {{DataVector{total_points},
                                              DataVector{total_points},
                                              DataVector{total_points}}};
+  fixture.geometry.distorted_coordinates_host = {{DataVector{total_points},
+                                                  DataVector{total_points},
+                                                  DataVector{total_points}}};
   fixture.geometry.inertial_coordinates_host = {{DataVector{total_points},
                                                  DataVector{total_points},
                                                  DataVector{total_points}}};
   fixture.geometry.mesh_velocity_host = {{DataVector{total_points},
                                           DataVector{total_points},
                                           DataVector{total_points}}};
+  fixture.geometry.grid_to_distorted_frame_velocity_host = {
+      {DataVector{total_points}, DataVector{total_points},
+       DataVector{total_points}}};
   for (size_t d = 0; d < Dim; ++d) {
     for (size_t point = 0; point < total_points; ++point) {
       fixture.geometry.grid_coordinates_host[d][point] =
           10.0 * static_cast<double>(d + 1) + static_cast<double>(point);
+      fixture.geometry.distorted_coordinates_host[d][point] =
+          15.0 * static_cast<double>(d + 1) + static_cast<double>(point);
       fixture.geometry.inertial_coordinates_host[d][point] =
           20.0 * static_cast<double>(d + 1) + static_cast<double>(point);
       fixture.geometry.mesh_velocity_host[d][point] =
           30.0 * static_cast<double>(d + 1) + static_cast<double>(point);
+      fixture.geometry.grid_to_distorted_frame_velocity_host[d][point] =
+          35.0 * static_cast<double>(d + 1) + static_cast<double>(point);
+    }
+  }
+
+  using host_jacobian_type =
+      packed_geometry_type::host_inverse_jacobian_cache_type;
+  fixture.geometry.logical_to_distorted_inverse_jacobian_host =
+      host_jacobian_type{"TestGhHostElementViewLogicalToDistortedInvJacobian",
+                         num_elements, points_per_element, Dim * Dim};
+  fixture.geometry.grid_to_distorted_inverse_jacobian_host =
+      host_jacobian_type{"TestGhHostElementViewGridToDistortedInvJacobian",
+                         num_elements, points_per_element, Dim * Dim};
+  fixture.geometry.distorted_to_inertial_jacobian_host =
+      host_jacobian_type{"TestGhHostElementViewDistortedToInertialJacobian",
+                         num_elements, points_per_element, Dim * Dim};
+  fixture.geometry.distorted_to_inertial_inverse_jacobian_host =
+      host_jacobian_type{"TestGhHostElementViewDistortedToInertialInvJacobian",
+                         num_elements, points_per_element, Dim * Dim};
+  for (size_t e = 0; e < num_elements; ++e) {
+    for (size_t p = 0; p < points_per_element; ++p) {
+      for (size_t source_d = 0; source_d < Dim; ++source_d) {
+        for (size_t target_d = 0; target_d < Dim; ++target_d) {
+          const size_t component = source_d * Dim + target_d;
+          const double offset = static_cast<double>(10 * e + p + component);
+          fixture.geometry.logical_to_distorted_inverse_jacobian_host(
+              e, p, component) = 100.0 + offset;
+          fixture.geometry.grid_to_distorted_inverse_jacobian_host(
+              e, p, component) = 200.0 + offset;
+          fixture.geometry.distorted_to_inertial_jacobian_host(
+              e, p, component) = 300.0 + offset;
+          fixture.geometry.distorted_to_inertial_inverse_jacobian_host(
+              e, p, component) = 400.0 + offset;
+        }
+      }
     }
   }
 
@@ -160,10 +203,15 @@ void check_view_matches_fixture(const gh::Batched::HostElementView& view,
     for (size_t p = 0; p < points_per_element; ++p) {
       CHECK(view.grid_coordinates.get(d)[p] ==
             fixture.geometry.grid_coordinates_host[d][point_begin + p]);
+      CHECK(view.distorted_coordinates.get(d)[p] ==
+            fixture.geometry.distorted_coordinates_host[d][point_begin + p]);
       CHECK(view.inertial_coordinates.get(d)[p] ==
             fixture.geometry.inertial_coordinates_host[d][point_begin + p]);
       CHECK(view.mesh_velocity.get(d)[p] ==
             fixture.geometry.mesh_velocity_host[d][point_begin + p]);
+      CHECK(view.grid_to_distorted_frame_velocity.get(d)[p] ==
+            fixture.geometry
+                .grid_to_distorted_frame_velocity_host[d][point_begin + p]);
     }
   }
 
@@ -176,6 +224,28 @@ void check_view_matches_fixture(const gh::Batched::HostElementView& view,
                                                             inertial_d)[p] ==
               host_inverse_jacobian(element_index, p,
                                     logical_d * Dim + inertial_d));
+      }
+    }
+  }
+  for (size_t source_d = 0; source_d < Dim; ++source_d) {
+    for (size_t target_d = 0; target_d < Dim; ++target_d) {
+      const size_t component = source_d * Dim + target_d;
+      for (size_t p = 0; p < points_per_element; ++p) {
+        CHECK(view.logical_to_distorted_inverse_jacobian.get(source_d,
+                                                             target_d)[p] ==
+              fixture.geometry.logical_to_distorted_inverse_jacobian_host(
+                  element_index, p, component));
+        CHECK(view.grid_to_distorted_inverse_jacobian.get(source_d,
+                                                          target_d)[p] ==
+              fixture.geometry.grid_to_distorted_inverse_jacobian_host(
+                  element_index, p, component));
+        CHECK(view.distorted_to_inertial_jacobian.get(source_d, target_d)[p] ==
+              fixture.geometry.distorted_to_inertial_jacobian_host(
+                  element_index, p, component));
+        CHECK(view.distorted_to_inertial_inverse_jacobian.get(source_d,
+                                                              target_d)[p] ==
+              fixture.geometry.distorted_to_inertial_inverse_jacobian_host(
+                  element_index, p, component));
       }
     }
   }
