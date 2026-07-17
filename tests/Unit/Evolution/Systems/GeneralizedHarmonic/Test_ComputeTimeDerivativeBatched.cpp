@@ -17,7 +17,7 @@
 #include "Domain/Structure/Element.hpp"
 #include "Domain/Structure/ElementId.hpp"
 #include "Evolution/Kokkos/PackedDataBundles.hpp"
-#include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/AnalyticChristoffel.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Harmonic.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/ComputeTimeDerivativeBatched.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/TimeDerivative.hpp"
@@ -71,10 +71,7 @@ dt_variables_type compute_host_reference(
                       inverse_jacobian);
 
   using all_solutions = gh::Solutions::all_solutions<Dim>;
-  const std::array<double, 3> zero_spin{{0.0, 0.0, 0.0}};
-  const std::array<double, 3> zero_center{{0.0, 0.0, 0.0}};
-  gh::gauges::AnalyticChristoffel gauge_condition{
-      std::make_unique<hardcoded_solution>(1.0, zero_spin, zero_center)};
+  const gh::gauges::Harmonic gauge_condition{};
 
   tnsr::aa<DataVector, Dim, Frame::Inertial> host_dt_spacetime_metric{
       num_points};
@@ -284,7 +281,7 @@ void test_compute_time_derivative_batched_matches_host(
   gh::Actions::ComputeTimeDerivativeBatched::apply(
       make_not_null(&packed_evolution_state),
       make_not_null(&packed_boundary_scratch), packed_topology, packed_geometry,
-      device_gamma0, device_gamma1, device_gamma2);
+      gh::gauges::Harmonic{}, device_gamma0, device_gamma1, device_gamma2);
 
   dt_variables_type dt_batched{num_points, 0.0};
   copy_to_host(make_not_null(&dt_batched),

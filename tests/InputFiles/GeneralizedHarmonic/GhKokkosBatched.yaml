@@ -56,8 +56,7 @@ DomainCreator:
 EvolutionSystem:
   GeneralizedHarmonic:
     GaugeCondition:
-      AnalyticChristoffel:
-        AnalyticPrescription: *InitialData
+      Harmonic:
     DampingFunctionGamma0:
       GaussianPlusConstant:
         Constant: 0.001

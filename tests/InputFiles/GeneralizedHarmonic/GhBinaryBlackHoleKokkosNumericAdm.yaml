@@ -54,10 +54,7 @@ DomainCreator:
 EvolutionSystem:
   GeneralizedHarmonic:
     GaugeCondition:
-      DampedHarmonic:
-        SpatialDecayWidth: 17.0152695482514
-        Amplitudes: [1.0, 1.0, 1.0]
-        Exponents: [2, 2, 2]
+      Harmonic:
     DampingFunctionGamma0:
       GaussianPlusConstant:
         Constant: 0.001

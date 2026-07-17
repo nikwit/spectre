@@ -8,6 +8,7 @@
 #include "DataStructures/DataBox/PrefixHelpers.hpp"
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "Evolution/Kokkos/PackedTags.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Tags/GaugeCondition.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/KokkosTimeStepperTags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Utilities/Gsl.hpp"
@@ -31,6 +32,7 @@ struct ComputeTimeDerivativeBatched {
       evolution::Kokkos::Tags::PackedBoundaryScratch<system>;
   using packed_topology_tag = evolution::Kokkos::Tags::PackedTopology<system>;
   using packed_geometry_tag = evolution::Kokkos::Tags::PackedGeometry<system>;
+  using gauge_condition_tag = gh::gauges::Tags::GaugeCondition;
   using device_constraint_gamma0_tag = gh::KokkosTags::DeviceConstraintGamma0;
   using device_constraint_gamma1_tag = gh::KokkosTags::DeviceConstraintGamma1;
   using device_constraint_gamma2_tag = gh::KokkosTags::DeviceConstraintGamma2;
@@ -53,7 +55,7 @@ struct ComputeTimeDerivativeBatched {
   using return_tags =
       tmpl::list<packed_evolution_state_tag, packed_boundary_scratch_tag>;
   using argument_tags =
-      tmpl::list<packed_topology_tag, packed_geometry_tag,
+      tmpl::list<packed_topology_tag, packed_geometry_tag, gauge_condition_tag,
                  device_constraint_gamma0_tag, device_constraint_gamma1_tag,
                  device_constraint_gamma2_tag>;
 
@@ -64,6 +66,7 @@ struct ComputeTimeDerivativeBatched {
           packed_boundary_scratch,
       const typename packed_topology_tag::type& packed_topology,
       const typename packed_geometry_tag::type& packed_geometry,
+      const gh::gauges::GaugeCondition& gauge_condition,
       const typename device_constraint_gamma0_tag::type& device_gamma0,
       const typename device_constraint_gamma1_tag::type& device_gamma1,
       const typename device_constraint_gamma2_tag::type& device_gamma2);

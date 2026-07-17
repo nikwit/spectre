@@ -71,6 +71,9 @@ void InitializeBatchedDataWithTag<FunctionsOfTimeTag,
               damping_function_gamma1,
           const typename damping_function_gamma2_tag::DampingFunctionType&
               damping_function_gamma2) {
+  if (not gauge_condition.is_harmonic()) {
+    ERROR("GH batched evolution currently supports only the Harmonic gauge.");
+  }
 #ifdef SPECTRE_KOKKOS
   const auto execution_space_name = ::Kokkos::DefaultExecutionSpace::name();
   const int execution_space_concurrency =

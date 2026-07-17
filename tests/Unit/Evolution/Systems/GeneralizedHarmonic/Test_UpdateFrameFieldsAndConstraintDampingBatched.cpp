@@ -13,7 +13,7 @@
 #include "Domain/Creators/Rectilinear.hpp"
 #include "Domain/Creators/TimeDependence/UniformTranslation.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
-#include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/AnalyticChristoffel.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Harmonic.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/DriverState.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/InitializeBatchedData.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/UpdateConstraintDampingBatched.hpp"
@@ -205,8 +205,7 @@ void test_update_frame_fields_and_constraint_damping_batched() {
   const std::array<double, 3> zero_spin{{0.0, 0.0, 0.0}};
   const std::array<double, 3> zero_center{{0.0, 0.0, 0.0}};
   const hardcoded_solution solution{1.0, zero_spin, zero_center};
-  const gh::gauges::AnalyticChristoffel gauge_condition{
-      std::make_unique<hardcoded_solution>(solution)};
+  const gh::gauges::Harmonic gauge_condition{};
 
   constexpr double gamma0_constant = 0.4;
   constexpr double gamma1_constant = -0.7;

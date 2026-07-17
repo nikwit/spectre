@@ -20,6 +20,7 @@
 #include "Evolution/Kokkos/CleanHistory.hpp"
 #include "Evolution/Kokkos/RecordTimeStepperData.hpp"
 #include "Evolution/Kokkos/UpdateU.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Harmonic.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/FindApparentHorizonBatchedEvent.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/ObserveTimeStepBatchedEvent.hpp"
 #include "Evolution/Tags/Filter.hpp"
@@ -173,7 +174,8 @@ struct EvolutionMetavarsKokkosBatched {
         tmpl::pair<
             gh::BoundaryConditions::BoundaryCondition<volume_dim>,
             gh::BoundaryConditions::standard_boundary_conditions<volume_dim>>,
-        tmpl::pair<gh::gauges::GaugeCondition, gh::gauges::all_gauges>,
+        tmpl::pair<gh::gauges::GaugeCondition,
+                   tmpl::list<gh::gauges::Harmonic>>,
         tmpl::pair<evolution::initial_data::InitialData,
                    tmpl::append<gh::Solutions::all_solutions<volume_dim>,
                                 tmpl::list<gh::NumericInitialData>>>,
