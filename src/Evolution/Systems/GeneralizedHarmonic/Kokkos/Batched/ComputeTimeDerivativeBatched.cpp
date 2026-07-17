@@ -463,6 +463,7 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
             double dt_piece = -lapse_at_s * get<mu, nu>(pi_at_s);
             double sum = 0.0;
             double mesh_sum = 0.0;
+            double mesh_advection = 0.0;
             static_for<dim>([&](auto m_c) {
               constexpr int m = m_c;
               dt_piece += get<m>(shift_at_s) * get<m, mu, nu>(phi_at_s);
@@ -472,10 +473,17 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
               mesh_sum += get<m>(mesh_velocity_at_s) *
                           (get<m, mu, nu>(d_spacetime_metric)[point] -
                            get<m, mu, nu>(phi_at_s));
+              // Generic moving-mesh advection v^m d_m g_{mu nu}, added for
+              // every evolved variable. Production adds this in
+              // VolumeTermsImpl, separately from the GH-specific gamma1
+              // mesh term (gamma1 * mesh_sum) above.
+              mesh_advection += get<m>(mesh_velocity_at_s) *
+                                get<m, mu, nu>(d_spacetime_metric)[point];
             });
 
             get<mu, nu>(dt_spacetime_metric)[point] =
-                dt_piece + gamma1_plus_1 * sum + gamma1 * mesh_sum;
+                dt_piece + gamma1_plus_1 * sum + gamma1 * mesh_sum +
+                mesh_advection;
           });
         });
       });
@@ -831,6 +839,8 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
             static_for<int_dim>([&](auto m_c) {
               constexpr int m = (int)m_c;
               acc += get<m>(shift) * get<m, mu, nu>(d_pi)[s];
+              // Generic moving-mesh advection v^m d_m Pi_{mu nu}.
+              acc += get<m>(mesh_velocity_at_s) * get<m, mu, nu>(d_pi)[s];
             });
 
             get<mu, nu>(dt_pi)[s] = acc;
@@ -849,6 +859,7 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
         const auto spacetime_metric_at_s = make_at_index(spacetime_metric, s);
         const auto pi_at_s = make_at_index(pi, s);
         const auto phi_at_s = make_at_index(phi, s);
+        const auto mesh_velocity_at_s = make_at_index(mesh_velocity, s);
 
         const auto inverse_spatial_metric =
             make_at_index(cached_inverse_spatial_metric, s);
@@ -909,6 +920,9 @@ void ComputeTimeDerivativeBatched::compute_time_derivative_batched_volume_impl(
                 constexpr int m = (int)m_c;
                 dt_phi_i_mu_nu +=
                     get<m>(shift) * get<m, i, mu, nu>(d_phi)[point];
+                // Generic moving-mesh advection v^m d_m Phi_{i mu nu}.
+                dt_phi_i_mu_nu += get<m>(mesh_velocity_at_s) *
+                                  get<m, i, mu, nu>(d_phi)[point];
               });
               get<i, mu, nu>(dt_phi)[point] = dt_phi_i_mu_nu;
             });
