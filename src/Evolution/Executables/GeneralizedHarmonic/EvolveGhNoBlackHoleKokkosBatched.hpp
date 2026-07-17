@@ -80,7 +80,12 @@ struct GhKokkosBatchedDriver {
                   gh::Batched::Actions::InitializeDriver<Metavariables>>,
               Actions::MutateApply<
                   gh::Batched::Actions::InitializeBoundaryBatchMetadata>,
-              Parallel::Actions::TerminatePhase>>,
+              // Initialization::TimeStepping leaves Tags::TimeStepId
+              // undefined; production executables advance it once in the
+              // self-start phase before evolving. Runge-Kutta steppers need
+              // no self-start history, so a single AdvanceTime supplies the
+              // initial TimeStepId here.
+              Actions::AdvanceTime, Parallel::Actions::TerminatePhase>>,
       Parallel::PhaseActions<Parallel::Phase::Register,
                              tmpl::list<Parallel::Actions::TerminatePhase>>,
       Parallel::PhaseActions<

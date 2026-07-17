@@ -1,0 +1,163 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+# Time-loop smoke test for the batched BBH driver: a single Kerr-Schild
+# hole at object A of a binary domain whose object B is a filled sphere,
+# with static maps and every control system disabled. A two-excision
+# domain cannot be evolved from single-hole analytic data because the
+# second excision has incoming characteristics, so this input exercises
+# the BBH action loop (dense triggers, LimitTimeStep, RK update,
+# filtering) on a physically consistent configuration.
+
+Executable: EvolveGhBinaryBlackHoleKokkos
+Testing:
+  Check: parse;execute
+
+---
+
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
+
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.0002
+  MinimumTimeStep: 1e-7
+  TimeStepper: Rk5Tsitouras
+
+InitialData: &InitialData
+  GeneralizedHarmonic(KerrSchild):
+    Mass: 1.0
+    Spin: [0.0, 0.0, 0.0]
+    Center: &AhCenter [8.0, 0.0, 0.0]
+    Velocity: [0.0, 0.0, 0.0]
+
+DomainCreator:
+  BinaryCompactObject:
+    ObjectA:
+      InnerRadius: 1.9
+      OuterRadius: 3.0
+      XCoord: 8.0
+      Interior:
+        ExciseWithBoundaryCondition:
+          DemandOutgoingCharSpeeds:
+      UseLogarithmicMap: false
+    ObjectB:
+      InnerRadius: 1.9
+      OuterRadius: 3.0
+      XCoord: -8.0
+      Interior: Auto
+      UseLogarithmicMap: false
+    CenterOfMassOffset: [0., 0.]
+    CubeScale: 1.0
+    Envelope:
+      Radius: 30.0
+      RadialDistribution: Linear
+    OuterShell:
+      Radius: 60.0
+      RadialDistribution: Linear
+      RadialPartitioning: []
+      OpeningAngle: 90.0
+      BoundaryCondition:
+        ConstraintPreservingBjorhus:
+          Type: ConstraintPreservingPhysical
+    UseEquiangularMap: true
+    InitialRefinement: 0
+    InitialGridPoints: 5
+    TimeDependentMaps: None
+
+EvolutionSystem:
+  GeneralizedHarmonic:
+    GaugeCondition:
+      Harmonic:
+    DampingFunctionGamma0:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 3.0
+        Width: 11.313708499
+        Center: *AhCenter
+    DampingFunctionGamma1:
+      GaussianPlusConstant:
+        Constant: -1.0
+        Amplitude: 0.0
+        Width: 11.313708499
+        Center: *AhCenter
+    DampingFunctionGamma2:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 1.0
+        Width: 11.313708499
+        Center: *AhCenter
+
+Filtering:
+  ExpFilter0:
+    Alpha: 36.0
+    HalfPower: 64
+    Enable: true
+    BlocksToFilter: All
+
+SpatialDiscretization:
+  DiscontinuousGalerkin:
+    Quadrature: GaussLobatto
+
+EventsAndTriggersAtSlabs:
+  - Trigger:
+      Slabs:
+        Specified:
+          Values: [2]
+    Events:
+      - CompletionBatched
+
+Observers:
+  VolumeFileName: "GhBinaryBlackHoleKokkosSmokeVolume"
+  ReductionFileName: "GhBinaryBlackHoleKokkosSmokeReductions"
+  SurfaceFileName: "GhBinaryBlackHoleKokkosSmokeSurfaces"
+
+ApparentHorizons:
+  BatchedObservationAhA: &BatchedAh
+    InitialGuess:
+      LMax: &LMax 4
+      Radius: &AhRadius 2.2
+      Center: *AhCenter
+    FastFlow:
+      Flow: Fast
+      Alpha: 1.0
+      Beta: 0.5
+      AbsTol: 1e-12
+      TruncationTol: 1e-2
+      DivergenceTol: 1.2
+      DivergenceIter: 5
+      MaxIts: 100
+    Verbosity: Quiet
+    MaxComputeCoordsRetries: 3
+    BlocksForHorizonFind: All
+  BatchedObservationAhB: *BatchedAh
+  ControlSystemAhA: *BatchedAh
+  ControlSystemAhB: *BatchedAh
+  ControlSystemCharSpeedAhA: *BatchedAh
+  ControlSystemCharSpeedAhB: *BatchedAh
+
+InterpolationTargets:
+  ControlSystemCharSpeedExcisionA:
+    LMax: *LMax
+    Radius: 1.9
+    Center: *AhCenter
+    AngularOrdering: Strahlkorper
+  ControlSystemCharSpeedExcisionB:
+    LMax: *LMax
+    Radius: 1.9
+    Center: *AhCenter
+    AngularOrdering: Strahlkorper
+
+ControlSystems:
+  WriteDataToDisk: false
+  MeasurementsPerUpdate: 4
+  Verbosity: Silent
+  Expansion: None
+  Rotation: None
+  Translation: None
+  Skew: None
+  ShapeA: None
+  ShapeB: None
+  SizeA: None
+  SizeB: None
