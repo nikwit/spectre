@@ -310,10 +310,61 @@ void InitializeBatchedDataWithTag<FunctionsOfTimeTag,
             const auto& inertial_coords =
                 numeric_import_targets.at(element_id).first;
 
-            host_variables_type element_vars{mesh.number_of_grid_points()};
-            element_vars.assign_subset(evolution::Initialization::initial_data(
+            // Mirror the production gh::Actions::SetInitialData analytic
+            // branch: take ADM variables from the solution, construct the
+            // GH variables with initial_gh_variables_from_adm (Phi from the
+            // numerical metric derivative, Pi with dt lapse and shift set
+            // to zero), then let SetPiAndPhiFromConstraints below adjust Pi
+            // to the evolution gauge.
+            const auto adm_vars = evolution::Initialization::initial_data(
                 *data_or_solution, inertial_coords, initial_time,
-                typename host_variables_type::tags_list{}));
+                tmpl::list<
+                    gr::Tags::SpatialMetric<DataVector, volume_dim>,
+                    gr::Tags::Lapse<DataVector>,
+                    gr::Tags::Shift<DataVector, volume_dim>,
+                    gr::Tags::ExtrinsicCurvature<DataVector, volume_dim>>{});
+
+            host_variables_type element_vars{mesh.number_of_grid_points()};
+            gh::initial_gh_variables_from_adm<volume_dim>(
+                make_not_null(
+                    &get<gr::Tags::SpacetimeMetric<DataVector, volume_dim>>(
+                        element_vars)),
+                make_not_null(
+                    &get<gh::Tags::Pi<DataVector, volume_dim>>(element_vars)),
+                make_not_null(
+                    &get<gh::Tags::Phi<DataVector, volume_dim>>(element_vars)),
+                get<gr::Tags::SpatialMetric<DataVector, volume_dim>>(adm_vars),
+                get<gr::Tags::Lapse<DataVector>>(adm_vars),
+                get<gr::Tags::Shift<DataVector, volume_dim>>(adm_vars),
+                get<gr::Tags::ExtrinsicCurvature<DataVector, volume_dim>>(
+                    adm_vars),
+                mesh,
+                gsl::at(element_logical_to_inertial_inverse_jacobians, e));
+
+            // Production GH executables run SetPiAndPhiFromConstraints
+            // during initialization so the initial data satisfies the
+            // 1- and 3-index constraints and is in the evolution gauge.
+            const auto& block = domain.blocks()[element_id.block_id()];
+            const auto element_map =
+                ElementMap<volume_dim, Frame::Grid>{element_id, block};
+            const auto grid_to_inertial_map =
+                block.is_time_dependent()
+                    ? block.moving_mesh_grid_to_inertial_map().get_clone()
+                    : domain::make_coordinate_map_base<Frame::Grid,
+                                                       Frame::Inertial>(
+                          domain::CoordinateMaps::Identity<volume_dim>{});
+            gh::gauges::SetPiAndPhiFromConstraints<
+                gh::Solutions::all_solutions<volume_dim>, volume_dim>::
+                impl(make_not_null(&get<gh::Tags::Pi<DataVector, volume_dim>>(
+                         element_vars)),
+                     make_not_null(&get<gh::Tags::Phi<DataVector, volume_dim>>(
+                         element_vars)),
+                     initial_time, mesh, element_map, *grid_to_inertial_map,
+                     functions_of_time, gsl::at(element_logical_coordinates, e),
+                     get<gr::Tags::SpacetimeMetric<DataVector, volume_dim>>(
+                         element_vars),
+                     gauge_condition, true);
+
             pack_element_vars(element_vars, e);
           }
         } else if constexpr (std::is_same_v<initial_data_subclass,
