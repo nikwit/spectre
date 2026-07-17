@@ -589,9 +589,6 @@ void ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
             ? gsl::at(face_to_volume_index_map, sliced_dim).second
             : gsl::at(face_to_volume_index_map, sliced_dim).first;
     const double outward = outward_sign(side);
-    const double lift_prefactor =
-        -0.5 *
-        static_cast<double>(extents[sliced_dim] * (extents[sliced_dim] - 1));
     const size_t expected_face_points = num_elements * num_face_points;
     auto& input_device =
         packed_boundary_scratch->external_boundary_input_data[local_face_id];
@@ -839,10 +836,13 @@ void ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
               << ": " << error.value());
       }
 
+      // TimeDerivative-type boundary corrections are added pointwise at the
+      // face collocation points (production uses add_slice_to_data for
+      // Gauss-Lobatto meshes); they are not flux corrections, so no mass
+      // lifting or normal-magnitude weighting is applied.
       for (size_t component = 0; component < num_dt_components; ++component) {
         for (size_t p = 0; p < num_face_points; ++p) {
           correction_host(face_point_offset + p, component) =
-              lift_prefactor * normal_magnitude[p] *
               face_correction.data()[component * num_face_points + p];
         }
       }

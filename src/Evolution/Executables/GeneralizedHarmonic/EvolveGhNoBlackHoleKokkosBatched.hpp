@@ -102,13 +102,17 @@ struct GhKokkosBatchedDriver {
                   gh::Batched::Actions::ComputeTimeDerivativeBatched>,
               Actions::MutateApply<
                   gh::Batched::Actions::PackageLocalFacesBatched>,
+              // External TimeDerivative-type boundary conditions consume the
+              // volume RHS before internal-face lifting, matching the
+              // production executables where they are applied within
+              // ComputeTimeDerivative.
+              Actions::MutateApply<
+                  gh::Batched::Actions::
+                      ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched>,
               Actions::MutateApply<
                   gh::Batched::Actions::ComputeInternalBoundaryTermsBatched>,
               Actions::MutateApply<
                   gh::Batched::Actions::LiftInternalBoundaryTermsBatched>,
-              Actions::MutateApply<
-                  gh::Batched::Actions::
-                      ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched>,
               Actions::MutateApply<
                   evolution::Actions::Kokkos::RecordTimeStepperData<
                       typename Metavariables::system>>,
