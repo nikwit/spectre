@@ -57,6 +57,7 @@ target_link_libraries(
   Utilities
   PRIVATE
   LinearOperators
+  TimeKokkos
   INTERFACE
   Observer
   Parallel

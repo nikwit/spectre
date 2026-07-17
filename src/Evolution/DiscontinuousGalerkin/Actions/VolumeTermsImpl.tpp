@@ -190,13 +190,9 @@ void volume_terms(
   using flux_variables = tmpl::list<FluxVariablesTags...>;
 
   // Compute d_i u_\alpha for nonconservative products
-  auto partial_derivs_on_device = copy_to_device(*partial_derivs);
   if constexpr (has_partial_derivs) {
-    const auto evolved_vars_on_device = copy_to_device(evolved_vars);
-    const auto inv_jacobian_on_device =
-        copy_to_device(logical_to_inertial_inverse_jacobian);
-    partial_derivatives(make_not_null(&partial_derivs_on_device),
-                        evolved_vars_on_device, mesh, inv_jacobian_on_device);
+    partial_derivatives(partial_derivs, evolved_vars, mesh,
+                        logical_to_inertial_inverse_jacobian);
   }
 
   // For now just zero dt_vars. If this is a performance bottle neck we
