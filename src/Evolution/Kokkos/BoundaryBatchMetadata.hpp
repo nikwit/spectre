@@ -21,6 +21,12 @@ static constexpr size_t boundary_volume_dim = 3;
 static constexpr size_t boundary_number_of_faces = 2 * boundary_volume_dim;
 static constexpr size_t boundary_projection_group_count = 16;
 
+enum class ExternalBoundaryConditionKind : int {
+  None = 0,
+  DemandOutgoingCharSpeeds = 1,
+  ConstraintPreservingPhysical = 2
+};
+
 struct BoundaryCorrectionWorkItem {
   size_t local_element_index{0};
   size_t remote_element_index{0};
@@ -42,8 +48,9 @@ struct MortarMetadata {
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {
-    ERROR("Tried to call pup for evolution::Kokkos::Batched::MortarMetadata, "
-          "but pup is not supported with kokkos");
+    ERROR(
+        "Tried to call pup for evolution::Kokkos::Batched::MortarMetadata, "
+        "but pup is not supported with kokkos");
   }
 };
 
@@ -71,8 +78,9 @@ struct FaceBoundaryMetadata {
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {
-    ERROR("Tried to call pup for evolution::Kokkos::Batched::"
-          "FaceBoundaryMetadata, but pup is not supported with kokkos");
+    ERROR(
+        "Tried to call pup for evolution::Kokkos::Batched::"
+        "FaceBoundaryMetadata, but pup is not supported with kokkos");
   }
 };
 

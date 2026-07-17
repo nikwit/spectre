@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <vector>
 
 #include <pup.h>
 
@@ -40,6 +41,15 @@ struct PackedBoundaryMetadataStorage {
   std::array<::Kokkos::View<int*>,
              evolution::Kokkos::Batched::boundary_number_of_faces>
       external_face_mask_for_all_elements{};
+  std::array<::Kokkos::View<int*>,
+             evolution::Kokkos::Batched::boundary_number_of_faces>
+      external_boundary_condition_kind_for_all_elements{};
+  std::array<std::vector<int>,
+             evolution::Kokkos::Batched::boundary_number_of_faces>
+      external_face_mask_for_all_elements_host{};
+  std::array<std::vector<int>,
+             evolution::Kokkos::Batched::boundary_number_of_faces>
+      external_boundary_condition_kind_for_all_elements_host{};
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {
@@ -135,6 +145,8 @@ struct PackedBoundaryScratchStorage<
       Variables<tmpl::list<device_inverse_spatial_metric_tag, device_shift_tag,
                            device_lapse_tag>>;
   using projection_workspace_type = ::Kokkos::View<double***>;
+  using external_boundary_workspace_type =
+      ::Kokkos::View<double**, ::Kokkos::LayoutRight>;
 
   packaged_face_data_storage_type packaged_face_data_for_all_elements{};
   internal_boundary_terms_storage_type
@@ -150,6 +162,10 @@ struct PackedBoundaryScratchStorage<
   Variables<device_dt_boundary_tags> projection_dt_boundary_on_mortar{};
   Variables<device_dt_boundary_tags> projection_dt_boundary_on_face{};
   projection_workspace_type projection_workspace{};
+  std::array<external_boundary_workspace_type, number_of_faces>
+      external_boundary_input_data{};
+  std::array<external_boundary_workspace_type, number_of_faces>
+      external_boundary_corrections{};
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {

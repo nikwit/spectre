@@ -28,25 +28,25 @@ struct ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched {
   using device_constraint_gamma1_tag = gh::KokkosTags::DeviceConstraintGamma1;
   using device_constraint_gamma2_tag = gh::KokkosTags::DeviceConstraintGamma2;
 
-  using return_tags = tmpl::list<packed_evolution_state_tag>;
+  using return_tags =
+      tmpl::list<packed_evolution_state_tag, packed_boundary_scratch_tag>;
   using argument_tags =
       tmpl::list<packed_topology_tag, packed_geometry_tag,
                  packed_boundary_metadata_tag, device_constraint_gamma0_tag,
-                 device_constraint_gamma1_tag, device_constraint_gamma2_tag,
-                 packed_boundary_scratch_tag>;
+                 device_constraint_gamma1_tag, device_constraint_gamma2_tag>;
 
   static void apply(
       const gsl::not_null<typename packed_evolution_state_tag::type*>
           packed_evolution_state,
+      const gsl::not_null<typename packed_boundary_scratch_tag::type*>
+          packed_boundary_scratch,
       const typename packed_topology_tag::type& packed_topology,
       const typename packed_geometry_tag::type& packed_geometry,
       const typename packed_boundary_metadata_tag::type&
           packed_boundary_metadata,
       const typename device_constraint_gamma0_tag::type& device_gamma0,
       const typename device_constraint_gamma1_tag::type& device_gamma1,
-      const typename device_constraint_gamma2_tag::type& device_gamma2,
-      const typename packed_boundary_scratch_tag::type&
-          packed_boundary_scratch);
+      const typename device_constraint_gamma2_tag::type& device_gamma2);
 };
 
 }  // namespace gh::Actions

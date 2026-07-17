@@ -9,16 +9,20 @@
 #include <vector>
 
 #include "DataStructures/Index.hpp"
+#include "Domain/Creators/Tags/ExternalBoundaryConditions.hpp"
 #include "Domain/Structure/Direction.hpp"
 #include "Domain/Structure/DirectionalId.hpp"
 #include "Domain/Structure/OrientationMapHelpers.hpp"
 #include "Evolution/Kokkos/PackedTags.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/Bjorhus.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/DemandOutgoingCharSpeeds.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/MortarHelpers.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/Spectral/Projection.hpp"
 #include "NumericalAlgorithms/Spectral/SegmentSize.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
 #include "Utilities/TMPL.hpp"
@@ -38,10 +42,14 @@ struct InitializeBoundaryBatchMetadata {
       evolution::Kokkos::Tags::PackedBoundaryMetadata<system>;
   using packed_boundary_scratch_tag =
       evolution::Kokkos::Tags::PackedBoundaryScratch<system>;
+  using external_boundary_conditions_tag =
+      domain::Tags::ExternalBoundaryConditions<volume_dim>;
 
   using return_tags =
       tmpl::list<packed_boundary_metadata_tag, packed_boundary_scratch_tag>;
-  using argument_tags = tmpl::list<packed_topology_tag>;
+  using argument_tags =
+      tmpl::list<packed_topology_tag, external_boundary_conditions_tag>;
+  using const_global_cache_tags = tmpl::list<external_boundary_conditions_tag>;
 
   static constexpr size_t side_index(const Side side) {
     return side == Side::Upper ? static_cast<size_t>(1)
@@ -60,7 +68,9 @@ struct InitializeBoundaryBatchMetadata {
           packed_boundary_metadata,
       const gsl::not_null<typename packed_boundary_scratch_tag::type*>
           packed_boundary_scratch,
-      const typename packed_topology_tag::type& packed_topology) {
+      const typename packed_topology_tag::type& packed_topology,
+      const typename external_boundary_conditions_tag::type&
+          external_boundary_conditions_by_block) {
     using BoundaryCorrectionWorkItem =
         evolution::Kokkos::Batched::BoundaryCorrectionWorkItem;
     using MortarMetadata = evolution::Kokkos::Batched::MortarMetadata;
@@ -121,6 +131,13 @@ struct InitializeBoundaryBatchMetadata {
         {"GhBatchedExternalFaceMask0", "GhBatchedExternalFaceMask1",
          "GhBatchedExternalFaceMask2", "GhBatchedExternalFaceMask3",
          "GhBatchedExternalFaceMask4", "GhBatchedExternalFaceMask5"}};
+    constexpr std::array<const char*, number_of_faces> external_kind_labels{
+        {"GhBatchedExternalBoundaryConditionKind0",
+         "GhBatchedExternalBoundaryConditionKind1",
+         "GhBatchedExternalBoundaryConditionKind2",
+         "GhBatchedExternalBoundaryConditionKind3",
+         "GhBatchedExternalBoundaryConditionKind4",
+         "GhBatchedExternalBoundaryConditionKind5"}};
 
     const size_t num_elements = packed_topology.local_elements.size();
     for (size_t sliced_dim = 0; sliced_dim < volume_dim; ++sliced_dim) {
@@ -131,18 +148,82 @@ struct InitializeBoundaryBatchMetadata {
         auto& external_face_mask =
             packed_boundary_metadata
                 ->external_face_mask_for_all_elements[local_face_id];
+        auto& external_boundary_condition_kind =
+            packed_boundary_metadata
+                ->external_boundary_condition_kind_for_all_elements
+                    [local_face_id];
         external_face_mask = ::Kokkos::View<int*>{
             external_mask_labels[local_face_id], num_elements};
+        external_boundary_condition_kind = ::Kokkos::View<int*>{
+            external_kind_labels[local_face_id], num_elements};
         auto host_external_face_mask =
             ::Kokkos::create_mirror_view(external_face_mask);
+        auto host_external_boundary_condition_kind =
+            ::Kokkos::create_mirror_view(external_boundary_condition_kind);
+        auto& external_face_mask_host =
+            packed_boundary_metadata
+                ->external_face_mask_for_all_elements_host[local_face_id];
+        auto& external_boundary_condition_kind_host =
+            packed_boundary_metadata
+                ->external_boundary_condition_kind_for_all_elements_host
+                    [local_face_id];
+        external_face_mask_host.resize(num_elements);
+        external_boundary_condition_kind_host.resize(num_elements);
         for (size_t e = 0; e < num_elements; ++e) {
-          host_external_face_mask(e) =
-              packed_topology.local_elements[e].external_boundaries().count(
-                  direction) == 0
-                  ? 0
-                  : 1;
+          const auto& element = packed_topology.local_elements[e];
+          const bool is_external =
+              element.external_boundaries().count(direction) != 0;
+          external_face_mask_host[e] = is_external ? 1 : 0;
+          host_external_face_mask(e) = external_face_mask_host[e];
+          auto kind =
+              evolution::Kokkos::Batched::ExternalBoundaryConditionKind::None;
+          if (is_external) {
+            const size_t block_id = element.id().block_id();
+            if (block_id >= external_boundary_conditions_by_block.size() or
+                external_boundary_conditions_by_block[block_id].count(
+                    direction) == 0) {
+              ERROR("Missing external boundary condition for block "
+                    << block_id << " in direction " << direction << ".");
+            }
+            const auto& boundary_condition =
+                external_boundary_conditions_by_block[block_id].at(direction);
+            if (boundary_condition == nullptr) {
+              ERROR("Null external boundary condition for block "
+                    << block_id << " in direction " << direction << ".");
+            }
+            if (dynamic_cast<const gh::BoundaryConditions::
+                                 DemandOutgoingCharSpeeds<volume_dim>*>(
+                    boundary_condition.get()) != nullptr) {
+              kind = evolution::Kokkos::Batched::ExternalBoundaryConditionKind::
+                  DemandOutgoingCharSpeeds;
+            } else if (const auto* const bjorhus = dynamic_cast<
+                           const gh::BoundaryConditions::
+                               ConstraintPreservingBjorhus<volume_dim>*>(
+                           boundary_condition.get());
+                       bjorhus != nullptr and
+                       bjorhus->bjorhus_type() ==
+                           gh::BoundaryConditions::detail::
+                               ConstraintPreservingBjorhusType::
+                                   ConstraintPreservingPhysical) {
+              kind = evolution::Kokkos::Batched::ExternalBoundaryConditionKind::
+                  ConstraintPreservingPhysical;
+            } else {
+              ERROR(
+                  "GH batched evolution currently supports only "
+                  "DemandOutgoingCharSpeeds and "
+                  "ConstraintPreservingBjorhus with type "
+                  "ConstraintPreservingPhysical. Unsupported boundary "
+                  "condition on block "
+                  << block_id << " in direction " << direction << ".");
+            }
+          }
+          external_boundary_condition_kind_host[e] = static_cast<int>(kind);
+          host_external_boundary_condition_kind(e) =
+              external_boundary_condition_kind_host[e];
         }
         ::Kokkos::deep_copy(external_face_mask, host_external_face_mask);
+        ::Kokkos::deep_copy(external_boundary_condition_kind,
+                            host_external_boundary_condition_kind);
       }
     }
 

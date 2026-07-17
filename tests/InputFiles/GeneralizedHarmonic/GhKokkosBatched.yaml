@@ -38,8 +38,7 @@ DomainCreator:
     OuterRadius: 300.
     Interior:
       ExciseWithBoundaryCondition:
-        DirichletAnalytic:
-          AnalyticPrescription: *InitialData
+        DemandOutgoingCharSpeeds:
     InitialRefinement: 1
     InitialGridPoints: 14
     UseEquiangularMap: true
@@ -50,8 +49,8 @@ DomainCreator:
     WhichWedges: All
     TimeDependentMaps: None
     OuterBoundaryCondition:
-      DirichletAnalytic:
-        AnalyticPrescription: *InitialData
+      ConstraintPreservingBjorhus:
+        Type: ConstraintPreservingPhysical
 
 EvolutionSystem:
   GeneralizedHarmonic:

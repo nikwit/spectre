@@ -46,9 +46,10 @@
 #include "Evolution/DiscontinuousGalerkin/Actions/ComputeTimeDerivative.hpp"
 #include "Evolution/DiscontinuousGalerkin/Initialization/Mortars.hpp"
 #include "Evolution/Kokkos/PackedDataBundles.hpp"
-#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/DirichletAnalytic.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/Bjorhus.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/DemandOutgoingCharSpeeds.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryCorrections/UpwindPenalty.hpp"
-#include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/AnalyticChristoffel.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Harmonic.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Tags/GaugeCondition.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/ApplyBoundaryCorrectionsToTimeDerivativeKokkos.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched.hpp"
@@ -277,9 +278,9 @@ DomainData make_periodic_domain_data(
 }
 
 DomainData make_external_domain_data(
-    const bool use_time_dependent_map = false) {
-  const std::array<double, 3> zero_spin{{0.0, 0.0, 0.0}};
-  const std::array<double, 3> zero_center{{0.0, 0.0, 0.0}};
+    const bool use_time_dependent_map = false,
+    const bool demand_outgoing_on_lower_x = false,
+    const bool demand_outgoing_on_all_faces = false) {
   std::array<
       std::array<std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>,
                  2>,
@@ -287,10 +288,16 @@ DomainData make_external_domain_data(
       boundary_conditions{};
   for (size_t d = 0; d < Dim; ++d) {
     for (size_t side_i = 0; side_i < 2; ++side_i) {
-      boundary_conditions[d][side_i] =
-          std::make_unique<gh::BoundaryConditions::DirichletAnalytic<Dim>>(
-              std::make_unique<hardcoded_solution>(1.0, zero_spin,
-                                                   zero_center));
+      if (demand_outgoing_on_all_faces or
+          (d == 0 and side_i == 0 and demand_outgoing_on_lower_x)) {
+        boundary_conditions[d][side_i] = std::make_unique<
+            gh::BoundaryConditions::DemandOutgoingCharSpeeds<Dim>>();
+      } else {
+        boundary_conditions[d][side_i] = std::make_unique<
+            gh::BoundaryConditions::ConstraintPreservingBjorhus<Dim>>(
+            gh::BoundaryConditions::detail::ConstraintPreservingBjorhusType::
+                ConstraintPreservingPhysical);
+      }
     }
   }
 
@@ -476,10 +483,7 @@ dt_variables_type compute_host_volume_dt_reference(const SetupData& setup) {
                       setup.mesh, setup.inverse_jacobian);
 
   using all_solutions = gh::Solutions::all_solutions<Dim>;
-  const std::array<double, 3> zero_spin{{0.0, 0.0, 0.0}};
-  const std::array<double, 3> zero_center{{0.0, 0.0, 0.0}};
-  gh::gauges::AnalyticChristoffel gauge_condition{
-      std::make_unique<hardcoded_solution>(1.0, zero_spin, zero_center)};
+  const gh::gauges::Harmonic gauge_condition{};
 
   tnsr::aa<DataVector, Dim, Frame::Inertial> host_dt_spacetime_metric{
       num_points};
@@ -1162,7 +1166,8 @@ BatchedData initialize_batched_data(
 
   gh::Actions::InitializeBoundaryBatchMetadata::apply(
       make_not_null(&batched.packed_boundary_metadata),
-      make_not_null(&batched.packed_boundary_scratch), batched.packed_topology);
+      make_not_null(&batched.packed_boundary_scratch), batched.packed_topology,
+      domain_data.external_boundary_conditions);
 
   return batched;
 }
@@ -1188,14 +1193,12 @@ void test_periodic_boundary_actions_batched_match_host(
     auto host_boundary_data = compute_host_boundary_data(
         setup, domain_data.external_boundary_conditions);
     CHECK(host_boundary_data.external.empty());
+    host_volume_dt_by_element.insert_or_assign(
+        element_id, compute_host_volume_dt_reference(setup));
     if (use_time_dependent_map) {
-      host_volume_dt_by_element.insert_or_assign(
-          element_id, compute_host_volume_dt_reference(setup));
       outgoing_by_element.insert_or_assign(
           element_id, compute_host_outgoing_boundary_data_moving_map(setup));
     } else {
-      host_volume_dt_by_element.insert_or_assign(element_id,
-                                                 host_boundary_data.volume_dt);
       outgoing_by_element.insert_or_assign(element_id,
                                            host_boundary_data.outgoing);
     }
@@ -1229,8 +1232,8 @@ void test_periodic_boundary_actions_batched_match_host(
   gh::Actions::ComputeTimeDerivativeBatched::apply(
       make_not_null(&batched.packed_evolution_state),
       make_not_null(&batched.packed_boundary_scratch), batched.packed_topology,
-      batched.packed_geometry, batched.device_gamma0, batched.device_gamma1,
-      batched.device_gamma2);
+      batched.packed_geometry, gh::gauges::Harmonic{}, batched.device_gamma0,
+      batched.device_gamma1, batched.device_gamma2);
   dt_variables_type dt_volume_from_batched{batched.packed_topology.total_points,
                                            0.0};
   copy_to_host(make_not_null(&dt_volume_from_batched),
@@ -1382,8 +1385,8 @@ void test_external_boundary_apply_batched_matches_host(
   gh::Actions::ComputeTimeDerivativeBatched::apply(
       make_not_null(&batched.packed_evolution_state),
       make_not_null(&batched.packed_boundary_scratch), batched.packed_topology,
-      batched.packed_geometry, batched.device_gamma0, batched.device_gamma1,
-      batched.device_gamma2);
+      batched.packed_geometry, gh::gauges::Harmonic{}, batched.device_gamma0,
+      batched.device_gamma1, batched.device_gamma2);
 
   gh::Actions::PackageLocalFacesBatched::apply(
       make_not_null(&batched.packed_boundary_scratch), batched.packed_topology,
@@ -1395,11 +1398,71 @@ void test_external_boundary_apply_batched_matches_host(
   copy_to_host(make_not_null(&dt_before_external),
                batched.packed_evolution_state.device_dt_variables);
 
+  for (size_t d = 0; d < Dim; ++d) {
+    batched.packed_geometry.inertial_coordinates_host[d] = {};
+    batched.packed_geometry.mesh_velocity_host[d] = {};
+  }
   gh::Actions::ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
-      make_not_null(&batched.packed_evolution_state), batched.packed_topology,
+      make_not_null(&batched.packed_evolution_state),
+      make_not_null(&batched.packed_boundary_scratch), batched.packed_topology,
       batched.packed_geometry, batched.packed_boundary_metadata,
-      batched.device_gamma0, batched.device_gamma1, batched.device_gamma2,
-      batched.packed_boundary_scratch);
+      batched.device_gamma0, batched.device_gamma1, batched.device_gamma2);
+
+  const size_t expected_face_points =
+      domain_data.mesh.slice_away(0).number_of_grid_points();
+  dt_variables_type expected_dt_after_external = dt_before_external;
+  const Approx gather_approx = Approx::custom().epsilon(1.0e-12).scale(1.0);
+  for (size_t face_id = 0; face_id < 2 * Dim; ++face_id) {
+    const auto& input_workspace =
+        batched.packed_boundary_scratch.external_boundary_input_data[face_id];
+    const auto& correction_workspace =
+        batched.packed_boundary_scratch.external_boundary_corrections[face_id];
+    CHECK(input_workspace.extent(0) == expected_face_points);
+    CHECK(input_workspace.extent(1) >
+          dt_variables_type::number_of_independent_components);
+    CHECK(correction_workspace.extent(0) == expected_face_points);
+    CHECK(correction_workspace.extent(1) ==
+          dt_variables_type::number_of_independent_components);
+
+    const size_t sliced_dim = face_id / 2;
+    const bool upper_side = face_id % 2 == 1;
+    const auto face_to_volume = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{},
+        upper_side ? batched.packed_topology
+                         .device_face_to_volume_index_map[sliced_dim]
+                         .second
+                   : batched.packed_topology
+                         .device_face_to_volume_index_map[sliced_dim]
+                         .first);
+    const auto input_host = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, input_workspace);
+    const auto correction_host = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{}, correction_workspace);
+    for (size_t p = 0; p < expected_face_points; ++p) {
+      const size_t volume_index = face_to_volume(p);
+      for (size_t component = 0;
+           component < variables_type::number_of_independent_components;
+           ++component) {
+        CHECK(input_host(p, component) ==
+              gather_approx(
+                  setup.vars
+                      .data()[component * batched.packed_topology.total_points +
+                              volume_index]));
+      }
+      constexpr size_t dt_input_offset =
+          variables_type::number_of_independent_components;
+      for (size_t component = 0;
+           component < dt_variables_type::number_of_independent_components;
+           ++component) {
+        const size_t storage_index =
+            component * batched.packed_topology.total_points + volume_index;
+        CHECK(input_host(p, dt_input_offset + component) ==
+              gather_approx(expected_dt_after_external.data()[storage_index]));
+        expected_dt_after_external.data()[storage_index] +=
+            correction_host(p, component);
+      }
+    }
+  }
 
   dt_variables_type dt_from_batched{batched.packed_topology.total_points, 0.0};
   copy_to_host(make_not_null(&dt_from_batched),
@@ -1412,8 +1475,185 @@ void test_external_boundary_apply_batched_matches_host(
       ++changed_entries;
     }
     CHECK(std::isfinite(dt_from_batched.data()[i]));
+    CHECK(dt_from_batched.data()[i] ==
+          gather_approx(expected_dt_after_external.data()[i]));
   }
   CHECK(changed_entries > 0);
+}
+
+void test_external_boundary_demand_outgoing_dispatch() {
+  const DomainData domain_data = make_external_domain_data(false, true);
+  REQUIRE(domain_data.element_ids.size() == 1);
+
+  const auto element_id = domain_data.element_ids[0];
+  const SetupData setup = make_setup_data(
+      element_id, domain_data.domain, domain_data.initial_refinement_levels,
+      domain_data.mesh, domain_data.functions_of_time);
+  std::map<ElementId<Dim>, SetupData> setup_by_id{};
+  setup_by_id.insert_or_assign(element_id, setup);
+  BatchedData batched = initialize_batched_data(domain_data, setup_by_id);
+
+  using external_bc_kind =
+      evolution::Kokkos::Batched::ExternalBoundaryConditionKind;
+  for (size_t face_id = 0; face_id < 2 * Dim; ++face_id) {
+    const auto& host_masks =
+        batched.packed_boundary_metadata
+            .external_face_mask_for_all_elements_host[face_id];
+    const auto& host_kinds =
+        batched.packed_boundary_metadata
+            .external_boundary_condition_kind_for_all_elements_host[face_id];
+    REQUIRE(host_masks.size() == 1);
+    REQUIRE(host_kinds.size() == 1);
+    CHECK(host_masks[0] == 1);
+    const auto kinds = Kokkos::create_mirror_view_and_copy(
+        Kokkos::HostSpace{},
+        batched.packed_boundary_metadata
+            .external_boundary_condition_kind_for_all_elements[face_id]);
+    REQUIRE(kinds.extent(0) == 1);
+    CHECK(host_kinds[0] == kinds(0));
+    CHECK(kinds(0) ==
+          static_cast<int>(
+              face_id == 0 ? external_bc_kind::DemandOutgoingCharSpeeds
+                           : external_bc_kind::ConstraintPreservingPhysical));
+  }
+
+  gh::Actions::ComputeTimeDerivativeBatched::apply(
+      make_not_null(&batched.packed_evolution_state),
+      make_not_null(&batched.packed_boundary_scratch), batched.packed_topology,
+      batched.packed_geometry, gh::gauges::Harmonic{}, batched.device_gamma0,
+      batched.device_gamma1, batched.device_gamma2);
+  gh::Actions::PackageLocalFacesBatched::apply(
+      make_not_null(&batched.packed_boundary_scratch), batched.packed_topology,
+      batched.packed_geometry, batched.packed_evolution_state,
+      batched.device_gamma0, batched.device_gamma1, batched.device_gamma2);
+
+  const auto lower_x_face_to_volume = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{},
+      batched.packed_topology.device_face_to_volume_index_map[0].first);
+  const auto lower_x_packaged_data =
+      batched.packed_boundary_scratch.packaged_face_data_for_all_elements[0]
+          .view();
+  const size_t char_speed_offset = lower_x_packaged_data.extent(1) - (Dim + 1);
+  Kokkos::parallel_for(
+      "TestGhDemandOutgoingSpeeds", lower_x_packaged_data.extent(0),
+      KOKKOS_LAMBDA(const int face_point) {
+        for (size_t speed_index = 0; speed_index < Dim + 1; ++speed_index) {
+          lower_x_packaged_data(face_point, char_speed_offset + speed_index) =
+              1.0;
+        }
+      });
+
+  dt_variables_type dt_before_external{batched.packed_topology.total_points,
+                                       0.0};
+  copy_to_host(make_not_null(&dt_before_external),
+               batched.packed_evolution_state.device_dt_variables);
+  gh::Actions::ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
+      make_not_null(&batched.packed_evolution_state),
+      make_not_null(&batched.packed_boundary_scratch), batched.packed_topology,
+      batched.packed_geometry, batched.packed_boundary_metadata,
+      batched.device_gamma0, batched.device_gamma1, batched.device_gamma2);
+  dt_variables_type dt_after_external{batched.packed_topology.total_points,
+                                      0.0};
+  copy_to_host(make_not_null(&dt_after_external),
+               batched.packed_evolution_state.device_dt_variables);
+
+  const size_t face_extent = domain_data.mesh.extents(1);
+  REQUIRE(face_extent == domain_data.mesh.extents(2));
+  size_t checked_demand_only_points = 0;
+  for (size_t face_point = 0; face_point < lower_x_face_to_volume.extent(0);
+       ++face_point) {
+    const size_t index_1 = face_point % face_extent;
+    const size_t index_2 = face_point / face_extent;
+    if (index_1 == 0 or index_1 + 1 == face_extent or index_2 == 0 or
+        index_2 + 1 == face_extent) {
+      continue;
+    }
+    const size_t volume_index = lower_x_face_to_volume(face_point);
+    for (size_t component = 0;
+         component < dt_variables_type::number_of_independent_components;
+         ++component) {
+      const size_t storage_index =
+          component * batched.packed_topology.total_points + volume_index;
+      CHECK(dt_after_external.data()[storage_index] ==
+            dt_before_external.data()[storage_index]);
+    }
+    ++checked_demand_only_points;
+  }
+  CHECK(checked_demand_only_points > 0);
+
+  Kokkos::parallel_for(
+      "TestGhIngoingDemandSpeed", 1, KOKKOS_LAMBDA(const int /*unused*/) {
+        lower_x_packaged_data(0, char_speed_offset) = -1.0;
+      });
+  CHECK_THROWS_WITH(
+      gh::Actions::ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::
+          apply(make_not_null(&batched.packed_evolution_state),
+                make_not_null(&batched.packed_boundary_scratch),
+                batched.packed_topology, batched.packed_geometry,
+                batched.packed_boundary_metadata, batched.device_gamma0,
+                batched.device_gamma1, batched.device_gamma2),
+      Catch::Matchers::ContainsSubstring(
+          "DemandOutgoingCharSpeeds device validation failed"));
+}
+
+void test_external_boundary_demand_outgoing_device_fast_path() {
+  const DomainData domain_data = make_external_domain_data(false, false, true);
+  REQUIRE(domain_data.element_ids.size() == 1);
+
+  const auto element_id = domain_data.element_ids[0];
+  const SetupData setup = make_setup_data(
+      element_id, domain_data.domain, domain_data.initial_refinement_levels,
+      domain_data.mesh, domain_data.functions_of_time);
+  std::map<ElementId<Dim>, SetupData> setup_by_id{};
+  setup_by_id.insert_or_assign(element_id, setup);
+  BatchedData batched = initialize_batched_data(domain_data, setup_by_id);
+
+  gh::Actions::ComputeTimeDerivativeBatched::apply(
+      make_not_null(&batched.packed_evolution_state),
+      make_not_null(&batched.packed_boundary_scratch), batched.packed_topology,
+      batched.packed_geometry, gh::gauges::Harmonic{}, batched.device_gamma0,
+      batched.device_gamma1, batched.device_gamma2);
+  gh::Actions::PackageLocalFacesBatched::apply(
+      make_not_null(&batched.packed_boundary_scratch), batched.packed_topology,
+      batched.packed_geometry, batched.packed_evolution_state,
+      batched.device_gamma0, batched.device_gamma1, batched.device_gamma2);
+
+  for (size_t face_id = 0; face_id < 2 * Dim; ++face_id) {
+    const auto packaged_data = batched.packed_boundary_scratch
+                                   .packaged_face_data_for_all_elements[face_id]
+                                   .view();
+    const size_t char_speed_offset = packaged_data.extent(1) - (Dim + 1);
+    Kokkos::parallel_for(
+        "TestGhAllDemandOutgoingSpeeds", packaged_data.extent(0),
+        KOKKOS_LAMBDA(const int face_point) {
+          for (size_t speed_index = 0; speed_index < Dim + 1; ++speed_index) {
+            packaged_data(face_point, char_speed_offset + speed_index) = 1.0;
+          }
+        });
+  }
+
+  dt_variables_type dt_before_external{batched.packed_topology.total_points,
+                                       0.0};
+  copy_to_host(make_not_null(&dt_before_external),
+               batched.packed_evolution_state.device_dt_variables);
+
+  batched.packed_boundary_scratch.volume_partial_derivatives = {};
+  batched.packed_boundary_scratch.volume_gauge_data = {};
+  batched.packed_boundary_scratch.volume_three_plus_one_data = {};
+  gh::Actions::ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched::apply(
+      make_not_null(&batched.packed_evolution_state),
+      make_not_null(&batched.packed_boundary_scratch), batched.packed_topology,
+      batched.packed_geometry, batched.packed_boundary_metadata,
+      batched.device_gamma0, batched.device_gamma1, batched.device_gamma2);
+
+  dt_variables_type dt_after_external{batched.packed_topology.total_points,
+                                      0.0};
+  copy_to_host(make_not_null(&dt_after_external),
+               batched.packed_evolution_state.device_dt_variables);
+  REQUIRE(dt_after_external.size() == dt_before_external.size());
+  for (size_t i = 0; i < dt_after_external.size(); ++i) {
+    CHECK(dt_after_external.data()[i] == dt_before_external.data()[i]);
+  }
 }
 }  // namespace
 
@@ -1424,4 +1664,6 @@ SPECTRE_TEST_CASE(
   test_periodic_boundary_actions_batched_match_host(true);
   test_external_boundary_apply_batched_matches_host(false);
   test_external_boundary_apply_batched_matches_host(true);
+  test_external_boundary_demand_outgoing_dispatch();
+  test_external_boundary_demand_outgoing_device_fast_path();
 }

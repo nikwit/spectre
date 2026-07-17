@@ -177,6 +177,8 @@ class ConstraintPreservingBjorhus final : public BoundaryCondition<Dim> {
   auto get_clone() const -> std::unique_ptr<
       domain::BoundaryConditions::BoundaryCondition> override;
 
+  detail::ConstraintPreservingBjorhusType bjorhus_type() const { return type_; }
+
   static constexpr evolution::BoundaryConditions::Type bc_type =
       evolution::BoundaryConditions::Type::TimeDerivative;
 
