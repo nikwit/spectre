@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <map>
+#include <string>
 #include <vector>
 
 #include <pup.h>
@@ -94,6 +95,17 @@ struct PackedGeometry {
   // on the device (see gh::Actions::BatchedMapKind).
   device_inertial_coordinates_type grid_coordinates_device{};
   device_inverse_jacobian_type logical_to_grid_inverse_jacobian_device{};
+  // Per-element device coordinate-map plan: the gh::Actions::BatchedMapKind of
+  // each element's block, fixed at initialization. Drives the on-device
+  // frame-field kernel's per-element dispatch (and is the natural key for a
+  // later group-by-map-kind launch optimization). Empty until built.
+  std::vector<int> element_map_kind_host{};
+  ::Kokkos::View<int*> element_map_kind_device{};
+  // Name of the single scalar function of time driving on-device rigid
+  // rotation blocks (empty if there are none). Its angle and angular velocity
+  // are staged to the device each stage.
+  std::string rotation_function_of_time_name{};
+  bool map_plan_initialized{false};
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {
