@@ -13,6 +13,12 @@ ResourceInfo:
     GhKokkosBatchedDriver:
       Exclusive: true
       Proc: Auto
+    BatchedObservationAhA:
+      Exclusive: false
+      Proc: Auto
+    BatchedObservationAhB:
+      Exclusive: false
+      Proc: Auto
 
 Evolution:
   InitialTime: 0.0
@@ -111,3 +117,26 @@ EventsAndTriggersAtSlabs:
 Observers:
   VolumeFileName: "GhKerrSchildKokkosBatchedVolume"
   ReductionFileName: "GhKerrSchildKokkosBatchedReductions"
+  SurfaceFileName: "GhKerrSchildKokkosBatchedSurfaces"
+
+# No trigger runs the horizon finders in this input; the options below
+# only need to parse.
+ApparentHorizons:
+  BatchedObservationAhA: &BatchedAh
+    InitialGuess:
+      LMax: 4
+      Radius: 2.2
+      Center: [0.0, 0.0, 0.0]
+    FastFlow:
+      Flow: Fast
+      Alpha: 1.0
+      Beta: 0.5
+      AbsTol: 1e-12
+      TruncationTol: 1e-2
+      DivergenceTol: 1.2
+      DivergenceIter: 5
+      MaxIts: 100
+    Verbosity: Quiet
+    MaxComputeCoordsRetries: 3
+    BlocksForHorizonFind: All
+  BatchedObservationAhB: *BatchedAh
