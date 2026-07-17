@@ -732,10 +732,13 @@ void unpack_packaged_boundary_data(
             boundary_data_view(p, component_index++);
       }
     }
+    // The iaa fields are packaged in Tensor storage order via operator[],
+    // which places the spatial index innermost within each symmetric
+    // spacetime pair.
     component_index = offset_v_zero;
-    for (size_t d = 0; d < Dim; ++d) {
-      for (size_t a = 0; a < Dim + 1; ++a) {
-        for (size_t b = a; b < Dim + 1; ++b) {
+    for (size_t a = 0; a < Dim + 1; ++a) {
+      for (size_t b = a; b < Dim + 1; ++b) {
+        for (size_t d = 0; d < Dim; ++d) {
           v_zero->get(d, a, b)[p] = boundary_data_view(p, component_index++);
         }
       }
@@ -753,18 +756,18 @@ void unpack_packaged_boundary_data(
       }
     }
     component_index = offset_normal_times_v_plus;
-    for (size_t d = 0; d < Dim; ++d) {
-      for (size_t a = 0; a < Dim + 1; ++a) {
-        for (size_t b = a; b < Dim + 1; ++b) {
+    for (size_t a = 0; a < Dim + 1; ++a) {
+      for (size_t b = a; b < Dim + 1; ++b) {
+        for (size_t d = 0; d < Dim; ++d) {
           normal_times_v_plus->get(d, a, b)[p] =
               boundary_data_view(p, component_index++);
         }
       }
     }
     component_index = offset_normal_times_v_minus;
-    for (size_t d = 0; d < Dim; ++d) {
-      for (size_t a = 0; a < Dim + 1; ++a) {
-        for (size_t b = a; b < Dim + 1; ++b) {
+    for (size_t a = 0; a < Dim + 1; ++a) {
+      for (size_t b = a; b < Dim + 1; ++b) {
+        for (size_t d = 0; d < Dim; ++d) {
           normal_times_v_minus->get(d, a, b)[p] =
               boundary_data_view(p, component_index++);
         }

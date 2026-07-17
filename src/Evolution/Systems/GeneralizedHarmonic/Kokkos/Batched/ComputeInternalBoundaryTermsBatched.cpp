@@ -243,13 +243,17 @@ KOKKOS_INLINE_FUNCTION void load_iaa_from_packaged_data(
     const gsl::not_null<tnsr::iaa<double, volume_dim, Frame::Inertial>*> tensor,
     const package_storage_type& packaged_data_view, const size_t point,
     const size_t component_offset) {
+  // The packaged data is written in Tensor storage order via operator[],
+  // which for iaa tensors has the spatial index varying fastest within each
+  // symmetric spacetime pair. The pair ordering matches the (a, b >= a)
+  // iteration used for aa tensors.
   size_t component_index = 0;
-  static_for<volume_dim>([&](auto d_c) {
-    constexpr int d = (int)d_c;
-    static_for<volume_dim + 1>([&](auto a_c) {
-      constexpr int a = (int)a_c;
-      static_for<volume_dim + 1 - a>([&](auto off_c) {
-        constexpr int b = a + (int)off_c;
+  static_for<volume_dim + 1>([&](auto a_c) {
+    constexpr int a = (int)a_c;
+    static_for<volume_dim + 1 - a>([&](auto off_c) {
+      constexpr int b = a + (int)off_c;
+      static_for<volume_dim>([&](auto d_c) {
+        constexpr int d = (int)d_c;
         get<d, a, b>(*tensor) =
             packaged_data_view(point, component_offset + component_index);
         ++component_index;
