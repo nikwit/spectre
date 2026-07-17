@@ -30,6 +30,7 @@ spectre_target_headers(
   HEADERS
   ApplyBoundaryCorrectionsToTimeDerivativeKokkos.hpp
   Batched/Actions.hpp
+  Batched/BatchedMapPlan.hpp
   Batched/BoundaryCorrectionHelpers.hpp
   Batched/ApplyExternalBoundaryCorrectionsToTimeDerivativeBatched.hpp
   Batched/ComputeInternalBoundaryTermsBatched.hpp

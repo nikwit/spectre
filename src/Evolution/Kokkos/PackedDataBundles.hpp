@@ -88,6 +88,12 @@ struct PackedGeometry {
   device_inertial_coordinates_type inertial_coordinates_device{};
   device_mesh_velocity_type mesh_velocity_device{};
   device_inverse_jacobian_type element_inverse_jacobian_device{};
+  // Device-resident copies of the domain-static geometry. These are uploaded
+  // once (they never change during an evolution) and are consumed by the
+  // on-device frame-field update for blocks whose coordinate map is evaluated
+  // on the device (see gh::Actions::BatchedMapKind).
+  device_inertial_coordinates_type grid_coordinates_device{};
+  device_inverse_jacobian_type logical_to_grid_inverse_jacobian_device{};
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {

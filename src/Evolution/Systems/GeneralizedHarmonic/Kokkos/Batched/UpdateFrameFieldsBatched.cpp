@@ -14,6 +14,7 @@
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Domain/ElementMap.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/BatchedMapPlan.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
@@ -123,6 +124,92 @@ void copy_host_array_to_device(
   }
 }
 
+// Upload the domain-static geometry (grid coordinates and the logical-to-grid
+// inverse Jacobian) to the device once. These never change during an
+// evolution, so this is a one-time cost guarded by the current device extents.
+template <size_t VolumeDim>
+void ensure_static_device_geometry(
+    const gsl::not_null<
+        evolution::Kokkos::PackedGeometry<gh::System<VolumeDim>>*>
+        packed_geometry,
+    const size_t num_elements, const size_t points_per_element,
+    const size_t total_points) {
+  using packed_geometry_type =
+      evolution::Kokkos::PackedGeometry<gh::System<VolumeDim>>;
+
+  bool coordinates_ready = true;
+  for (size_t d = 0; d < VolumeDim; ++d) {
+    if (packed_geometry->grid_coordinates_device.get(d).extent(0) !=
+        total_points) {
+      coordinates_ready = false;
+    }
+  }
+  if (not coordinates_ready) {
+    for (size_t d = 0; d < VolumeDim; ++d) {
+      packed_geometry->grid_coordinates_device.get(d) =
+          ::Kokkos::View<double*>("GhBatchedGridCoordinates", total_points);
+    }
+    copy_host_array_to_device<VolumeDim>(
+        packed_geometry->grid_coordinates_host,
+        make_not_null(&packed_geometry->grid_coordinates_device));
+  }
+
+  if (packed_geometry->logical_to_grid_inverse_jacobian_device.extent(0) !=
+          num_elements or
+      packed_geometry->logical_to_grid_inverse_jacobian_device.extent(1) !=
+          points_per_element or
+      packed_geometry->logical_to_grid_inverse_jacobian_device.extent(2) !=
+          VolumeDim * VolumeDim) {
+    packed_geometry->logical_to_grid_inverse_jacobian_device =
+        typename packed_geometry_type::device_inverse_jacobian_type{
+            "GhBatchedLogicalToGridInverseJacobianDevice", num_elements,
+            points_per_element, VolumeDim * VolumeDim};
+    ::Kokkos::deep_copy(
+        packed_geometry->logical_to_grid_inverse_jacobian_device,
+        packed_geometry->logical_to_grid_inverse_jacobian_host);
+  }
+}
+
+// Device path for a fully static domain: inertial coordinates equal grid
+// coordinates, the mesh velocity is zero, and the composed logical-to-inertial
+// inverse Jacobian equals the static logical-to-grid inverse Jacobian. This
+// writes the device-resident geometry consumed by the RHS/boundary kernels
+// directly on the device, with no per-stage host map loop or host-to-device
+// transfer. The host geometry arrays are left as initialization set them
+// (constant for a static domain) for the host-side observation/AH consumers.
+template <size_t VolumeDim>
+void update_static_frame_fields_device(
+    const gsl::not_null<
+        evolution::Kokkos::PackedGeometry<gh::System<VolumeDim>>*>
+        packed_geometry,
+    const size_t points_per_element, const size_t total_points) {
+  const auto grid_coordinates = packed_geometry->grid_coordinates_device;
+  const auto inertial_coordinates =
+      packed_geometry->inertial_coordinates_device;
+  const auto mesh_velocity = packed_geometry->mesh_velocity_device;
+  const auto logical_to_grid_inverse_jacobian =
+      packed_geometry->logical_to_grid_inverse_jacobian_device;
+  const auto element_inverse_jacobian =
+      packed_geometry->element_inverse_jacobian_device;
+  const size_t ppe = points_per_element;
+  ::Kokkos::parallel_for(
+      "GhUpdateStaticFrameFields", total_points,
+      KOKKOS_LAMBDA(const int linear_index_int) {
+        const size_t s = static_cast<size_t>(linear_index_int);
+        const size_t e = s / ppe;
+        const size_t p = s % ppe;
+        for (size_t d = 0; d < VolumeDim; ++d) {
+          inertial_coordinates.get(d)(s) = grid_coordinates.get(d)(s);
+          mesh_velocity.get(d)(s) = 0.0;
+        }
+        for (size_t component = 0; component < VolumeDim * VolumeDim;
+             ++component) {
+          element_inverse_jacobian(e, p, component) =
+              logical_to_grid_inverse_jacobian(e, p, component);
+        }
+      });
+}
+
 }  // namespace
 
 template <typename FunctionsOfTimeTag,
@@ -164,6 +251,29 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
            "Packed grid coordinates are not initialized. Expected "
                << total_points << " points in component " << d << ", got "
                << packed_geometry->grid_coordinates_host[d].size() << ".");
+  }
+
+  // If every block's grid-to-inertial map is static, evaluate the frame fields
+  // entirely on the device from the domain-static geometry. This avoids the
+  // per-stage host map loop and the host-to-device transfers below. The host
+  // geometry arrays are constant for a static domain and were set during
+  // initialization, so they are left untouched here for the host-side
+  // observation and apparent-horizon consumers.
+  bool all_static = true;
+  for (size_t e = 0; e < num_elements; ++e) {
+    const auto& element_id = packed_topology.local_element_ids[e];
+    const auto& block = domain.blocks()[element_id.block_id()];
+    if (classify_block_map(block) != BatchedMapKind::Static) {
+      all_static = false;
+      break;
+    }
+  }
+  if (all_static) {
+    ensure_static_device_geometry<volume_dim>(
+        packed_geometry, num_elements, points_per_element, total_points);
+    update_static_frame_fields_device<volume_dim>(
+        packed_geometry, points_per_element, total_points);
+    return;
   }
 
   auto host_inverse_jacobian = ::Kokkos::create_mirror_view(
