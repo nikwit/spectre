@@ -17,6 +17,7 @@
 #include "Domain/CoordinateMaps/CoordinateMap.hpp"
 #include "Domain/CoordinateMaps/CoordinateMap.tpp"
 #include "Domain/CoordinateMaps/TimeDependent/RotScaleTrans.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/Skew.hpp"
 #include "Domain/Creators/Rectilinear.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "Domain/FunctionsOfTime/PiecewisePolynomial.hpp"
@@ -212,7 +213,8 @@ void check_frame_fields_and_damping_at_time(
 
 void test_update_frame_fields_and_constraint_damping_batched(
     const domain::CoordinateMaps::TimeDependent::RotScaleTrans<Dim>::BlockRegion
-        region) {
+        region,
+    const bool include_skew, const bool include_rot_scale_trans) {
   const std::array<double, Dim> velocity{{0.25, -0.15, 0.05}};
   const domain::creators::Rectilinear<Dim> domain_creator{
       {{-1.2, -0.8, -0.6}}, {{1.1, 0.9, 0.7}},    {{1, 0, 0}},
@@ -221,6 +223,7 @@ void test_update_frame_fields_and_constraint_damping_batched(
   auto domain = domain_creator.create_domain();
   const std::string translation_name{"Translation"};
   const std::string rotation_name{"Rotation"};
+  const std::string skew_name{"Skew"};
   const std::pair<std::string, std::string> scale_names{"ExpansionA",
                                                         "ExpansionB"};
   using RotScaleTrans =
@@ -228,10 +231,25 @@ void test_update_frame_fields_and_constraint_damping_batched(
   const double inner_radius =
       region == RotScaleTrans::BlockRegion::Transition ? 0.01 : 10.0;
   const double outer_radius = 20.0;
-  domain.inject_time_dependent_map_for_block(
-      0, domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
-             RotScaleTrans{scale_names, rotation_name, translation_name,
-                           inner_radius, outer_radius, region}));
+  const RotScaleTrans rot_scale_trans{scale_names,      rotation_name,
+                                      translation_name, inner_radius,
+                                      outer_radius,     region};
+  if (include_skew and include_rot_scale_trans) {
+    domain.inject_time_dependent_map_for_block(
+        0, domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
+               domain::CoordinateMaps::TimeDependent::Skew{
+                   skew_name, {{0.1, -0.05, 0.02}}, 10.0},
+               rot_scale_trans));
+  } else if (include_skew) {
+    domain.inject_time_dependent_map_for_block(
+        0, domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
+               domain::CoordinateMaps::TimeDependent::Skew{
+                   skew_name, {{0.1, -0.05, 0.02}}, 10.0}));
+  } else {
+    domain.inject_time_dependent_map_for_block(
+        0, domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
+               rot_scale_trans));
+  }
   const auto initial_refinement_levels =
       domain_creator.initial_refinement_levels();
   const auto initial_extents = domain_creator.initial_extents();
@@ -255,6 +273,15 @@ void test_update_frame_fields_and_constraint_damping_batched(
           0.0,
           std::array<DataVector, 2>{DataVector{{1.1}}, DataVector{{-0.01}}},
           10.0));
+  if (include_skew) {
+    functions_of_time.emplace(
+        skew_name,
+        std::make_unique<domain::FunctionsOfTime::PiecewisePolynomial<1>>(
+            0.0,
+            std::array<DataVector, 2>{DataVector{{0.04, -0.03}},
+                                      DataVector{{0.01, 0.015}}},
+            10.0));
+  }
   constexpr size_t quaternion_deriv_order = 3;
   using QuaternionFunctionOfTime =
       domain::FunctionsOfTime::QuaternionFunctionOfTime<quaternion_deriv_order>;
@@ -318,10 +345,15 @@ void test_update_frame_fields_and_constraint_damping_batched(
             packed_topology.local_element_ids.size());
     REQUIRE(packed_geometry.block_map_descriptors_host.size() == 1);
     REQUIRE(packed_geometry.block_map_descriptors_host[0].has_value());
+    CHECK(packed_geometry.block_map_descriptors_host[0]->size() ==
+          (include_skew and include_rot_scale_trans ? 2 : 1));
     for (size_t e = 0; e < packed_geometry.element_map_kind_host.size(); ++e) {
       const auto expected_kind =
           time_index == 1 and e == 0
               ? gh::Actions::BatchedMapKind::HostEvaluated
+          : include_skew and include_rot_scale_trans
+              ? gh::Actions::BatchedMapKind::SkewComposedAffine
+          : include_skew ? gh::Actions::BatchedMapKind::Skew
           : region == RotScaleTrans::BlockRegion::Transition
               ? gh::Actions::BatchedMapKind::RotScaleTransTransition
               : gh::Actions::BatchedMapKind::ComposedAffine;
@@ -368,7 +400,12 @@ SPECTRE_TEST_CASE(
     "[Unit][Evolution]") {
   using BlockRegion =
       domain::CoordinateMaps::TimeDependent::RotScaleTrans<Dim>::BlockRegion;
-  test_update_frame_fields_and_constraint_damping_batched(BlockRegion::Inner);
+  test_update_frame_fields_and_constraint_damping_batched(BlockRegion::Inner,
+                                                          false, true);
   test_update_frame_fields_and_constraint_damping_batched(
-      BlockRegion::Transition);
+      BlockRegion::Transition, false, true);
+  test_update_frame_fields_and_constraint_damping_batched(BlockRegion::Inner,
+                                                          true, true);
+  test_update_frame_fields_and_constraint_damping_batched(BlockRegion::Inner,
+                                                          true, false);
 }

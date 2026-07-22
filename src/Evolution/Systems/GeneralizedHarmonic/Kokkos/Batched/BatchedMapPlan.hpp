@@ -55,6 +55,11 @@ enum class BatchedMapKind : int {
   /// expansion, and translation parameters are staged exactly from the map
   /// descriptor and evaluated per grid point on the device.
   RotScaleTransTransition = 5,
+  /// A standalone nonlinear Skew map.
+  Skew = 6,
+  /// A Skew map followed by an affine RotScaleTrans map, matching the map
+  /// composition used by BBH blocks inside the envelope.
+  SkewComposedAffine = 7,
 };
 
 template <size_t Dim>
@@ -83,6 +88,116 @@ struct RotScaleTransMapData {
   static constexpr size_t outer_radius_offset = inner_radius_offset + 1;
   static constexpr size_t size = outer_radius_offset + 1;
 };
+
+struct SkewMapData {
+  static constexpr size_t center_offset = 0;
+  static constexpr size_t outer_radius_offset = center_offset + 3;
+  static constexpr size_t angles_offset = outer_radius_offset + 1;
+  static constexpr size_t angle_derivs_offset = angles_offset + 2;
+  static constexpr size_t size = angle_derivs_offset + 2;
+};
+
+template <size_t Dim>
+struct SkewComposedAffineMapData {
+  static constexpr size_t skew_offset = 0;
+  static constexpr size_t affine_offset = SkewMapData::size;
+  static constexpr size_t size = affine_offset + AffineMapData<Dim>::size;
+};
+
+template <size_t Dim>
+KOKKOS_INLINE_FUNCTION void composed_affine_frame_fields(
+    const double (&grid_coords)[Dim], const double* affine_data,
+    double (&inertial_coords)[Dim], double (&mesh_velocity)[Dim],
+    double (&grid_to_inertial_inverse_jacobian)[Dim * Dim]);
+
+KOKKOS_INLINE_FUNCTION void skew_frame_fields(const double (&source_coords)[3],
+                                              const double* const map_data,
+                                              double (&target_coords)[3],
+                                              double (&frame_velocity)[3],
+                                              double (&inverse_jacobian)[9]) {
+  const double outer_radius = map_data[SkewMapData::outer_radius_offset];
+  const double inverse_outer_radius_squared =
+      1.0 / (outer_radius * outer_radius);
+  const double lambda = (source_coords[0] * source_coords[0] +
+                         source_coords[1] * source_coords[1] +
+                         source_coords[2] * source_coords[2]) *
+                        inverse_outer_radius_squared;
+  const double width = 0.5 * (1.0 + cos(M_PI * lambda));
+  const double tan_y = tan(map_data[SkewMapData::angles_offset]);
+  const double tan_z = tan(map_data[SkewMapData::angles_offset + 1]);
+  const double y_displacement =
+      source_coords[1] - map_data[SkewMapData::center_offset + 1];
+  const double z_displacement =
+      source_coords[2] - map_data[SkewMapData::center_offset + 2];
+  const double tan_sum = -(tan_y * y_displacement + tan_z * z_displacement);
+
+  target_coords[0] = source_coords[0] + width * tan_sum;
+  target_coords[1] = source_coords[1];
+  target_coords[2] = source_coords[2];
+  frame_velocity[0] = -width * (map_data[SkewMapData::angle_derivs_offset] *
+                                    (1.0 + tan_y * tan_y) * y_displacement +
+                                map_data[SkewMapData::angle_derivs_offset + 1] *
+                                    (1.0 + tan_z * tan_z) * z_displacement);
+  frame_velocity[1] = 0.0;
+  frame_velocity[2] = 0.0;
+
+  double width_deriv[3]{};
+  const double width_deriv_factor =
+      -M_PI * inverse_outer_radius_squared * sin(M_PI * lambda);
+  for (size_t d = 0; d < 3; ++d) {
+    width_deriv[d] = width_deriv_factor * source_coords[d];
+  }
+  const double jacobian_00 = 1.0 + width_deriv[0] * tan_sum;
+  const double jacobian_01 = width_deriv[1] * tan_sum - width * tan_y;
+  const double jacobian_02 = width_deriv[2] * tan_sum - width * tan_z;
+  inverse_jacobian[0] = 1.0 / jacobian_00;
+  inverse_jacobian[1] = -jacobian_01 / jacobian_00;
+  inverse_jacobian[2] = -jacobian_02 / jacobian_00;
+  inverse_jacobian[3] = 0.0;
+  inverse_jacobian[4] = 1.0;
+  inverse_jacobian[5] = 0.0;
+  inverse_jacobian[6] = 0.0;
+  inverse_jacobian[7] = 0.0;
+  inverse_jacobian[8] = 1.0;
+}
+
+KOKKOS_INLINE_FUNCTION void skew_composed_affine_frame_fields(
+    const double (&grid_coords)[3], const double* const map_data,
+    double (&inertial_coords)[3], double (&mesh_velocity)[3],
+    double (&grid_to_inertial_inverse_jacobian)[9]) {
+  using composition_data = SkewComposedAffineMapData<3>;
+  double skewed_coords[3]{};
+  double skew_velocity[3]{};
+  double skew_inverse_jacobian[9]{};
+  skew_frame_fields(grid_coords, map_data + composition_data::skew_offset,
+                    skewed_coords, skew_velocity, skew_inverse_jacobian);
+
+  const double* const affine_data = map_data + composition_data::affine_offset;
+  composed_affine_frame_fields<3>(skewed_coords, affine_data, inertial_coords,
+                                  mesh_velocity,
+                                  grid_to_inertial_inverse_jacobian);
+  double composed_inverse_jacobian[9]{};
+  for (size_t grid_d = 0; grid_d < 3; ++grid_d) {
+    for (size_t inertial_d = 0; inertial_d < 3; ++inertial_d) {
+      for (size_t skewed_d = 0; skewed_d < 3; ++skewed_d) {
+        composed_inverse_jacobian[grid_d * 3 + inertial_d] +=
+            skew_inverse_jacobian[grid_d * 3 + skewed_d] *
+            grid_to_inertial_inverse_jacobian[skewed_d * 3 + inertial_d];
+      }
+    }
+  }
+  for (size_t inertial_d = 0; inertial_d < 3; ++inertial_d) {
+    for (size_t skewed_d = 0; skewed_d < 3; ++skewed_d) {
+      mesh_velocity[inertial_d] += affine_data[AffineMapData<3>::matrix_offset +
+                                               inertial_d * 3 + skewed_d] *
+                                   skew_velocity[skewed_d];
+    }
+  }
+  for (size_t component = 0; component < 9; ++component) {
+    grid_to_inertial_inverse_jacobian[component] =
+        composed_inverse_jacobian[component];
+  }
+}
 
 KOKKOS_INLINE_FUNCTION void rot_scale_trans_transition_frame_fields(
     const double (&grid_coords)[3], const double* const map_data,
