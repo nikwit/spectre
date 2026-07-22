@@ -60,8 +60,15 @@ enum class BatchedMapKind : int {
   /// A Skew map followed by an affine RotScaleTrans map, matching the map
   /// composition used by BBH blocks inside the envelope.
   SkewComposedAffine = 7,
-  /// A standalone spherical-transition Shape map.
+  /// A standalone Shape map.
   Shape = 8,
+  /// A Shape map followed by an affine RotScaleTrans map.
+  ShapeComposedAffine = 9,
+  /// A Shape map followed by a Skew map.
+  ShapeComposedSkew = 10,
+  /// A Shape map followed by Skew and affine RotScaleTrans maps. This is the
+  /// full map chain on BBH blocks with a distorted frame.
+  ShapeComposedSkewAffine = 11,
 };
 
 template <size_t Dim>
@@ -105,6 +112,37 @@ struct ShapePointData {
   static constexpr size_t transition_gradient_offset = 2;
   static constexpr size_t size = transition_gradient_offset + 3;
 };
+
+KOKKOS_INLINE_FUNCTION void invert_matrix_3d(const double (&matrix)[9],
+                                             double (&inverse)[9]) {
+  const double determinant =
+      matrix[0] * (matrix[4] * matrix[8] - matrix[5] * matrix[7]) -
+      matrix[1] * (matrix[3] * matrix[8] - matrix[5] * matrix[6]) +
+      matrix[2] * (matrix[3] * matrix[7] - matrix[4] * matrix[6]);
+  inverse[0] = (matrix[4] * matrix[8] - matrix[5] * matrix[7]) / determinant;
+  inverse[1] = (matrix[2] * matrix[7] - matrix[1] * matrix[8]) / determinant;
+  inverse[2] = (matrix[1] * matrix[5] - matrix[2] * matrix[4]) / determinant;
+  inverse[3] = (matrix[5] * matrix[6] - matrix[3] * matrix[8]) / determinant;
+  inverse[4] = (matrix[0] * matrix[8] - matrix[2] * matrix[6]) / determinant;
+  inverse[5] = (matrix[2] * matrix[3] - matrix[0] * matrix[5]) / determinant;
+  inverse[6] = (matrix[3] * matrix[7] - matrix[4] * matrix[6]) / determinant;
+  inverse[7] = (matrix[1] * matrix[6] - matrix[0] * matrix[7]) / determinant;
+  inverse[8] = (matrix[0] * matrix[4] - matrix[1] * matrix[3]) / determinant;
+}
+
+KOKKOS_INLINE_FUNCTION void multiply_matrices_3d(const double (&left)[9],
+                                                 const double (&right)[9],
+                                                 double (&result)[9]) {
+  for (size_t row = 0; row < 3; ++row) {
+    for (size_t column = 0; column < 3; ++column) {
+      result[row * 3 + column] = 0.0;
+      for (size_t contracted = 0; contracted < 3; ++contracted) {
+        result[row * 3 + column] +=
+            left[row * 3 + contracted] * right[contracted * 3 + column];
+      }
+    }
+  }
+}
 
 KOKKOS_INLINE_FUNCTION void interpolate_shape_fields(
     const double* const coefficients, const size_t l_max,
@@ -234,28 +272,7 @@ KOKKOS_INLINE_FUNCTION void shape_frame_fields(
                    shape_fields[2 + source_d]);
     }
   }
-  const double determinant =
-      jacobian[0] * (jacobian[4] * jacobian[8] - jacobian[5] * jacobian[7]) -
-      jacobian[1] * (jacobian[3] * jacobian[8] - jacobian[5] * jacobian[6]) +
-      jacobian[2] * (jacobian[3] * jacobian[7] - jacobian[4] * jacobian[6]);
-  inverse_jacobian[0] =
-      (jacobian[4] * jacobian[8] - jacobian[5] * jacobian[7]) / determinant;
-  inverse_jacobian[1] =
-      (jacobian[2] * jacobian[7] - jacobian[1] * jacobian[8]) / determinant;
-  inverse_jacobian[2] =
-      (jacobian[1] * jacobian[5] - jacobian[2] * jacobian[4]) / determinant;
-  inverse_jacobian[3] =
-      (jacobian[5] * jacobian[6] - jacobian[3] * jacobian[8]) / determinant;
-  inverse_jacobian[4] =
-      (jacobian[0] * jacobian[8] - jacobian[2] * jacobian[6]) / determinant;
-  inverse_jacobian[5] =
-      (jacobian[2] * jacobian[3] - jacobian[0] * jacobian[5]) / determinant;
-  inverse_jacobian[6] =
-      (jacobian[3] * jacobian[7] - jacobian[4] * jacobian[6]) / determinant;
-  inverse_jacobian[7] =
-      (jacobian[1] * jacobian[6] - jacobian[0] * jacobian[7]) / determinant;
-  inverse_jacobian[8] =
-      (jacobian[0] * jacobian[4] - jacobian[1] * jacobian[3]) / determinant;
+  invert_matrix_3d(jacobian, inverse_jacobian);
 }
 
 template <size_t Dim>
@@ -485,6 +502,106 @@ KOKKOS_INLINE_FUNCTION void composed_affine_frame_fields(
     grid_to_inertial_inverse_jacobian[component] =
         affine_data[AffineMapData<Dim>::inverse_jacobian_offset + component];
   }
+}
+
+KOKKOS_INLINE_FUNCTION void shape_composed_frame_fields(
+    const double (&grid_coords)[3], const double (&center)[3],
+    const double* const shape_point_data,
+    const double* const shape_coefficients, const size_t shape_l_max,
+    const double* const shape_alpha, const double* const shape_beta,
+    const double* const shape_pmm, const size_t* const shape_indices,
+    const double* const skew_data, const double* const affine_data,
+    const bool include_skew, const bool include_affine,
+    double (&inertial_coords)[3], double (&mesh_velocity)[3],
+    double (&grid_to_inertial_inverse_jacobian)[9],
+    double (&distorted_coords)[3],
+    double (&grid_to_distorted_frame_velocity)[3],
+    double (&grid_to_distorted_inverse_jacobian)[9],
+    double (&distorted_to_inertial_jacobian)[9],
+    double (&distorted_to_inertial_inverse_jacobian)[9]) {
+  shape_frame_fields(
+      grid_coords, center, shape_point_data, shape_coefficients, shape_l_max,
+      shape_alpha, shape_beta, shape_pmm, shape_indices, distorted_coords,
+      grid_to_distorted_frame_velocity, grid_to_distorted_inverse_jacobian);
+
+  double outer_coords[3]{distorted_coords[0], distorted_coords[1],
+                         distorted_coords[2]};
+  double outer_velocity[3]{grid_to_distorted_frame_velocity[0],
+                           grid_to_distorted_frame_velocity[1],
+                           grid_to_distorted_frame_velocity[2]};
+  for (size_t component = 0; component < 9; ++component) {
+    distorted_to_inertial_jacobian[component] = component % 4 == 0 ? 1.0 : 0.0;
+    distorted_to_inertial_inverse_jacobian[component] =
+        component % 4 == 0 ? 1.0 : 0.0;
+  }
+
+  if (include_skew) {
+    double skewed_coords[3]{};
+    double skew_frame_velocity[3]{};
+    double skew_inverse_jacobian[9]{};
+    skew_frame_fields(outer_coords, skew_data, skewed_coords,
+                      skew_frame_velocity, skew_inverse_jacobian);
+    double skew_jacobian[9]{};
+    invert_matrix_3d(skew_inverse_jacobian, skew_jacobian);
+    double composed_velocity[3]{};
+    for (size_t target_d = 0; target_d < 3; ++target_d) {
+      composed_velocity[target_d] = skew_frame_velocity[target_d];
+      for (size_t source_d = 0; source_d < 3; ++source_d) {
+        composed_velocity[target_d] +=
+            skew_jacobian[target_d * 3 + source_d] * outer_velocity[source_d];
+      }
+      outer_coords[target_d] = skewed_coords[target_d];
+      outer_velocity[target_d] = composed_velocity[target_d];
+    }
+    for (size_t component = 0; component < 9; ++component) {
+      distorted_to_inertial_jacobian[component] = skew_jacobian[component];
+      distorted_to_inertial_inverse_jacobian[component] =
+          skew_inverse_jacobian[component];
+    }
+  }
+
+  if (include_affine) {
+    double affine_coords[3]{};
+    double affine_frame_velocity[3]{};
+    double affine_inverse_jacobian[9]{};
+    composed_affine_frame_fields<3>(outer_coords, affine_data, affine_coords,
+                                    affine_frame_velocity,
+                                    affine_inverse_jacobian);
+    for (size_t target_d = 0; target_d < 3; ++target_d) {
+      mesh_velocity[target_d] = affine_frame_velocity[target_d];
+      for (size_t source_d = 0; source_d < 3; ++source_d) {
+        mesh_velocity[target_d] += affine_data[AffineMapData<3>::matrix_offset +
+                                               target_d * 3 + source_d] *
+                                   outer_velocity[source_d];
+      }
+      inertial_coords[target_d] = affine_coords[target_d];
+    }
+    double affine_jacobian[9]{};
+    for (size_t component = 0; component < 9; ++component) {
+      affine_jacobian[component] =
+          affine_data[AffineMapData<3>::matrix_offset + component];
+    }
+    double composed_jacobian[9]{};
+    double composed_inverse_jacobian[9]{};
+    multiply_matrices_3d(affine_jacobian, distorted_to_inertial_jacobian,
+                         composed_jacobian);
+    multiply_matrices_3d(distorted_to_inertial_inverse_jacobian,
+                         affine_inverse_jacobian, composed_inverse_jacobian);
+    for (size_t component = 0; component < 9; ++component) {
+      distorted_to_inertial_jacobian[component] = composed_jacobian[component];
+      distorted_to_inertial_inverse_jacobian[component] =
+          composed_inverse_jacobian[component];
+    }
+  } else {
+    for (size_t d = 0; d < 3; ++d) {
+      inertial_coords[d] = outer_coords[d];
+      mesh_velocity[d] = outer_velocity[d];
+    }
+  }
+
+  multiply_matrices_3d(grid_to_distorted_inverse_jacobian,
+                       distorted_to_inertial_inverse_jacobian,
+                       grid_to_inertial_inverse_jacobian);
 }
 
 /// \brief Closed-form grid-to-inertial frame fields for a rigid rotation about

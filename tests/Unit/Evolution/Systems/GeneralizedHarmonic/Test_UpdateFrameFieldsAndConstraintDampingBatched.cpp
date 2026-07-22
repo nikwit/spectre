@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -19,6 +20,7 @@
 #include "Domain/CoordinateMaps/TimeDependent/RotScaleTrans.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/Shape.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/ShapeMapTransitionFunctions/SphereTransition.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/ShapeMapTransitionFunctions/Wedge.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/Skew.hpp"
 #include "Domain/Creators/Rectilinear.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
@@ -163,7 +165,29 @@ void check_frame_fields_and_damping_at_time(
         block.moving_mesh_grid_to_inertial_map()
             .coords_frame_velocity_jacobians(grid_coords, time,
                                              functions_of_time);
-    (void)expected_jacobian;
+    std::optional<std::tuple<
+        tnsr::I<DataVector, Dim, Frame::Distorted>,
+        InverseJacobian<DataVector, Dim, Frame::Grid, Frame::Distorted>,
+        Jacobian<DataVector, Dim, Frame::Grid, Frame::Distorted>,
+        tnsr::I<DataVector, Dim, Frame::Distorted>>>
+        expected_grid_to_distorted{};
+    std::optional<std::tuple<
+        tnsr::I<DataVector, Dim, Frame::Inertial>,
+        InverseJacobian<DataVector, Dim, Frame::Distorted, Frame::Inertial>,
+        Jacobian<DataVector, Dim, Frame::Distorted, Frame::Inertial>,
+        tnsr::I<DataVector, Dim, Frame::Inertial>>>
+        expected_distorted_to_inertial{};
+    if (block.has_distorted_frame()) {
+      expected_grid_to_distorted =
+          block.moving_mesh_grid_to_distorted_map()
+              .coords_frame_velocity_jacobians(grid_coords, time,
+                                               functions_of_time);
+      expected_distorted_to_inertial =
+          block.moving_mesh_distorted_to_inertial_map()
+              .coords_frame_velocity_jacobians(
+                  std::get<0>(*expected_grid_to_distorted), time,
+                  functions_of_time);
+    }
     std::array<decltype(Kokkos::create_mirror_view_and_copy(
                    Kokkos::HostSpace{},
                    packed_geometry.inertial_coordinates_device.get(0))),
@@ -188,6 +212,14 @@ void check_frame_fields_and_damping_at_time(
         CHECK(packed_geometry.mesh_velocity_host[d][s] ==
               approx(expected_velocity.get(d)[p]));
         CHECK(velocity_device[d](s) == approx(expected_velocity.get(d)[p]));
+        CHECK(packed_geometry.distorted_coordinates_host[d][s] ==
+              approx(block.has_distorted_frame()
+                         ? std::get<0>(*expected_grid_to_distorted).get(d)[p]
+                         : grid_coords.get(d)[p]));
+        CHECK(packed_geometry.grid_to_distorted_frame_velocity_host[d][s] ==
+              approx(block.has_distorted_frame()
+                         ? std::get<3>(*expected_grid_to_distorted).get(d)[p]
+                         : 0.0));
       }
     }
     for (size_t p = 0; p < element_points; ++p) {
@@ -203,6 +235,39 @@ void check_frame_fields_and_damping_at_time(
           }
           CHECK(host_inverse_jacobian(e, p, component) ==
                 approx(expected_composed_inverse_jacobian));
+
+          double expected_logical_to_distorted_inverse_jacobian = 0.0;
+          for (size_t grid_d = 0; grid_d < Dim; ++grid_d) {
+            expected_logical_to_distorted_inverse_jacobian +=
+                packed_geometry.logical_to_grid_inverse_jacobian_host(
+                    e, p, logical_d * Dim + grid_d) *
+                (block.has_distorted_frame()
+                     ? std::get<1>(*expected_grid_to_distorted)
+                           .get(grid_d, inertial_d)[p]
+                     : (grid_d == inertial_d ? 1.0 : 0.0));
+          }
+          CHECK(packed_geometry.logical_to_distorted_inverse_jacobian_host(
+                    e, p, component) ==
+                approx(expected_logical_to_distorted_inverse_jacobian));
+          CHECK(packed_geometry.grid_to_distorted_inverse_jacobian_host(
+                    e, p, component) ==
+                approx(block.has_distorted_frame()
+                           ? std::get<1>(*expected_grid_to_distorted)
+                                 .get(logical_d, inertial_d)[p]
+                           : (logical_d == inertial_d ? 1.0 : 0.0)));
+          CHECK(packed_geometry.distorted_to_inertial_jacobian_host(
+                    e, p, component) ==
+                approx(block.has_distorted_frame()
+                           ? std::get<2>(*expected_distorted_to_inertial)
+                                 .get(logical_d, inertial_d)[p]
+                           : expected_jacobian.get(logical_d, inertial_d)[p]));
+          CHECK(packed_geometry.distorted_to_inertial_inverse_jacobian_host(
+                    e, p, component) ==
+                approx(block.has_distorted_frame()
+                           ? std::get<1>(*expected_distorted_to_inertial)
+                                 .get(logical_d, inertial_d)[p]
+                           : expected_inverse_jacobian.get(logical_d,
+                                                           inertial_d)[p]));
         }
       }
     }
@@ -219,11 +284,17 @@ void test_update_frame_fields_and_constraint_damping_batched(
     const domain::CoordinateMaps::TimeDependent::RotScaleTrans<Dim>::BlockRegion
         region,
     const bool include_skew, const bool include_rot_scale_trans,
-    const bool include_shape) {
+    const bool include_shape, const bool use_distorted_frame) {
   const std::array<double, Dim> velocity{{0.25, -0.15, 0.05}};
+  const std::array<double, Dim> lower_bound =
+      use_distorted_frame ? std::array{1.2, -0.2, -0.2}
+                          : std::array{-1.2, -0.8, -0.6};
+  const std::array<double, Dim> upper_bound = use_distorted_frame
+                                                  ? std::array{1.8, 0.2, 0.2}
+                                                  : std::array{1.1, 0.9, 0.7};
   const domain::creators::Rectilinear<Dim> domain_creator{
-      {{-1.2, -0.8, -0.6}}, {{1.1, 0.9, 0.7}},    {{1, 0, 0}},
-      {{4, 4, 4}},          {{true, true, true}}, {}};
+      lower_bound, upper_bound,          {{1, 0, 0}},
+      {{4, 4, 4}}, {{true, true, true}}, {}};
 
   auto domain = domain_creator.create_domain();
   const std::string translation_name{"Translation"};
@@ -241,15 +312,52 @@ void test_update_frame_fields_and_constraint_damping_batched(
                                       translation_name, inner_radius,
                                       outer_radius,     region};
   if (include_shape) {
-    domain.inject_time_dependent_map_for_block(
-        0, domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
-               domain::CoordinateMaps::TimeDependent::Shape{
-                   {{0.05, -0.03, 0.02}},
-                   1.0e-12,
-                   std::make_unique<
-                       domain::CoordinateMaps::ShapeMapTransitionFunctions::
-                           SphereTransition>(0.01, 5.0, false, false),
-                   shape_name}));
+    const auto make_shape = [&shape_name, use_distorted_frame]() {
+      using namespace domain::CoordinateMaps::ShapeMapTransitionFunctions;
+      std::unique_ptr<ShapeMapTransitionFunction> transition{};
+      if (use_distorted_frame) {
+        transition = std::make_unique<Wedge>(std::array{0.05, -0.03, 0.02}, 1.0,
+                                             1.0, std::array{0.05, -0.03, 0.02},
+                                             3.0, 1.0, Wedge::Axis::PlusX);
+      } else {
+        transition =
+            std::make_unique<SphereTransition>(0.01, 5.0, false, false);
+      }
+      return domain::CoordinateMaps::TimeDependent::Shape{
+          {{0.05, -0.03, 0.02}}, 1.0e-12, std::move(transition), shape_name};
+    };
+    const auto make_skew = [&skew_name]() {
+      return domain::CoordinateMaps::TimeDependent::Skew{
+          skew_name, {{0.1, -0.05, 0.02}}, 10.0};
+    };
+    if (include_skew and include_rot_scale_trans) {
+      auto grid_to_inertial =
+          domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
+              make_shape(), make_skew(), rot_scale_trans);
+      if (use_distorted_frame) {
+        domain.inject_time_dependent_map_for_block(
+            0, std::move(grid_to_inertial),
+            domain::make_coordinate_map_base<Frame::Grid, Frame::Distorted>(
+                make_shape()),
+            domain::make_coordinate_map_base<Frame::Distorted, Frame::Inertial>(
+                make_skew(), rot_scale_trans));
+      } else {
+        domain.inject_time_dependent_map_for_block(0,
+                                                   std::move(grid_to_inertial));
+      }
+    } else if (include_rot_scale_trans) {
+      domain.inject_time_dependent_map_for_block(
+          0, domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
+                 make_shape(), rot_scale_trans));
+    } else if (include_skew) {
+      domain.inject_time_dependent_map_for_block(
+          0, domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
+                 make_shape(), make_skew()));
+    } else {
+      domain.inject_time_dependent_map_for_block(
+          0, domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
+                 make_shape()));
+    }
   } else if (include_skew and include_rot_scale_trans) {
     domain.inject_time_dependent_map_for_block(
         0, domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
@@ -389,11 +497,20 @@ void test_update_frame_fields_and_constraint_damping_batched(
     REQUIRE(packed_geometry.block_map_descriptors_host.size() == 1);
     REQUIRE(packed_geometry.block_map_descriptors_host[0].has_value());
     CHECK(packed_geometry.block_map_descriptors_host[0]->size() ==
-          (include_skew and include_rot_scale_trans ? 2 : 1));
+          (include_shape ? size_t{1} + static_cast<size_t>(include_skew) +
+                               static_cast<size_t>(include_rot_scale_trans)
+           : include_skew and include_rot_scale_trans ? 2
+                                                      : 1));
     for (size_t e = 0; e < packed_geometry.element_map_kind_host.size(); ++e) {
       const auto expected_kind =
           time_index == 1 and e == 0
               ? gh::Actions::BatchedMapKind::HostEvaluated
+          : include_shape and include_skew and include_rot_scale_trans
+              ? gh::Actions::BatchedMapKind::ShapeComposedSkewAffine
+          : include_shape and include_skew
+              ? gh::Actions::BatchedMapKind::ShapeComposedSkew
+          : include_shape and include_rot_scale_trans
+              ? gh::Actions::BatchedMapKind::ShapeComposedAffine
           : include_shape ? gh::Actions::BatchedMapKind::Shape
           : include_skew and include_rot_scale_trans
               ? gh::Actions::BatchedMapKind::SkewComposedAffine
@@ -444,14 +561,16 @@ SPECTRE_TEST_CASE(
     "[Unit][Evolution]") {
   using BlockRegion =
       domain::CoordinateMaps::TimeDependent::RotScaleTrans<Dim>::BlockRegion;
-  test_update_frame_fields_and_constraint_damping_batched(BlockRegion::Inner,
-                                                          false, true, false);
   test_update_frame_fields_and_constraint_damping_batched(
-      BlockRegion::Transition, false, true, false);
-  test_update_frame_fields_and_constraint_damping_batched(BlockRegion::Inner,
-                                                          true, true, false);
-  test_update_frame_fields_and_constraint_damping_batched(BlockRegion::Inner,
-                                                          true, false, false);
-  test_update_frame_fields_and_constraint_damping_batched(BlockRegion::Inner,
-                                                          false, false, true);
+      BlockRegion::Inner, false, true, false, false);
+  test_update_frame_fields_and_constraint_damping_batched(
+      BlockRegion::Transition, false, true, false, false);
+  test_update_frame_fields_and_constraint_damping_batched(
+      BlockRegion::Inner, true, true, false, false);
+  test_update_frame_fields_and_constraint_damping_batched(
+      BlockRegion::Inner, true, false, false, false);
+  test_update_frame_fields_and_constraint_damping_batched(
+      BlockRegion::Inner, false, false, true, false);
+  test_update_frame_fields_and_constraint_damping_batched(
+      BlockRegion::Inner, true, true, true, true);
 }

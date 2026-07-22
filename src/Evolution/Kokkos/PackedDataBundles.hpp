@@ -97,6 +97,15 @@ struct PackedGeometry {
   device_inertial_coordinates_type inertial_coordinates_device{};
   device_mesh_velocity_type mesh_velocity_device{};
   device_inverse_jacobian_type element_inverse_jacobian_device{};
+  // Intermediate-frame geometry is device-resident for map compositions with
+  // a distorted frame, then mirrored to the existing host caches for
+  // observation and apparent-horizon consumers.
+  device_inertial_coordinates_type distorted_coordinates_device{};
+  device_mesh_velocity_type grid_to_distorted_frame_velocity_device{};
+  device_inverse_jacobian_type logical_to_distorted_inverse_jacobian_device{};
+  device_inverse_jacobian_type grid_to_distorted_inverse_jacobian_device{};
+  device_inverse_jacobian_type distorted_to_inertial_jacobian_device{};
+  device_inverse_jacobian_type distorted_to_inertial_inverse_jacobian_device{};
   // Device-resident copies of the domain-static geometry. These are uploaded
   // once (they never change during an evolution) and are consumed by the
   // on-device frame-field update for blocks whose coordinate map is evaluated
@@ -109,6 +118,7 @@ struct PackedGeometry {
   // later group-by-map-kind launch optimization). Empty until built.
   std::vector<int> element_map_kind_host{};
   ::Kokkos::View<int*> element_map_kind_device{};
+  ::Kokkos::View<int*> element_has_distorted_frame_device{};
   // Exact host-side descriptions of each block's grid-to-inertial map. An
   // empty optional marks a composition containing a map that has not yet
   // implemented the descriptor interface. These are captured once while the

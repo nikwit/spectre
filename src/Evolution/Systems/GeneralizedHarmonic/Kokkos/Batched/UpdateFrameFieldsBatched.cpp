@@ -20,6 +20,7 @@
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/RotationMatrixHelpers.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/Shape.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/ShapeMapTransitionFunctions/Wedge.hpp"
 #include "Domain/ElementMap.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/BatchedMapPlan.hpp"
@@ -64,6 +65,36 @@ void ensure_frame_field_storage(
             "GhBatchedElementInverseJacobian", num_elements, points_per_element,
             VolumeDim * VolumeDim};
   }
+  const auto ensure_device_jacobian =
+      [num_elements, points_per_element](
+          const gsl::not_null<
+              typename packed_geometry_type::device_inverse_jacobian_type*>
+              jacobian,
+          const std::string& label) {
+        if (jacobian->extent(0) != num_elements or
+            jacobian->extent(1) != points_per_element or
+            jacobian->extent(2) != VolumeDim * VolumeDim) {
+          *jacobian =
+              typename packed_geometry_type::device_inverse_jacobian_type{
+                  label, num_elements, points_per_element,
+                  VolumeDim * VolumeDim};
+        }
+      };
+  ensure_device_jacobian(
+      make_not_null(
+          &packed_geometry->logical_to_distorted_inverse_jacobian_device),
+      "GhBatchedLogicalToDistortedInverseJacobianDevice");
+  ensure_device_jacobian(
+      make_not_null(
+          &packed_geometry->grid_to_distorted_inverse_jacobian_device),
+      "GhBatchedGridToDistortedInverseJacobianDevice");
+  ensure_device_jacobian(
+      make_not_null(&packed_geometry->distorted_to_inertial_jacobian_device),
+      "GhBatchedDistortedToInertialJacobianDevice");
+  ensure_device_jacobian(
+      make_not_null(
+          &packed_geometry->distorted_to_inertial_inverse_jacobian_device),
+      "GhBatchedDistortedToInertialInverseJacobianDevice");
   const auto ensure_host_jacobian =
       [num_elements, points_per_element](
           const gsl::not_null<
@@ -115,6 +146,18 @@ void ensure_frame_field_storage(
         total_points) {
       packed_geometry->mesh_velocity_device.get(d) =
           ::Kokkos::View<double*>("GhBatchedMeshVelocity", total_points);
+    }
+    if (packed_geometry->distorted_coordinates_device.get(d).extent(0) !=
+        total_points) {
+      packed_geometry->distorted_coordinates_device.get(d) =
+          ::Kokkos::View<double*>("GhBatchedDistortedCoordinates",
+                                  total_points);
+    }
+    if (packed_geometry->grid_to_distorted_frame_velocity_device.get(d).extent(
+            0) != total_points) {
+      packed_geometry->grid_to_distorted_frame_velocity_device.get(d) =
+          ::Kokkos::View<double*>("GhBatchedGridToDistortedFrameVelocity",
+                                  total_points);
     }
   }
 }
@@ -203,7 +246,21 @@ void update_frame_fields_device(
       packed_geometry->logical_to_grid_inverse_jacobian_device;
   const auto element_inverse_jacobian =
       packed_geometry->element_inverse_jacobian_device;
+  const auto distorted_coordinates =
+      packed_geometry->distorted_coordinates_device;
+  const auto grid_to_distorted_frame_velocity =
+      packed_geometry->grid_to_distorted_frame_velocity_device;
+  const auto logical_to_distorted_inverse_jacobian =
+      packed_geometry->logical_to_distorted_inverse_jacobian_device;
+  const auto grid_to_distorted_inverse_jacobian =
+      packed_geometry->grid_to_distorted_inverse_jacobian_device;
+  const auto distorted_to_inertial_jacobian =
+      packed_geometry->distorted_to_inertial_jacobian_device;
+  const auto distorted_to_inertial_inverse_jacobian =
+      packed_geometry->distorted_to_inertial_inverse_jacobian_device;
   const auto element_map_kind = packed_geometry->element_map_kind_device;
+  const auto element_has_distorted_frame =
+      packed_geometry->element_has_distorted_frame_device;
   const auto affine_map_data = packed_geometry->affine_map_data_device;
   const auto shape_coefficients = packed_geometry->shape_coefficients_device;
   const auto shape_point_data = packed_geometry->shape_point_data_device;
@@ -233,6 +290,12 @@ void update_frame_fields_device(
   constexpr int skew_composed_affine_kind =
       static_cast<int>(BatchedMapKind::SkewComposedAffine);
   constexpr int shape_kind = static_cast<int>(BatchedMapKind::Shape);
+  constexpr int shape_composed_affine_kind =
+      static_cast<int>(BatchedMapKind::ShapeComposedAffine);
+  constexpr int shape_composed_skew_kind =
+      static_cast<int>(BatchedMapKind::ShapeComposedSkew);
+  constexpr int shape_composed_skew_affine_kind =
+      static_cast<int>(BatchedMapKind::ShapeComposedSkewAffine);
   ::Kokkos::parallel_for(
       "GhUpdateFrameFields", total_points,
       KOKKOS_LAMBDA(const int linear_index_int) {
@@ -247,16 +310,33 @@ void update_frame_fields_device(
           for (size_t d = 0; d < VolumeDim; ++d) {
             inertial_coordinates.get(d)(s) = grid_coordinates.get(d)(s);
             mesh_velocity.get(d)(s) = 0.0;
+            distorted_coordinates.get(d)(s) = grid_coordinates.get(d)(s);
+            grid_to_distorted_frame_velocity.get(d)(s) = 0.0;
           }
           for (size_t component = 0; component < VolumeDim * VolumeDim;
                ++component) {
             element_inverse_jacobian(e, p, component) =
                 logical_to_grid_inverse_jacobian(e, p, component);
+            logical_to_distorted_inverse_jacobian(e, p, component) =
+                logical_to_grid_inverse_jacobian(e, p, component);
+            const bool is_diagonal = component % (VolumeDim + 1) == 0;
+            grid_to_distorted_inverse_jacobian(e, p, component) =
+                is_diagonal ? 1.0 : 0.0;
+            distorted_to_inertial_jacobian(e, p, component) =
+                is_diagonal ? 1.0 : 0.0;
+            distorted_to_inertial_inverse_jacobian(e, p, component) =
+                is_diagonal ? 1.0 : 0.0;
           }
         } else {
           double inertial[3];
           double velocity[3];
           double grid_to_inertial_inv_jac[9];
+          double distorted[3]{};
+          double grid_to_distorted_velocity[3]{};
+          double grid_to_distorted_inv_jac[9]{};
+          double distorted_to_inertial_jac[9]{};
+          double distorted_to_inertial_inv_jac[9]{};
+          bool intermediate_fields_are_set = false;
           if (kind == composed_affine_kind) {
             const double grid_coords[3]{grid_coordinates.get(0)(s),
                                         grid_coordinates.get(1)(s),
@@ -284,18 +364,36 @@ void update_frame_fields_device(
             skew_composed_affine_frame_fields(
                 grid_coords, &affine_map_data(e, 0), inertial, velocity,
                 grid_to_inertial_inv_jac);
-          } else if (kind == shape_kind) {
+          } else if (kind == shape_kind or kind == shape_composed_affine_kind or
+                     kind == shape_composed_skew_kind or
+                     kind == shape_composed_skew_affine_kind) {
             const double grid_coords[3]{grid_coordinates.get(0)(s),
                                         grid_coordinates.get(1)(s),
                                         grid_coordinates.get(2)(s)};
             const double center[3]{shape_centers(e, 0), shape_centers(e, 1),
                                    shape_centers(e, 2)};
-            shape_frame_fields(
+            const bool include_skew = kind == shape_composed_skew_kind or
+                                      kind == shape_composed_skew_affine_kind;
+            const bool include_affine = kind == shape_composed_affine_kind or
+                                        kind == shape_composed_skew_affine_kind;
+            const double* const skew_data =
+                include_skew ? &affine_map_data(e, 0) : nullptr;
+            const double* const affine_data =
+                not include_affine ? nullptr
+                : include_skew
+                    ? &affine_map_data(
+                          e, SkewComposedAffineMapData<3>::affine_offset)
+                    : &affine_map_data(e, 0);
+            shape_composed_frame_fields(
                 grid_coords, center, &shape_point_data(e, p, 0),
                 &shape_coefficients(e, 0, 0), shape_lmax(e),
                 &shape_recurrence_alpha(e, 0), &shape_recurrence_beta(e, 0),
                 &shape_recurrence_pmm(e, 0), &shape_recurrence_indices(e, 0),
-                inertial, velocity, grid_to_inertial_inv_jac);
+                skew_data, affine_data, include_skew, include_affine, inertial,
+                velocity, grid_to_inertial_inv_jac, distorted,
+                grid_to_distorted_velocity, grid_to_distorted_inv_jac,
+                distorted_to_inertial_jac, distorted_to_inertial_inv_jac);
+            intermediate_fields_are_set = element_has_distorted_frame(e) != 0;
           } else if (kind == rigid_rotation_z_kind) {
             rigid_rotation_z_frame_fields(
                 grid_coordinates.get(0)(s), grid_coordinates.get(1)(s),
@@ -309,9 +407,38 @@ void update_frame_fields_device(
           } else {
             Kokkos::abort("Unsupported device map kind.");
           }
+          if (not intermediate_fields_are_set) {
+            const double grid_coords[3]{grid_coordinates.get(0)(s),
+                                        grid_coordinates.get(1)(s),
+                                        grid_coordinates.get(2)(s)};
+            for (size_t d = 0; d < 3; ++d) {
+              distorted[d] = grid_coords[d];
+              grid_to_distorted_velocity[d] = 0.0;
+            }
+            for (size_t component = 0; component < 9; ++component) {
+              grid_to_distorted_inv_jac[component] =
+                  component % 4 == 0 ? 1.0 : 0.0;
+              distorted_to_inertial_inv_jac[component] =
+                  grid_to_inertial_inv_jac[component];
+            }
+            invert_matrix_3d(distorted_to_inertial_inv_jac,
+                             distorted_to_inertial_jac);
+          }
           for (size_t d = 0; d < VolumeDim; ++d) {
             inertial_coordinates.get(d)(s) = inertial[d];
             mesh_velocity.get(d)(s) = velocity[d];
+            distorted_coordinates.get(d)(s) = distorted[d];
+            grid_to_distorted_frame_velocity.get(d)(s) =
+                grid_to_distorted_velocity[d];
+          }
+          for (size_t component = 0; component < VolumeDim * VolumeDim;
+               ++component) {
+            grid_to_distorted_inverse_jacobian(e, p, component) =
+                grid_to_distorted_inv_jac[component];
+            distorted_to_inertial_jacobian(e, p, component) =
+                distorted_to_inertial_jac[component];
+            distorted_to_inertial_inverse_jacobian(e, p, component) =
+                distorted_to_inertial_inv_jac[component];
           }
           // Compose logical->grid (static) with grid->inertial (device map):
           // invjac(logical, inertial) = sum_grid L2G(logical, grid) *
@@ -327,6 +454,18 @@ void update_frame_fields_device(
               }
               element_inverse_jacobian(
                   e, p, logical_d * VolumeDim + inertial_d) = composed;
+            }
+            for (size_t distorted_d = 0; distorted_d < VolumeDim;
+                 ++distorted_d) {
+              double composed = 0.0;
+              for (size_t grid_d = 0; grid_d < VolumeDim; ++grid_d) {
+                composed +=
+                    logical_to_grid_inverse_jacobian(
+                        e, p, logical_d * VolumeDim + grid_d) *
+                    grid_to_distorted_inv_jac[grid_d * VolumeDim + distorted_d];
+              }
+              logical_to_distorted_inverse_jacobian(
+                  e, p, logical_d * VolumeDim + distorted_d) = composed;
             }
           }
         }
@@ -352,6 +491,54 @@ void copy_device_array_to_host(
       gsl::at(*host_data, d)[s] = mirror(s);
     }
   }
+}
+
+template <size_t VolumeDim>
+void copy_intermediate_frame_fields_to_host(
+    const gsl::not_null<
+        evolution::Kokkos::PackedGeometry<gh::System<VolumeDim>>*>
+        packed_geometry) {
+  copy_device_array_to_host<VolumeDim>(
+      packed_geometry->distorted_coordinates_device,
+      make_not_null(&packed_geometry->distorted_coordinates_host));
+  copy_device_array_to_host<VolumeDim>(
+      packed_geometry->grid_to_distorted_frame_velocity_device,
+      make_not_null(&packed_geometry->grid_to_distorted_frame_velocity_host));
+  ::Kokkos::deep_copy(
+      packed_geometry->logical_to_distorted_inverse_jacobian_host,
+      packed_geometry->logical_to_distorted_inverse_jacobian_device);
+  ::Kokkos::deep_copy(
+      packed_geometry->grid_to_distorted_inverse_jacobian_host,
+      packed_geometry->grid_to_distorted_inverse_jacobian_device);
+  ::Kokkos::deep_copy(packed_geometry->distorted_to_inertial_jacobian_host,
+                      packed_geometry->distorted_to_inertial_jacobian_device);
+  ::Kokkos::deep_copy(
+      packed_geometry->distorted_to_inertial_inverse_jacobian_host,
+      packed_geometry->distorted_to_inertial_inverse_jacobian_device);
+}
+
+template <size_t VolumeDim>
+void seed_intermediate_frame_fields_on_device(
+    const gsl::not_null<
+        evolution::Kokkos::PackedGeometry<gh::System<VolumeDim>>*>
+        packed_geometry) {
+  copy_host_array_to_device<VolumeDim>(
+      packed_geometry->distorted_coordinates_host,
+      make_not_null(&packed_geometry->distorted_coordinates_device));
+  copy_host_array_to_device<VolumeDim>(
+      packed_geometry->grid_to_distorted_frame_velocity_host,
+      make_not_null(&packed_geometry->grid_to_distorted_frame_velocity_device));
+  ::Kokkos::deep_copy(
+      packed_geometry->logical_to_distorted_inverse_jacobian_device,
+      packed_geometry->logical_to_distorted_inverse_jacobian_host);
+  ::Kokkos::deep_copy(
+      packed_geometry->grid_to_distorted_inverse_jacobian_device,
+      packed_geometry->grid_to_distorted_inverse_jacobian_host);
+  ::Kokkos::deep_copy(packed_geometry->distorted_to_inertial_jacobian_device,
+                      packed_geometry->distorted_to_inertial_jacobian_host);
+  ::Kokkos::deep_copy(
+      packed_geometry->distorted_to_inertial_inverse_jacobian_device,
+      packed_geometry->distorted_to_inertial_inverse_jacobian_host);
 }
 
 // Verify that a block's grid-to-inertial map is, at the given time, the rigid
@@ -804,15 +991,18 @@ void initialize_shape_map_data(
   packed_geometry->shape_lmax_host.assign(num_elements, 0);
   size_t max_lmax = 0;
   for (size_t e = 0; e < num_elements; ++e) {
-    if (packed_geometry->element_map_kind_host[e] !=
-        static_cast<int>(BatchedMapKind::Shape)) {
+    const int kind = packed_geometry->element_map_kind_host[e];
+    if (kind != static_cast<int>(BatchedMapKind::Shape) and
+        kind != static_cast<int>(BatchedMapKind::ShapeComposedAffine) and
+        kind != static_cast<int>(BatchedMapKind::ShapeComposedSkew) and
+        kind != static_cast<int>(BatchedMapKind::ShapeComposedSkewAffine)) {
       continue;
     }
     const size_t block_id = packed_topology.local_element_ids[e].block_id();
     const auto& descriptors =
         packed_geometry->block_map_descriptors_host.at(block_id);
-    ASSERT(descriptors.has_value() and descriptors->size() == 1,
-           "A standalone Shape map requires one exact descriptor.");
+    ASSERT(descriptors.has_value() and not descriptors->empty(),
+           "A device Shape map requires an exact leading descriptor.");
     const auto& shape =
         std::get<domain::CoordinateMaps::TimeDependent::ShapeMapDescriptor>(
             descriptors->front());
@@ -877,9 +1067,6 @@ void initialize_shape_map_data(
     const auto& shape =
         std::get<domain::CoordinateMaps::TimeDependent::ShapeMapDescriptor>(
             packed_geometry->block_map_descriptors_host.at(block_id)->front());
-    const auto& sphere = std::get<
-        domain::CoordinateMaps::TimeDependent::SphereTransitionDescriptor>(
-        shape.transition);
     for (size_t d = 0; d < VolumeDim; ++d) {
       host_centers(e, d) = shape.center[d];
     }
@@ -894,9 +1081,20 @@ void initialize_shape_map_data(
       host_pmm(e, i) = recurrence.pmm[i];
     }
 
+    using Wedge = domain::CoordinateMaps::ShapeMapTransitionFunctions::Wedge;
+    std::optional<Wedge> wedge_transition{};
+    if (const auto* const wedge = std::get_if<
+            domain::CoordinateMaps::TimeDependent::WedgeTransitionDescriptor>(
+            &shape.transition);
+        wedge != nullptr) {
+      wedge_transition.emplace(
+          wedge->inner_center, wedge->inner_radius, wedge->inner_sphericity,
+          wedge->outer_center, wedge->outer_radius, wedge->outer_sphericity,
+          static_cast<Wedge::Axis>(wedge->axis), wedge->reverse);
+    }
     const size_t point_begin = packed_topology.element_point_offsets_host[e];
     for (size_t p = 0; p < points_per_element; ++p) {
-      double centered[3]{};
+      std::array<double, 3> centered{};
       double radius_squared = 0.0;
       for (size_t d = 0; d < 3; ++d) {
         centered[d] =
@@ -907,28 +1105,45 @@ void initialize_shape_map_data(
       const double radius = std::sqrt(radius_squared);
       double transition = 0.0;
       double transition_over_radius = 0.0;
-      double gradient_factor = 0.0;
-      if (sphere.interior) {
-        const double inverse_cube_inner_radius =
-            1.0 /
-            (sphere.inner_radius * sphere.inner_radius * sphere.inner_radius);
-        transition = radius_squared * inverse_cube_inner_radius;
-        transition_over_radius = radius * inverse_cube_inner_radius;
-        gradient_factor = 2.0 * inverse_cube_inner_radius;
+      std::array<double, 3> transition_gradient{};
+      if (const auto* const sphere =
+              std::get_if<domain::CoordinateMaps::TimeDependent::
+                              SphereTransitionDescriptor>(&shape.transition);
+          sphere != nullptr) {
+        double gradient_factor = 0.0;
+        if (sphere->interior) {
+          const double inverse_cube_inner_radius =
+              1.0 / (sphere->inner_radius * sphere->inner_radius *
+                     sphere->inner_radius);
+          transition = radius_squared * inverse_cube_inner_radius;
+          transition_over_radius = radius * inverse_cube_inner_radius;
+          gradient_factor = 2.0 * inverse_cube_inner_radius;
+        } else {
+          const double radial_factor = std::clamp(
+              sphere->radial_slope * radius + sphere->radial_intercept, 0.0,
+              1.0);
+          transition = radial_factor / radius;
+          transition_over_radius = radial_factor / radius_squared;
+          gradient_factor = sphere->radial_slope / radius_squared -
+                            radial_factor / (radius_squared * radius);
+        }
+        for (size_t d = 0; d < 3; ++d) {
+          transition_gradient[d] = centered[d] * gradient_factor;
+        }
       } else {
-        const double radial_factor = std::clamp(
-            sphere.radial_slope * radius + sphere.radial_intercept, 0.0, 1.0);
-        transition = radial_factor / radius;
-        transition_over_radius = radial_factor / radius_squared;
-        gradient_factor = sphere.radial_slope / radius_squared -
-                          radial_factor / (radius_squared * radius);
+        ASSERT(wedge_transition.has_value(),
+               "A non-spherical Shape transition must be a Wedge.");
+        transition = (*wedge_transition)(centered, std::nullopt);
+        transition_over_radius =
+            (*wedge_transition)(centered, std::optional<size_t>{1});
+        transition_gradient = wedge_transition->gradient(centered);
       }
       host_point_data(e, p, ShapePointData::transition_offset) = transition;
       host_point_data(e, p, ShapePointData::transition_over_radius_offset) =
           transition_over_radius;
       for (size_t d = 0; d < 3; ++d) {
         host_point_data(e, p, ShapePointData::transition_gradient_offset + d) =
-            centered[d] * gradient_factor;
+            transition_gradient[d];
       }
     }
   }
@@ -1080,7 +1295,10 @@ bool stage_device_map_data(
         map_kind !=
             static_cast<int>(BatchedMapKind::RotScaleTransTransition) and
         map_kind != static_cast<int>(BatchedMapKind::Skew) and
-        map_kind != static_cast<int>(BatchedMapKind::SkewComposedAffine)) {
+        map_kind != static_cast<int>(BatchedMapKind::SkewComposedAffine) and
+        map_kind != static_cast<int>(BatchedMapKind::ShapeComposedAffine) and
+        map_kind != static_cast<int>(BatchedMapKind::ShapeComposedSkew) and
+        map_kind != static_cast<int>(BatchedMapKind::ShapeComposedSkewAffine)) {
       continue;
     }
     const auto& element_id = packed_topology.local_element_ids[e];
@@ -1101,6 +1319,48 @@ bool stage_device_map_data(
       bool data_is_ready = false;
       const auto& descriptors =
           packed_geometry->block_map_descriptors_host.at(block_id);
+      if (map_kind == static_cast<int>(BatchedMapKind::ShapeComposedAffine) or
+          map_kind == static_cast<int>(BatchedMapKind::ShapeComposedSkew) or
+          map_kind ==
+              static_cast<int>(BatchedMapKind::ShapeComposedSkewAffine)) {
+        const bool include_skew =
+            map_kind == static_cast<int>(BatchedMapKind::ShapeComposedSkew) or
+            map_kind ==
+                static_cast<int>(BatchedMapKind::ShapeComposedSkewAffine);
+        const bool include_affine =
+            map_kind == static_cast<int>(BatchedMapKind::ShapeComposedAffine) or
+            map_kind ==
+                static_cast<int>(BatchedMapKind::ShapeComposedSkewAffine);
+        ASSERT(
+            descriptors.has_value() and
+                descriptors->size() == 1 + static_cast<size_t>(include_skew) +
+                                           static_cast<size_t>(include_affine),
+            "A composed device Shape map has an unexpected descriptor "
+            "sequence.");
+        size_t descriptor_index = 1;
+        if (include_skew) {
+          stage_skew_map_data(
+              make_not_null(inferred_data.data()),
+              std::get<
+                  domain::CoordinateMaps::TimeDependent::SkewMapDescriptor>(
+                  (*descriptors)[descriptor_index]),
+              functions_of_time, time);
+          ++descriptor_index;
+        }
+        if (include_affine) {
+          stage_rot_scale_trans_affine_data<VolumeDim>(
+              make_not_null(
+                  inferred_data.data() +
+                  (include_skew
+                       ? SkewComposedAffineMapData<VolumeDim>::affine_offset
+                       : 0)),
+              std::get<domain::CoordinateMaps::TimeDependent::
+                           RotScaleTransMapDescriptor>(
+                  (*descriptors)[descriptor_index]),
+              functions_of_time, time);
+        }
+        data_is_ready = true;
+      }
       if (map_kind == static_cast<int>(BatchedMapKind::Skew) or
           map_kind == static_cast<int>(BatchedMapKind::SkewComposedAffine)) {
         ASSERT(descriptors.has_value() and
@@ -1255,12 +1515,49 @@ void build_map_plan(
       kind = cached->second;
     } else {
       kind = classify_block_map(block);
-      if (kind != BatchedMapKind::Static and not block.has_distorted_frame()) {
+      if (kind != BatchedMapKind::Static) {
         auto& descriptors =
             packed_geometry->block_map_descriptors_host[block_id];
         descriptors = block.moving_mesh_grid_to_inertial_map()
                           .time_dependent_map_descriptors();
+        if (descriptors.has_value() and not descriptors->empty() and
+            std::holds_alternative<
+                domain::CoordinateMaps::TimeDependent::ShapeMapDescriptor>(
+                descriptors->front())) {
+          if (descriptors->size() == 1) {
+            kind = BatchedMapKind::Shape;
+          } else if (descriptors->size() == 2 and
+                     std::holds_alternative<
+                         domain::CoordinateMaps::TimeDependent::
+                             SkewMapDescriptor>((*descriptors)[1])) {
+            kind = BatchedMapKind::ShapeComposedSkew;
+          } else if (descriptors->size() == 2 and
+                     std::holds_alternative<
+                         domain::CoordinateMaps::TimeDependent::
+                             RotScaleTransMapDescriptor>((*descriptors)[1]) and
+                     std::get<domain::CoordinateMaps::TimeDependent::
+                                  RotScaleTransMapDescriptor>((*descriptors)[1])
+                             .region !=
+                         domain::CoordinateMaps::TimeDependent::
+                             RotScaleTransMapDescriptor::Region::Transition) {
+            kind = BatchedMapKind::ShapeComposedAffine;
+          } else if (descriptors->size() == 3 and
+                     std::holds_alternative<
+                         domain::CoordinateMaps::TimeDependent::
+                             SkewMapDescriptor>((*descriptors)[1]) and
+                     std::holds_alternative<
+                         domain::CoordinateMaps::TimeDependent::
+                             RotScaleTransMapDescriptor>((*descriptors)[2]) and
+                     std::get<domain::CoordinateMaps::TimeDependent::
+                                  RotScaleTransMapDescriptor>((*descriptors)[2])
+                             .region !=
+                         domain::CoordinateMaps::TimeDependent::
+                             RotScaleTransMapDescriptor::Region::Transition) {
+            kind = BatchedMapKind::ShapeComposedSkewAffine;
+          }
+        }
         if (descriptors.has_value() and descriptors->size() == 2 and
+            kind == BatchedMapKind::HostEvaluated and
             std::holds_alternative<
                 domain::CoordinateMaps::TimeDependent::SkewMapDescriptor>(
                 descriptors->front())) {
@@ -1284,10 +1581,7 @@ void build_map_plan(
                          std::get_if<domain::CoordinateMaps::TimeDependent::
                                          ShapeMapDescriptor>(
                              &descriptors->front());
-                     shape != nullptr and
-                     std::holds_alternative<
-                         domain::CoordinateMaps::TimeDependent::
-                             SphereTransitionDescriptor>(shape->transition)) {
+                     shape != nullptr) {
             kind = BatchedMapKind::Shape;
           } else if (const auto* const rot_scale_trans =
                          std::get_if<domain::CoordinateMaps::TimeDependent::
@@ -1317,7 +1611,8 @@ void build_map_plan(
                 packed_geometry->grid_coordinates_host[d][point_begin + p];
           }
         }
-        if (kind == BatchedMapKind::HostEvaluated and names.size() == 1) {
+        if (not block.has_distorted_frame() and
+            kind == BatchedMapKind::HostEvaluated and names.size() == 1) {
           const std::string& name = *names.begin();
           if (verify_rigid_rotation_z<VolumeDim>(block, grid_coords, name, time,
                                                  functions_of_time)) {
@@ -1338,7 +1633,8 @@ void build_map_plan(
             }
           }
         }
-        if (kind == BatchedMapKind::HostEvaluated) {
+        if (not block.has_distorted_frame() and
+            kind == BatchedMapKind::HostEvaluated) {
           std::array<double, AffineMapData<VolumeDim>::size> affine_data{};
           if (infer_composed_affine_map<VolumeDim>(make_not_null(&affine_data),
                                                    block, grid_coords, time,
@@ -1354,12 +1650,21 @@ void build_map_plan(
 
   packed_geometry->element_map_kind_device =
       ::Kokkos::View<int*>("GhBatchedElementMapKind", num_elements);
+  packed_geometry->element_has_distorted_frame_device =
+      ::Kokkos::View<int*>("GhBatchedElementHasDistortedFrame", num_elements);
   auto host_kind =
       ::Kokkos::create_mirror_view(packed_geometry->element_map_kind_device);
+  auto host_has_distorted_frame = ::Kokkos::create_mirror_view(
+      packed_geometry->element_has_distorted_frame_device);
   for (size_t e = 0; e < num_elements; ++e) {
     host_kind(e) = packed_geometry->element_map_kind_host[e];
+    const size_t block_id = packed_topology.local_element_ids[e].block_id();
+    host_has_distorted_frame(e) =
+        domain.blocks()[block_id].has_distorted_frame() ? 1 : 0;
   }
   ::Kokkos::deep_copy(packed_geometry->element_map_kind_device, host_kind);
+  ::Kokkos::deep_copy(packed_geometry->element_has_distorted_frame_device,
+                      host_has_distorted_frame);
   initialize_shape_map_data<VolumeDim>(packed_geometry, packed_topology,
                                        functions_of_time, time);
   packed_geometry->map_plan_initialized = true;
@@ -1425,7 +1730,10 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
         kind == static_cast<int>(BatchedMapKind::ComposedAffine) or
         kind == static_cast<int>(BatchedMapKind::RotScaleTransTransition) or
         kind == static_cast<int>(BatchedMapKind::Skew) or
-        kind == static_cast<int>(BatchedMapKind::SkewComposedAffine);
+        kind == static_cast<int>(BatchedMapKind::SkewComposedAffine) or
+        kind == static_cast<int>(BatchedMapKind::ShapeComposedAffine) or
+        kind == static_cast<int>(BatchedMapKind::ShapeComposedSkew) or
+        kind == static_cast<int>(BatchedMapKind::ShapeComposedSkewAffine);
   }
   const bool staged_maps_ready =
       not has_affine_map_data or
@@ -1484,6 +1792,7 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
       copy_device_array_to_host<volume_dim>(
           packed_geometry->mesh_velocity_device,
           make_not_null(&packed_geometry->mesh_velocity_host));
+      copy_intermediate_frame_fields_to_host<volume_dim>(packed_geometry);
     }
     return;
   }
@@ -1671,6 +1980,7 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
   // the host coordinate and velocity views afterward so host-side consumers
   // see one coherent geometry snapshot.
   if (has_device_evaluated) {
+    seed_intermediate_frame_fields_on_device<volume_dim>(packed_geometry);
     update_frame_fields_device<volume_dim>(packed_geometry, points_per_element,
                                            total_points, fot_value,
                                            fot_value_dot);
@@ -1680,6 +1990,7 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
     copy_device_array_to_host<volume_dim>(
         packed_geometry->mesh_velocity_device,
         make_not_null(&packed_geometry->mesh_velocity_host));
+    copy_intermediate_frame_fields_to_host<volume_dim>(packed_geometry);
   }
 }
 
