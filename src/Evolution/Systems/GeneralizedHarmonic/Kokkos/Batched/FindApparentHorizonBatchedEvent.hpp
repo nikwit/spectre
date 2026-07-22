@@ -9,6 +9,7 @@
 #include <optional>
 #include <pup.h>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -26,20 +27,22 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/HostElementView.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "NumericalAlgorithms/Interpolation/IrregularInterpolant.hpp"
-#include "NumericalAlgorithms/SphericalHarmonics/Strahlkorper.hpp"
-#include "NumericalAlgorithms/SphericalHarmonics/StrahlkorperFunctions.hpp"
-#include "NumericalAlgorithms/SphericalHarmonics/Tags.hpp"
+#include "NumericalAlgorithms/Strahlkorper/Strahlkorper.hpp"
+#include "NumericalAlgorithms/Strahlkorper/StrahlkorperFunctions.hpp"
+#include "NumericalAlgorithms/Strahlkorper/Tags.hpp"
 #include "Options/String.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "Parallel/Invoke.hpp"
 #include "Parallel/ParallelComponentHelpers.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Component.hpp"
-#include "ParallelAlgorithms/ApparentHorizonFinder/ComputeExcisionBoundaryVolumeQuantities.hpp"
-#include "ParallelAlgorithms/ApparentHorizonFinder/ComputeExcisionBoundaryVolumeQuantities.tpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/ComputeVarsToInterpolateToTarget.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/FindApparentHorizon.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/HorizonAliases.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Tags.hpp"
 #include "ParallelAlgorithms/EventsAndDenseTriggers/Tags.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/Event.hpp"
+#include "ParallelAlgorithms/Interpolation/ComputeExcisionBoundaryVolumeQuantities.hpp"
+#include "ParallelAlgorithms/Interpolation/ComputeExcisionBoundaryVolumeQuantities.tpp"
 #include "ParallelAlgorithms/Interpolation/Targets/Sphere.hpp"
 #include "PointwiseFunctions/GeneralRelativity/DetAndInverseSpatialMetric.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
@@ -108,14 +111,17 @@ class FindApparentHorizonBatched : public Event {
                << HorizonMetavars::name());
     const auto& blocks_to_interpolate_for_this_target =
         blocks_to_interpolate.at(HorizonMetavars::name());
-    const auto& blocks = Parallel::get<domain::Tags::Domain<3>>(cache).blocks();
+    const auto& domain = Parallel::get<domain::Tags::Domain<3>>(cache);
+    const auto& blocks = domain.blocks();
+    const auto& functions_of_time =
+        Parallel::get<control_system::Tags::FunctionsOfTimeInitialize>(cache);
     auto& horizon_finder_proxy = Parallel::get_parallel_component<
         ah::Component<Metavariables, HorizonMetavars>>(cache);
 
     gh::Batched::for_each_host_element_view(
         packed_topology, packed_geometry, packed_evolution_state,
-        [&blocks, &blocks_to_interpolate_for_this_target, &horizon_finder_proxy,
-         &horizon_time,
+        [&blocks, &blocks_to_interpolate_for_this_target, &domain,
+         &functions_of_time, &horizon_finder_proxy, &horizon_time,
          this](const gh::Batched::HostElementView& host_element_view) {
           const auto& block_name =
               blocks[host_element_view.element_id.block_id()].name();
@@ -123,10 +129,32 @@ class FindApparentHorizonBatched : public Event {
             return;
           }
 
+          auto source_vars =
+              gh::Batched::make_ah_source_vars(host_element_view);
+          using horizon_frame = typename HorizonMetavars::frame;
+          if constexpr (std::is_same_v<horizon_frame, Frame::Distorted>) {
+            const auto& block = blocks[host_element_view.element_id.block_id()];
+            if (not block.has_distorted_frame()) {
+              return;
+            }
+          }
+          Variables<ah::vars_to_interpolate_to_target<3, horizon_frame>>
+              vars_to_interpolate_to_target{
+                  host_element_view.mesh.number_of_grid_points()};
+          ah::compute_vars_to_interpolate_to_target(
+              make_not_null(&vars_to_interpolate_to_target),
+              get<gr::Tags::SpacetimeMetric<DataVector, 3>>(source_vars),
+              get<gh::Tags::Pi<DataVector, 3>>(source_vars),
+              get<gh::Tags::Phi<DataVector, 3>>(source_vars),
+              get<::Tags::deriv<gh::Tags::Phi<DataVector, 3>, tmpl::size_t<3>,
+                                Frame::Inertial>>(source_vars),
+              horizon_time, domain, host_element_view.mesh,
+              host_element_view.element_id, functions_of_time);
+
           Parallel::simple_action<ah::FindApparentHorizon<HorizonMetavars>>(
               horizon_finder_proxy, horizon_time, host_element_view.element_id,
-              host_element_view.mesh,
-              gh::Batched::make_ah_source_vars(host_element_view), dependency_);
+              host_element_view.mesh, std::move(vars_to_interpolate_to_target),
+              dependency_);
         });
   }
 
@@ -212,14 +240,17 @@ class SendHorizonDataBatchedForControlSystem : public Event {
                << HorizonMetavars::name());
     const auto& blocks_to_interpolate_for_this_target =
         blocks_to_interpolate.at(HorizonMetavars::name());
-    const auto& blocks = Parallel::get<domain::Tags::Domain<3>>(cache).blocks();
+    const auto& domain = Parallel::get<domain::Tags::Domain<3>>(cache);
+    const auto& blocks = domain.blocks();
+    const auto& functions_of_time =
+        Parallel::get<control_system::Tags::FunctionsOfTimeInitialize>(cache);
     auto& horizon_finder_proxy = Parallel::get_parallel_component<
         ah::Component<Metavariables, HorizonMetavars>>(cache);
 
     gh::Batched::for_each_host_element_view(
         packed_topology, packed_geometry, packed_evolution_state,
-        [&blocks, &blocks_to_interpolate_for_this_target, &horizon_finder_proxy,
-         &measurement_id](
+        [&blocks, &blocks_to_interpolate_for_this_target, &domain,
+         &functions_of_time, &horizon_finder_proxy, &measurement_id](
             const gh::Batched::HostElementView& host_element_view) {
           const auto& block_name =
               blocks[host_element_view.element_id.block_id()].name();
@@ -227,10 +258,32 @@ class SendHorizonDataBatchedForControlSystem : public Event {
             return;
           }
 
+          auto source_vars =
+              gh::Batched::make_ah_source_vars(host_element_view);
+          using horizon_frame = typename HorizonMetavars::frame;
+          if constexpr (std::is_same_v<horizon_frame, Frame::Distorted>) {
+            const auto& block = blocks[host_element_view.element_id.block_id()];
+            if (not block.has_distorted_frame()) {
+              return;
+            }
+          }
+          Variables<ah::vars_to_interpolate_to_target<3, horizon_frame>>
+              vars_to_interpolate_to_target{
+                  host_element_view.mesh.number_of_grid_points()};
+          ah::compute_vars_to_interpolate_to_target(
+              make_not_null(&vars_to_interpolate_to_target),
+              get<gr::Tags::SpacetimeMetric<DataVector, 3>>(source_vars),
+              get<gh::Tags::Pi<DataVector, 3>>(source_vars),
+              get<gh::Tags::Phi<DataVector, 3>>(source_vars),
+              get<::Tags::deriv<gh::Tags::Phi<DataVector, 3>, tmpl::size_t<3>,
+                                Frame::Inertial>>(source_vars),
+              measurement_id, domain, host_element_view.mesh,
+              host_element_view.element_id, functions_of_time);
+
           Parallel::simple_action<ah::FindApparentHorizon<HorizonMetavars>>(
               horizon_finder_proxy, measurement_id,
               host_element_view.element_id, host_element_view.mesh,
-              gh::Batched::make_ah_source_vars(host_element_view),
+              std::move(vars_to_interpolate_to_target),
               std::optional<std::string>{});
         });
   }
@@ -287,7 +340,7 @@ class SendExcisionDataBatchedForSizeControl : public Event {
     Jacobian<DataVector, 3, Frame::ElementLogical, Frame::Distorted>
         unused_logical_to_distorted_jacobian{
             host_element_view.mesh.number_of_grid_points()};
-    ah::ComputeExcisionBoundaryVolumeQuantities::apply(
+    intrp::ComputeExcisionBoundaryVolumeQuantities::apply(
         make_not_null(&result), source_vars, host_element_view.mesh,
         host_element_view.distorted_to_inertial_jacobian,
         host_element_view.distorted_to_inertial_inverse_jacobian,
