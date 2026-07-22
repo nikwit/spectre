@@ -12,6 +12,7 @@
 #include <unordered_set>
 
 #include "DataStructures/Tensor/TypeAliases.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/MapDescriptor.hpp"
 #include "PointwiseFunctions/MathFunctions/MathFunction.hpp"
 #include "Utilities/TypeTraits/RemoveReferenceWrapper.hpp"
 
@@ -336,9 +337,28 @@ class RotScaleTrans {
 
   static constexpr bool supports_hessian{false};
 
-
   const std::unordered_set<std::string>& function_of_time_names() const {
     return f_of_t_names_;
+  }
+
+  RotScaleTransMapDescriptor time_dependent_map_descriptor() const {
+    static_assert(static_cast<int>(BlockRegion::Inner) ==
+                  static_cast<int>(RotScaleTransMapDescriptor::Region::Inner));
+    static_assert(
+        static_cast<int>(BlockRegion::Transition) ==
+        static_cast<int>(RotScaleTransMapDescriptor::Region::Transition));
+    static_assert(static_cast<int>(BlockRegion::Outer) ==
+                  static_cast<int>(RotScaleTransMapDescriptor::Region::Outer));
+    const auto descriptor_region =
+        static_cast<RotScaleTransMapDescriptor::Region>(region_);
+    return {scale_f_of_t_a_.has_value()
+                ? std::optional{std::pair{*scale_f_of_t_a_, *scale_f_of_t_b_}}
+                : std::nullopt,
+            rot_f_of_t_,
+            trans_f_of_t_,
+            inner_radius_,
+            outer_radius_,
+            descriptor_region};
   }
 
  private:

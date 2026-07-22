@@ -83,6 +83,7 @@ spectre_target_headers(
   SphericalToCartesianPfaffian.hpp
   Tags.hpp
   TimeDependentHelpers.hpp
+  TimeDependent/MapDescriptor.hpp
   UniformCylindricalEndcap.hpp
   UniformCylindricalFlatEndcap.hpp
   UniformCylindricalSide.hpp

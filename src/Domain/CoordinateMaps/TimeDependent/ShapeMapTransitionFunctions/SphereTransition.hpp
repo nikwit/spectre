@@ -82,6 +82,11 @@ class SphereTransition final : public ShapeMapTransitionFunction {
     return std::make_unique<SphereTransition>(*this);
   }
 
+  TimeDependent::ShapeMapTransitionDescriptor descriptor() const override {
+    return TimeDependent::SphereTransitionDescriptor{r_min_, r_max_, a_, b_,
+                                                     interior_};
+  }
+
   bool operator==(const ShapeMapTransitionFunction& other) const override;
   bool operator!=(const ShapeMapTransitionFunction& other) const override;
 

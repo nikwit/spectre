@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "DataStructures/Tensor/Tensor.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/MapDescriptor.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "Utilities/Autodiff/Autodiff.hpp"
 #include "Utilities/PrettyType.hpp"
@@ -45,6 +46,8 @@ constexpr size_t map_dim = FirstMap::dim;
 namespace CoordinateMap_detail {
 CREATE_IS_CALLABLE(function_of_time_names)
 CREATE_IS_CALLABLE_V(function_of_time_names)
+CREATE_IS_CALLABLE(time_dependent_map_descriptor)
+CREATE_IS_CALLABLE_V(time_dependent_map_descriptor)
 
 template <typename T>
 struct map_type {
@@ -83,6 +86,36 @@ std::unordered_set<std::string> initialize_names(
   EXPAND_PACK_LEFT_TO_RIGHT(add_names(std::integral_constant<size_t, Is>{}));
 
   return function_of_time_names;
+}
+
+template <typename... Maps, size_t... Is>
+std::optional<std::vector<CoordinateMaps::TimeDependent::MapDescriptor>>
+initialize_time_dependent_map_descriptors(const std::tuple<Maps...>& maps,
+                                          std::index_sequence<Is...> /*meta*/) {
+  std::vector<CoordinateMaps::TimeDependent::MapDescriptor> descriptors{};
+  bool all_maps_supported = true;
+  const auto add_descriptor = [&descriptors, &all_maps_supported,
+                               &maps](auto index) {
+    const auto& map = std::get<decltype(index)::value>(maps);
+    using TupleMap = std::decay_t<decltype(map)>;
+    constexpr bool map_is_unique_ptr = tt::is_a_v<std::unique_ptr, TupleMap>;
+    using Map = map_type_t<TupleMap>;
+    if constexpr (is_time_dependent_map_descriptor_callable_v<Map>) {
+      if constexpr (map_is_unique_ptr) {
+        descriptors.emplace_back(map->time_dependent_map_descriptor());
+      } else {
+        descriptors.emplace_back(map.time_dependent_map_descriptor());
+      }
+    } else {
+      all_maps_supported = false;
+    }
+  };
+  EXPAND_PACK_LEFT_TO_RIGHT(
+      add_descriptor(std::integral_constant<size_t, Is>{}));
+  if (not all_maps_supported) {
+    return std::nullopt;
+  }
+  return descriptors;
 }
 
 template <typename... Maps>
@@ -150,6 +183,14 @@ class CoordinateMapBase : public PUP::able {
   /// Get a set of all FunctionOfTime names used in this mapping
   virtual const std::unordered_set<std::string>& function_of_time_names()
       const = 0;
+
+  /// Exact metadata for each leaf map, in composition order. Returns
+  /// `std::nullopt` if any leaf map has no descriptor implementation.
+  virtual std::optional<
+      std::vector<CoordinateMaps::TimeDependent::MapDescriptor>>
+  time_dependent_map_descriptors() const {
+    return std::nullopt;
+  }
 
   /// Returns `true` if this CoordinateMap supports autodiff
   virtual bool supports_hessian() const = 0;
@@ -360,6 +401,12 @@ class CoordinateMap
   const std::unordered_set<std::string>& function_of_time_names()
       const override {
     return function_of_time_names_;
+  }
+
+  std::optional<std::vector<CoordinateMaps::TimeDependent::MapDescriptor>>
+  time_dependent_map_descriptors() const override {
+    return CoordinateMap_detail::initialize_time_dependent_map_descriptors(
+        maps_, std::make_index_sequence<sizeof...(Maps)>{});
   }
 
   /// Returns `true` if this coordinate map supports hessian

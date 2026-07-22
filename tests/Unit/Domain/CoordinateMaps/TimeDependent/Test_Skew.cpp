@@ -79,6 +79,10 @@ void test(const gsl::not_null<Generator*> generator) {
                                                      center, outer_radius};
 
   CHECK(skew_map.function_of_time_names().contains(function_of_time_name));
+  const auto descriptor = skew_map.time_dependent_map_descriptor();
+  CHECK(descriptor.function_of_time_name == function_of_time_name);
+  CHECK(descriptor.center == center);
+  CHECK(descriptor.outer_radius == outer_radius);
 
   // test serialized/deserialized map
   const auto skew_map_deserialized = serialize_and_deserialize(skew_map);

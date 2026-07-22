@@ -12,6 +12,7 @@
 #include <unordered_set>
 
 #include "DataStructures/Tensor/TypeAliases.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/MapDescriptor.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "Utilities/TypeTraits/RemoveReferenceWrapper.hpp"
 
@@ -211,6 +212,10 @@ class Skew {
 
   const std::unordered_set<std::string>& function_of_time_names() const {
     return f_of_t_names_;
+  }
+
+  SkewMapDescriptor time_dependent_map_descriptor() const {
+    return {f_of_t_name_, center_, outer_radius_};
   }
 
  private:

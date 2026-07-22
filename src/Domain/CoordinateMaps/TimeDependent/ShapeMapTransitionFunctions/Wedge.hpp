@@ -500,6 +500,14 @@ class Wedge final : public ShapeMapTransitionFunction {
     return std::make_unique<Wedge>(*this);
   }
 
+  TimeDependent::ShapeMapTransitionDescriptor descriptor() const override {
+    return TimeDependent::WedgeTransitionDescriptor{
+        inner_surface_.center,     inner_surface_.radius,
+        inner_surface_.sphericity, outer_surface_.center,
+        outer_surface_.radius,     outer_surface_.sphericity,
+        static_cast<int>(axis_),   reverse_};
+  }
+
   bool operator==(const ShapeMapTransitionFunction& other) const override;
   bool operator!=(const ShapeMapTransitionFunction& other) const override;
 

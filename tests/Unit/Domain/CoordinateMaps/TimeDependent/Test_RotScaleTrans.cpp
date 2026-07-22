@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <variant>
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Matrix.hpp"
@@ -114,6 +115,26 @@ void test_RotScaleTrans() {
   domain::CoordinateMaps::TimeDependent::RotScaleTrans<Dim>
       rot_scale_trans_map_transition = map_serialize_and_deserialize(
           scale_pair, "rotation_angle", "translation", BlockRegion::Transition);
+
+  const auto described_map =
+      domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
+          rot_scale_trans_map_transition);
+  const auto descriptors = described_map->time_dependent_map_descriptors();
+  REQUIRE(descriptors.has_value());
+  REQUIRE(descriptors->size() == 1);
+  const auto& descriptor = std::get<
+      domain::CoordinateMaps::TimeDependent::RotScaleTransMapDescriptor>(
+      descriptors->front());
+  REQUIRE(descriptor.scale_names.has_value());
+  CHECK(descriptor.scale_names->first == "expansion_a");
+  CHECK(descriptor.scale_names->second == "expansion_b");
+  CHECK(descriptor.rotation_name == "rotation_angle");
+  CHECK(descriptor.translation_name == "translation");
+  CHECK(descriptor.inner_radius == inner_radius);
+  CHECK(descriptor.outer_radius == outer_radius);
+  CHECK(descriptor.region ==
+        domain::CoordinateMaps::TimeDependent::RotScaleTransMapDescriptor::
+            Region::Transition);
 
   // Rotation, Scaling, Translation Outer
   domain::CoordinateMaps::TimeDependent::RotScaleTrans<Dim>

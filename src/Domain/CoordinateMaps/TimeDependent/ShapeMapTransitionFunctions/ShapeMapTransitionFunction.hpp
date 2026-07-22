@@ -8,6 +8,7 @@
 #include <pup.h>
 
 #include "DataStructures/DataVector.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/MapDescriptor.hpp"
 #include "Utilities/Serialization/CharmPupable.hpp"
 
 namespace domain::CoordinateMaps::ShapeMapTransitionFunctions {
@@ -125,6 +126,10 @@ class ShapeMapTransitionFunction : public PUP::able {
   /// @}
 
   virtual std::unique_ptr<ShapeMapTransitionFunction> get_clone() const = 0;
+
+  /// Exact construction metadata used by execution backends that implement
+  /// the Shape map without virtual calls.
+  virtual TimeDependent::ShapeMapTransitionDescriptor descriptor() const = 0;
 
   virtual bool operator==(const ShapeMapTransitionFunction& other) const = 0;
   virtual bool operator!=(const ShapeMapTransitionFunction& other) const = 0;

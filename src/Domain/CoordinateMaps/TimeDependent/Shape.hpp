@@ -12,6 +12,7 @@
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/MapDescriptor.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/ShapeMapTransitionFunctions/ShapeMapTransitionFunction.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/SpherepackIterator.hpp"
@@ -284,6 +285,11 @@ class Shape {
 
   const std::unordered_set<std::string>& function_of_time_names() const {
     return f_of_t_names_;
+  }
+
+  ShapeMapDescriptor time_dependent_map_descriptor() const {
+    return {center_, truncation_limit_, transition_func_->descriptor(),
+            shape_f_of_t_name_, size_f_of_t_name_};
   }
 
  private:
