@@ -4,8 +4,12 @@
 #include "Framework/TestingFramework.hpp"
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <memory>
+#include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "DataStructures/DataVector.hpp"
@@ -16,6 +20,7 @@
 #include "Domain/Creators/Rectilinear.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "Domain/FunctionsOfTime/PiecewisePolynomial.hpp"
+#include "Domain/FunctionsOfTime/QuaternionFunctionOfTime.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Harmonic.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/BatchedMapPlan.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/DriverState.hpp"
@@ -118,11 +123,11 @@ Scalar<DataVector> copy_gamma_to_host(const DeviceGammaType& device_gamma) {
 
 void check_frame_fields_and_damping_at_time(
     const packed_topology_type& packed_topology,
-    const packed_geometry_type& packed_geometry,
+    const packed_geometry_type& packed_geometry, const Domain<Dim>& domain,
+    const domain::FunctionsOfTimeMap& functions_of_time,
     const device_gamma0_type& device_gamma0,
     const device_gamma1_type& device_gamma1,
-    const device_gamma2_type& device_gamma2,
-    const std::array<double, Dim>& translation_velocity, const double time,
+    const device_gamma2_type& device_gamma2, const double time,
     const double expected_gamma0, const double expected_gamma1,
     const double expected_gamma2) {
   const size_t total_points = packed_topology.total_points;
@@ -135,35 +140,64 @@ void check_frame_fields_and_damping_at_time(
   const auto host_gamma2 = copy_gamma_to_host(device_gamma2);
 
   const Approx approx = Approx::custom().epsilon(1.0e-12).scale(1.0);
-  for (size_t d = 0; d < Dim; ++d) {
-    const auto inertial_component_device = Kokkos::create_mirror_view_and_copy(
-        Kokkos::HostSpace{},
-        packed_geometry.inertial_coordinates_device.get(d));
-    const auto mesh_velocity_component_device =
-        Kokkos::create_mirror_view_and_copy(
-            Kokkos::HostSpace{}, packed_geometry.mesh_velocity_device.get(d));
-    for (size_t s = 0; s < total_points; ++s) {
-      const double grid_coord = packed_geometry.grid_coordinates_host[d][s];
-      CHECK(packed_geometry.inertial_coordinates_host[d][s] ==
-            approx(grid_coord + translation_velocity[d] * time));
-      CHECK(inertial_component_device(s) ==
-            approx(grid_coord + translation_velocity[d] * time));
-      CHECK(mesh_velocity_component_device(s) ==
-            approx(translation_velocity[d]));
-    }
-  }
-
   for (size_t e = 0; e < packed_topology.local_element_ids.size(); ++e) {
     const size_t point_begin = packed_topology.element_point_offsets_host[e];
     const size_t point_end = packed_topology.element_point_offsets_host[e + 1];
     const size_t element_points = point_end - point_begin;
+    tnsr::I<DataVector, Dim, Frame::Grid> grid_coords{element_points};
+    for (size_t d = 0; d < Dim; ++d) {
+      for (size_t p = 0; p < element_points; ++p) {
+        grid_coords.get(d)[p] =
+            packed_geometry.grid_coordinates_host[d][point_begin + p];
+      }
+    }
+    const auto& block =
+        domain.blocks()[packed_topology.local_element_ids[e].block_id()];
+    const auto [expected_coords, expected_inverse_jacobian, expected_jacobian,
+                expected_velocity] =
+        block.moving_mesh_grid_to_inertial_map()
+            .coords_frame_velocity_jacobians(grid_coords, time,
+                                             functions_of_time);
+    (void)expected_jacobian;
+    std::array<decltype(Kokkos::create_mirror_view_and_copy(
+                   Kokkos::HostSpace{},
+                   packed_geometry.inertial_coordinates_device.get(0))),
+               Dim>
+        inertial_device{};
+    std::array<decltype(Kokkos::create_mirror_view_and_copy(
+                   Kokkos::HostSpace{},
+                   packed_geometry.mesh_velocity_device.get(0))),
+               Dim>
+        velocity_device{};
+    for (size_t d = 0; d < Dim; ++d) {
+      inertial_device[d] = Kokkos::create_mirror_view_and_copy(
+          Kokkos::HostSpace{},
+          packed_geometry.inertial_coordinates_device.get(d));
+      velocity_device[d] = Kokkos::create_mirror_view_and_copy(
+          Kokkos::HostSpace{}, packed_geometry.mesh_velocity_device.get(d));
+      for (size_t p = 0; p < element_points; ++p) {
+        const size_t s = point_begin + p;
+        CHECK(packed_geometry.inertial_coordinates_host[d][s] ==
+              approx(expected_coords.get(d)[p]));
+        CHECK(inertial_device[d](s) == approx(expected_coords.get(d)[p]));
+        CHECK(packed_geometry.mesh_velocity_host[d][s] ==
+              approx(expected_velocity.get(d)[p]));
+        CHECK(velocity_device[d](s) == approx(expected_velocity.get(d)[p]));
+      }
+    }
     for (size_t p = 0; p < element_points; ++p) {
       for (size_t logical_d = 0; logical_d < Dim; ++logical_d) {
         for (size_t inertial_d = 0; inertial_d < Dim; ++inertial_d) {
           const size_t component = logical_d * Dim + inertial_d;
+          double expected_composed_inverse_jacobian = 0.0;
+          for (size_t grid_d = 0; grid_d < Dim; ++grid_d) {
+            expected_composed_inverse_jacobian +=
+                packed_geometry.logical_to_grid_inverse_jacobian_host(
+                    e, p, logical_d * Dim + grid_d) *
+                expected_inverse_jacobian.get(grid_d, inertial_d)[p];
+          }
           CHECK(host_inverse_jacobian(e, p, component) ==
-                approx(packed_geometry.logical_to_grid_inverse_jacobian_host(
-                    e, p, component)));
+                approx(expected_composed_inverse_jacobian));
         }
       }
     }
@@ -176,7 +210,9 @@ void check_frame_fields_and_damping_at_time(
   }
 }
 
-void test_update_frame_fields_and_constraint_damping_batched() {
+void test_update_frame_fields_and_constraint_damping_batched(
+    const domain::CoordinateMaps::TimeDependent::RotScaleTrans<Dim>::BlockRegion
+        region) {
   const std::array<double, Dim> velocity{{0.25, -0.15, 0.05}};
   const domain::creators::Rectilinear<Dim> domain_creator{
       {{-1.2, -0.8, -0.6}}, {{1.1, 0.9, 0.7}},    {{1, 0, 0}},
@@ -184,12 +220,18 @@ void test_update_frame_fields_and_constraint_damping_batched() {
 
   auto domain = domain_creator.create_domain();
   const std::string translation_name{"Translation"};
+  const std::string rotation_name{"Rotation"};
+  const std::pair<std::string, std::string> scale_names{"ExpansionA",
+                                                        "ExpansionB"};
   using RotScaleTrans =
       domain::CoordinateMaps::TimeDependent::RotScaleTrans<Dim>;
+  const double inner_radius =
+      region == RotScaleTrans::BlockRegion::Transition ? 0.01 : 10.0;
+  const double outer_radius = 20.0;
   domain.inject_time_dependent_map_for_block(
       0, domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
-             RotScaleTrans{std::nullopt, std::nullopt, translation_name, 10.0,
-                           20.0, RotScaleTrans::BlockRegion::Inner}));
+             RotScaleTrans{scale_names, rotation_name, translation_name,
+                           inner_radius, outer_radius, region}));
   const auto initial_refinement_levels =
       domain_creator.initial_refinement_levels();
   const auto initial_extents = domain_creator.initial_extents();
@@ -201,6 +243,33 @@ void test_update_frame_fields_and_constraint_damping_batched() {
           std::array<DataVector, 2>{
               DataVector{Dim, 0.0},
               DataVector{velocity[0], velocity[1], velocity[2]}},
+          10.0));
+  functions_of_time.emplace(
+      scale_names.first,
+      std::make_unique<domain::FunctionsOfTime::PiecewisePolynomial<1>>(
+          0.0, std::array<DataVector, 2>{DataVector{{0.9}}, DataVector{{0.02}}},
+          10.0));
+  functions_of_time.emplace(
+      scale_names.second,
+      std::make_unique<domain::FunctionsOfTime::PiecewisePolynomial<1>>(
+          0.0,
+          std::array<DataVector, 2>{DataVector{{1.1}}, DataVector{{-0.01}}},
+          10.0));
+  constexpr size_t quaternion_deriv_order = 3;
+  using QuaternionFunctionOfTime =
+      domain::FunctionsOfTime::QuaternionFunctionOfTime<quaternion_deriv_order>;
+  const double initial_angle = 0.2;
+  const DataVector rotation_axis{{0.0, 0.0, 1.0}};
+  functions_of_time.emplace(
+      rotation_name,
+      std::make_unique<QuaternionFunctionOfTime>(
+          0.0,
+          std::array<DataVector, 1>{
+              DataVector{{std::cos(0.5 * initial_angle), 0.0, 0.0,
+                          std::sin(0.5 * initial_angle)}}},
+          std::array<DataVector, quaternion_deriv_order + 1>{
+              rotation_axis * initial_angle, rotation_axis * 0.03,
+              DataVector{Dim, 0.0}, DataVector{Dim, 0.0}},
           10.0));
 
   packed_topology_type packed_topology{};
@@ -253,6 +322,8 @@ void test_update_frame_fields_and_constraint_damping_batched() {
       const auto expected_kind =
           time_index == 1 and e == 0
               ? gh::Actions::BatchedMapKind::HostEvaluated
+          : region == RotScaleTrans::BlockRegion::Transition
+              ? gh::Actions::BatchedMapKind::RotScaleTransTransition
               : gh::Actions::BatchedMapKind::ComposedAffine;
       CHECK(packed_geometry.element_map_kind_host[e] ==
             static_cast<int>(expected_kind));
@@ -267,9 +338,9 @@ void test_update_frame_fields_and_constraint_damping_batched() {
                                          packed_geometry);
 
     check_frame_fields_and_damping_at_time(
-        packed_topology, packed_geometry, device_gamma0, device_gamma1,
-        device_gamma2, velocity, time, gamma0_constant, gamma1_constant,
-        gamma2_constant);
+        packed_topology, packed_geometry, domain, functions_of_time,
+        device_gamma0, device_gamma1, device_gamma2, time, gamma0_constant,
+        gamma1_constant, gamma2_constant);
 
     if (time_index == 0) {
       // Simulate a mixed-map domain at the second time: the first element uses
@@ -295,5 +366,9 @@ SPECTRE_TEST_CASE(
     "Unit.Evolution.Systems.GeneralizedHarmonic."
     "UpdateFrameFieldsAndConstraintDampingBatched",
     "[Unit][Evolution]") {
-  test_update_frame_fields_and_constraint_damping_batched();
+  using BlockRegion =
+      domain::CoordinateMaps::TimeDependent::RotScaleTrans<Dim>::BlockRegion;
+  test_update_frame_fields_and_constraint_damping_batched(BlockRegion::Inner);
+  test_update_frame_fields_and_constraint_damping_batched(
+      BlockRegion::Transition);
 }

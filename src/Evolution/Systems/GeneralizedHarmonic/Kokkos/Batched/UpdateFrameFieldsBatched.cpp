@@ -211,6 +211,8 @@ void update_frame_fields_device(
       static_cast<int>(BatchedMapKind::UniformRadialScaling);
   constexpr int composed_affine_kind =
       static_cast<int>(BatchedMapKind::ComposedAffine);
+  constexpr int rot_scale_trans_transition_kind =
+      static_cast<int>(BatchedMapKind::RotScaleTransTransition);
   ::Kokkos::parallel_for(
       "GhUpdateFrameFields", total_points,
       KOKKOS_LAMBDA(const int linear_index_int) {
@@ -240,6 +242,13 @@ void update_frame_fields_device(
                                         grid_coordinates.get(1)(s),
                                         grid_coordinates.get(2)(s)};
             composed_affine_frame_fields<VolumeDim>(
+                grid_coords, &affine_map_data(e, 0), inertial, velocity,
+                grid_to_inertial_inv_jac);
+          } else if (kind == rot_scale_trans_transition_kind) {
+            const double grid_coords[3]{grid_coordinates.get(0)(s),
+                                        grid_coordinates.get(1)(s),
+                                        grid_coordinates.get(2)(s)};
+            rot_scale_trans_transition_frame_fields(
                 grid_coords, &affine_map_data(e, 0), inertial, velocity,
                 grid_to_inertial_inv_jac);
           } else if (kind == rigid_rotation_z_kind) {
@@ -641,7 +650,7 @@ bool infer_composed_affine_map(
 }
 
 template <size_t VolumeDim>
-bool stage_composed_affine_map_data(
+bool stage_device_map_data(
     const gsl::not_null<
         evolution::Kokkos::PackedGeometry<gh::System<VolumeDim>>*>
         packed_geometry,
@@ -651,6 +660,7 @@ bool stage_composed_affine_map_data(
     const domain::FunctionsOfTimeMap& functions_of_time, const double time) {
   const size_t num_elements = packed_topology.local_element_ids.size();
   constexpr size_t affine_data_size = AffineMapData<VolumeDim>::size;
+  static_assert(affine_data_size >= RotScaleTransMapData<VolumeDim>::size);
   if (packed_geometry->affine_map_data_device.extent(0) != num_elements or
       packed_geometry->affine_map_data_device.extent(1) != affine_data_size) {
     packed_geometry->affine_map_data_device =
@@ -662,8 +672,9 @@ bool stage_composed_affine_map_data(
       ::Kokkos::create_mirror_view(packed_geometry->affine_map_data_device);
   std::map<size_t, std::array<double, affine_data_size>> data_by_block{};
   for (size_t e = 0; e < num_elements; ++e) {
-    if (packed_geometry->element_map_kind_host[e] !=
-        static_cast<int>(BatchedMapKind::ComposedAffine)) {
+    const int map_kind = packed_geometry->element_map_kind_host[e];
+    if (map_kind != static_cast<int>(BatchedMapKind::ComposedAffine) and
+        map_kind != static_cast<int>(BatchedMapKind::RotScaleTransTransition)) {
       continue;
     }
     const auto& element_id = packed_topology.local_element_ids[e];
@@ -684,7 +695,71 @@ bool stage_composed_affine_map_data(
       bool data_is_ready = false;
       const auto& descriptors =
           packed_geometry->block_map_descriptors_host.at(block_id);
-      if (descriptors.has_value() and descriptors->size() == 1) {
+      if (map_kind ==
+          static_cast<int>(BatchedMapKind::RotScaleTransTransition)) {
+        ASSERT(descriptors.has_value() and descriptors->size() == 1,
+               "A RotScaleTrans transition map requires one exact map "
+               "descriptor.");
+        const auto& rot_scale_trans = std::get<
+            domain::CoordinateMaps::TimeDependent::RotScaleTransMapDescriptor>(
+            descriptors->front());
+        using map_data = RotScaleTransMapData<VolumeDim>;
+        inferred_data[map_data::inner_radius_offset] =
+            rot_scale_trans.inner_radius;
+        inferred_data[map_data::outer_radius_offset] =
+            rot_scale_trans.outer_radius;
+        for (size_t d = 0; d < VolumeDim; ++d) {
+          inferred_data[map_data::rotation_offset + d * VolumeDim + d] = 1.0;
+        }
+        if (rot_scale_trans.rotation_name.has_value()) {
+          const auto& rotation_f_of_t =
+              *functions_of_time.at(*rot_scale_trans.rotation_name);
+          const Matrix rotation =
+              rotation_matrix<VolumeDim>(time, rotation_f_of_t);
+          const Matrix rotation_deriv =
+              rotation_matrix_deriv<VolumeDim>(time, rotation_f_of_t);
+          for (size_t target_d = 0; target_d < VolumeDim; ++target_d) {
+            for (size_t source_d = 0; source_d < VolumeDim; ++source_d) {
+              inferred_data[map_data::rotation_offset + target_d * VolumeDim +
+                            source_d] = rotation(target_d, source_d);
+              inferred_data[map_data::rotation_deriv_offset +
+                            target_d * VolumeDim + source_d] =
+                  rotation_deriv(target_d, source_d);
+            }
+          }
+        }
+        inferred_data[map_data::scale_a_offset] = 1.0;
+        inferred_data[map_data::scale_b_offset] = 1.0;
+        if (rot_scale_trans.scale_names.has_value()) {
+          const auto scale_a =
+              functions_of_time.at(rot_scale_trans.scale_names->first)
+                  ->func_and_deriv(time);
+          const auto scale_b =
+              functions_of_time.at(rot_scale_trans.scale_names->second)
+                  ->func_and_deriv(time);
+          inferred_data[map_data::scale_a_offset] = scale_a[0][0];
+          inferred_data[map_data::scale_b_offset] = scale_b[0][0];
+          inferred_data[map_data::scale_a_deriv_offset] = scale_a[1][0];
+          inferred_data[map_data::scale_b_deriv_offset] = scale_b[1][0];
+        }
+        if (rot_scale_trans.translation_name.has_value()) {
+          const auto translation =
+              functions_of_time.at(*rot_scale_trans.translation_name)
+                  ->func_and_deriv(time);
+          ASSERT(translation[0].size() == VolumeDim and
+                     translation[1].size() == VolumeDim,
+                 "RotScaleTrans translation function must have "
+                     << VolumeDim << " components.");
+          for (size_t d = 0; d < VolumeDim; ++d) {
+            inferred_data[map_data::translation_offset + d] = translation[0][d];
+            inferred_data[map_data::translation_deriv_offset + d] =
+                translation[1][d];
+          }
+        }
+        data_is_ready = true;
+      }
+      if (not data_is_ready and descriptors.has_value() and
+          descriptors->size() == 1) {
         if (const auto* const rot_scale_trans =
                 std::get_if<domain::CoordinateMaps::TimeDependent::
                                 RotScaleTransMapDescriptor>(
@@ -824,11 +899,12 @@ void build_map_plan(
                   std::get_if<domain::CoordinateMaps::TimeDependent::
                                   RotScaleTransMapDescriptor>(
                       &descriptors->front());
-              rot_scale_trans != nullptr and
-              rot_scale_trans->region !=
-                  domain::CoordinateMaps::TimeDependent::
-                      RotScaleTransMapDescriptor::Region::Transition) {
-            kind = BatchedMapKind::ComposedAffine;
+              rot_scale_trans != nullptr) {
+            kind = rot_scale_trans->region ==
+                           domain::CoordinateMaps::TimeDependent::
+                               RotScaleTransMapDescriptor::Region::Transition
+                       ? BatchedMapKind::RotScaleTransTransition
+                       : BatchedMapKind::ComposedAffine;
           }
         }
         // Attempt to recognize a device-supported time-dependent map. First
@@ -946,18 +1022,19 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
                                functions_of_time, time);
   }
 
-  bool has_composed_affine = false;
+  bool has_staged_map_data = false;
   for (const int kind : packed_geometry->element_map_kind_host) {
-    has_composed_affine =
-        has_composed_affine or
-        kind == static_cast<int>(BatchedMapKind::ComposedAffine);
+    has_staged_map_data =
+        has_staged_map_data or
+        kind == static_cast<int>(BatchedMapKind::ComposedAffine) or
+        kind == static_cast<int>(BatchedMapKind::RotScaleTransTransition);
   }
-  const bool affine_maps_ready =
-      not has_composed_affine or
-      stage_composed_affine_map_data<volume_dim>(
-          packed_geometry, packed_topology, domain, functions_of_time, time);
+  const bool staged_maps_ready =
+      not has_staged_map_data or
+      stage_device_map_data<volume_dim>(packed_geometry, packed_topology,
+                                        domain, functions_of_time, time);
 
-  bool has_host_evaluated = not affine_maps_ready;
+  bool has_host_evaluated = not staged_maps_ready;
   bool has_device_evaluated = false;
   bool all_static = true;
   for (size_t e = 0; e < num_elements; ++e) {
@@ -971,7 +1048,7 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
       all_static = false;
     }
   }
-  if (not affine_maps_ready) {
+  if (not staged_maps_ready) {
     // A map that ceases to verify as affine falls back to an all-host update
     // for this stage.
     has_device_evaluated = false;
@@ -1015,7 +1092,7 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
       packed_geometry->element_inverse_jacobian_device);
 
   for (size_t e = 0; e < num_elements; ++e) {
-    if (affine_maps_ready and
+    if (staged_maps_ready and
         packed_geometry->element_map_kind_host[e] !=
             static_cast<int>(BatchedMapKind::HostEvaluated)) {
       continue;

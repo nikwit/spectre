@@ -51,6 +51,10 @@ enum class BatchedMapKind : int {
   /// composed rotations (including quaternion-driven rotations), uniform
   /// expansion, and translations without introspecting type-erased maps.
   ComposedAffine = 4,
+  /// The nonlinear transition region of a RotScaleTrans map. Rotation,
+  /// expansion, and translation parameters are staged exactly from the map
+  /// descriptor and evaluated per grid point on the device.
+  RotScaleTransTransition = 5,
 };
 
 template <size_t Dim>
@@ -64,6 +68,120 @@ struct AffineMapData {
       velocity_translation_offset + Dim;
   static constexpr size_t size = inverse_jacobian_offset + Dim * Dim;
 };
+
+template <size_t Dim>
+struct RotScaleTransMapData {
+  static constexpr size_t rotation_offset = 0;
+  static constexpr size_t rotation_deriv_offset = rotation_offset + Dim * Dim;
+  static constexpr size_t scale_a_offset = rotation_deriv_offset + Dim * Dim;
+  static constexpr size_t scale_b_offset = scale_a_offset + 1;
+  static constexpr size_t scale_a_deriv_offset = scale_b_offset + 1;
+  static constexpr size_t scale_b_deriv_offset = scale_a_deriv_offset + 1;
+  static constexpr size_t translation_offset = scale_b_deriv_offset + 1;
+  static constexpr size_t translation_deriv_offset = translation_offset + Dim;
+  static constexpr size_t inner_radius_offset = translation_deriv_offset + Dim;
+  static constexpr size_t outer_radius_offset = inner_radius_offset + 1;
+  static constexpr size_t size = outer_radius_offset + 1;
+};
+
+KOKKOS_INLINE_FUNCTION void rot_scale_trans_transition_frame_fields(
+    const double (&grid_coords)[3], const double* const map_data,
+    double (&inertial_coords)[3], double (&mesh_velocity)[3],
+    double (&grid_to_inertial_inverse_jacobian)[9]) {
+  using offsets = RotScaleTransMapData<3>;
+  const double inner_radius = map_data[offsets::inner_radius_offset];
+  const double outer_radius = map_data[offsets::outer_radius_offset];
+  const double radius =
+      sqrt(grid_coords[0] * grid_coords[0] + grid_coords[1] * grid_coords[1] +
+           grid_coords[2] * grid_coords[2]);
+  const double radius_difference = outer_radius - inner_radius;
+  const bool closer_to_outer =
+      1.0 - radius / (inner_radius + outer_radius) < 0.5;
+
+  const double scale_a = map_data[offsets::scale_a_offset];
+  const double scale_b = map_data[offsets::scale_b_offset];
+  const double scale_a_deriv = map_data[offsets::scale_a_deriv_offset];
+  const double scale_b_deriv = map_data[offsets::scale_b_deriv_offset];
+  const double scale_difference = scale_a - scale_b;
+  const double scale_deriv_difference = scale_a_deriv - scale_b_deriv;
+  const double radial_scale =
+      closer_to_outer ? inner_radius * (outer_radius - radius) *
+                            scale_difference / (radius_difference * radius)
+                      : outer_radius * (inner_radius - radius) *
+                            scale_difference / (radius_difference * radius);
+  const double radial_scale_deriv =
+      closer_to_outer
+          ? inner_radius * (outer_radius - radius) * scale_deriv_difference /
+                (radius_difference * radius)
+          : outer_radius * (inner_radius - radius) * scale_deriv_difference /
+                (radius_difference * radius);
+  const double scale = (closer_to_outer ? scale_b : scale_a) + radial_scale;
+  const double scale_deriv =
+      (closer_to_outer ? scale_b_deriv : scale_a_deriv) + radial_scale_deriv;
+  const double translation_weight =
+      closer_to_outer ? (outer_radius - radius) / radius_difference
+                      : 1.0 + (inner_radius - radius) / radius_difference;
+
+  double rotated_coords[3]{0.0, 0.0, 0.0};
+  double rotated_velocity[3]{0.0, 0.0, 0.0};
+  for (size_t target_d = 0; target_d < 3; ++target_d) {
+    for (size_t source_d = 0; source_d < 3; ++source_d) {
+      rotated_coords[target_d] +=
+          map_data[offsets::rotation_offset + target_d * 3 + source_d] *
+          grid_coords[source_d];
+      rotated_velocity[target_d] +=
+          map_data[offsets::rotation_deriv_offset + target_d * 3 + source_d] *
+          grid_coords[source_d];
+    }
+    inertial_coords[target_d] =
+        scale * rotated_coords[target_d] +
+        translation_weight * map_data[offsets::translation_offset + target_d];
+    mesh_velocity[target_d] =
+        scale * rotated_velocity[target_d] +
+        scale_deriv * rotated_coords[target_d] +
+        translation_weight *
+            map_data[offsets::translation_deriv_offset + target_d];
+  }
+
+  const double scale_radial_deriv = -inner_radius * outer_radius *
+                                    scale_difference /
+                                    (radius_difference * radius * radius);
+  const double translation_radial_deriv = -1.0 / radius_difference;
+  double jacobian[9]{};
+  for (size_t target_d = 0; target_d < 3; ++target_d) {
+    for (size_t source_d = 0; source_d < 3; ++source_d) {
+      jacobian[target_d * 3 + source_d] =
+          scale * map_data[offsets::rotation_offset + target_d * 3 + source_d] +
+          (scale_radial_deriv * rotated_coords[target_d] +
+           translation_radial_deriv *
+               map_data[offsets::translation_offset + target_d]) *
+              grid_coords[source_d] / radius;
+    }
+  }
+
+  const double determinant =
+      jacobian[0] * (jacobian[4] * jacobian[8] - jacobian[5] * jacobian[7]) -
+      jacobian[1] * (jacobian[3] * jacobian[8] - jacobian[5] * jacobian[6]) +
+      jacobian[2] * (jacobian[3] * jacobian[7] - jacobian[4] * jacobian[6]);
+  grid_to_inertial_inverse_jacobian[0] =
+      (jacobian[4] * jacobian[8] - jacobian[5] * jacobian[7]) / determinant;
+  grid_to_inertial_inverse_jacobian[1] =
+      (jacobian[2] * jacobian[7] - jacobian[1] * jacobian[8]) / determinant;
+  grid_to_inertial_inverse_jacobian[2] =
+      (jacobian[1] * jacobian[5] - jacobian[2] * jacobian[4]) / determinant;
+  grid_to_inertial_inverse_jacobian[3] =
+      (jacobian[5] * jacobian[6] - jacobian[3] * jacobian[8]) / determinant;
+  grid_to_inertial_inverse_jacobian[4] =
+      (jacobian[0] * jacobian[8] - jacobian[2] * jacobian[6]) / determinant;
+  grid_to_inertial_inverse_jacobian[5] =
+      (jacobian[2] * jacobian[3] - jacobian[0] * jacobian[5]) / determinant;
+  grid_to_inertial_inverse_jacobian[6] =
+      (jacobian[3] * jacobian[7] - jacobian[4] * jacobian[6]) / determinant;
+  grid_to_inertial_inverse_jacobian[7] =
+      (jacobian[1] * jacobian[6] - jacobian[0] * jacobian[7]) / determinant;
+  grid_to_inertial_inverse_jacobian[8] =
+      (jacobian[0] * jacobian[4] - jacobian[1] * jacobian[3]) / determinant;
+}
 
 template <size_t Dim>
 KOKKOS_INLINE_FUNCTION void composed_affine_frame_fields(
