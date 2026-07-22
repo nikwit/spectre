@@ -58,10 +58,13 @@ DomainCreator:
       RadialDistribution: Linear
       RadialPartitioning: []
       OpeningAngle: 90.0
+      UseSphericalHarmonics: false
       BoundaryCondition:
         ConstraintPreservingBjorhus:
           Type: ConstraintPreservingPhysical
+          IncomingWaveProfile: None
     UseEquiangularMap: true
+    UseWorldtube: false
     InitialRefinement: 0
     InitialGridPoints: 5
     TimeDependentMaps: None
@@ -114,11 +117,15 @@ Observers:
   SurfaceFileName: "GhBinaryBlackHoleKokkosSmokeSurfaces"
 
 ApparentHorizons:
+  LMax: &LMax 4
   BatchedObservationAhA: &BatchedAh
+    Criteria:
     InitialGuess:
-      LMax: &LMax 4
-      Radius: &AhRadius 2.2
-      Center: *AhCenter
+      InitialL: *LMax
+      InitialShape:
+        Sphere:
+          Radius: &AhRadius 2.2
+          Center: *AhCenter
     FastFlow:
       Flow: Fast
       Alpha: 1.0
@@ -150,6 +157,7 @@ InterpolationTargets:
     AngularOrdering: Strahlkorper
 
 ControlSystems:
+  DelayUpdate: true
   WriteDataToDisk: false
   MeasurementsPerUpdate: 4
   Verbosity: Silent
