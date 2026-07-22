@@ -17,6 +17,8 @@
 #include "Domain/CoordinateMaps/CoordinateMap.hpp"
 #include "Domain/CoordinateMaps/CoordinateMap.tpp"
 #include "Domain/CoordinateMaps/TimeDependent/RotScaleTrans.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/Shape.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/ShapeMapTransitionFunctions/SphereTransition.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/Skew.hpp"
 #include "Domain/Creators/Rectilinear.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
@@ -31,6 +33,8 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/KokkosTimeStepperTags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/SpherepackIterator.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/KerrSchild.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/WrappedGr.hpp"
 #include "PointwiseFunctions/ConstraintDamping/Constant.hpp"
@@ -214,7 +218,8 @@ void check_frame_fields_and_damping_at_time(
 void test_update_frame_fields_and_constraint_damping_batched(
     const domain::CoordinateMaps::TimeDependent::RotScaleTrans<Dim>::BlockRegion
         region,
-    const bool include_skew, const bool include_rot_scale_trans) {
+    const bool include_skew, const bool include_rot_scale_trans,
+    const bool include_shape) {
   const std::array<double, Dim> velocity{{0.25, -0.15, 0.05}};
   const domain::creators::Rectilinear<Dim> domain_creator{
       {{-1.2, -0.8, -0.6}}, {{1.1, 0.9, 0.7}},    {{1, 0, 0}},
@@ -224,6 +229,7 @@ void test_update_frame_fields_and_constraint_damping_batched(
   const std::string translation_name{"Translation"};
   const std::string rotation_name{"Rotation"};
   const std::string skew_name{"Skew"};
+  const std::string shape_name{"Shape"};
   const std::pair<std::string, std::string> scale_names{"ExpansionA",
                                                         "ExpansionB"};
   using RotScaleTrans =
@@ -234,7 +240,17 @@ void test_update_frame_fields_and_constraint_damping_batched(
   const RotScaleTrans rot_scale_trans{scale_names,      rotation_name,
                                       translation_name, inner_radius,
                                       outer_radius,     region};
-  if (include_skew and include_rot_scale_trans) {
+  if (include_shape) {
+    domain.inject_time_dependent_map_for_block(
+        0, domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
+               domain::CoordinateMaps::TimeDependent::Shape{
+                   {{0.05, -0.03, 0.02}},
+                   1.0e-12,
+                   std::make_unique<
+                       domain::CoordinateMaps::ShapeMapTransitionFunctions::
+                           SphereTransition>(0.01, 5.0, false, false),
+                   shape_name}));
+  } else if (include_skew and include_rot_scale_trans) {
     domain.inject_time_dependent_map_for_block(
         0, domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
                domain::CoordinateMaps::TimeDependent::Skew{
@@ -280,6 +296,33 @@ void test_update_frame_fields_and_constraint_damping_batched(
             0.0,
             std::array<DataVector, 2>{DataVector{{0.04, -0.03}},
                                       DataVector{{0.01, 0.015}}},
+            10.0));
+  }
+  if (include_shape) {
+    constexpr size_t shape_lmax = 3;
+    DataVector shape_coefficients{
+        ylm::Spherepack::spectral_size(shape_lmax, shape_lmax), 0.0};
+    DataVector shape_deriv{shape_coefficients.size(), 0.0};
+    DataVector shape_dderiv{shape_coefficients.size(), 0.0};
+    ylm::SpherepackIterator iterator{shape_lmax, shape_lmax};
+    iterator.set(0, 0);
+    shape_coefficients[iterator()] = 0.08;
+    shape_deriv[iterator()] = -0.01;
+    iterator.set(2, 0);
+    shape_coefficients[iterator()] = 0.025;
+    shape_deriv[iterator()] = 0.004;
+    iterator.set(2, 1);
+    shape_coefficients[iterator()] = -0.015;
+    shape_deriv[iterator()] = 0.003;
+    iterator.set(2, -1);
+    shape_coefficients[iterator()] = 0.01;
+    shape_deriv[iterator()] = -0.002;
+    functions_of_time.emplace(
+        shape_name,
+        std::make_unique<domain::FunctionsOfTime::PiecewisePolynomial<2>>(
+            0.0,
+            std::array<DataVector, 3>{shape_coefficients, shape_deriv,
+                                      shape_dderiv},
             10.0));
   }
   constexpr size_t quaternion_deriv_order = 3;
@@ -351,6 +394,7 @@ void test_update_frame_fields_and_constraint_damping_batched(
       const auto expected_kind =
           time_index == 1 and e == 0
               ? gh::Actions::BatchedMapKind::HostEvaluated
+          : include_shape ? gh::Actions::BatchedMapKind::Shape
           : include_skew and include_rot_scale_trans
               ? gh::Actions::BatchedMapKind::SkewComposedAffine
           : include_skew ? gh::Actions::BatchedMapKind::Skew
@@ -401,11 +445,13 @@ SPECTRE_TEST_CASE(
   using BlockRegion =
       domain::CoordinateMaps::TimeDependent::RotScaleTrans<Dim>::BlockRegion;
   test_update_frame_fields_and_constraint_damping_batched(BlockRegion::Inner,
-                                                          false, true);
+                                                          false, true, false);
   test_update_frame_fields_and_constraint_damping_batched(
-      BlockRegion::Transition, false, true);
+      BlockRegion::Transition, false, true, false);
   test_update_frame_fields_and_constraint_damping_batched(BlockRegion::Inner,
-                                                          true, true);
+                                                          true, true, false);
   test_update_frame_fields_and_constraint_damping_batched(BlockRegion::Inner,
-                                                          true, false);
+                                                          true, false, false);
+  test_update_frame_fields_and_constraint_damping_batched(BlockRegion::Inner,
+                                                          false, false, true);
 }

@@ -134,6 +134,16 @@ namespace ylm {
  */
 class Spherepack {
  public:
+  /// Coefficients for the Clenshaw recurrence used by
+  /// `interpolate_from_coefs`. These small, immutable arrays can be staged on
+  /// an accelerator to reproduce Spherepack interpolation pointwise.
+  struct InterpolationRecurrence {
+    std::vector<double> alpha{};
+    std::vector<double> beta{};
+    std::vector<double> pmm{};
+    std::vector<size_t> coefficient_indices{};
+  };
+
   /// Type returned by gradient function.
   using FirstDeriv = tnsr::i<DataVector, 2, Frame::ElementLogical>;
   /// Type returned by second derivative function.
@@ -455,6 +465,8 @@ class Spherepack {
   template <typename T>
   InterpolationInfo<T> set_up_interpolation_info(
       const std::array<T, 2>& target_points) const;
+
+  InterpolationRecurrence interpolation_recurrence() const;
 
   /// Interpolates from `collocation_values` onto the points that have
   /// been passed into the `set_up_interpolation_info` function.

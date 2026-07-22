@@ -79,6 +79,10 @@ struct PackedGeometry {
       ::Kokkos::View<double***, ::Kokkos::LayoutRight, ::Kokkos::HostSpace>;
   using device_affine_map_data_type =
       ::Kokkos::View<double**, ::Kokkos::LayoutRight>;
+  using device_shape_coefficients_type =
+      ::Kokkos::View<double***, ::Kokkos::LayoutRight>;
+  using device_shape_point_data_type =
+      ::Kokkos::View<double***, ::Kokkos::LayoutRight>;
   std::array<DataVector, volume_dim> grid_coordinates_host{};
   std::array<DataVector, volume_dim> distorted_coordinates_host{};
   std::array<DataVector, volume_dim> inertial_coordinates_host{};
@@ -119,6 +123,22 @@ struct PackedGeometry {
   // Jacobian. Coefficients are refreshed once per stage and consumed directly
   // by the device frame-field kernel.
   device_affine_map_data_type affine_map_data_device{};
+  // Shape-map data. The coefficient view stores, per element, the spectral
+  // expansions of lambda, dt(lambda), and its three Cartesian angular
+  // derivatives. Point data stores the static transition function, its
+  // radius-divided value, and its Cartesian gradient.
+  device_shape_coefficients_type shape_coefficients_device{};
+  device_shape_point_data_type shape_point_data_device{};
+  ::Kokkos::View<double**, ::Kokkos::LayoutRight>
+      shape_recurrence_alpha_device{};
+  ::Kokkos::View<double**, ::Kokkos::LayoutRight>
+      shape_recurrence_beta_device{};
+  ::Kokkos::View<double**, ::Kokkos::LayoutRight> shape_recurrence_pmm_device{};
+  ::Kokkos::View<size_t**, ::Kokkos::LayoutRight>
+      shape_recurrence_indices_device{};
+  ::Kokkos::View<double* [volume_dim]> shape_centers_device {};
+  ::Kokkos::View<size_t*> shape_lmax_device{};
+  std::vector<size_t> shape_lmax_host{};
   // Name of the single scalar function of time driving the on-device
   // time-dependent map blocks (empty if there are none): the rotation angle for
   // RigidRotationZ or the scale factor for UniformRadialScaling. Its value and

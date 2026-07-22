@@ -554,6 +554,17 @@ Spherepack::InterpolationInfo<T> Spherepack::set_up_interpolation_info(
                            target_points);
 }
 
+Spherepack::InterpolationRecurrence Spherepack::interpolation_recurrence()
+    const {
+  return {std::vector<double>{storage_.work_interp_alpha.begin(),
+                              storage_.work_interp_alpha.end()},
+          std::vector<double>{storage_.work_interp_beta.begin(),
+                              storage_.work_interp_beta.end()},
+          std::vector<double>{storage_.work_interp_pmm.begin(),
+                              storage_.work_interp_pmm.end()},
+          storage_.work_interp_index};
+}
+
 template <typename T>
 void Spherepack::interpolate(
     const gsl::not_null<T*> result,

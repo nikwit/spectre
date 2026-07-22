@@ -60,6 +60,8 @@ enum class BatchedMapKind : int {
   /// A Skew map followed by an affine RotScaleTrans map, matching the map
   /// composition used by BBH blocks inside the envelope.
   SkewComposedAffine = 7,
+  /// A standalone spherical-transition Shape map.
+  Shape = 8,
 };
 
 template <size_t Dim>
@@ -96,6 +98,165 @@ struct SkewMapData {
   static constexpr size_t angle_derivs_offset = angles_offset + 2;
   static constexpr size_t size = angle_derivs_offset + 2;
 };
+
+struct ShapePointData {
+  static constexpr size_t transition_offset = 0;
+  static constexpr size_t transition_over_radius_offset = 1;
+  static constexpr size_t transition_gradient_offset = 2;
+  static constexpr size_t size = transition_gradient_offset + 3;
+};
+
+KOKKOS_INLINE_FUNCTION void interpolate_shape_fields(
+    const double* const coefficients, const size_t l_max,
+    const double* const alpha, const double* const beta,
+    const double* const pmm, const size_t* const coefficient_indices,
+    const double theta, const double phi, double (&result)[5]) {
+  constexpr size_t num_fields = 5;
+  const size_t n_theta = l_max + 1;
+  const size_t l1 = l_max + 1;
+  const size_t spectral_size = 2 * l1 * l1;
+  const size_t b_offset = l1 * n_theta;
+  const double cos_theta = cos(theta);
+  const double sin_theta = sin(theta);
+
+  size_t recurrence_index = 0;
+  double y_n[num_fields]{};
+  double y_np1[num_fields]{};
+  for (size_t n = n_theta - 1; n > 0; --n, ++recurrence_index) {
+    for (size_t field = 0; field < num_fields; ++field) {
+      const double y_np2 = y_np1[field];
+      y_np1[field] = y_n[field];
+      y_n[field] = cos_theta * alpha[recurrence_index] * y_np1[field] +
+                   beta[recurrence_index] * y_np2 +
+                   coefficients[field * spectral_size +
+                                coefficient_indices[recurrence_index]];
+    }
+  }
+  for (size_t field = 0; field < num_fields; ++field) {
+    result[field] = 0.5 * pmm[0] *
+                    (beta[recurrence_index] * y_np1[field] +
+                     cos_theta * alpha[recurrence_index] * y_n[field] +
+                     coefficients[field * spectral_size +
+                                  coefficient_indices[recurrence_index]]);
+  }
+  ++recurrence_index;
+
+  const double trig_alpha = 2.0 * sin(0.5 * phi) * sin(0.5 * phi);
+  const double trig_beta = sin(phi);
+  double sin_m_phi = 0.0;
+  double cos_m_phi = 1.0;
+  double sin_theta_to_m = 1.0;
+  for (size_t m = 1; m < l1; ++m) {
+    const double previous_sin_m_phi = sin_m_phi;
+    const double delta_sin_m_phi =
+        trig_alpha * sin_m_phi - trig_beta * cos_m_phi;
+    cos_m_phi -= trig_alpha * cos_m_phi + trig_beta * previous_sin_m_phi;
+    sin_m_phi -= delta_sin_m_phi;
+    sin_theta_to_m *= sin_theta;
+
+    double cosine_y_n[num_fields]{};
+    double cosine_y_np1[num_fields]{};
+    double sine_y_n[num_fields]{};
+    double sine_y_np1[num_fields]{};
+    for (size_t n = n_theta - 1; n > m; --n, ++recurrence_index) {
+      for (size_t field = 0; field < num_fields; ++field) {
+        const double cosine_y_np2 = cosine_y_np1[field];
+        const double sine_y_np2 = sine_y_np1[field];
+        cosine_y_np1[field] = cosine_y_n[field];
+        sine_y_np1[field] = sine_y_n[field];
+        cosine_y_n[field] =
+            cos_theta * alpha[recurrence_index] * cosine_y_np1[field] +
+            beta[recurrence_index] * cosine_y_np2 +
+            coefficients[field * spectral_size +
+                         coefficient_indices[recurrence_index]];
+        sine_y_n[field] =
+            cos_theta * alpha[recurrence_index] * sine_y_np1[field] +
+            beta[recurrence_index] * sine_y_np2 +
+            coefficients[field * spectral_size + b_offset +
+                         coefficient_indices[recurrence_index]];
+      }
+    }
+    const double pbar_factor = pmm[m] * sin_theta_to_m;
+    for (size_t field = 0; field < num_fields; ++field) {
+      const double cosine_value =
+          pbar_factor *
+          (beta[recurrence_index] * cosine_y_np1[field] +
+           cos_theta * alpha[recurrence_index] * cosine_y_n[field] +
+           coefficients[field * spectral_size +
+                        coefficient_indices[recurrence_index]]);
+      const double sine_value =
+          pbar_factor * (beta[recurrence_index] * sine_y_np1[field] +
+                         cos_theta * alpha[recurrence_index] * sine_y_n[field] +
+                         coefficients[field * spectral_size + b_offset +
+                                      coefficient_indices[recurrence_index]]);
+      result[field] += cosine_value * cos_m_phi - sine_value * sin_m_phi;
+    }
+    ++recurrence_index;
+  }
+}
+
+KOKKOS_INLINE_FUNCTION void shape_frame_fields(
+    const double (&source_coords)[3], const double (&center)[3],
+    const double* const point_data, const double* const coefficients,
+    const size_t l_max, const double* const alpha, const double* const beta,
+    const double* const pmm, const size_t* const coefficient_indices,
+    double (&target_coords)[3], double (&frame_velocity)[3],
+    double (&inverse_jacobian)[9]) {
+  double centered_coords[3]{};
+  for (size_t d = 0; d < 3; ++d) {
+    centered_coords[d] = source_coords[d] - center[d];
+  }
+  const double theta = atan2(sqrt(centered_coords[0] * centered_coords[0] +
+                                  centered_coords[1] * centered_coords[1]),
+                             centered_coords[2]);
+  const double phi = atan2(centered_coords[1], centered_coords[0]);
+  double shape_fields[5]{};
+  interpolate_shape_fields(coefficients, l_max, alpha, beta, pmm,
+                           coefficient_indices, theta, phi, shape_fields);
+
+  const double transition = point_data[ShapePointData::transition_offset];
+  const double map_factor = 1.0 - transition * shape_fields[0];
+  for (size_t d = 0; d < 3; ++d) {
+    target_coords[d] = center[d] + centered_coords[d] * map_factor;
+    frame_velocity[d] = -centered_coords[d] * transition * shape_fields[1];
+  }
+
+  double jacobian[9]{};
+  for (size_t target_d = 0; target_d < 3; ++target_d) {
+    for (size_t source_d = 0; source_d < 3; ++source_d) {
+      jacobian[target_d * 3 + source_d] =
+          (target_d == source_d ? map_factor : 0.0) -
+          centered_coords[target_d] *
+              (point_data[ShapePointData::transition_gradient_offset +
+                          source_d] *
+                   shape_fields[0] +
+               point_data[ShapePointData::transition_over_radius_offset] *
+                   shape_fields[2 + source_d]);
+    }
+  }
+  const double determinant =
+      jacobian[0] * (jacobian[4] * jacobian[8] - jacobian[5] * jacobian[7]) -
+      jacobian[1] * (jacobian[3] * jacobian[8] - jacobian[5] * jacobian[6]) +
+      jacobian[2] * (jacobian[3] * jacobian[7] - jacobian[4] * jacobian[6]);
+  inverse_jacobian[0] =
+      (jacobian[4] * jacobian[8] - jacobian[5] * jacobian[7]) / determinant;
+  inverse_jacobian[1] =
+      (jacobian[2] * jacobian[7] - jacobian[1] * jacobian[8]) / determinant;
+  inverse_jacobian[2] =
+      (jacobian[1] * jacobian[5] - jacobian[2] * jacobian[4]) / determinant;
+  inverse_jacobian[3] =
+      (jacobian[5] * jacobian[6] - jacobian[3] * jacobian[8]) / determinant;
+  inverse_jacobian[4] =
+      (jacobian[0] * jacobian[8] - jacobian[2] * jacobian[6]) / determinant;
+  inverse_jacobian[5] =
+      (jacobian[2] * jacobian[3] - jacobian[0] * jacobian[5]) / determinant;
+  inverse_jacobian[6] =
+      (jacobian[3] * jacobian[7] - jacobian[4] * jacobian[6]) / determinant;
+  inverse_jacobian[7] =
+      (jacobian[1] * jacobian[6] - jacobian[0] * jacobian[7]) / determinant;
+  inverse_jacobian[8] =
+      (jacobian[0] * jacobian[4] - jacobian[1] * jacobian[3]) / determinant;
+}
 
 template <size_t Dim>
 struct SkewComposedAffineMapData {

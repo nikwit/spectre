@@ -19,9 +19,12 @@
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/RotationMatrixHelpers.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/Shape.hpp"
 #include "Domain/ElementMap.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/BatchedMapPlan.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/SpherepackIterator.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
@@ -202,6 +205,18 @@ void update_frame_fields_device(
       packed_geometry->element_inverse_jacobian_device;
   const auto element_map_kind = packed_geometry->element_map_kind_device;
   const auto affine_map_data = packed_geometry->affine_map_data_device;
+  const auto shape_coefficients = packed_geometry->shape_coefficients_device;
+  const auto shape_point_data = packed_geometry->shape_point_data_device;
+  const auto shape_recurrence_alpha =
+      packed_geometry->shape_recurrence_alpha_device;
+  const auto shape_recurrence_beta =
+      packed_geometry->shape_recurrence_beta_device;
+  const auto shape_recurrence_pmm =
+      packed_geometry->shape_recurrence_pmm_device;
+  const auto shape_recurrence_indices =
+      packed_geometry->shape_recurrence_indices_device;
+  const auto shape_centers = packed_geometry->shape_centers_device;
+  const auto shape_lmax = packed_geometry->shape_lmax_device;
   const size_t ppe = points_per_element;
   constexpr int static_kind = static_cast<int>(BatchedMapKind::Static);
   constexpr int host_evaluated_kind =
@@ -217,6 +232,7 @@ void update_frame_fields_device(
   constexpr int skew_kind = static_cast<int>(BatchedMapKind::Skew);
   constexpr int skew_composed_affine_kind =
       static_cast<int>(BatchedMapKind::SkewComposedAffine);
+  constexpr int shape_kind = static_cast<int>(BatchedMapKind::Shape);
   ::Kokkos::parallel_for(
       "GhUpdateFrameFields", total_points,
       KOKKOS_LAMBDA(const int linear_index_int) {
@@ -268,6 +284,18 @@ void update_frame_fields_device(
             skew_composed_affine_frame_fields(
                 grid_coords, &affine_map_data(e, 0), inertial, velocity,
                 grid_to_inertial_inv_jac);
+          } else if (kind == shape_kind) {
+            const double grid_coords[3]{grid_coordinates.get(0)(s),
+                                        grid_coordinates.get(1)(s),
+                                        grid_coordinates.get(2)(s)};
+            const double center[3]{shape_centers(e, 0), shape_centers(e, 1),
+                                   shape_centers(e, 2)};
+            shape_frame_fields(
+                grid_coords, center, &shape_point_data(e, p, 0),
+                &shape_coefficients(e, 0, 0), shape_lmax(e),
+                &shape_recurrence_alpha(e, 0), &shape_recurrence_beta(e, 0),
+                &shape_recurrence_pmm(e, 0), &shape_recurrence_indices(e, 0),
+                inertial, velocity, grid_to_inertial_inv_jac);
           } else if (kind == rigid_rotation_z_kind) {
             rigid_rotation_z_frame_fields(
                 grid_coordinates.get(0)(s), grid_coordinates.get(1)(s),
@@ -764,6 +792,263 @@ void stage_rot_scale_trans_affine_data(
 }
 
 template <size_t VolumeDim>
+void initialize_shape_map_data(
+    const gsl::not_null<
+        evolution::Kokkos::PackedGeometry<gh::System<VolumeDim>>*>
+        packed_geometry,
+    const evolution::Kokkos::PackedTopology<gh::System<VolumeDim>>&
+        packed_topology,
+    const domain::FunctionsOfTimeMap& functions_of_time, const double time) {
+  const size_t num_elements = packed_topology.local_element_ids.size();
+  const size_t points_per_element = packed_topology.points_per_element;
+  packed_geometry->shape_lmax_host.assign(num_elements, 0);
+  size_t max_lmax = 0;
+  for (size_t e = 0; e < num_elements; ++e) {
+    if (packed_geometry->element_map_kind_host[e] !=
+        static_cast<int>(BatchedMapKind::Shape)) {
+      continue;
+    }
+    const size_t block_id = packed_topology.local_element_ids[e].block_id();
+    const auto& descriptors =
+        packed_geometry->block_map_descriptors_host.at(block_id);
+    ASSERT(descriptors.has_value() and descriptors->size() == 1,
+           "A standalone Shape map requires one exact descriptor.");
+    const auto& shape =
+        std::get<domain::CoordinateMaps::TimeDependent::ShapeMapDescriptor>(
+            descriptors->front());
+    const size_t lmax =
+        domain::CoordinateMaps::TimeDependent::lmax_from_coefs(
+            functions_of_time.at(shape.shape_function_of_time_name)
+                ->func(time)[0]) +
+        1;
+    packed_geometry->shape_lmax_host[e] = lmax;
+    max_lmax = std::max(max_lmax, lmax);
+  }
+  if (max_lmax == 0) {
+    return;
+  }
+
+  const size_t max_spectral_size =
+      ylm::Spherepack::spectral_size(max_lmax, max_lmax);
+  const size_t max_recurrence_size = (max_lmax + 1) * (max_lmax + 2) / 2;
+  packed_geometry->shape_coefficients_device =
+      typename evolution::Kokkos::PackedGeometry<
+          gh::System<VolumeDim>>::device_shape_coefficients_type{
+          "GhBatchedShapeCoefficients", num_elements, 5, max_spectral_size};
+  packed_geometry->shape_point_data_device =
+      typename evolution::Kokkos::PackedGeometry<
+          gh::System<VolumeDim>>::device_shape_point_data_type{
+          "GhBatchedShapePointData", num_elements, points_per_element,
+          ShapePointData::size};
+  packed_geometry->shape_recurrence_alpha_device = {
+      "GhBatchedShapeRecurrenceAlpha", num_elements, max_recurrence_size};
+  packed_geometry->shape_recurrence_beta_device = {
+      "GhBatchedShapeRecurrenceBeta", num_elements, max_recurrence_size};
+  packed_geometry->shape_recurrence_pmm_device = {"GhBatchedShapeRecurrencePmm",
+                                                  num_elements, max_lmax + 1};
+  packed_geometry->shape_recurrence_indices_device = {
+      "GhBatchedShapeRecurrenceIndices", num_elements, max_recurrence_size};
+  packed_geometry->shape_centers_device = {"GhBatchedShapeCenters",
+                                           num_elements};
+  packed_geometry->shape_lmax_device =
+      ::Kokkos::View<size_t*>{"GhBatchedShapeLmax", num_elements};
+
+  auto host_point_data =
+      ::Kokkos::create_mirror_view(packed_geometry->shape_point_data_device);
+  auto host_alpha = ::Kokkos::create_mirror_view(
+      packed_geometry->shape_recurrence_alpha_device);
+  auto host_beta = ::Kokkos::create_mirror_view(
+      packed_geometry->shape_recurrence_beta_device);
+  auto host_pmm = ::Kokkos::create_mirror_view(
+      packed_geometry->shape_recurrence_pmm_device);
+  auto host_indices = ::Kokkos::create_mirror_view(
+      packed_geometry->shape_recurrence_indices_device);
+  auto host_centers =
+      ::Kokkos::create_mirror_view(packed_geometry->shape_centers_device);
+  auto host_lmax =
+      ::Kokkos::create_mirror_view(packed_geometry->shape_lmax_device);
+  for (size_t e = 0; e < num_elements; ++e) {
+    const size_t lmax = packed_geometry->shape_lmax_host[e];
+    host_lmax(e) = lmax;
+    if (lmax == 0) {
+      continue;
+    }
+    const size_t block_id = packed_topology.local_element_ids[e].block_id();
+    const auto& shape =
+        std::get<domain::CoordinateMaps::TimeDependent::ShapeMapDescriptor>(
+            packed_geometry->block_map_descriptors_host.at(block_id)->front());
+    const auto& sphere = std::get<
+        domain::CoordinateMaps::TimeDependent::SphereTransitionDescriptor>(
+        shape.transition);
+    for (size_t d = 0; d < VolumeDim; ++d) {
+      host_centers(e, d) = shape.center[d];
+    }
+    const ylm::Spherepack spherepack{lmax, lmax};
+    const auto recurrence = spherepack.interpolation_recurrence();
+    for (size_t i = 0; i < recurrence.alpha.size(); ++i) {
+      host_alpha(e, i) = recurrence.alpha[i];
+      host_beta(e, i) = recurrence.beta[i];
+      host_indices(e, i) = recurrence.coefficient_indices[i];
+    }
+    for (size_t i = 0; i < recurrence.pmm.size(); ++i) {
+      host_pmm(e, i) = recurrence.pmm[i];
+    }
+
+    const size_t point_begin = packed_topology.element_point_offsets_host[e];
+    for (size_t p = 0; p < points_per_element; ++p) {
+      double centered[3]{};
+      double radius_squared = 0.0;
+      for (size_t d = 0; d < 3; ++d) {
+        centered[d] =
+            packed_geometry->grid_coordinates_host[d][point_begin + p] -
+            shape.center[d];
+        radius_squared += centered[d] * centered[d];
+      }
+      const double radius = std::sqrt(radius_squared);
+      double transition = 0.0;
+      double transition_over_radius = 0.0;
+      double gradient_factor = 0.0;
+      if (sphere.interior) {
+        const double inverse_cube_inner_radius =
+            1.0 /
+            (sphere.inner_radius * sphere.inner_radius * sphere.inner_radius);
+        transition = radius_squared * inverse_cube_inner_radius;
+        transition_over_radius = radius * inverse_cube_inner_radius;
+        gradient_factor = 2.0 * inverse_cube_inner_radius;
+      } else {
+        const double radial_factor = std::clamp(
+            sphere.radial_slope * radius + sphere.radial_intercept, 0.0, 1.0);
+        transition = radial_factor / radius;
+        transition_over_radius = radial_factor / radius_squared;
+        gradient_factor = sphere.radial_slope / radius_squared -
+                          radial_factor / (radius_squared * radius);
+      }
+      host_point_data(e, p, ShapePointData::transition_offset) = transition;
+      host_point_data(e, p, ShapePointData::transition_over_radius_offset) =
+          transition_over_radius;
+      for (size_t d = 0; d < 3; ++d) {
+        host_point_data(e, p, ShapePointData::transition_gradient_offset + d) =
+            centered[d] * gradient_factor;
+      }
+    }
+  }
+  ::Kokkos::deep_copy(packed_geometry->shape_point_data_device,
+                      host_point_data);
+  ::Kokkos::deep_copy(packed_geometry->shape_recurrence_alpha_device,
+                      host_alpha);
+  ::Kokkos::deep_copy(packed_geometry->shape_recurrence_beta_device, host_beta);
+  ::Kokkos::deep_copy(packed_geometry->shape_recurrence_pmm_device, host_pmm);
+  ::Kokkos::deep_copy(packed_geometry->shape_recurrence_indices_device,
+                      host_indices);
+  ::Kokkos::deep_copy(packed_geometry->shape_centers_device, host_centers);
+  ::Kokkos::deep_copy(packed_geometry->shape_lmax_device, host_lmax);
+}
+
+template <size_t VolumeDim>
+void stage_shape_coefficients(
+    const gsl::not_null<
+        evolution::Kokkos::PackedGeometry<gh::System<VolumeDim>>*>
+        packed_geometry,
+    const evolution::Kokkos::PackedTopology<gh::System<VolumeDim>>&
+        packed_topology,
+    const domain::FunctionsOfTimeMap& functions_of_time, const double time) {
+  if (packed_geometry->shape_coefficients_device.extent(0) == 0) {
+    return;
+  }
+  auto host_coefficients =
+      ::Kokkos::create_mirror_view(packed_geometry->shape_coefficients_device);
+  std::map<size_t, std::array<DataVector, 5>> coefficients_by_block{};
+  for (size_t e = 0; e < packed_topology.local_element_ids.size(); ++e) {
+    const size_t evaluation_lmax = packed_geometry->shape_lmax_host[e];
+    if (evaluation_lmax == 0) {
+      continue;
+    }
+    const size_t block_id = packed_topology.local_element_ids[e].block_id();
+    auto coefficients = coefficients_by_block.find(block_id);
+    if (coefficients == coefficients_by_block.end()) {
+      const auto& shape =
+          std::get<domain::CoordinateMaps::TimeDependent::ShapeMapDescriptor>(
+              packed_geometry->block_map_descriptors_host.at(block_id)
+                  ->front());
+      auto [shape_coefs, shape_coef_derivs, shape_coef_dderivs] =
+          functions_of_time.at(shape.shape_function_of_time_name)
+              ->func_and_2_derivs(time);
+      if (shape.size_function_of_time_name.has_value()) {
+        ASSERT(shape_coefs[0] == 0.0 and shape_coef_derivs[0] == 0.0,
+               "A separately controlled Shape size requires zero l=0 Shape "
+               "coefficients.");
+        const auto size =
+            functions_of_time.at(*shape.size_function_of_time_name)
+                ->func_and_deriv(time);
+        constexpr double size_to_spherepack = M_SQRT1_2 * M_2_SQRTPI;
+        shape_coefs[0] = size_to_spherepack * size[0][0];
+        shape_coef_derivs[0] = size_to_spherepack * size[1][0];
+      }
+      const size_t source_lmax =
+          domain::CoordinateMaps::TimeDependent::lmax_from_coefs(shape_coefs);
+      ylm::SpherepackIterator source_iterator{source_lmax, source_lmax};
+      size_t truncated_lmax = 2;
+      for (size_t l = source_lmax; l > 2; --l) {
+        bool keep_l = false;
+        for (int m = static_cast<int>(l); m >= -static_cast<int>(l); --m) {
+          source_iterator.set(l, m);
+          const size_t index = source_iterator();
+          keep_l =
+              keep_l or std::abs(shape_coefs[index]) > shape.truncation_limit or
+              std::abs(shape_coef_derivs[index]) > shape.truncation_limit or
+              std::abs(shape_coef_dderivs[index]) > shape.truncation_limit;
+        }
+        if (keep_l) {
+          truncated_lmax = l;
+          break;
+        }
+      }
+      const ylm::SpherepackIterator truncated_iterator{truncated_lmax,
+                                                       truncated_lmax};
+      const ylm::SpherepackIterator evaluation_iterator{evaluation_lmax,
+                                                        evaluation_lmax};
+      const auto extend_coefficients = [&](const DataVector& source) {
+        const DataVector truncated =
+            domain::CoordinateMaps::TimeDependent::truncate_coefs(
+                source, source_iterator, truncated_iterator);
+        return domain::CoordinateMaps::TimeDependent::truncate_coefs(
+            truncated, truncated_iterator, evaluation_iterator);
+      };
+      std::array<DataVector, 5> staged{extend_coefficients(shape_coefs),
+                                       extend_coefficients(shape_coef_derivs),
+                                       DataVector{}, DataVector{},
+                                       DataVector{}};
+      const ylm::Spherepack spherepack{evaluation_lmax, evaluation_lmax};
+      const auto angular_gradient = spherepack.gradient_from_coefs(staged[0]);
+      const auto theta_phis = spherepack.theta_phi_points();
+      std::array<DataVector, 3> cartesian_gradient{
+          DataVector{spherepack.physical_size()},
+          DataVector{spherepack.physical_size()},
+          DataVector{spherepack.physical_size()}};
+      cartesian_gradient[0] =
+          cos(theta_phis[0]) * cos(theta_phis[1]) * angular_gradient.get(0) -
+          sin(theta_phis[1]) * angular_gradient.get(1);
+      cartesian_gradient[1] =
+          cos(theta_phis[0]) * sin(theta_phis[1]) * angular_gradient.get(0) +
+          cos(theta_phis[1]) * angular_gradient.get(1);
+      cartesian_gradient[2] = -sin(theta_phis[0]) * angular_gradient.get(0);
+      for (size_t d = 0; d < 3; ++d) {
+        staged[2 + d] = spherepack.phys_to_spec(cartesian_gradient[d]);
+      }
+      coefficients =
+          coefficients_by_block.emplace(block_id, std::move(staged)).first;
+    }
+    for (size_t field = 0; field < 5; ++field) {
+      for (size_t i = 0; i < coefficients->second[field].size(); ++i) {
+        host_coefficients(e, field, i) = coefficients->second[field][i];
+      }
+    }
+  }
+  ::Kokkos::deep_copy(packed_geometry->shape_coefficients_device,
+                      host_coefficients);
+}
+
+template <size_t VolumeDim>
 bool stage_device_map_data(
     const gsl::not_null<
         evolution::Kokkos::PackedGeometry<gh::System<VolumeDim>>*>
@@ -995,6 +1280,15 @@ void build_map_plan(
                   domain::CoordinateMaps::TimeDependent::SkewMapDescriptor>(
                   descriptors->front())) {
             kind = BatchedMapKind::Skew;
+          } else if (const auto* const shape =
+                         std::get_if<domain::CoordinateMaps::TimeDependent::
+                                         ShapeMapDescriptor>(
+                             &descriptors->front());
+                     shape != nullptr and
+                     std::holds_alternative<
+                         domain::CoordinateMaps::TimeDependent::
+                             SphereTransitionDescriptor>(shape->transition)) {
+            kind = BatchedMapKind::Shape;
           } else if (const auto* const rot_scale_trans =
                          std::get_if<domain::CoordinateMaps::TimeDependent::
                                          RotScaleTransMapDescriptor>(
@@ -1066,6 +1360,8 @@ void build_map_plan(
     host_kind(e) = packed_geometry->element_map_kind_host[e];
   }
   ::Kokkos::deep_copy(packed_geometry->element_map_kind_device, host_kind);
+  initialize_shape_map_data<VolumeDim>(packed_geometry, packed_topology,
+                                       functions_of_time, time);
   packed_geometry->map_plan_initialized = true;
 }
 
@@ -1122,19 +1418,21 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
                                functions_of_time, time);
   }
 
-  bool has_staged_map_data = false;
+  bool has_affine_map_data = false;
   for (const int kind : packed_geometry->element_map_kind_host) {
-    has_staged_map_data =
-        has_staged_map_data or
+    has_affine_map_data =
+        has_affine_map_data or
         kind == static_cast<int>(BatchedMapKind::ComposedAffine) or
         kind == static_cast<int>(BatchedMapKind::RotScaleTransTransition) or
         kind == static_cast<int>(BatchedMapKind::Skew) or
         kind == static_cast<int>(BatchedMapKind::SkewComposedAffine);
   }
   const bool staged_maps_ready =
-      not has_staged_map_data or
+      not has_affine_map_data or
       stage_device_map_data<volume_dim>(packed_geometry, packed_topology,
                                         domain, functions_of_time, time);
+  stage_shape_coefficients<volume_dim>(packed_geometry, packed_topology,
+                                       functions_of_time, time);
 
   bool has_host_evaluated = not staged_maps_ready;
   bool has_device_evaluated = false;
