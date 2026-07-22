@@ -201,6 +201,8 @@ void update_frame_fields_device(
   const auto affine_map_data = packed_geometry->affine_map_data_device;
   const size_t ppe = points_per_element;
   constexpr int static_kind = static_cast<int>(BatchedMapKind::Static);
+  constexpr int host_evaluated_kind =
+      static_cast<int>(BatchedMapKind::HostEvaluated);
   constexpr int rigid_rotation_z_kind =
       static_cast<int>(BatchedMapKind::RigidRotationZ);
   constexpr int uniform_radial_scaling_kind =
@@ -214,7 +216,10 @@ void update_frame_fields_device(
         const size_t e = s / ppe;
         const size_t p = s % ppe;
         const int kind = element_map_kind(e);
-        if (kind == static_kind) {
+        if (kind == host_evaluated_kind) {
+          // These entries were copied from the host before a mixed-map launch.
+          return;
+        } else if (kind == static_kind) {
           for (size_t d = 0; d < VolumeDim; ++d) {
             inertial_coordinates.get(d)(s) = grid_coordinates.get(d)(s);
             mesh_velocity.get(d)(s) = 0.0;
@@ -419,10 +424,12 @@ bool verify_uniform_radial_scaling(
   return true;
 }
 
-// Infer a general affine grid-to-inertial map from origin and basis-vector
-// probes, then verify it against all points in a representative element. This
-// is repeated at every stage so a controlled map that ceases to be affine
-// safely returns to the host path.
+// Infer a general affine grid-to-inertial map from four well-conditioned
+// points in a representative element, then verify it against every element
+// point. Restricting probes to the block avoids singular evaluations of radial
+// maps at artificial points such as the origin. This is repeated at every
+// stage so a controlled map that ceases to be affine safely returns to the
+// host path.
 template <size_t VolumeDim>
 bool infer_composed_affine_map(
     const gsl::not_null<std::array<double, AffineMapData<VolumeDim>::size>*>
@@ -430,52 +437,170 @@ bool infer_composed_affine_map(
     const Block<VolumeDim>& block,
     const tnsr::I<DataVector, VolumeDim, Frame::Grid>& representative_coords,
     const double time, const domain::FunctionsOfTimeMap& functions_of_time) {
+  static_assert(VolumeDim == 3,
+                "The affine map inference currently supports only 3D.");
   const size_t representative_points = representative_coords.get(0).size();
-  const size_t num_probes = VolumeDim + 1 + representative_points;
-  tnsr::I<DataVector, VolumeDim, Frame::Grid> probes{num_probes};
-  for (size_t d = 0; d < VolumeDim; ++d) {
-    probes.get(d)[0] = 0.0;
-    for (size_t basis_d = 0; basis_d < VolumeDim; ++basis_d) {
-      probes.get(d)[basis_d + 1] = d == basis_d ? 1.0 : 0.0;
+  if (representative_points < VolumeDim + 1) {
+    return false;
+  }
+
+  std::array<size_t, VolumeDim + 1> fit_points{{0, 0, 0, 0}};
+  double longest_displacement_squared = 0.0;
+  for (size_t p = 1; p < representative_points; ++p) {
+    double displacement_squared = 0.0;
+    for (size_t d = 0; d < VolumeDim; ++d) {
+      const double displacement =
+          representative_coords.get(d)[p] - representative_coords.get(d)[0];
+      displacement_squared += displacement * displacement;
     }
-    for (size_t p = 0; p < representative_points; ++p) {
-      probes.get(d)[VolumeDim + 1 + p] = representative_coords.get(d)[p];
+    if (displacement_squared > longest_displacement_squared) {
+      longest_displacement_squared = displacement_squared;
+      fit_points[1] = p;
     }
+  }
+  if (longest_displacement_squared == 0.0) {
+    return false;
+  }
+
+  const std::array<double, 3> first_displacement{
+      representative_coords.get(0)[fit_points[1]] -
+          representative_coords.get(0)[0],
+      representative_coords.get(1)[fit_points[1]] -
+          representative_coords.get(1)[0],
+      representative_coords.get(2)[fit_points[1]] -
+          representative_coords.get(2)[0]};
+  double largest_cross_product_squared = 0.0;
+  std::array<double, 3> plane_normal{};
+  for (size_t p = 1; p < representative_points; ++p) {
+    const std::array<double, 3> displacement{
+        representative_coords.get(0)[p] - representative_coords.get(0)[0],
+        representative_coords.get(1)[p] - representative_coords.get(1)[0],
+        representative_coords.get(2)[p] - representative_coords.get(2)[0]};
+    const std::array<double, 3> cross_product{
+        first_displacement[1] * displacement[2] -
+            first_displacement[2] * displacement[1],
+        first_displacement[2] * displacement[0] -
+            first_displacement[0] * displacement[2],
+        first_displacement[0] * displacement[1] -
+            first_displacement[1] * displacement[0]};
+    const double cross_product_squared = cross_product[0] * cross_product[0] +
+                                         cross_product[1] * cross_product[1] +
+                                         cross_product[2] * cross_product[2];
+    if (cross_product_squared > largest_cross_product_squared) {
+      largest_cross_product_squared = cross_product_squared;
+      fit_points[2] = p;
+      plane_normal = cross_product;
+    }
+  }
+  if (largest_cross_product_squared == 0.0) {
+    return false;
+  }
+
+  double largest_volume = 0.0;
+  for (size_t p = 1; p < representative_points; ++p) {
+    double signed_volume = 0.0;
+    for (size_t d = 0; d < VolumeDim; ++d) {
+      signed_volume += plane_normal[d] * (representative_coords.get(d)[p] -
+                                          representative_coords.get(d)[0]);
+    }
+    if (std::abs(signed_volume) > largest_volume) {
+      largest_volume = std::abs(signed_volume);
+      fit_points[3] = p;
+    }
+  }
+  if (largest_volume == 0.0) {
+    return false;
   }
 
   const auto map_data =
       block.moving_mesh_grid_to_inertial_map().coords_frame_velocity_jacobians(
-          probes, time, functions_of_time);
+          representative_coords, time, functions_of_time);
   const auto& inertial_coords = std::get<0>(map_data);
   const auto& inverse_jacobian = std::get<1>(map_data);
   const auto& mesh_velocity = std::get<3>(map_data);
 
+  // Columns of point_displacements span the representative element. Its
+  // inverse converts differences at the three fit points into derivatives
+  // with respect to the grid coordinates.
+  std::array<double, 9> point_displacements{};
+  for (size_t grid_d = 0; grid_d < VolumeDim; ++grid_d) {
+    for (size_t column = 0; column < VolumeDim; ++column) {
+      point_displacements[grid_d * VolumeDim + column] =
+          representative_coords.get(grid_d)[fit_points[column + 1]] -
+          representative_coords.get(grid_d)[fit_points[0]];
+    }
+  }
+  const double a = point_displacements[0];
+  const double b = point_displacements[1];
+  const double c = point_displacements[2];
+  const double d = point_displacements[3];
+  const double e = point_displacements[4];
+  const double f = point_displacements[5];
+  const double g = point_displacements[6];
+  const double h = point_displacements[7];
+  const double i = point_displacements[8];
+  const double determinant =
+      a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+  const double coordinate_scale = std::sqrt(longest_displacement_squared);
+  if (not std::isfinite(determinant) or
+      std::abs(determinant) <=
+          1.0e-13 * coordinate_scale * coordinate_scale * coordinate_scale) {
+    return false;
+  }
+  const std::array<double, 9> inverse_point_displacements{
+      (e * i - f * h) / determinant, (c * h - b * i) / determinant,
+      (b * f - c * e) / determinant, (f * g - d * i) / determinant,
+      (a * i - c * g) / determinant, (c * d - a * f) / determinant,
+      (d * h - e * g) / determinant, (b * g - a * h) / determinant,
+      (a * e - b * d) / determinant};
+
   for (size_t inertial_d = 0; inertial_d < VolumeDim; ++inertial_d) {
-    (*affine_data)[AffineMapData<VolumeDim>::translation_offset + inertial_d] =
-        inertial_coords.get(inertial_d)[0];
-    (*affine_data)[AffineMapData<VolumeDim>::velocity_translation_offset +
-                   inertial_d] = mesh_velocity.get(inertial_d)[0];
     for (size_t grid_d = 0; grid_d < VolumeDim; ++grid_d) {
+      double matrix_component = 0.0;
+      double velocity_matrix_component = 0.0;
+      for (size_t column = 0; column < VolumeDim; ++column) {
+        matrix_component +=
+            (inertial_coords.get(inertial_d)[fit_points[column + 1]] -
+             inertial_coords.get(inertial_d)[fit_points[0]]) *
+            inverse_point_displacements[column * VolumeDim + grid_d];
+        velocity_matrix_component +=
+            (mesh_velocity.get(inertial_d)[fit_points[column + 1]] -
+             mesh_velocity.get(inertial_d)[fit_points[0]]) *
+            inverse_point_displacements[column * VolumeDim + grid_d];
+      }
       (*affine_data)[AffineMapData<VolumeDim>::matrix_offset +
-                     inertial_d * VolumeDim + grid_d] =
-          inertial_coords.get(inertial_d)[grid_d + 1] -
-          inertial_coords.get(inertial_d)[0];
+                     inertial_d * VolumeDim + grid_d] = matrix_component;
       (*affine_data)[AffineMapData<VolumeDim>::velocity_matrix_offset +
                      inertial_d * VolumeDim + grid_d] =
-          mesh_velocity.get(inertial_d)[grid_d + 1] -
-          mesh_velocity.get(inertial_d)[0];
+          velocity_matrix_component;
       (*affine_data)[AffineMapData<VolumeDim>::inverse_jacobian_offset +
                      grid_d * VolumeDim + inertial_d] =
-          inverse_jacobian.get(grid_d, inertial_d)[0];
+          inverse_jacobian.get(grid_d, inertial_d)[fit_points[0]];
     }
+    double translation = inertial_coords.get(inertial_d)[fit_points[0]];
+    double velocity_translation = mesh_velocity.get(inertial_d)[fit_points[0]];
+    for (size_t grid_d = 0; grid_d < VolumeDim; ++grid_d) {
+      translation -= (*affine_data)[AffineMapData<VolumeDim>::matrix_offset +
+                                    inertial_d * VolumeDim + grid_d] *
+                     representative_coords.get(grid_d)[fit_points[0]];
+      velocity_translation -=
+          (*affine_data)[AffineMapData<VolumeDim>::velocity_matrix_offset +
+                         inertial_d * VolumeDim + grid_d] *
+          representative_coords.get(grid_d)[fit_points[0]];
+    }
+    (*affine_data)[AffineMapData<VolumeDim>::translation_offset + inertial_d] =
+        translation;
+    (*affine_data)[AffineMapData<VolumeDim>::velocity_translation_offset +
+                   inertial_d] = velocity_translation;
   }
 
   constexpr double tolerance = 1.0e-11;
-  const auto within_tolerance = [tolerance](const double a, const double b) {
-    return std::isfinite(a) and std::isfinite(b) and
-           std::abs(a - b) <= tolerance * (1.0 + std::abs(b));
+  const auto within_tolerance = [tolerance](const double lhs,
+                                            const double rhs) {
+    return std::isfinite(lhs) and std::isfinite(rhs) and
+           std::abs(lhs - rhs) <= tolerance * (1.0 + std::abs(rhs));
   };
-  for (size_t p = 0; p < num_probes; ++p) {
+  for (size_t p = 0; p < representative_points; ++p) {
     for (size_t inertial_d = 0; inertial_d < VolumeDim; ++inertial_d) {
       double expected_coord =
           (*affine_data)[AffineMapData<VolumeDim>::translation_offset +
@@ -487,11 +612,11 @@ bool infer_composed_affine_map(
         expected_coord +=
             (*affine_data)[AffineMapData<VolumeDim>::matrix_offset +
                            inertial_d * VolumeDim + grid_d] *
-            probes.get(grid_d)[p];
+            representative_coords.get(grid_d)[p];
         expected_velocity +=
             (*affine_data)[AffineMapData<VolumeDim>::velocity_matrix_offset +
                            inertial_d * VolumeDim + grid_d] *
-            probes.get(grid_d)[p];
+            representative_coords.get(grid_d)[p];
       }
       if (not within_tolerance(inertial_coords.get(inertial_d)[p],
                                expected_coord) or
@@ -728,31 +853,39 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
           packed_geometry, packed_topology, domain, functions_of_time, time);
 
   bool has_host_evaluated = not affine_maps_ready;
+  bool has_device_evaluated = false;
   bool all_static = true;
   for (size_t e = 0; e < num_elements; ++e) {
     const int kind = packed_geometry->element_map_kind_host[e];
     if (kind == static_cast<int>(BatchedMapKind::HostEvaluated)) {
       has_host_evaluated = true;
-      break;
+    } else {
+      has_device_evaluated = true;
     }
     if (kind != static_cast<int>(BatchedMapKind::Static)) {
       all_static = false;
     }
   }
+  if (not affine_maps_ready) {
+    // A map that ceases to verify as affine falls back to an all-host update
+    // for this stage.
+    has_device_evaluated = false;
+  }
+
+  double fot_value = 0.0;
+  double fot_value_dot = 0.0;
+  if (has_device_evaluated and
+      not packed_geometry->device_map_function_of_time_name.empty()) {
+    const auto value_and_deriv =
+        functions_of_time.at(packed_geometry->device_map_function_of_time_name)
+            ->func_and_deriv(time);
+    fot_value = value_and_deriv[0][0];
+    fot_value_dot = value_and_deriv[1][0];
+  }
 
   if (not has_host_evaluated) {
     ensure_static_device_geometry<volume_dim>(packed_geometry, num_elements,
                                               points_per_element, total_points);
-    double fot_value = 0.0;
-    double fot_value_dot = 0.0;
-    if (not packed_geometry->device_map_function_of_time_name.empty()) {
-      const auto value_and_deriv =
-          functions_of_time
-              .at(packed_geometry->device_map_function_of_time_name)
-              ->func_and_deriv(time);
-      fot_value = value_and_deriv[0][0];
-      fot_value_dot = value_and_deriv[1][0];
-    }
     update_frame_fields_device<volume_dim>(packed_geometry, points_per_element,
                                            total_points, fot_value,
                                            fot_value_dot);
@@ -777,6 +910,11 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
       packed_geometry->element_inverse_jacobian_device);
 
   for (size_t e = 0; e < num_elements; ++e) {
+    if (affine_maps_ready and
+        packed_geometry->element_map_kind_host[e] !=
+            static_cast<int>(BatchedMapKind::HostEvaluated)) {
+      continue;
+    }
     const auto& element_id = packed_topology.local_element_ids[e];
     const auto& block = domain.blocks()[element_id.block_id()];
 
@@ -945,6 +1083,22 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
       make_not_null(&packed_geometry->mesh_velocity_device));
   ::Kokkos::deep_copy(packed_geometry->element_inverse_jacobian_device,
                       host_inverse_jacobian);
+
+  // In a mixed domain the host-evaluated entries above seed the device
+  // arrays, then this kernel overwrites only the supported entries. Refresh
+  // the host coordinate and velocity views afterward so host-side consumers
+  // see one coherent geometry snapshot.
+  if (has_device_evaluated) {
+    update_frame_fields_device<volume_dim>(packed_geometry, points_per_element,
+                                           total_points, fot_value,
+                                           fot_value_dot);
+    copy_device_array_to_host<volume_dim>(
+        packed_geometry->inertial_coordinates_device,
+        make_not_null(&packed_geometry->inertial_coordinates_host));
+    copy_device_array_to_host<volume_dim>(
+        packed_geometry->mesh_velocity_device,
+        make_not_null(&packed_geometry->mesh_velocity_host));
+  }
 }
 
 template struct UpdateFrameFieldsBatchedWithTag<

@@ -178,7 +178,7 @@ void test_update_frame_fields_and_constraint_damping_batched() {
   const domain::creators::Rectilinear<Dim> domain_creator{
       {{-1.2, -0.8, -0.6}},
       {{1.1, 0.9, 0.7}},
-      {{0, 0, 0}},
+      {{1, 0, 0}},
       {{4, 4, 4}},
       {{true, true, true}},
       {},
@@ -228,15 +228,21 @@ void test_update_frame_fields_and_constraint_damping_batched() {
       snapshot_domain_static_caches(packed_geometry);
 
   const std::array<double, 2> test_times{{0.3, 1.6}};
-  for (const double time : test_times) {
+  REQUIRE(packed_topology.local_element_ids.size() >= 2);
+  for (size_t time_index = 0; time_index < test_times.size(); ++time_index) {
+    const double time = test_times[time_index];
     gh::Actions::UpdateFrameFieldsBatched::apply(
         make_not_null(&packed_geometry), packed_topology, domain,
         functions_of_time, time);
     REQUIRE(packed_geometry.element_map_kind_host.size() ==
             packed_topology.local_element_ids.size());
-    for (const int map_kind : packed_geometry.element_map_kind_host) {
-      CHECK(map_kind ==
-            static_cast<int>(gh::Actions::BatchedMapKind::ComposedAffine));
+    for (size_t e = 0; e < packed_geometry.element_map_kind_host.size(); ++e) {
+      const auto expected_kind =
+          time_index == 1 and e == 0
+              ? gh::Actions::BatchedMapKind::HostEvaluated
+              : gh::Actions::BatchedMapKind::ComposedAffine;
+      CHECK(packed_geometry.element_map_kind_host[e] ==
+            static_cast<int>(expected_kind));
     }
     check_domain_static_caches_unchanged(domain_static_cache_snapshot,
                                          packed_geometry);
@@ -251,6 +257,22 @@ void test_update_frame_fields_and_constraint_damping_batched() {
         packed_topology, packed_geometry, device_gamma0, device_gamma1,
         device_gamma2, velocity, time, gamma0_constant, gamma1_constant,
         gamma2_constant);
+
+    if (time_index == 0) {
+      // Simulate a mixed-map domain at the second time: the first element uses
+      // the host representation while the remaining elements retain the
+      // verified device representation of the same map. This isolates the
+      // mixed dispatch and checks that the combined device/host geometry is
+      // coherent without requiring a large multi-block domain fixture.
+      packed_geometry.element_map_kind_host[0] =
+          static_cast<int>(gh::Actions::BatchedMapKind::HostEvaluated);
+      auto host_map_kinds = Kokkos::create_mirror_view_and_copy(
+          Kokkos::HostSpace{}, packed_geometry.element_map_kind_device);
+      host_map_kinds(0) =
+          static_cast<int>(gh::Actions::BatchedMapKind::HostEvaluated);
+      Kokkos::deep_copy(packed_geometry.element_map_kind_device,
+                        host_map_kinds);
+    }
   }
 }
 
