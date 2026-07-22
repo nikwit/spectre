@@ -4,6 +4,7 @@
 #include "NumericalAlgorithms/Spectral/DifferentiationMatrix.hpp"
 
 #include <cstddef>
+#include <map>
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Matrix.hpp"
@@ -453,8 +454,33 @@ PRECOMPUTED_SPECTRAL_QUANTITY(differentiation_matrix_transpose, Matrix,
 PRECOMPUTED_SPECTRAL_QUANTITY(weak_flux_differentiation_matrix, Matrix,
                               WeakFluxDifferentiationMatrixGenerator)
 #ifdef SPECTRE_KOKKOS
-PRECOMPUTED_SPECTRAL_QUANTITY(differentiation_matrix_on_device, MatrixViewRO,
-                              DifferentiationMatrixOnDeviceGenerator)
+template <Basis BasisType, Quadrature QuadratureType>
+const MatrixViewRO& differentiation_matrix_on_device(const size_t num_points) {
+  constexpr size_t min_num_points =
+      minimum_number_of_points<BasisType, QuadratureType>;
+  constexpr size_t max_num_points = maximum_number_of_points<BasisType>;
+  ASSERT(num_points >= min_num_points,
+         "Tried to work with less than the minimum number of collocation "
+         "points for this quadrature.");
+  ASSERT(num_points <= max_num_points,
+         "Exceeded maximum number of collocation points.");
+
+  using Cache = std::map<size_t, MatrixViewRO>;
+  static auto* const cache = []() {
+    auto* const result = new Cache{};
+    Kokkos::push_finalize_hook([result]() { delete result; });
+    return result;
+  }();
+  auto matrix = cache->find(num_points);
+  if (matrix == cache->end()) {
+    matrix =
+        cache
+            ->emplace(num_points, DifferentiationMatrixOnDeviceGenerator<
+                                      BasisType, QuadratureType>{}(num_points))
+            .first;
+  }
+  return matrix->second;
+}
 #endif  // SPECTRE_KOKKOS
 
 #undef PRECOMPUTED_SPECTRAL_QUANTITY

@@ -4,15 +4,14 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/FilterKokkosBatched.hpp"
 
 #include <cstddef>
+#include <map>
+#include <tuple>
 
 #include "DataStructures/Matrix.hpp"
 #include "NumericalAlgorithms/Spectral/Basis.hpp"
-#include "NumericalAlgorithms/Spectral/MaximumNumberOfPoints.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
-#include "Utilities/Literals.hpp"
-#include "Utilities/StaticCache.hpp"
 
 namespace gh::Actions {
 
@@ -48,23 +47,24 @@ const MatrixViewLeftLayout& filter_matrix_on_device_batched(
          "different filter parameters. Use a different FilterIndex for a "
          "different filter configuration.");
 
-  const static auto cache = make_static_cache<
-      CacheRange<1_st,
-                 Spectral::maximum_number_of_points<Spectral::Basis::Legendre> +
-                     1>,
-      CacheEnumeration<Spectral::Basis, Spectral::Basis::Legendre,
-                       Spectral::Basis::Chebyshev>,
-      CacheEnumeration<Spectral::Quadrature, Spectral::Quadrature::Gauss,
-                       Spectral::Quadrature::GaussLobatto>>(
-      [filter = filter_helper](const size_t extents,
-                               const Spectral::Basis basis,
-                               const Spectral::Quadrature quadrature) {
-        const Mesh<1> matrix_mesh{extents, basis, quadrature};
-        return matrix_on_device(filter.filter_matrix(matrix_mesh),
-                                "GhFilterKokkosBatchedMatrix");
-      });
+  using CacheKey = std::tuple<size_t, Spectral::Basis, Spectral::Quadrature>;
+  using Cache = std::map<CacheKey, MatrixViewLeftLayout>;
+  static auto* const cache = []() {
+    auto* const result = new Cache{};
+    Kokkos::push_finalize_hook([result]() { delete result; });
+    return result;
+  }();
 
-  return cache(mesh.extents(0), mesh.basis(0), mesh.quadrature(0));
+  const CacheKey key{mesh.extents(0), mesh.basis(0), mesh.quadrature(0)};
+  auto matrix = cache->find(key);
+  if (matrix == cache->end()) {
+    matrix =
+        cache
+            ->emplace(key, matrix_on_device(filter_helper.filter_matrix(mesh),
+                                            "GhFilterKokkosBatchedMatrix"))
+            .first;
+  }
+  return matrix->second;
 }
 
 void apply_filter_matrices_on_device_batched(
