@@ -96,8 +96,8 @@ MatrixViewRO matrix_on_device(const Matrix& matrix, const char* const label) {
       matrix_host(i, j) = matrix(i, j);
     }
   }
-  Kokkos::View<double**, Kokkos::LayoutLeft> matrix_device(
-      label, matrix.rows(), matrix.columns());
+  Kokkos::View<double**, Kokkos::LayoutLeft> matrix_device(label, matrix.rows(),
+                                                           matrix.columns());
   Kokkos::deep_copy(matrix_device, matrix_host);
   return MatrixViewRO(matrix_device);
 }
@@ -143,10 +143,10 @@ const Matrix& projection_matrix_child_to_parent(const Mesh<1>& child_mesh,
     const static auto cache_legendre = make_runtime_cache<
         CacheEnumeration<Quadrature, Quadrature::Gauss,
                          Quadrature::GaussLobatto>,
-        CacheRange<2_st, max_points_l + 1>,
+        CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
         CacheEnumeration<Quadrature, Quadrature::Gauss,
                          Quadrature::GaussLobatto>,
-        CacheRange<2_st, max_points_l + 1>,
+        CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
         CacheEnumeration<SegmentSize, SegmentSize::Full, SegmentSize::UpperHalf,
                          SegmentSize::LowerHalf>>(
         [compute_matrix](const Quadrature q_parent, const size_t n_parent,
@@ -156,15 +156,14 @@ const Matrix& projection_matrix_child_to_parent(const Mesh<1>& child_mesh,
                                 Basis::Legendre, q_child, n_child,
                                 local_child_size);
         });
-    const static auto cache_fourier =
-        make_runtime_cache<CacheRange<2_st, max_points_f + 1>,
-                          CacheRange<2_st, max_points_f + 1>>(
-            [compute_matrix](const size_t n_parent, const size_t n_child) {
-              return compute_matrix(Basis::Fourier, Quadrature::Equiangular,
-                                    n_parent, Basis::Fourier,
-                                    Quadrature::Equiangular, n_child,
-                                    SegmentSize::Full);
-            });
+    const static auto cache_fourier = make_runtime_cache<
+        CacheRange<2_st, maximum_number_of_points<Basis::Fourier> + 1>,
+        CacheRange<2_st, maximum_number_of_points<Basis::Fourier> + 1>>(
+        [compute_matrix](const size_t n_parent, const size_t n_child) {
+          return compute_matrix(
+              Basis::Fourier, Quadrature::Equiangular, n_parent, Basis::Fourier,
+              Quadrature::Equiangular, n_child, SegmentSize::Full);
+        });
     if (parent_mesh.basis(0) == Basis::Legendre) {
       return cache_legendre(parent_mesh.quadrature(0), parent_mesh.extents(0),
                             child_mesh.quadrature(0), child_mesh.extents(0),
@@ -208,26 +207,26 @@ const Matrix& projection_matrix_child_to_parent(const Mesh<1>& child_mesh,
 
             return projection;
           };
-      const static auto cache_legendre =
-          make_runtime_cache<CacheEnumeration<Quadrature, Quadrature::Gauss,
-                                             Quadrature::GaussLobatto>,
-                            CacheRange<2_st, max_points_l + 1>,
-                            CacheEnumeration<Quadrature, Quadrature::Gauss,
-                                             Quadrature::GaussLobatto>,
-                            CacheRange<2_st, max_points_l + 1>>(
-              [compute_matrix](const Quadrature q_parent, const size_t n_parent,
-                               const Quadrature q_child, const size_t n_child) {
-                return compute_matrix(Basis::Legendre, q_parent, n_parent,
-                                      Basis::Legendre, q_child, n_child);
-              });
-      const static auto cache_fourier =
-          make_runtime_cache<CacheRange<2_st, max_points_f + 1>,
-                            CacheRange<2_st, max_points_f + 1>>(
-              [compute_matrix](const size_t n_parent, const size_t n_child) {
-                return compute_matrix(Basis::Fourier, Quadrature::Equiangular,
-                                      n_parent, Basis::Fourier,
-                                      Quadrature::Equiangular, n_child);
-              });
+      const static auto cache_legendre = make_runtime_cache<
+          CacheEnumeration<Quadrature, Quadrature::Gauss,
+                           Quadrature::GaussLobatto>,
+          CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
+          CacheEnumeration<Quadrature, Quadrature::Gauss,
+                           Quadrature::GaussLobatto>,
+          CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>>(
+          [compute_matrix](const Quadrature q_parent, const size_t n_parent,
+                           const Quadrature q_child, const size_t n_child) {
+            return compute_matrix(Basis::Legendre, q_parent, n_parent,
+                                  Basis::Legendre, q_child, n_child);
+          });
+      const static auto cache_fourier = make_runtime_cache<
+          CacheRange<2_st, maximum_number_of_points<Basis::Fourier> + 1>,
+          CacheRange<2_st, maximum_number_of_points<Basis::Fourier> + 1>>(
+          [compute_matrix](const size_t n_parent, const size_t n_child) {
+            return compute_matrix(Basis::Fourier, Quadrature::Equiangular,
+                                  n_parent, Basis::Fourier,
+                                  Quadrature::Equiangular, n_child);
+          });
       if (parent_mesh.basis(0) == Basis::Legendre) {
         return cache_legendre(parent_mesh.quadrature(0), parent_mesh.extents(0),
                               child_mesh.quadrature(0), child_mesh.extents(0));
@@ -241,10 +240,10 @@ const Matrix& projection_matrix_child_to_parent(const Mesh<1>& child_mesh,
       const static auto cache = make_runtime_cache<
           CacheEnumeration<Quadrature, Quadrature::Gauss,
                            Quadrature::GaussLobatto>,
-          CacheRange<2_st, max_points_l + 1>,
+          CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
           CacheEnumeration<Quadrature, Quadrature::Gauss,
                            Quadrature::GaussLobatto>,
-          CacheRange<2_st, max_points_l + 1>>(
+          CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>>(
           [](const Quadrature quadrature_element, const size_t extents_element,
              const Quadrature quadrature_mortar, const size_t extents_mortar) {
             const Mesh<1> mesh_element(extents_element, Basis::Legendre,
@@ -318,38 +317,36 @@ const Matrix& projection_matrix_child_to_parent(const Mesh<1>& child_mesh,
     }
 
     case SegmentSize::LowerHalf: {
-      const static auto cache =
-          make_runtime_cache<CacheEnumeration<Quadrature, Quadrature::Gauss,
-                                             Quadrature::GaussLobatto>,
-                            CacheRange<2_st, max_points_l + 1>,
-                            CacheEnumeration<Quadrature, Quadrature::Gauss,
-                                             Quadrature::GaussLobatto>,
-                            CacheRange<2_st, max_points_l + 1>>(
-              [](const Quadrature quadrature_element,
-                 const size_t extents_element,
-                 const Quadrature quadrature_mortar,
-                 const size_t extents_mortar) {
-                const Mesh<1> mesh_element(extents_element, Basis::Legendre,
-                                           quadrature_element);
-                const Mesh<1> mesh_mortar(extents_mortar, Basis::Legendre,
-                                          quadrature_mortar);
+      const static auto cache = make_runtime_cache<
+          CacheEnumeration<Quadrature, Quadrature::Gauss,
+                           Quadrature::GaussLobatto>,
+          CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
+          CacheEnumeration<Quadrature, Quadrature::Gauss,
+                           Quadrature::GaussLobatto>,
+          CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>>(
+          [](const Quadrature quadrature_element, const size_t extents_element,
+             const Quadrature quadrature_mortar, const size_t extents_mortar) {
+            const Mesh<1> mesh_element(extents_element, Basis::Legendre,
+                                       quadrature_element);
+            const Mesh<1> mesh_mortar(extents_mortar, Basis::Legendre,
+                                      quadrature_mortar);
 
-                // The lower-half matrices are generated from the upper-half
-                // matrices using symmetry.
-                const auto& projection_upper_half =
-                    projection_matrix_child_to_parent(mesh_mortar, mesh_element,
-                                                      SegmentSize::UpperHalf);
+            // The lower-half matrices are generated from the upper-half
+            // matrices using symmetry.
+            const auto& projection_upper_half =
+                projection_matrix_child_to_parent(mesh_mortar, mesh_element,
+                                                  SegmentSize::UpperHalf);
 
-                Matrix projection_lower_half(extents_element, extents_mortar);
-                for (size_t i = 0; i < extents_element; ++i) {
-                  for (size_t j = 0; j < extents_mortar; ++j) {
-                    projection_lower_half(i, j) = projection_upper_half(
-                        extents_element - i - 1, extents_mortar - j - 1);
-                  }
-                }
+            Matrix projection_lower_half(extents_element, extents_mortar);
+            for (size_t i = 0; i < extents_element; ++i) {
+              for (size_t j = 0; j < extents_mortar; ++j) {
+                projection_lower_half(i, j) = projection_upper_half(
+                    extents_element - i - 1, extents_mortar - j - 1);
+              }
+            }
 
-                return projection_lower_half;
-              });
+            return projection_lower_half;
+          });
       return cache(parent_mesh.quadrature(0), parent_mesh.extents(0),
                    child_mesh.quadrature(0), child_mesh.extents(0));
     }
@@ -396,11 +393,9 @@ const MatrixViewRO& projection_matrix_child_to_parent_on_device(
   }
 
   const static auto cache = make_static_cache<
-      CacheEnumeration<Quadrature, Quadrature::Gauss,
-                       Quadrature::GaussLobatto>,
+      CacheEnumeration<Quadrature, Quadrature::Gauss, Quadrature::GaussLobatto>,
       CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
-      CacheEnumeration<Quadrature, Quadrature::Gauss,
-                       Quadrature::GaussLobatto>,
+      CacheEnumeration<Quadrature, Quadrature::Gauss, Quadrature::GaussLobatto>,
       CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
       CacheEnumeration<SegmentSize, SegmentSize::Full, SegmentSize::UpperHalf,
                        SegmentSize::LowerHalf>>(
@@ -515,44 +510,42 @@ const Matrix& projection_matrix_parent_to_child(const Mesh<1>& parent_mesh,
 
   switch (size) {
     case SegmentSize::Full: {
-      const static auto cache =
-          make_runtime_cache<CacheEnumeration<Quadrature, Quadrature::Gauss,
-                                             Quadrature::GaussLobatto>,
-                            CacheRange<2_st, max_points_l + 1>,
-                            CacheEnumeration<Quadrature, Quadrature::Gauss,
-                                             Quadrature::GaussLobatto>,
-                            CacheRange<2_st, max_points_l + 1>>(
-              make_interpolators([](const DataVector& x) { return x; }));
+      const static auto cache = make_runtime_cache<
+          CacheEnumeration<Quadrature, Quadrature::Gauss,
+                           Quadrature::GaussLobatto>,
+          CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
+          CacheEnumeration<Quadrature, Quadrature::Gauss,
+                           Quadrature::GaussLobatto>,
+          CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>>(
+          make_interpolators([](const DataVector& x) { return x; }));
       return cache(child_mesh.quadrature(0), child_mesh.extents(0),
                    parent_mesh.quadrature(0), parent_mesh.extents(0));
     }
 
     case SegmentSize::UpperHalf: {
-      const static auto cache =
-          make_runtime_cache<CacheEnumeration<Quadrature, Quadrature::Gauss,
-                                             Quadrature::GaussLobatto>,
-                            CacheRange<2_st, max_points_l + 1>,
-                            CacheEnumeration<Quadrature, Quadrature::Gauss,
-                                             Quadrature::GaussLobatto>,
-                            CacheRange<2_st, max_points_l + 1>>(
-              make_interpolators([](const DataVector& x) {
-                return DataVector{0.5 * (x + 1.)};
-              }));
+      const static auto cache = make_runtime_cache<
+          CacheEnumeration<Quadrature, Quadrature::Gauss,
+                           Quadrature::GaussLobatto>,
+          CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
+          CacheEnumeration<Quadrature, Quadrature::Gauss,
+                           Quadrature::GaussLobatto>,
+          CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>>(
+          make_interpolators(
+              [](const DataVector& x) { return DataVector{0.5 * (x + 1.)}; }));
       return cache(child_mesh.quadrature(0), child_mesh.extents(0),
                    parent_mesh.quadrature(0), parent_mesh.extents(0));
     }
 
     case SegmentSize::LowerHalf: {
-      const static auto cache =
-          make_runtime_cache<CacheEnumeration<Quadrature, Quadrature::Gauss,
-                                             Quadrature::GaussLobatto>,
-                            CacheRange<2_st, max_points_l + 1>,
-                            CacheEnumeration<Quadrature, Quadrature::Gauss,
-                                             Quadrature::GaussLobatto>,
-                            CacheRange<2_st, max_points_l + 1>>(
-              make_interpolators([](const DataVector& x) {
-                return DataVector{0.5 * (x - 1.)};
-              }));
+      const static auto cache = make_runtime_cache<
+          CacheEnumeration<Quadrature, Quadrature::Gauss,
+                           Quadrature::GaussLobatto>,
+          CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
+          CacheEnumeration<Quadrature, Quadrature::Gauss,
+                           Quadrature::GaussLobatto>,
+          CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>>(
+          make_interpolators(
+              [](const DataVector& x) { return DataVector{0.5 * (x - 1.)}; }));
       return cache(child_mesh.quadrature(0), child_mesh.extents(0),
                    parent_mesh.quadrature(0), parent_mesh.extents(0));
     }
@@ -575,11 +568,9 @@ const MatrixViewRO& projection_matrix_parent_to_child_on_device(
          "Mesh has more points than supported by its quadrature.");
 
   const static auto cache = make_static_cache<
-      CacheEnumeration<Quadrature, Quadrature::Gauss,
-                       Quadrature::GaussLobatto>,
+      CacheEnumeration<Quadrature, Quadrature::Gauss, Quadrature::GaussLobatto>,
       CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
-      CacheEnumeration<Quadrature, Quadrature::Gauss,
-                       Quadrature::GaussLobatto>,
+      CacheEnumeration<Quadrature, Quadrature::Gauss, Quadrature::GaussLobatto>,
       CacheRange<2_st, maximum_number_of_points<Basis::Legendre> + 1>,
       CacheEnumeration<SegmentSize, SegmentSize::Full, SegmentSize::UpperHalf,
                        SegmentSize::LowerHalf>>(
@@ -910,15 +901,15 @@ GENERATE_INSTANTIATIONS(INSTANTIATE, (0, 1, 2, 3),
 #undef INSTANTIATE
 #undef VECTOR
 #ifdef SPECTRE_KOKKOS
-#define INSTANTIATE(r, data)                                                   \
-  template std::array<std::reference_wrapper<const MatrixViewRO>, DIM(data)>   \
-  projection_matrix_child_to_parent_on_device(                                 \
-      const Mesh<DIM(data)>& child_mesh, const Mesh<DIM(data)>& parent_mesh,   \
-      const std::array<SegmentSize, DIM(data)>& child_sizes,                   \
-      bool operand_is_massive);                                                \
-  template std::array<std::reference_wrapper<const MatrixViewRO>, DIM(data)>   \
-  projection_matrix_parent_to_child_on_device(                                 \
-      const Mesh<DIM(data)>& parent_mesh, const Mesh<DIM(data)>& child_mesh,   \
+#define INSTANTIATE(r, data)                                                 \
+  template std::array<std::reference_wrapper<const MatrixViewRO>, DIM(data)> \
+  projection_matrix_child_to_parent_on_device(                               \
+      const Mesh<DIM(data)>& child_mesh, const Mesh<DIM(data)>& parent_mesh, \
+      const std::array<SegmentSize, DIM(data)>& child_sizes,                 \
+      bool operand_is_massive);                                              \
+  template std::array<std::reference_wrapper<const MatrixViewRO>, DIM(data)> \
+  projection_matrix_parent_to_child_on_device(                               \
+      const Mesh<DIM(data)>& parent_mesh, const Mesh<DIM(data)>& child_mesh, \
       const std::array<SegmentSize, DIM(data)>& child_sizes);
 GENERATE_INSTANTIATIONS(INSTANTIATE, (0, 1, 2, 3))
 #undef INSTANTIATE

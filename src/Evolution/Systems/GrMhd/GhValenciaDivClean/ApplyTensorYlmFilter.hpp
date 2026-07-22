@@ -20,8 +20,7 @@ namespace gsl {
 template <typename T>
 class not_null;
 }  // namespace gsl
-template <typename TagsList>
-class Variables;
+#include "DataStructures/VariablesDeclaration.hpp"
 /// \endcond
 
 namespace grmhd::GhValenciaDivClean::filter_detail {

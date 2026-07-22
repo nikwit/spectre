@@ -171,7 +171,7 @@ SetupData make_setup_data(
     const std::vector<std::array<size_t, Dim>>& initial_refinement_levels,
     const Mesh<Dim>& mesh) {
   SetupData setup{};
-  setup.element = domain::Initialization::create_initial_element(
+  setup.element = domain::create_initial_element(
       element_id, domain_object.blocks(), initial_refinement_levels);
   setup.mesh = mesh;
 

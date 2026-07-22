@@ -7,8 +7,7 @@
 
 /// \cond
 class ImexTimeStepper;
-template <typename TagsList>
-class Variables;
+#include "DataStructures/VariablesDeclaration.hpp"
 namespace Tags {
 template <typename StepperInterface>
 struct TimeStepper;

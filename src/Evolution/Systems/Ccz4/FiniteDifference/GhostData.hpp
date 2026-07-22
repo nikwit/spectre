@@ -9,8 +9,7 @@
 
 /// \cond
 class DataVector;
-template <typename T>
-class Variables;
+#include "DataStructures/VariablesDeclaration.hpp"
 /// \endcond
 
 namespace Ccz4::fd {

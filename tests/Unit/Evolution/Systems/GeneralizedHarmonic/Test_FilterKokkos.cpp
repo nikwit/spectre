@@ -15,6 +15,7 @@
 
 #include "DataStructures/DataBox/DataBox.hpp"
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/TaggedTuple.hpp"
 #include "DataStructures/VariablesKokkos.hpp"
 #include "Domain/CoordinateMaps/CoordinateMap.hpp"
 #include "Domain/CoordinateMaps/CoordinateMap.tpp"
@@ -40,7 +41,6 @@
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Serialization/RegisterDerivedClassesWithCharm.hpp"
 #include "Utilities/TMPL.hpp"
-#include "Utilities/TaggedTuple.hpp"
 
 namespace {
 
@@ -66,9 +66,11 @@ Domain<dim> make_domain() {
       maps{};
   maps.emplace_back(std::make_unique<map>(identity_map{}));
 
-  return Domain<dim>{std::move(maps), {}, {"Block0"},
-                     std::unordered_map<std::string,
-                                        std::unordered_set<std::string>>{}};
+  return Domain<dim>{
+      std::move(maps),
+      {},
+      {"Block0"},
+      std::unordered_map<std::string, std::unordered_set<std::string>>{}};
 }
 
 }  // namespace
@@ -96,8 +98,8 @@ SPECTRE_TEST_CASE("Unit.Evolution.Systems.GeneralizedHarmonic.FilterKokkos",
   auto& phi = get<phi_tag>(host_vars);
   for (size_t c = 0; c < spacetime_metric.size(); ++c) {
     for (size_t s = 0; s < mesh.number_of_grid_points(); ++s) {
-      spacetime_metric[c][s] = 0.1 * static_cast<double>(c) +
-                               static_cast<double>(s);
+      spacetime_metric[c][s] =
+          0.1 * static_cast<double>(c) + static_cast<double>(s);
       pi[c][s] = 10.0 + 0.2 * static_cast<double>(c) + static_cast<double>(s);
     }
   }
@@ -109,15 +111,14 @@ SPECTRE_TEST_CASE("Unit.Evolution.Systems.GeneralizedHarmonic.FilterKokkos",
 
   const filter_type filter{18.0, 8, true, std::nullopt};
 
-  auto box =
-      db::create<db::AddSimpleTags<domain::Tags::Mesh<dim>,
-                                   domain::Tags::Element<dim>,
-                                   device_variables_tag>>(mesh, element,
-                                                          copy_to_device(
-                                                              host_vars));
-  auto host_box = db::create<db::AddSimpleTags<
-      domain::Tags::Mesh<dim>, domain::Tags::Element<dim>,
-      typename gh_system::variables_tag>>(mesh, element, host_vars);
+  auto box = db::create<
+      db::AddSimpleTags<domain::Tags::Mesh<dim>, domain::Tags::Element<dim>,
+                        device_variables_tag>>(mesh, element,
+                                               copy_to_device(host_vars));
+  auto host_box = db::create<
+      db::AddSimpleTags<domain::Tags::Mesh<dim>, domain::Tags::Element<dim>,
+                        typename gh_system::variables_tag>>(mesh, element,
+                                                            host_vars);
   tuples::TaggedTuple<> inboxes{};
 
   Parallel::GlobalCache<FilterKokkosMetavars> cache{

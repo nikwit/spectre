@@ -16,8 +16,7 @@
 
 /// \cond
 class DataVector;
-template <typename TagsList>
-class Variables;
+#include "DataStructures/VariablesDeclaration.hpp"
 namespace gsl {
 template <class T>
 class not_null;

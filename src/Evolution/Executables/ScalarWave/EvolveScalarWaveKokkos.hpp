@@ -63,8 +63,8 @@
 #include "PointwiseFunctions/InitialDataUtilities/NumericData.hpp"
 #include "PointwiseFunctions/MathFunctions/Factory.hpp"
 #include "PointwiseFunctions/MathFunctions/MathFunction.hpp"
-#include "Time/Actions/AdvanceTime.hpp"
 #include "Time/Actions/SelfStartActions.hpp"
+#include "Time/AdvanceTime.hpp"
 #include "Time/ChangeSlabSize/Action.hpp"
 #include "Time/ChangeSlabSize/Tags.hpp"
 #include "Time/StepChoosers/ByBlock.hpp"
@@ -179,8 +179,8 @@ struct EvolutionMetavarsKokkos {
 
   using initialization_actions = tmpl::list<
       Initialization::Actions::InitializeItems<
-          Initialization::TimeStepping<EvolutionMetavarsKokkos,
-                                       TimeStepperBase>,
+          Initialization::TimeStepping<EvolutionMetavarsKokkos, TimeStepperBase,
+                                       false>,
           evolution::dg::Initialization::Domain<EvolutionMetavarsKokkos>,
           Initialization::TimeStepperHistory<EvolutionMetavarsKokkos>>,
       Initialization::Actions::NonconservativeSystem<system>,
@@ -215,10 +215,11 @@ struct EvolutionMetavarsKokkos {
                                             Parallel::Actions::TerminatePhase>>,
           Parallel::PhaseActions<
               Parallel::Phase::Evolve,
-              tmpl::list<
-                  evolution::Actions::RunEventsAndTriggers<local_time_stepping>,
-                  Actions::ChangeSlabSize, step_actions, Actions::AdvanceTime,
-                  PhaseControl::Actions::ExecutePhaseChange>>>>;
+              tmpl::list<evolution::Actions::RunEventsAndTriggers<
+                             Triggers::WhenToCheck::AtSlabs>,
+                         Actions::ChangeSlabSize, step_actions,
+                         Actions::MutateApply<AdvanceTime<>>,
+                         PhaseControl::Actions::ExecutePhaseChange>>>>;
 
   using component_list =
       tmpl::list<observers::Observer<EvolutionMetavarsKokkos>,

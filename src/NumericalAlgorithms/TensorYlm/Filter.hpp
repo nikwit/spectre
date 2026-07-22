@@ -13,8 +13,7 @@
 
 /// \cond
 class DataVector;
-template <typename TagsList>
-class Variables;
+#include "DataStructures/VariablesDeclaration.hpp"
 /// \endcond
 
 namespace ylm::TensorYlm {

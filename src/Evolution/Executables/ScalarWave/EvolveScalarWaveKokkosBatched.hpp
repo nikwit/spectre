@@ -41,7 +41,7 @@
 #include "PointwiseFunctions/InitialDataUtilities/Tags/InitialData.hpp"
 #include "PointwiseFunctions/MathFunctions/Factory.hpp"
 #include "PointwiseFunctions/MathFunctions/MathFunction.hpp"
-#include "Time/Actions/AdvanceTime.hpp"
+#include "Time/AdvanceTime.hpp"
 #include "Time/Tags/Time.hpp"
 #include "Time/Tags/TimeStep.hpp"
 #include "Time/Tags/TimeStepId.hpp"
@@ -70,23 +70,23 @@ struct ScalarWaveKokkosBatchedDriver {
   using phase_dependent_action_list = tmpl::list<
       Parallel::PhaseActions<
           Parallel::Phase::Initialization,
-          tmpl::list<
-              Initialization::Actions::InitializeItems<
-                  Initialization::TimeStepping<
-                      Metavariables, typename Metavariables::TimeStepperBase>,
-                  ScalarWave::Batched::Initialization::DriverState>,
-              Actions::MutateApply<ScalarWave::Batched::Actions::
-                                       InitializeDriver<Metavariables>>,
-              Actions::MutateApply<ScalarWave::Batched::Actions::
-                                       InitializeBoundaryBatchMetadata>,
-              Parallel::Actions::TerminatePhase>>,
+          tmpl::list<Initialization::Actions::InitializeItems<
+                         Initialization::TimeStepping<
+                             Metavariables,
+                             typename Metavariables::TimeStepperBase, false>,
+                         ScalarWave::Batched::Initialization::DriverState>,
+                     Actions::MutateApply<ScalarWave::Batched::Actions::
+                                              InitializeDriver<Metavariables>>,
+                     Actions::MutateApply<ScalarWave::Batched::Actions::
+                                              InitializeBoundaryBatchMetadata>,
+                     Parallel::Actions::TerminatePhase>>,
       Parallel::PhaseActions<Parallel::Phase::Register,
                              tmpl::list<Parallel::Actions::TerminatePhase>>,
       Parallel::PhaseActions<
           Parallel::Phase::Evolve,
           tmpl::list<
               evolution::Actions::RunEventsAndTriggers<
-                  Metavariables::local_time_stepping>,
+                  Triggers::WhenToCheck::AtSlabs>,
               Actions::MutateApply<
                   ScalarWave::Batched::Actions::ComputeTimeDerivativeBatched>,
               Actions::MutateApply<
@@ -105,7 +105,7 @@ struct ScalarWaveKokkosBatchedDriver {
                   typename Metavariables::system>>,
               Actions::MutateApply<evolution::Actions::Kokkos::CleanHistory<
                   typename Metavariables::system>>,
-              Actions::AdvanceTime>>>;
+              Actions::MutateApply<AdvanceTime<>>>>>;
 
   using simple_tags_from_options = Parallel::get_simple_tags_from_options<
       Parallel::get_initialization_actions_list<phase_dependent_action_list>>;

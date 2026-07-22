@@ -341,7 +341,7 @@ SetupData make_setup_data(
     const Mesh<Dim>& mesh,
     const domain::FunctionsOfTimeMap& functions_of_time) {
   SetupData setup{};
-  setup.element = domain::Initialization::create_initial_element(
+  setup.element = domain::create_initial_element(
       element_id, domain_object.blocks(), initial_refinement_levels);
   setup.mesh = mesh;
 

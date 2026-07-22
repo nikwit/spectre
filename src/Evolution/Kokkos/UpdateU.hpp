@@ -9,6 +9,7 @@
 
 #include "Evolution/Kokkos/PackedTags.hpp"
 #include "Time/Kokkos/UpdateU.hpp"
+#include "Time/Tags/StepperErrorTolerancesCompute.hpp"
 #include "Time/Tags/TimeStep.hpp"
 #include "Time/Tags/TimeStepId.hpp"
 #include "Time/Tags/TimeStepper.hpp"
@@ -28,6 +29,8 @@ struct UpdateU {
       evolution::Kokkos::Tags::PackedEvolutionState<System>;
 
  public:
+  using compute_tags =
+      tmpl::list<::Tags::StepperErrorEstimatesEnabledCompute<false>>;
   using return_tags = tmpl::list<packed_evolution_state_tag>;
   using argument_tags = tmpl::list<::Tags::TimeStepper<TimeStepper>,
                                    ::Tags::TimeStepId, ::Tags::TimeStep>;

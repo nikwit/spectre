@@ -24,8 +24,7 @@
 /// \cond
 template <size_t Dim>
 class Mesh;
-template <typename TagsList>
-class Variables;
+#include "DataStructures/VariablesDeclaration.hpp"
 namespace PUP {
 class er;
 }  // namespace PUP

@@ -113,7 +113,7 @@ struct DriverState {
       }
 
       for (const auto& element_id : block_element_ids) {
-        const auto element = ::domain::Initialization::create_initial_element(
+        const auto element = ::domain::create_initial_element(
             element_id, domain.blocks(), initial_refinement_levels);
         packed_topology->element_index_by_id.insert_or_assign(
             element_id, packed_topology->local_element_ids.size());

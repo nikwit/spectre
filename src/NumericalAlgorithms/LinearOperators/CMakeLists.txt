@@ -11,6 +11,7 @@ spectre_target_sources(
   CoefficientTransforms.cpp
   DefiniteIntegral.cpp
   Divergence.cpp
+  ExponentialFilter.cpp
   IndefiniteIntegral.cpp
   Linearize.cpp
   PartialDerivatives.cpp
@@ -27,6 +28,7 @@ spectre_target_headers(
   DefiniteIntegral.hpp
   Divergence.hpp
   Divergence.tpp
+  ExponentialFilter.hpp
   IndefiniteIntegral.hpp
   Linearize.hpp
   MeanValue.hpp

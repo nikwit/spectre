@@ -30,6 +30,7 @@
 #include "ParallelAlgorithms/Actions/MutateApply.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/GaugeWave.hpp"
 #include "Time/Actions/SelfStartActions.hpp"
+#include "Time/AdvanceTime.hpp"
 #include "Time/ChangeSlabSize/Action.hpp"
 #include "Time/ChangeSlabSize/Tags.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
@@ -98,8 +99,8 @@ struct EvolutionMetavarsKokkos {
 
   using initialization_actions = tmpl::list<
       Initialization::Actions::InitializeItems<
-          Initialization::TimeStepping<EvolutionMetavarsKokkos,
-                                       TimeStepperBase>,
+          Initialization::TimeStepping<EvolutionMetavarsKokkos, TimeStepperBase,
+                                       false>,
           evolution::dg::Initialization::Domain<EvolutionMetavarsKokkos, false>,
           Initialization::TimeStepperHistory<EvolutionMetavarsKokkos>>,
       Initialization::Actions::NonconservativeSystem<system>,
@@ -148,9 +149,9 @@ struct EvolutionMetavarsKokkos {
           Parallel::PhaseActions<
               Parallel::Phase::Evolve,
               tmpl::list<::evolution::Actions::RunEventsAndTriggers<
-                             local_time_stepping>,
+                             Triggers::WhenToCheck::AtSlabs>,
                          Actions::ChangeSlabSize, step_actions,
-                         Actions::AdvanceTime,
+                         Actions::MutateApply<AdvanceTime<>>,
                          PhaseControl::Actions::ExecutePhaseChange>>>>>;
 
   struct registration

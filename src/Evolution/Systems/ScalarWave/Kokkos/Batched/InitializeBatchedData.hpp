@@ -181,9 +181,8 @@ struct InitializeBatchedData {
                      "EvolveScalarWaveKokkosBatched initial-data packing "
                      "currently supports only time-independent blocks.");
 
-              const auto element =
-                  ::domain::Initialization::create_initial_element(
-                      element_id, domain.blocks(), initial_refinement_levels);
+              const auto element = ::domain::create_initial_element(
+                  element_id, domain.blocks(), initial_refinement_levels);
               const auto mesh = ::domain::Initialization::create_initial_mesh(
                   initial_extents, element, quadrature);
               if (not have_uniform_mesh_metadata) {

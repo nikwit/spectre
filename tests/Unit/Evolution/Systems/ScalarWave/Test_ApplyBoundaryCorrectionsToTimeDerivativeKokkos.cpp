@@ -15,6 +15,7 @@
 #include "DataStructures/DataBox/PrefixHelpers.hpp"
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/TaggedTuple.hpp"
 #include "DataStructures/Variables.hpp"
 #include "DataStructures/VariablesKokkos.hpp"
 #include "Domain/CoordinateMaps/CoordinateMap.hpp"
@@ -50,7 +51,6 @@
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
 #include "Utilities/TMPL.hpp"
-#include "Utilities/TaggedTuple.hpp"
 
 namespace {
 constexpr size_t Dim = 3;
@@ -135,7 +135,7 @@ SetupData make_setup_data(
     const std::vector<std::array<size_t, Dim>>& initial_refinement_levels,
     const Mesh<Dim>& mesh) {
   SetupData setup{};
-  setup.element = domain::Initialization::create_initial_element(
+  setup.element = domain::create_initial_element(
       element_id, domain_object.blocks(), initial_refinement_levels);
   setup.mesh = mesh;
 

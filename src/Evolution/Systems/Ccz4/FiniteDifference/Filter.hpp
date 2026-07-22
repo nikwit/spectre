@@ -21,8 +21,7 @@
 class DataVector;
 template <size_t Dim>
 class Mesh;
-template <typename TagsList>
-class Variables;
+#include "DataStructures/VariablesDeclaration.hpp"
 namespace evolution::dg::subcell {
 class GhostData;
 }  // namespace evolution::dg::subcell

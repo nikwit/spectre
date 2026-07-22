@@ -9,6 +9,7 @@
 
 #include "DataStructures/DataBox/DataBox.hpp"
 #include "DataStructures/Matrix.hpp"
+#include "DataStructures/TaggedTuple.hpp"
 #include "DataStructures/VariablesKokkos.hpp"
 #include "Domain/Creators/Tags/Domain.hpp"
 #include "Domain/Structure/BlockGroups.hpp"
@@ -30,7 +31,6 @@
 #include "Utilities/Literals.hpp"
 #include "Utilities/StaticCache.hpp"
 #include "Utilities/TMPL.hpp"
-#include "Utilities/TaggedTuple.hpp"
 
 namespace gh::Actions {
 

@@ -53,6 +53,8 @@
 #include "Evolution/Tags/Filter.hpp"
 #include "IO/Observer/ObserverComponent.hpp"
 #include "NumericalAlgorithms/LinearOperators/ExponentialFilter.hpp"
+#include "NumericalAlgorithms/Strahlkorper/IO/InitialShapeFromFile.hpp"
+#include "NumericalAlgorithms/Strahlkorper/InitialShape.hpp"
 #include "Options/String.hpp"
 #include "Parallel/Algorithms/AlgorithmSingleton.hpp"
 #include "Parallel/GlobalCache.hpp"
@@ -66,9 +68,11 @@
 #include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/ObserveFieldsOnHorizon.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/ObserveTimeSeriesOnHorizon.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Component.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/Criteria/Factory.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Destination.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/FindApparentHorizon.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/HorizonAliases.hpp"
+#include "ParallelAlgorithms/ApparentHorizonFinder/KerrSchild.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Protocols/HorizonMetavars.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Tags.hpp"
 #include "ParallelAlgorithms/EventsAndDenseTriggers/DenseTrigger.hpp"
@@ -80,7 +84,7 @@
 #include "ParallelAlgorithms/EventsAndTriggers/Trigger.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/WhenToCheck.hpp"
 #include "ParallelAlgorithms/Interpolation/Targets/Sphere.hpp"
-#include "Time/Actions/AdvanceTime.hpp"
+#include "Time/AdvanceTime.hpp"
 #include "Time/Slab.hpp"
 #include "Time/Tags/TimeStep.hpp"
 #include "Time/Tags/TimeStepId.hpp"
@@ -276,7 +280,8 @@ struct GhBinaryBlackHoleKokkosDriver {
           tmpl::list<
               Initialization::Actions::InitializeItems<
                   Initialization::TimeStepping<
-                      Metavariables, typename Metavariables::TimeStepperBase>,
+                      Metavariables, typename Metavariables::TimeStepperBase,
+                      true>,
                   gh::Batched::Initialization::DriverState,
                   gh::Batched::Initialization::ControlSystemMeasurements<
                       Metavariables>,
@@ -293,7 +298,8 @@ struct GhBinaryBlackHoleKokkosDriver {
               // self-start phase before evolving. Runge-Kutta steppers need
               // no self-start history, so a single AdvanceTime supplies the
               // initial TimeStepId here.
-              Actions::AdvanceTime, Parallel::Actions::TerminatePhase>>,
+              Actions::MutateApply<AdvanceTime<>>,
+              Parallel::Actions::TerminatePhase>>,
       Parallel::PhaseActions<Parallel::Phase::Register,
                              tmpl::list<Parallel::Actions::TerminatePhase>>,
       Parallel::PhaseActions<
@@ -306,7 +312,7 @@ struct GhBinaryBlackHoleKokkosDriver {
                   gh::Batched::Actions::UpdateConstraintDampingBatched<
                       Metavariables, functions_of_time_tag>>,
               evolution::Actions::RunEventsAndTriggers<
-                  Metavariables::local_time_stepping>,
+                  Triggers::WhenToCheck::AtSlabs>,
               Actions::MutateApply<
                   gh::Batched::Actions::ComputeTimeDerivativeBatched>,
               Actions::MutateApply<
@@ -335,7 +341,7 @@ struct GhBinaryBlackHoleKokkosDriver {
                   Filters::Exponential<0>>>,
               Actions::MutateApply<evolution::Actions::Kokkos::CleanHistory<
                   typename Metavariables::system>>,
-              Actions::AdvanceTime>>>;
+              Actions::MutateApply<AdvanceTime<>>>>>;
 
   using simple_tags_from_options = Parallel::get_simple_tags_from_options<
       Parallel::get_initialization_actions_list<phase_dependent_action_list>>;
@@ -420,6 +426,15 @@ struct EvolutionMetavarsBinaryBlackHoleKokkos {
   struct factory_creation
       : tt::ConformsTo<Options::protocols::FactoryCreation> {
     using factory_classes = tmpl::map<
+        tmpl::pair<ah::Criterion, ah::Criteria::standard_criteria>,
+        tmpl::pair<ylm::InitialShape<Frame::Distorted>,
+                   tmpl::list<ylm::InitialShapes::Sphere<Frame::Distorted>,
+                              ylm::InitialShapes::FromFile<Frame::Distorted>,
+                              ah::InitialShapes::KerrSchild<Frame::Distorted>>>,
+        tmpl::pair<ylm::InitialShape<Frame::Inertial>,
+                   tmpl::list<ylm::InitialShapes::Sphere<Frame::Inertial>,
+                              ylm::InitialShapes::FromFile<Frame::Inertial>,
+                              ah::InitialShapes::KerrSchild<Frame::Inertial>>>,
         tmpl::pair<DomainCreator<volume_dim>, domain_creators<volume_dim>>,
         tmpl::pair<DenseTrigger,
                    control_system::control_system_triggers<control_systems>>,
@@ -472,7 +487,8 @@ struct EvolutionMetavarsBinaryBlackHoleKokkos {
                  gh::Tags::DampingFunctionGamma1<volume_dim, Frame::Grid>,
                  gh::Tags::DampingFunctionGamma2<volume_dim, Frame::Grid>,
                  Filters::Tags::Filter<Filters::Exponential<0>>,
-                 ::Tags::EventsAndTriggers<Triggers::WhenToCheck::AtSlabs>>,
+                 ::Tags::EventsAndTriggers<Triggers::WhenToCheck::AtSlabs>,
+                 control_system::Tags::DelayUpdate>,
       tmpl::transform<size_excision_target_tags,
                       tmpl::bind<intrp::Tags::Sphere, tmpl::_1>>>>;
   using mutable_global_cache_tags =

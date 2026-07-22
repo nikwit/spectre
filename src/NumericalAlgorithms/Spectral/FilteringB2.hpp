@@ -13,8 +13,7 @@ class DataVector;
 class Matrix;
 template <size_t>
 class Mesh;
-template <typename TagsList>
-class Variables;
+#include "DataStructures/VariablesDeclaration.hpp"
 /// \endcond
 
 namespace Spectral::filtering {

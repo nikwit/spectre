@@ -80,7 +80,8 @@ constexpr size_t offset_v_spacetime_metric = 0;
 constexpr size_t offset_v_zero =
     offset_v_spacetime_metric + num_spacetime_metric_components;
 constexpr size_t offset_v_plus = offset_v_zero + num_phi_components;
-constexpr size_t offset_v_minus = offset_v_plus + num_spacetime_metric_components;
+constexpr size_t offset_v_minus =
+    offset_v_plus + num_spacetime_metric_components;
 constexpr size_t offset_normal_times_v_plus =
     offset_v_minus + num_spacetime_metric_components;
 constexpr size_t offset_normal_times_v_minus =
@@ -151,7 +152,7 @@ SetupData make_setup_data(
     const std::vector<std::array<size_t, Dim>>& initial_refinement_levels,
     const Mesh<Dim>& mesh) {
   SetupData setup{};
-  setup.element = domain::Initialization::create_initial_element(
+  setup.element = domain::create_initial_element(
       element_id, domain_object.blocks(), initial_refinement_levels);
   setup.mesh = mesh;
 
@@ -169,23 +170,24 @@ SetupData make_setup_data(
   const std::array<double, 3> zero_spin{{0.0, 0.0, 0.0}};
   const std::array<double, 3> zero_center{{0.0, 0.0, 0.0}};
   const hardcoded_solution solution{1.0, zero_spin, zero_center};
-  const auto analytic_vars = solution.variables(
-      setup.inertial_coords, setup.time,
-      tmpl::list<spacetime_metric_tag, pi_tag, phi_tag>{});
+  const auto analytic_vars =
+      solution.variables(setup.inertial_coords, setup.time,
+                         tmpl::list<spacetime_metric_tag, pi_tag, phi_tag>{});
   const size_t num_points = setup.mesh.number_of_grid_points();
   setup.vars = variables_type{num_points, 0.0};
-  get<spacetime_metric_tag>(setup.vars) = get<spacetime_metric_tag>(analytic_vars);
+  get<spacetime_metric_tag>(setup.vars) =
+      get<spacetime_metric_tag>(analytic_vars);
   get<pi_tag>(setup.vars) = get<pi_tag>(analytic_vars);
   get<phi_tag>(setup.vars) = get<phi_tag>(analytic_vars);
 
   setup.gamma0 = gh::Tags::ConstraintGamma0::type{num_points, 0.0};
   setup.gamma1 = gh::Tags::ConstraintGamma1::type{num_points, 0.0};
   setup.gamma2 = gh::Tags::ConstraintGamma2::type{num_points, 0.0};
-  get(setup.gamma0) =
-      0.9 + 0.1 * setup.inertial_coords.get(0) - 0.05 * setup.inertial_coords.get(1);
+  get(setup.gamma0) = 0.9 + 0.1 * setup.inertial_coords.get(0) -
+                      0.05 * setup.inertial_coords.get(1);
   get(setup.gamma1) = -0.1 + 0.04 * setup.inertial_coords.get(2);
-  get(setup.gamma2) =
-      0.5 + 0.07 * setup.inertial_coords.get(0) + 0.02 * setup.inertial_coords.get(1);
+  get(setup.gamma2) = 0.5 + 0.07 * setup.inertial_coords.get(0) +
+                      0.02 * setup.inertial_coords.get(1);
 
   dg::MortarMap<Dim, Mesh<Dim>> neighbor_mesh{};
   for (const auto& [direction, neighbors] : setup.element.neighbors()) {
@@ -196,7 +198,8 @@ SetupData make_setup_data(
   }
   setup.mortar_infos =
       evolution::dg::Initialization::detail::mortar_infos<Dim>(setup.element);
-  auto [mortar_meshes, mortar_next_temporal_ids, normal_covector_and_magnitude] =
+  auto [mortar_meshes, mortar_next_temporal_ids,
+        normal_covector_and_magnitude] =
       evolution::dg::Initialization::detail::mortars_apply_impl<Dim>(
           setup.element, setup.time_step_id, setup.mesh, neighbor_mesh);
   setup.mortar_meshes = std::move(mortar_meshes);
@@ -212,8 +215,8 @@ SetupData make_setup_data(
       make_not_null(&setup.device_face_unit_normal_covector),
       make_not_null(&setup.device_face_normal_magnitude),
       make_not_null(&setup.device_mortar_data), setup.inverse_jacobian,
-      setup.gamma0, setup.gamma1, setup.gamma2, setup.inertial_coords, setup.mesh,
-      setup.element, setup.mortar_meshes, setup.mortar_infos);
+      setup.gamma0, setup.gamma1, setup.gamma2, setup.inertial_coords,
+      setup.mesh, setup.element, setup.mortar_meshes, setup.mortar_infos);
   return setup;
 }
 
@@ -231,11 +234,12 @@ outgoing_boundary_data_map compute_outgoing_boundary_data(
       make_not_null(&external_boundary_data), device_vars,
       setup.device_inverse_jacobian, setup.device_inertial_coordinates,
       setup.device_gamma0, setup.device_gamma1, setup.device_gamma2,
-      setup.device_face_to_volume_index_map, setup.device_face_unit_normal_covector,
+      setup.device_face_to_volume_index_map,
+      setup.device_face_unit_normal_covector,
       setup.device_face_normal_magnitude, setup.device_mortar_data,
       setup.mortar_meshes, setup.gamma0, setup.gamma1, setup.gamma2,
-      external_boundary_conditions_by_block, setup.time, setup.mesh, setup.element,
-      setup.time_step_id);
+      external_boundary_conditions_by_block, setup.time, setup.mesh,
+      setup.element, setup.time_step_id);
   CHECK(external_boundary_data.empty());
   return outgoing_boundary_data;
 }
@@ -245,7 +249,8 @@ incoming_boundary_data_map build_incoming_boundary_data(
     const std::map<ElementId<Dim>, outgoing_boundary_data_map>&
         outgoing_by_element) {
   incoming_boundary_data_map incoming_boundary_data{};
-  for (const auto& [direction, neighbors] : receiver_setup.element.neighbors()) {
+  for (const auto& [direction, neighbors] :
+       receiver_setup.element.neighbors()) {
     REQUIRE(neighbors.size() == 1);
     const auto& sender_id = *neighbors.begin();
     const auto& orientation = neighbors.orientation(sender_id);
@@ -276,8 +281,7 @@ void unpack_packaged_boundary_data(
         normal_times_v_minus,
     const gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
         gamma2_v_spacetime_metric,
-    const gsl::not_null<tnsr::a<DataVector, Dim, Frame::Inertial>*>
-        char_speeds,
+    const gsl::not_null<tnsr::a<DataVector, Dim, Frame::Inertial>*> char_speeds,
     const ViewType& boundary_data_view, const size_t num_points) {
   for (size_t p = 0; p < num_points; ++p) {
     size_t component_index = offset_v_spacetime_metric;
@@ -367,8 +371,8 @@ double metric_normal_magnitude_at_volume_index(
   for (size_t i = 0; i < Dim; ++i) {
     unnormalized_normal_vector.get(i) = 0.0;
     for (size_t j = 0; j < Dim; ++j) {
-      unnormalized_normal_vector.get(i) +=
-          inverse_spatial_metric.get(i, j) * unnormalized_normal_covector.get(j);
+      unnormalized_normal_vector.get(i) += inverse_spatial_metric.get(i, j) *
+                                           unnormalized_normal_covector.get(j);
     }
     normal_magnitude_squared +=
         unnormalized_normal_vector.get(i) * unnormalized_normal_covector.get(i);
@@ -382,7 +386,8 @@ void add_host_boundary_corrections(
     const outgoing_boundary_data_map& local_outgoing_boundary_data,
     const incoming_boundary_data_map& incoming_boundary_data) {
   for (const auto& [direction, neighbors] : setup.element.neighbors()) {
-    const Mesh<Dim - 1> face_mesh = setup.mesh.slice_away(direction.dimension());
+    const Mesh<Dim - 1> face_mesh =
+        setup.mesh.slice_away(direction.dimension());
     dt_variables_type dt_boundary_correction_on_face_sum{
         face_mesh.number_of_grid_points(), 0.0};
 
@@ -390,14 +395,18 @@ void add_host_boundary_corrections(
       const DirectionalId<Dim> mortar_id{direction, neighbor};
       REQUIRE(local_outgoing_boundary_data.count(mortar_id) == 1);
       REQUIRE(incoming_boundary_data.count(mortar_id) == 1);
-      const auto& local_boundary_data = local_outgoing_boundary_data.at(mortar_id);
+      const auto& local_boundary_data =
+          local_outgoing_boundary_data.at(mortar_id);
       const auto& remote_boundary_data = incoming_boundary_data.at(mortar_id);
       const auto& mortar_mesh = setup.mortar_meshes.at(mortar_id);
       const auto& mortar_data = setup.device_mortar_data.at(mortar_id);
       const auto local_packaged_data_view = Kokkos::create_mirror_view_and_copy(
-          Kokkos::HostSpace{}, local_boundary_data.boundary_correction_data.view());
-      const auto remote_packaged_data_view = Kokkos::create_mirror_view_and_copy(
-          Kokkos::HostSpace{}, remote_boundary_data.boundary_correction_data.view());
+          Kokkos::HostSpace{},
+          local_boundary_data.boundary_correction_data.view());
+      const auto remote_packaged_data_view =
+          Kokkos::create_mirror_view_and_copy(
+              Kokkos::HostSpace{},
+              remote_boundary_data.boundary_correction_data.view());
       REQUIRE(local_packaged_data_view.extent(1) ==
               packaged_boundary_data_components);
       REQUIRE(remote_packaged_data_view.extent(1) ==
@@ -408,12 +417,10 @@ void add_host_boundary_corrections(
       auto& dt_spacetime_metric_on_mortar =
           get<::Tags::dt<gr::Tags::SpacetimeMetric<DataVector, Dim>>>(
               dt_boundary_correction_on_mortar);
-      auto& dt_pi_on_mortar =
-          get<::Tags::dt<gh::Tags::Pi<DataVector, Dim>>>(
-              dt_boundary_correction_on_mortar);
-      auto& dt_phi_on_mortar =
-          get<::Tags::dt<gh::Tags::Phi<DataVector, Dim>>>(
-              dt_boundary_correction_on_mortar);
+      auto& dt_pi_on_mortar = get<::Tags::dt<gh::Tags::Pi<DataVector, Dim>>>(
+          dt_boundary_correction_on_mortar);
+      auto& dt_phi_on_mortar = get<::Tags::dt<gh::Tags::Phi<DataVector, Dim>>>(
+          dt_boundary_correction_on_mortar);
       tnsr::aa<DataVector, Dim, Frame::Inertial> local_v_spacetime_metric{
           mortar_mesh.number_of_grid_points(), 0.0};
       tnsr::iaa<DataVector, Dim, Frame::Inertial> local_v_zero{
@@ -451,16 +458,18 @@ void add_host_boundary_corrections(
           mortar_mesh.number_of_grid_points(), 0.0};
 
       unpack_packaged_boundary_data(
-          make_not_null(&local_v_spacetime_metric), make_not_null(&local_v_zero),
-          make_not_null(&local_v_plus), make_not_null(&local_v_minus),
+          make_not_null(&local_v_spacetime_metric),
+          make_not_null(&local_v_zero), make_not_null(&local_v_plus),
+          make_not_null(&local_v_minus),
           make_not_null(&local_normal_times_v_plus),
           make_not_null(&local_normal_times_v_minus),
           make_not_null(&local_gamma2_v_spacetime_metric),
           make_not_null(&local_char_speeds), local_packaged_data_view,
           mortar_mesh.number_of_grid_points());
       unpack_packaged_boundary_data(
-          make_not_null(&remote_v_spacetime_metric), make_not_null(&remote_v_zero),
-          make_not_null(&remote_v_plus), make_not_null(&remote_v_minus),
+          make_not_null(&remote_v_spacetime_metric),
+          make_not_null(&remote_v_zero), make_not_null(&remote_v_plus),
+          make_not_null(&remote_v_minus),
           make_not_null(&remote_normal_times_v_plus),
           make_not_null(&remote_normal_times_v_minus),
           make_not_null(&remote_gamma2_v_spacetime_metric),
@@ -517,7 +526,8 @@ void add_host_boundary_corrections(
     }
 
     const size_t sliced_dim = direction.dimension();
-    const size_t extent_perpendicular_to_boundary = setup.mesh.extents(sliced_dim);
+    const size_t extent_perpendicular_to_boundary =
+        setup.mesh.extents(sliced_dim);
     const double lift_prefactor =
         -0.5 * static_cast<double>(extent_perpendicular_to_boundary *
                                    (extent_perpendicular_to_boundary - 1));
@@ -526,10 +536,12 @@ void add_host_boundary_corrections(
         direction.side() == Side::Upper
             ? Kokkos::create_mirror_view_and_copy(
                   Kokkos::HostSpace{},
-                  gsl::at(setup.device_face_to_volume_index_map, sliced_dim).second)
+                  gsl::at(setup.device_face_to_volume_index_map, sliced_dim)
+                      .second)
             : Kokkos::create_mirror_view_and_copy(
                   Kokkos::HostSpace{},
-                  gsl::at(setup.device_face_to_volume_index_map, sliced_dim).first);
+                  gsl::at(setup.device_face_to_volume_index_map, sliced_dim)
+                      .first);
     const auto host_face_unit_normal_covector =
         direction.side() == Side::Upper
             ? Kokkos::create_mirror_view_and_copy(
@@ -538,15 +550,18 @@ void add_host_boundary_corrections(
                       .second)
             : Kokkos::create_mirror_view_and_copy(
                   Kokkos::HostSpace{},
-                  gsl::at(setup.device_face_unit_normal_covector, sliced_dim).first);
+                  gsl::at(setup.device_face_unit_normal_covector, sliced_dim)
+                      .first);
     const auto host_face_normal_magnitude =
         direction.side() == Side::Upper
             ? Kokkos::create_mirror_view_and_copy(
                   Kokkos::HostSpace{},
-                  gsl::at(setup.device_face_normal_magnitude, sliced_dim).second)
+                  gsl::at(setup.device_face_normal_magnitude, sliced_dim)
+                      .second)
             : Kokkos::create_mirror_view_and_copy(
                   Kokkos::HostSpace{},
-                  gsl::at(setup.device_face_normal_magnitude, sliced_dim).first);
+                  gsl::at(setup.device_face_normal_magnitude, sliced_dim)
+                      .first);
 
     for (size_t face_index = 0; face_index < face_mesh.number_of_grid_points();
          ++face_index) {
@@ -579,10 +594,9 @@ void add_host_boundary_corrections(
           for (size_t d = 0; d < Dim; ++d) {
             get<::Tags::dt<gh::Tags::Phi<DataVector, Dim>>>(*host_dt_reference)
                 .get(d, a, b)[volume_index] +=
-                lifted_factor *
-                get<::Tags::dt<gh::Tags::Phi<DataVector, Dim>>>(
-                    dt_boundary_correction_on_face_sum)
-                    .get(d, a, b)[face_index];
+                lifted_factor * get<::Tags::dt<gh::Tags::Phi<DataVector, Dim>>>(
+                                    dt_boundary_correction_on_face_sum)
+                                    .get(d, a, b)[face_index];
           }
         }
       }
@@ -606,8 +620,8 @@ void test_apply_boundary_corrections_to_time_derivative_kokkos_matches_host() {
   std::map<ElementId<Dim>, outgoing_boundary_data_map> outgoing_by_element{};
   for (const auto& setup : setups) {
     outgoing_by_element.insert_or_assign(
-        setup.element.id(),
-        compute_outgoing_boundary_data(setup, domain_data.domain.blocks().size()));
+        setup.element.id(), compute_outgoing_boundary_data(
+                                setup, domain_data.domain.blocks().size()));
   }
 
   std::map<ElementId<Dim>, incoming_boundary_data_map> incoming_by_element{};
@@ -627,10 +641,11 @@ void test_apply_boundary_corrections_to_time_derivative_kokkos_matches_host() {
     gh::Actions::ApplyBoundaryCorrectionsToTimeDerivativeKokkos::apply(
         make_not_null(&device_dt), device_vars,
         outgoing_by_element.at(setup.element.id()),
-        incoming_by_element.at(setup.element.id()), external_boundary_data_map{},
-        setup.device_face_to_volume_index_map,
-        setup.device_face_unit_normal_covector, setup.device_face_normal_magnitude,
-        setup.device_mortar_data, setup.mortar_meshes, setup.mesh, setup.element);
+        incoming_by_element.at(setup.element.id()),
+        external_boundary_data_map{}, setup.device_face_to_volume_index_map,
+        setup.device_face_unit_normal_covector,
+        setup.device_face_normal_magnitude, setup.device_mortar_data,
+        setup.mortar_meshes, setup.mesh, setup.element);
 
     dt_variables_type host_dt_from_kokkos{num_points, 0.0};
     copy_to_host(make_not_null(&host_dt_from_kokkos), device_dt);
@@ -641,17 +656,15 @@ void test_apply_boundary_corrections_to_time_derivative_kokkos_matches_host() {
                                   incoming_by_element.at(setup.element.id()));
 
     const Approx approx = Approx::custom().epsilon(1e-8).scale(1.0);
-    CHECK_ITERABLE_CUSTOM_APPROX(get<::Tags::dt<spacetime_metric_tag>>(
-                                     host_dt_from_kokkos),
-                                 get<::Tags::dt<spacetime_metric_tag>>(
-                                     host_dt_reference),
+    CHECK_ITERABLE_CUSTOM_APPROX(
+        get<::Tags::dt<spacetime_metric_tag>>(host_dt_from_kokkos),
+        get<::Tags::dt<spacetime_metric_tag>>(host_dt_reference), approx);
+    CHECK_ITERABLE_CUSTOM_APPROX(get<::Tags::dt<pi_tag>>(host_dt_from_kokkos),
+                                 get<::Tags::dt<pi_tag>>(host_dt_reference),
                                  approx);
-    CHECK_ITERABLE_CUSTOM_APPROX(
-        get<::Tags::dt<pi_tag>>(host_dt_from_kokkos),
-        get<::Tags::dt<pi_tag>>(host_dt_reference), approx);
-    CHECK_ITERABLE_CUSTOM_APPROX(
-        get<::Tags::dt<phi_tag>>(host_dt_from_kokkos),
-        get<::Tags::dt<phi_tag>>(host_dt_reference), approx);
+    CHECK_ITERABLE_CUSTOM_APPROX(get<::Tags::dt<phi_tag>>(host_dt_from_kokkos),
+                                 get<::Tags::dt<phi_tag>>(host_dt_reference),
+                                 approx);
   }
 }
 }  // namespace

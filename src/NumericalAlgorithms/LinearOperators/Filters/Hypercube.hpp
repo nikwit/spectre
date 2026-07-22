@@ -25,8 +25,7 @@ class DataVector;
 template <size_t Dim>
 class Mesh;
 class Matrix;
-template <typename TagsList>
-class Variables;
+#include "DataStructures/VariablesDeclaration.hpp"
 /// \endcond
 
 namespace Filters {

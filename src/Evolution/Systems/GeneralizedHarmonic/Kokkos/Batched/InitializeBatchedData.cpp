@@ -338,8 +338,8 @@ void InitializeBatchedDataWithTag<FunctionsOfTimeTag,
                 get<gr::Tags::Shift<DataVector, volume_dim>>(adm_vars),
                 get<gr::Tags::ExtrinsicCurvature<DataVector, volume_dim>>(
                     adm_vars),
-                mesh,
-                gsl::at(element_logical_to_inertial_inverse_jacobians, e));
+                mesh, gsl::at(element_logical_to_inertial_inverse_jacobians, e),
+                inertial_coords);
 
             // Production GH executables run SetPiAndPhiFromConstraints
             // during initialization so the initial data satisfies the
@@ -390,6 +390,8 @@ void InitializeBatchedDataWithTag<FunctionsOfTimeTag,
             const auto& mesh = gsl::at(element_meshes, e);
             const auto& inverse_jacobian =
                 gsl::at(element_logical_to_inertial_inverse_jacobians, e);
+            const auto& inertial_coords =
+                numeric_import_targets.at(element_id).first;
 
             tnsr::aa<DataVector, volume_dim, Frame::Inertial> spacetime_metric{
                 mesh.number_of_grid_points()};
@@ -400,7 +402,7 @@ void InitializeBatchedDataWithTag<FunctionsOfTimeTag,
             data_or_solution->set_initial_data(
                 make_not_null(&spacetime_metric), make_not_null(&pi),
                 make_not_null(&phi), make_not_null(&numeric_data), mesh,
-                inverse_jacobian);
+                inverse_jacobian, inertial_coords);
 
             const auto& block = domain.blocks()[element_id.block_id()];
             const auto element_map =

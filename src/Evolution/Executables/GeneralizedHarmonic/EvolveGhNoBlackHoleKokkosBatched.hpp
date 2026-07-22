@@ -49,7 +49,7 @@
 #include "ParallelAlgorithms/EventsAndTriggers/Tags.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/Trigger.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/WhenToCheck.hpp"
-#include "Time/Actions/AdvanceTime.hpp"
+#include "Time/AdvanceTime.hpp"
 #include "Time/Tags/TimeStep.hpp"
 #include "Time/Tags/TimeStepId.hpp"
 #include "Time/TimeSteppers/Factory.hpp"
@@ -72,21 +72,22 @@ struct GhKokkosBatchedDriver {
   using phase_dependent_action_list = tmpl::list<
       Parallel::PhaseActions<
           Parallel::Phase::Initialization,
-          tmpl::list<
-              Initialization::Actions::InitializeItems<
-                  Initialization::TimeStepping<
-                      Metavariables, typename Metavariables::TimeStepperBase>,
-                  gh::Batched::Initialization::DriverState>,
-              Actions::MutateApply<
-                  gh::Batched::Actions::InitializeDriver<Metavariables>>,
-              Actions::MutateApply<
-                  gh::Batched::Actions::InitializeBoundaryBatchMetadata>,
-              // Initialization::TimeStepping leaves Tags::TimeStepId
-              // undefined; production executables advance it once in the
-              // self-start phase before evolving. Runge-Kutta steppers need
-              // no self-start history, so a single AdvanceTime supplies the
-              // initial TimeStepId here.
-              Actions::AdvanceTime, Parallel::Actions::TerminatePhase>>,
+          tmpl::list<Initialization::Actions::InitializeItems<
+                         Initialization::TimeStepping<
+                             Metavariables,
+                             typename Metavariables::TimeStepperBase, false>,
+                         gh::Batched::Initialization::DriverState>,
+                     Actions::MutateApply<
+                         gh::Batched::Actions::InitializeDriver<Metavariables>>,
+                     Actions::MutateApply<
+                         gh::Batched::Actions::InitializeBoundaryBatchMetadata>,
+                     // Initialization::TimeStepping leaves Tags::TimeStepId
+                     // undefined; production executables advance it once in the
+                     // self-start phase before evolving. Runge-Kutta steppers
+                     // need no self-start history, so a single AdvanceTime
+                     // supplies the initial TimeStepId here.
+                     Actions::MutateApply<AdvanceTime<>>,
+                     Parallel::Actions::TerminatePhase>>,
       Parallel::PhaseActions<Parallel::Phase::Register,
                              tmpl::list<Parallel::Actions::TerminatePhase>>,
       Parallel::PhaseActions<
@@ -98,7 +99,7 @@ struct GhKokkosBatchedDriver {
                   gh::Batched::Actions::UpdateConstraintDampingBatched<
                       Metavariables>>,
               evolution::Actions::RunEventsAndTriggers<
-                  Metavariables::local_time_stepping>,
+                  Triggers::WhenToCheck::AtSlabs>,
               Actions::MutateApply<
                   gh::Batched::Actions::ComputeTimeDerivativeBatched>,
               Actions::MutateApply<
@@ -123,7 +124,7 @@ struct GhKokkosBatchedDriver {
                   Filters::Exponential<0>>>,
               Actions::MutateApply<evolution::Actions::Kokkos::CleanHistory<
                   typename Metavariables::system>>,
-              Actions::AdvanceTime>>>;
+              Actions::MutateApply<AdvanceTime<>>>>>;
 
   using simple_tags_from_options = Parallel::get_simple_tags_from_options<
       Parallel::get_initialization_actions_list<phase_dependent_action_list>>;

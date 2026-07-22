@@ -77,7 +77,8 @@ using d_spacetime_metric_tag =
     ::Tags::deriv<spacetime_metric_tag, tmpl::size_t<Dim>, Frame::Inertial>;
 using d_pi_tag = ::Tags::deriv<pi_tag, tmpl::size_t<Dim>, Frame::Inertial>;
 using d_phi_tag = ::Tags::deriv<phi_tag, tmpl::size_t<Dim>, Frame::Inertial>;
-using dg_package_field_tags = typename boundary_correction::dg_package_field_tags;
+using dg_package_field_tags =
+    typename boundary_correction::dg_package_field_tags;
 using packaged_data_by_mortar_map = dg::MortarMap<Dim, DataVector>;
 
 using external_boundary_conditions_type =
@@ -127,7 +128,7 @@ SetupData make_setup_data(
     const std::vector<std::array<size_t, Dim>>& initial_refinement_levels,
     const Mesh<Dim>& mesh) {
   SetupData setup{};
-  setup.element = domain::Initialization::create_initial_element(
+  setup.element = domain::create_initial_element(
       element_id, domain_object.blocks(), initial_refinement_levels);
   setup.mesh = mesh;
 
@@ -150,18 +151,19 @@ SetupData make_setup_data(
                          tmpl::list<spacetime_metric_tag, pi_tag, phi_tag>{});
   const size_t num_points = setup.mesh.number_of_grid_points();
   setup.vars = variables_type{num_points, 0.0};
-  get<spacetime_metric_tag>(setup.vars) = get<spacetime_metric_tag>(analytic_vars);
+  get<spacetime_metric_tag>(setup.vars) =
+      get<spacetime_metric_tag>(analytic_vars);
   get<pi_tag>(setup.vars) = get<pi_tag>(analytic_vars);
   get<phi_tag>(setup.vars) = get<phi_tag>(analytic_vars);
 
   setup.gamma0 = gh::Tags::ConstraintGamma0::type{num_points, 0.0};
   setup.gamma1 = gh::Tags::ConstraintGamma1::type{num_points, 0.0};
   setup.gamma2 = gh::Tags::ConstraintGamma2::type{num_points, 0.0};
-  get(setup.gamma0) =
-      0.9 + 0.1 * setup.inertial_coords.get(0) - 0.05 * setup.inertial_coords.get(1);
+  get(setup.gamma0) = 0.9 + 0.1 * setup.inertial_coords.get(0) -
+                      0.05 * setup.inertial_coords.get(1);
   get(setup.gamma1) = -0.1 + 0.04 * setup.inertial_coords.get(2);
-  get(setup.gamma2) =
-      0.5 + 0.07 * setup.inertial_coords.get(0) + 0.02 * setup.inertial_coords.get(1);
+  get(setup.gamma2) = 0.5 + 0.07 * setup.inertial_coords.get(0) +
+                      0.02 * setup.inertial_coords.get(1);
 
   setup.moving_mesh_map =
       domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
@@ -175,8 +177,8 @@ void compute_host_reference(
     const gsl::not_null<packaged_data_by_mortar_map*> packaged_data_by_mortar) {
   const size_t num_points = setup.mesh.number_of_grid_points();
   Variables<derivative_variables_tags> host_partial_derivs{num_points};
-  partial_derivatives(make_not_null(&host_partial_derivs), setup.vars, setup.mesh,
-                      setup.inverse_jacobian);
+  partial_derivatives(make_not_null(&host_partial_derivs), setup.vars,
+                      setup.mesh, setup.inverse_jacobian);
 
   using all_solutions = gh::Solutions::all_solutions<Dim>;
   const std::array<double, 3> zero_spin{{0.0, 0.0, 0.0}};
@@ -184,7 +186,8 @@ void compute_host_reference(
   gh::gauges::AnalyticChristoffel gauge_condition{
       std::make_unique<hardcoded_solution>(1.0, zero_spin, zero_center)};
 
-  tnsr::aa<DataVector, Dim, Frame::Inertial> host_dt_spacetime_metric{num_points};
+  tnsr::aa<DataVector, Dim, Frame::Inertial> host_dt_spacetime_metric{
+      num_points};
   tnsr::aa<DataVector, Dim, Frame::Inertial> host_dt_pi{num_points};
   tnsr::iaa<DataVector, Dim, Frame::Inertial> host_dt_phi{num_points};
   Variables<typename gh::TimeDerivative<all_solutions, Dim>::temporary_tags>
@@ -247,7 +250,8 @@ void compute_host_reference(
       std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>{std::nullopt});
 
   dt_reference->initialize(num_points, 0.0);
-  get<::Tags::dt<spacetime_metric_tag>>(*dt_reference) = host_dt_spacetime_metric;
+  get<::Tags::dt<spacetime_metric_tag>>(*dt_reference) =
+      host_dt_spacetime_metric;
   get<::Tags::dt<pi_tag>>(*dt_reference) = host_dt_pi;
   get<::Tags::dt<phi_tag>>(*dt_reference) = host_dt_phi;
 
@@ -279,9 +283,9 @@ void compute_host_reference(
       tmpl::append<typename system::variables_tag::tags_list, fluxes_tags,
                    temporary_tags_for_face, tmpl::list<>>;
   using all_face_temporary_tags = tmpl::remove_duplicates<tmpl::push_back<
-      tmpl::append<dg_package_data_projected_tags,
-                   evolution::dg::Actions::detail::inverse_spatial_metric_tag<
-                       system>>,
+      tmpl::append<
+          dg_package_data_projected_tags,
+          evolution::dg::Actions::detail::inverse_spatial_metric_tag<system>>,
       evolution::dg::Actions::detail::OneOverNormalVectorMagnitude,
       evolution::dg::Actions::detail::NormalVector<Dim>>>;
   using vars_face_temporaries = Variables<all_face_temporary_tags>;
@@ -565,9 +569,9 @@ void test_compute_and_package_matches_host_internal_reference() {
         make_not_null(&device_face_to_volume_index_map),
         make_not_null(&device_face_unit_normal_covector),
         make_not_null(&device_face_normal_magnitude),
-        make_not_null(&device_mortar_data), setup.inverse_jacobian, setup.gamma0,
-        setup.gamma1, setup.gamma2, setup.inertial_coords, setup.mesh,
-        setup.element, mortar_meshes, mortar_infos);
+        make_not_null(&device_mortar_data), setup.inverse_jacobian,
+        setup.gamma0, setup.gamma1, setup.gamma2, setup.inertial_coords,
+        setup.mesh, setup.element, mortar_meshes, mortar_infos);
 
     typename gh::KokkosTags::OutgoingBoundaryCorrectionData<Dim>::type
         outgoing_boundary_data{};
@@ -582,9 +586,8 @@ void test_compute_and_package_matches_host_internal_reference() {
         device_gamma1, device_gamma2, device_face_to_volume_index_map,
         device_face_unit_normal_covector, device_face_normal_magnitude,
         device_mortar_data, mortar_meshes, setup.gamma0, setup.gamma1,
-        setup.gamma2,
-        external_boundary_conditions_by_block, setup.time, setup.mesh,
-        setup.element, setup.time_step_id);
+        setup.gamma2, external_boundary_conditions_by_block, setup.time,
+        setup.mesh, setup.element, setup.time_step_id);
 
     dt_variables_type dt_kokkos{setup.mesh.number_of_grid_points(), 0.0};
     copy_to_host(make_not_null(&dt_kokkos), device_dt);
@@ -595,13 +598,14 @@ void test_compute_and_package_matches_host_internal_reference() {
                            make_not_null(&host_packaged_data_by_mortar));
 
     const Approx approx = Approx::custom().epsilon(1e-10).scale(1.0);
-    CHECK_ITERABLE_CUSTOM_APPROX(get<::Tags::dt<spacetime_metric_tag>>(dt_kokkos),
-                                 get<::Tags::dt<spacetime_metric_tag>>(dt_reference),
-                                 approx);
+    CHECK_ITERABLE_CUSTOM_APPROX(
+        get<::Tags::dt<spacetime_metric_tag>>(dt_kokkos),
+        get<::Tags::dt<spacetime_metric_tag>>(dt_reference), approx);
     CHECK_ITERABLE_CUSTOM_APPROX(get<::Tags::dt<pi_tag>>(dt_kokkos),
                                  get<::Tags::dt<pi_tag>>(dt_reference), approx);
     CHECK_ITERABLE_CUSTOM_APPROX(get<::Tags::dt<phi_tag>>(dt_kokkos),
-                                 get<::Tags::dt<phi_tag>>(dt_reference), approx);
+                                 get<::Tags::dt<phi_tag>>(dt_reference),
+                                 approx);
 
     CHECK(outgoing_boundary_data.size() == setup.element.number_of_neighbors());
     CHECK(external_boundary_data.empty());
