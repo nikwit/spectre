@@ -75,6 +75,8 @@ struct PackedGeometry {
       ::Kokkos::View<double***, ::Kokkos::LayoutRight>;
   using host_inverse_jacobian_cache_type =
       ::Kokkos::View<double***, ::Kokkos::LayoutRight, ::Kokkos::HostSpace>;
+  using device_affine_map_data_type =
+      ::Kokkos::View<double**, ::Kokkos::LayoutRight>;
   std::array<DataVector, volume_dim> grid_coordinates_host{};
   std::array<DataVector, volume_dim> distorted_coordinates_host{};
   std::array<DataVector, volume_dim> inertial_coordinates_host{};
@@ -101,6 +103,12 @@ struct PackedGeometry {
   // later group-by-map-kind launch optimization). Empty until built.
   std::vector<int> element_map_kind_host{};
   ::Kokkos::View<int*> element_map_kind_device{};
+  // Per-element coefficients for maps classified as ComposedAffine. The
+  // packed layout contains the coordinate matrix and translation, the affine
+  // frame-velocity matrix and translation, and the grid-to-inertial inverse
+  // Jacobian. Coefficients are refreshed once per stage and consumed directly
+  // by the device frame-field kernel.
+  device_affine_map_data_type affine_map_data_device{};
   // Name of the single scalar function of time driving the on-device
   // time-dependent map blocks (empty if there are none): the rotation angle for
   // RigidRotationZ or the scale factor for UniformRadialScaling. Its value and

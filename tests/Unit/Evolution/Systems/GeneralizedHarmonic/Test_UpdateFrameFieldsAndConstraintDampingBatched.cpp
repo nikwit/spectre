@@ -14,6 +14,7 @@
 #include "Domain/Creators/TimeDependence/UniformTranslation.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Harmonic.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/BatchedMapPlan.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/DriverState.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/InitializeBatchedData.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/UpdateConstraintDampingBatched.hpp"
@@ -231,6 +232,12 @@ void test_update_frame_fields_and_constraint_damping_batched() {
     gh::Actions::UpdateFrameFieldsBatched::apply(
         make_not_null(&packed_geometry), packed_topology, domain,
         functions_of_time, time);
+    REQUIRE(packed_geometry.element_map_kind_host.size() ==
+            packed_topology.local_element_ids.size());
+    for (const int map_kind : packed_geometry.element_map_kind_host) {
+      CHECK(map_kind ==
+            static_cast<int>(gh::Actions::BatchedMapKind::ComposedAffine));
+    }
     check_domain_static_caches_unchanged(domain_static_cache_snapshot,
                                          packed_geometry);
     gh::Actions::UpdateConstraintDampingBatched::apply(

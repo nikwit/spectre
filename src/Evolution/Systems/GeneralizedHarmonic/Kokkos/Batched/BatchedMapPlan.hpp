@@ -44,7 +44,54 @@ enum class BatchedMapKind : int {
   /// scale factor and its time derivative; see
   /// uniform_radial_scaling_frame_fields.
   UniformRadialScaling = 3,
+  /// A general affine map, x^i = A^i_j xi^j + b^i, with affine frame
+  /// velocity. The matrix, translation, their time derivatives, and the
+  /// inverse Jacobian are inferred and verified from the host map at every
+  /// stage, then evaluated for all grid points on the device. This supports
+  /// composed rotations (including quaternion-driven rotations), uniform
+  /// expansion, and translations without introspecting type-erased maps.
+  ComposedAffine = 4,
 };
+
+template <size_t Dim>
+struct AffineMapData {
+  static constexpr size_t matrix_offset = 0;
+  static constexpr size_t translation_offset = Dim * Dim;
+  static constexpr size_t velocity_matrix_offset = translation_offset + Dim;
+  static constexpr size_t velocity_translation_offset =
+      velocity_matrix_offset + Dim * Dim;
+  static constexpr size_t inverse_jacobian_offset =
+      velocity_translation_offset + Dim;
+  static constexpr size_t size = inverse_jacobian_offset + Dim * Dim;
+};
+
+template <size_t Dim>
+KOKKOS_INLINE_FUNCTION void composed_affine_frame_fields(
+    const double (&grid_coords)[Dim], const double* const affine_data,
+    double (&inertial_coords)[Dim], double (&mesh_velocity)[Dim],
+    double (&grid_to_inertial_inverse_jacobian)[Dim * Dim]) {
+  for (size_t inertial_d = 0; inertial_d < Dim; ++inertial_d) {
+    inertial_coords[inertial_d] =
+        affine_data[AffineMapData<Dim>::translation_offset + inertial_d];
+    mesh_velocity[inertial_d] =
+        affine_data[AffineMapData<Dim>::velocity_translation_offset +
+                    inertial_d];
+    for (size_t grid_d = 0; grid_d < Dim; ++grid_d) {
+      inertial_coords[inertial_d] +=
+          affine_data[AffineMapData<Dim>::matrix_offset + inertial_d * Dim +
+                      grid_d] *
+          grid_coords[grid_d];
+      mesh_velocity[inertial_d] +=
+          affine_data[AffineMapData<Dim>::velocity_matrix_offset +
+                      inertial_d * Dim + grid_d] *
+          grid_coords[grid_d];
+    }
+  }
+  for (size_t component = 0; component < Dim * Dim; ++component) {
+    grid_to_inertial_inverse_jacobian[component] =
+        affine_data[AffineMapData<Dim>::inverse_jacobian_offset + component];
+  }
+}
 
 /// \brief Closed-form grid-to-inertial frame fields for a rigid rotation about
 /// the z-axis through the origin.
@@ -66,8 +113,8 @@ enum class BatchedMapKind : int {
 ///   Jacobian.
 KOKKOS_INLINE_FUNCTION void rigid_rotation_z_frame_fields(
     const double grid_x, const double grid_y, const double grid_z,
-    const double theta, const double theta_dot,
-    double (&inertial_coords)[3], double (&mesh_velocity)[3],
+    const double theta, const double theta_dot, double (&inertial_coords)[3],
+    double (&mesh_velocity)[3],
     double (&grid_to_inertial_inverse_jacobian)[9]) {
   const double cos_theta = cos(theta);
   const double sin_theta = sin(theta);

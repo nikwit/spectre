@@ -198,10 +198,15 @@ void update_frame_fields_device(
   const auto element_inverse_jacobian =
       packed_geometry->element_inverse_jacobian_device;
   const auto element_map_kind = packed_geometry->element_map_kind_device;
+  const auto affine_map_data = packed_geometry->affine_map_data_device;
   const size_t ppe = points_per_element;
   constexpr int static_kind = static_cast<int>(BatchedMapKind::Static);
   constexpr int rigid_rotation_z_kind =
       static_cast<int>(BatchedMapKind::RigidRotationZ);
+  constexpr int uniform_radial_scaling_kind =
+      static_cast<int>(BatchedMapKind::UniformRadialScaling);
+  constexpr int composed_affine_kind =
+      static_cast<int>(BatchedMapKind::ComposedAffine);
   ::Kokkos::parallel_for(
       "GhUpdateFrameFields", total_points,
       KOKKOS_LAMBDA(const int linear_index_int) {
@@ -223,17 +228,25 @@ void update_frame_fields_device(
           double inertial[3];
           double velocity[3];
           double grid_to_inertial_inv_jac[9];
-          if (kind == rigid_rotation_z_kind) {
+          if (kind == composed_affine_kind) {
+            const double grid_coords[3]{grid_coordinates.get(0)(s),
+                                        grid_coordinates.get(1)(s),
+                                        grid_coordinates.get(2)(s)};
+            composed_affine_frame_fields<VolumeDim>(
+                grid_coords, &affine_map_data(e, 0), inertial, velocity,
+                grid_to_inertial_inv_jac);
+          } else if (kind == rigid_rotation_z_kind) {
             rigid_rotation_z_frame_fields(
                 grid_coordinates.get(0)(s), grid_coordinates.get(1)(s),
                 grid_coordinates.get(2)(s), fot_value, fot_value_dot, inertial,
                 velocity, grid_to_inertial_inv_jac);
-          } else {
-            // BatchedMapKind::UniformRadialScaling
+          } else if (kind == uniform_radial_scaling_kind) {
             uniform_radial_scaling_frame_fields(
                 grid_coordinates.get(0)(s), grid_coordinates.get(1)(s),
                 grid_coordinates.get(2)(s), fot_value, fot_value_dot, inertial,
                 velocity, grid_to_inertial_inv_jac);
+          } else {
+            Kokkos::abort("Unsupported device map kind.");
           }
           for (size_t d = 0; d < VolumeDim; ++d) {
             inertial_coordinates.get(d)(s) = inertial[d];
@@ -246,14 +259,13 @@ void update_frame_fields_device(
             for (size_t inertial_d = 0; inertial_d < VolumeDim; ++inertial_d) {
               double composed = 0.0;
               for (size_t grid_d = 0; grid_d < VolumeDim; ++grid_d) {
-                composed += logical_to_grid_inverse_jacobian(
-                                e, p, logical_d * VolumeDim + grid_d) *
-                            grid_to_inertial_inv_jac[grid_d * VolumeDim +
-                                                     inertial_d];
+                composed +=
+                    logical_to_grid_inverse_jacobian(
+                        e, p, logical_d * VolumeDim + grid_d) *
+                    grid_to_inertial_inv_jac[grid_d * VolumeDim + inertial_d];
               }
-              element_inverse_jacobian(e, p,
-                                       logical_d * VolumeDim + inertial_d) =
-                  composed;
+              element_inverse_jacobian(
+                  e, p, logical_d * VolumeDim + inertial_d) = composed;
             }
           }
         }
@@ -319,9 +331,9 @@ bool verify_rigid_rotation_z(
     double inertial[3];
     double velocity[3];
     double grid_to_inertial_inv_jac[9];
-    rigid_rotation_z_frame_fields(
-        grid_coords.get(0)[p], grid_coords.get(1)[p], grid_coords.get(2)[p],
-        theta, theta_dot, inertial, velocity, grid_to_inertial_inv_jac);
+    rigid_rotation_z_frame_fields(grid_coords.get(0)[p], grid_coords.get(1)[p],
+                                  grid_coords.get(2)[p], theta, theta_dot,
+                                  inertial, velocity, grid_to_inertial_inv_jac);
     for (size_t d = 0; d < VolumeDim; ++d) {
       if (not within_tolerance(inertial_coords.get(d)[p], inertial[d])) {
         return false;
@@ -407,10 +419,161 @@ bool verify_uniform_radial_scaling(
   return true;
 }
 
-// Build the per-element device map plan once: classify every element's block
-// as Static, RigidRotationZ (verified against the host map), or HostEvaluated,
-// record the shared rotation function-of-time name, and upload the per-element
-// kind array to the device.
+// Infer a general affine grid-to-inertial map from origin and basis-vector
+// probes, then verify it against all points in a representative element. This
+// is repeated at every stage so a controlled map that ceases to be affine
+// safely returns to the host path.
+template <size_t VolumeDim>
+bool infer_composed_affine_map(
+    const gsl::not_null<std::array<double, AffineMapData<VolumeDim>::size>*>
+        affine_data,
+    const Block<VolumeDim>& block,
+    const tnsr::I<DataVector, VolumeDim, Frame::Grid>& representative_coords,
+    const double time, const domain::FunctionsOfTimeMap& functions_of_time) {
+  const size_t representative_points = representative_coords.get(0).size();
+  const size_t num_probes = VolumeDim + 1 + representative_points;
+  tnsr::I<DataVector, VolumeDim, Frame::Grid> probes{num_probes};
+  for (size_t d = 0; d < VolumeDim; ++d) {
+    probes.get(d)[0] = 0.0;
+    for (size_t basis_d = 0; basis_d < VolumeDim; ++basis_d) {
+      probes.get(d)[basis_d + 1] = d == basis_d ? 1.0 : 0.0;
+    }
+    for (size_t p = 0; p < representative_points; ++p) {
+      probes.get(d)[VolumeDim + 1 + p] = representative_coords.get(d)[p];
+    }
+  }
+
+  const auto map_data =
+      block.moving_mesh_grid_to_inertial_map().coords_frame_velocity_jacobians(
+          probes, time, functions_of_time);
+  const auto& inertial_coords = std::get<0>(map_data);
+  const auto& inverse_jacobian = std::get<1>(map_data);
+  const auto& mesh_velocity = std::get<3>(map_data);
+
+  for (size_t inertial_d = 0; inertial_d < VolumeDim; ++inertial_d) {
+    (*affine_data)[AffineMapData<VolumeDim>::translation_offset + inertial_d] =
+        inertial_coords.get(inertial_d)[0];
+    (*affine_data)[AffineMapData<VolumeDim>::velocity_translation_offset +
+                   inertial_d] = mesh_velocity.get(inertial_d)[0];
+    for (size_t grid_d = 0; grid_d < VolumeDim; ++grid_d) {
+      (*affine_data)[AffineMapData<VolumeDim>::matrix_offset +
+                     inertial_d * VolumeDim + grid_d] =
+          inertial_coords.get(inertial_d)[grid_d + 1] -
+          inertial_coords.get(inertial_d)[0];
+      (*affine_data)[AffineMapData<VolumeDim>::velocity_matrix_offset +
+                     inertial_d * VolumeDim + grid_d] =
+          mesh_velocity.get(inertial_d)[grid_d + 1] -
+          mesh_velocity.get(inertial_d)[0];
+      (*affine_data)[AffineMapData<VolumeDim>::inverse_jacobian_offset +
+                     grid_d * VolumeDim + inertial_d] =
+          inverse_jacobian.get(grid_d, inertial_d)[0];
+    }
+  }
+
+  constexpr double tolerance = 1.0e-11;
+  const auto within_tolerance = [tolerance](const double a, const double b) {
+    return std::isfinite(a) and std::isfinite(b) and
+           std::abs(a - b) <= tolerance * (1.0 + std::abs(b));
+  };
+  for (size_t p = 0; p < num_probes; ++p) {
+    for (size_t inertial_d = 0; inertial_d < VolumeDim; ++inertial_d) {
+      double expected_coord =
+          (*affine_data)[AffineMapData<VolumeDim>::translation_offset +
+                         inertial_d];
+      double expected_velocity =
+          (*affine_data)[AffineMapData<VolumeDim>::velocity_translation_offset +
+                         inertial_d];
+      for (size_t grid_d = 0; grid_d < VolumeDim; ++grid_d) {
+        expected_coord +=
+            (*affine_data)[AffineMapData<VolumeDim>::matrix_offset +
+                           inertial_d * VolumeDim + grid_d] *
+            probes.get(grid_d)[p];
+        expected_velocity +=
+            (*affine_data)[AffineMapData<VolumeDim>::velocity_matrix_offset +
+                           inertial_d * VolumeDim + grid_d] *
+            probes.get(grid_d)[p];
+      }
+      if (not within_tolerance(inertial_coords.get(inertial_d)[p],
+                               expected_coord) or
+          not within_tolerance(mesh_velocity.get(inertial_d)[p],
+                               expected_velocity)) {
+        return false;
+      }
+      for (size_t grid_d = 0; grid_d < VolumeDim; ++grid_d) {
+        if (not within_tolerance(
+                inverse_jacobian.get(grid_d, inertial_d)[p],
+                (*affine_data)
+                    [AffineMapData<VolumeDim>::inverse_jacobian_offset +
+                     grid_d * VolumeDim + inertial_d])) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+template <size_t VolumeDim>
+bool stage_composed_affine_map_data(
+    const gsl::not_null<
+        evolution::Kokkos::PackedGeometry<gh::System<VolumeDim>>*>
+        packed_geometry,
+    const evolution::Kokkos::PackedTopology<gh::System<VolumeDim>>&
+        packed_topology,
+    const Domain<VolumeDim>& domain,
+    const domain::FunctionsOfTimeMap& functions_of_time, const double time) {
+  const size_t num_elements = packed_topology.local_element_ids.size();
+  constexpr size_t affine_data_size = AffineMapData<VolumeDim>::size;
+  if (packed_geometry->affine_map_data_device.extent(0) != num_elements or
+      packed_geometry->affine_map_data_device.extent(1) != affine_data_size) {
+    packed_geometry->affine_map_data_device =
+        typename evolution::Kokkos::PackedGeometry<
+            gh::System<VolumeDim>>::device_affine_map_data_type{
+            "GhBatchedAffineMapData", num_elements, affine_data_size};
+  }
+  auto host_affine_data =
+      ::Kokkos::create_mirror_view(packed_geometry->affine_map_data_device);
+  std::map<size_t, std::array<double, affine_data_size>> data_by_block{};
+  for (size_t e = 0; e < num_elements; ++e) {
+    if (packed_geometry->element_map_kind_host[e] !=
+        static_cast<int>(BatchedMapKind::ComposedAffine)) {
+      continue;
+    }
+    const auto& element_id = packed_topology.local_element_ids[e];
+    const size_t block_id = element_id.block_id();
+    auto data = data_by_block.find(block_id);
+    if (data == data_by_block.end()) {
+      const size_t point_begin = packed_topology.element_point_offsets_host[e];
+      const size_t points_per_element = packed_topology.points_per_element;
+      tnsr::I<DataVector, VolumeDim, Frame::Grid> representative_coords{
+          points_per_element};
+      for (size_t d = 0; d < VolumeDim; ++d) {
+        for (size_t p = 0; p < points_per_element; ++p) {
+          representative_coords.get(d)[p] =
+              packed_geometry->grid_coordinates_host[d][point_begin + p];
+        }
+      }
+      std::array<double, affine_data_size> inferred_data{};
+      if (not infer_composed_affine_map<VolumeDim>(
+              make_not_null(&inferred_data), domain.blocks()[block_id],
+              representative_coords, time, functions_of_time)) {
+        return false;
+      }
+      data = data_by_block.emplace(block_id, inferred_data).first;
+    }
+    for (size_t component = 0; component < affine_data_size; ++component) {
+      host_affine_data(e, component) = data->second[component];
+    }
+  }
+  ::Kokkos::deep_copy(packed_geometry->affine_map_data_device,
+                      host_affine_data);
+  return true;
+}
+
+// Build the per-element device map plan once: classify every element's block,
+// verify the specialized and general-affine device representations against the
+// host map, record any shared scalar function-of-time name, and upload the
+// per-element kind array to the device.
 template <size_t VolumeDim>
 void build_map_plan(
     const gsl::not_null<
@@ -437,26 +600,25 @@ void build_map_plan(
       kind = cached->second;
     } else {
       kind = classify_block_map(block);
-      if (kind != BatchedMapKind::Static) {
-        // Attempt to recognize a device-supported time-dependent map. The
-        // currently supported device maps (rigid z-rotation, uniform radial
-        // scaling) each have a single scalar function of time and no distorted
-        // frame; verify the candidate closed form against the host map at this
-        // time before enabling the device path, otherwise fall back to host.
+      if (kind != BatchedMapKind::Static and not block.has_distorted_frame()) {
+        // Attempt to recognize a device-supported time-dependent map. First
+        // check the inexpensive specialized single-function maps, then infer
+        // and verify a general affine composition. Distorted-frame maps remain
+        // on the host path.
         const auto& names =
             block.moving_mesh_grid_to_inertial_map().function_of_time_names();
-        if (names.size() == 1 and not block.has_distorted_frame()) {
-          const std::string& name = *names.begin();
-          const size_t point_begin =
-              packed_topology.element_point_offsets_host[e];
-          tnsr::I<DataVector, VolumeDim, Frame::Grid> grid_coords{
-              points_per_element};
-          for (size_t d = 0; d < VolumeDim; ++d) {
-            for (size_t p = 0; p < points_per_element; ++p) {
-              grid_coords.get(d)[p] =
-                  packed_geometry->grid_coordinates_host[d][point_begin + p];
-            }
+        const size_t point_begin =
+            packed_topology.element_point_offsets_host[e];
+        tnsr::I<DataVector, VolumeDim, Frame::Grid> grid_coords{
+            points_per_element};
+        for (size_t d = 0; d < VolumeDim; ++d) {
+          for (size_t p = 0; p < points_per_element; ++p) {
+            grid_coords.get(d)[p] =
+                packed_geometry->grid_coordinates_host[d][point_begin + p];
           }
+        }
+        if (names.size() == 1) {
+          const std::string& name = *names.begin();
           if (verify_rigid_rotation_z<VolumeDim>(block, grid_coords, name, time,
                                                  functions_of_time)) {
             kind = BatchedMapKind::RigidRotationZ;
@@ -468,13 +630,20 @@ void build_map_plan(
             if (packed_geometry->device_map_function_of_time_name.empty()) {
               packed_geometry->device_map_function_of_time_name = name;
             } else {
-              ASSERT(
-                  packed_geometry->device_map_function_of_time_name == name,
-                  "Batched device maps currently require a single shared "
-                  "scalar function of time, but found both '"
-                      << packed_geometry->device_map_function_of_time_name
-                      << "' and '" << name << "'.");
+              ASSERT(packed_geometry->device_map_function_of_time_name == name,
+                     "Batched device maps currently require a single shared "
+                     "scalar function of time, but found both '"
+                         << packed_geometry->device_map_function_of_time_name
+                         << "' and '" << name << "'.");
             }
+          }
+        }
+        if (kind == BatchedMapKind::HostEvaluated) {
+          std::array<double, AffineMapData<VolumeDim>::size> affine_data{};
+          if (infer_composed_affine_map<VolumeDim>(make_not_null(&affine_data),
+                                                   block, grid_coords, time,
+                                                   functions_of_time)) {
+            kind = BatchedMapKind::ComposedAffine;
           }
         }
       }
@@ -485,8 +654,8 @@ void build_map_plan(
 
   packed_geometry->element_map_kind_device =
       ::Kokkos::View<int*>("GhBatchedElementMapKind", num_elements);
-  auto host_kind = ::Kokkos::create_mirror_view(
-      packed_geometry->element_map_kind_device);
+  auto host_kind =
+      ::Kokkos::create_mirror_view(packed_geometry->element_map_kind_device);
   for (size_t e = 0; e < num_elements; ++e) {
     host_kind(e) = packed_geometry->element_map_kind_host[e];
   }
@@ -537,17 +706,28 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
                << packed_geometry->grid_coordinates_host[d].size() << ".");
   }
 
-  // Classify each block's map once. Static and rigid-z-rotation blocks are
-  // evaluated on the device; any other time-dependent map falls back to the
-  // host path below.
+  // Classify each block's map once. Verified static, specialized scalar, and
+  // general-affine maps are evaluated on the device; unsupported maps fall
+  // back to the host path below.
   if (not packed_geometry->map_plan_initialized) {
-    ensure_static_device_geometry<volume_dim>(
-        packed_geometry, num_elements, points_per_element, total_points);
+    ensure_static_device_geometry<volume_dim>(packed_geometry, num_elements,
+                                              points_per_element, total_points);
     build_map_plan<volume_dim>(packed_geometry, packed_topology, domain,
                                functions_of_time, time);
   }
 
-  bool has_host_evaluated = false;
+  bool has_composed_affine = false;
+  for (const int kind : packed_geometry->element_map_kind_host) {
+    has_composed_affine =
+        has_composed_affine or
+        kind == static_cast<int>(BatchedMapKind::ComposedAffine);
+  }
+  const bool affine_maps_ready =
+      not has_composed_affine or
+      stage_composed_affine_map_data<volume_dim>(
+          packed_geometry, packed_topology, domain, functions_of_time, time);
+
+  bool has_host_evaluated = not affine_maps_ready;
   bool all_static = true;
   for (size_t e = 0; e < num_elements; ++e) {
     const int kind = packed_geometry->element_map_kind_host[e];
@@ -561,8 +741,8 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
   }
 
   if (not has_host_evaluated) {
-    ensure_static_device_geometry<volume_dim>(
-        packed_geometry, num_elements, points_per_element, total_points);
+    ensure_static_device_geometry<volume_dim>(packed_geometry, num_elements,
+                                              points_per_element, total_points);
     double fot_value = 0.0;
     double fot_value_dot = 0.0;
     if (not packed_geometry->device_map_function_of_time_name.empty()) {
