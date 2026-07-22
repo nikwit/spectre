@@ -10,9 +10,12 @@
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
+#include "Domain/CoordinateMaps/CoordinateMap.hpp"
+#include "Domain/CoordinateMaps/CoordinateMap.tpp"
+#include "Domain/CoordinateMaps/TimeDependent/RotScaleTrans.hpp"
 #include "Domain/Creators/Rectilinear.hpp"
-#include "Domain/Creators/TimeDependence/UniformTranslation.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
+#include "Domain/FunctionsOfTime/PiecewisePolynomial.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Harmonic.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/BatchedMapPlan.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/DriverState.hpp"
@@ -176,21 +179,29 @@ void check_frame_fields_and_damping_at_time(
 void test_update_frame_fields_and_constraint_damping_batched() {
   const std::array<double, Dim> velocity{{0.25, -0.15, 0.05}};
   const domain::creators::Rectilinear<Dim> domain_creator{
-      {{-1.2, -0.8, -0.6}},
-      {{1.1, 0.9, 0.7}},
-      {{1, 0, 0}},
-      {{4, 4, 4}},
-      {{true, true, true}},
-      {},
-      std::make_unique<
-          domain::creators::time_dependence::UniformTranslation<Dim, 0>>(
-          0.0, velocity)};
+      {{-1.2, -0.8, -0.6}}, {{1.1, 0.9, 0.7}},    {{1, 0, 0}},
+      {{4, 4, 4}},          {{true, true, true}}, {}};
 
-  const auto domain = domain_creator.create_domain();
+  auto domain = domain_creator.create_domain();
+  const std::string translation_name{"Translation"};
+  using RotScaleTrans =
+      domain::CoordinateMaps::TimeDependent::RotScaleTrans<Dim>;
+  domain.inject_time_dependent_map_for_block(
+      0, domain::make_coordinate_map_base<Frame::Grid, Frame::Inertial>(
+             RotScaleTrans{std::nullopt, std::nullopt, translation_name, 10.0,
+                           20.0, RotScaleTrans::BlockRegion::Inner}));
   const auto initial_refinement_levels =
       domain_creator.initial_refinement_levels();
   const auto initial_extents = domain_creator.initial_extents();
-  const auto functions_of_time = domain_creator.functions_of_time();
+  domain::FunctionsOfTimeMap functions_of_time{};
+  functions_of_time.emplace(
+      translation_name,
+      std::make_unique<domain::FunctionsOfTime::PiecewisePolynomial<1>>(
+          0.0,
+          std::array<DataVector, 2>{
+              DataVector{Dim, 0.0},
+              DataVector{velocity[0], velocity[1], velocity[2]}},
+          10.0));
 
   packed_topology_type packed_topology{};
   gh::Batched::Initialization::DriverState::apply(
@@ -236,6 +247,8 @@ void test_update_frame_fields_and_constraint_damping_batched() {
         functions_of_time, time);
     REQUIRE(packed_geometry.element_map_kind_host.size() ==
             packed_topology.local_element_ids.size());
+    REQUIRE(packed_geometry.block_map_descriptors_host.size() == 1);
+    REQUIRE(packed_geometry.block_map_descriptors_host[0].has_value());
     for (size_t e = 0; e < packed_geometry.element_map_kind_host.size(); ++e) {
       const auto expected_kind =
           time_index == 1 and e == 0

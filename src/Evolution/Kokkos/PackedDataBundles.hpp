@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,7 @@
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/VariablesKokkos.hpp"
+#include "Domain/CoordinateMaps/TimeDependent/MapDescriptor.hpp"
 #include "Domain/Structure/Element.hpp"
 #include "Domain/Structure/ElementId.hpp"
 #include "Evolution/Kokkos/KokkosTimeStepperTags.hpp"
@@ -103,6 +105,14 @@ struct PackedGeometry {
   // later group-by-map-kind launch optimization). Empty until built.
   std::vector<int> element_map_kind_host{};
   ::Kokkos::View<int*> element_map_kind_device{};
+  // Exact host-side descriptions of each block's grid-to-inertial map. An
+  // empty optional marks a composition containing a map that has not yet
+  // implemented the descriptor interface. These are captured once while the
+  // map plan is built and are used to stage compact device parameters without
+  // probing the type-erased coordinate map at every time step.
+  std::vector<std::optional<
+      std::vector<domain::CoordinateMaps::TimeDependent::MapDescriptor>>>
+      block_map_descriptors_host{};
   // Per-element coefficients for maps classified as ComposedAffine. The
   // packed layout contains the coordinate matrix and translation, the affine
   // frame-velocity matrix and translation, and the grid-to-inertial inverse

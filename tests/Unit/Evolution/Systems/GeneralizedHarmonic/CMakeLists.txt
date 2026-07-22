@@ -35,7 +35,6 @@ set(LIBRARY_SOURCES
   Test_SyncKokkosToHostEvent.cpp
   Test_Tags.cpp
   Test_TensorYlmTransforms.cpp
-  Test_UpdateFrameFieldsAndConstraintDampingBatched.cpp
   )
 
 add_test_library(${LIBRARY} "${LIBRARY_SOURCES}")
@@ -65,5 +64,31 @@ target_link_libraries(
   Options
   Spectral
   Time
+  Utilities
+  )
+
+# Keep the device-map equivalence test in a focused executable. This makes it
+# possible to validate map work without rebuilding the unrelated GH tests.
+set(MAP_TEST_LIBRARY "Test_GeneralizedHarmonicKokkosMaps")
+
+add_test_library(
+  ${MAP_TEST_LIBRARY}
+  "Test_UpdateFrameFieldsAndConstraintDampingBatched.cpp"
+  )
+
+target_link_libraries(
+  ${MAP_TEST_LIBRARY}
+  PRIVATE
+  CoordinateMaps
+  DataStructures
+  Domain
+  DomainCreators
+  DomainStructure
+  Evolution
+  FunctionsOfTime
+  GeneralRelativitySolutions
+  GeneralizedHarmonic
+  GeneralizedHarmonicKokkos
+  Spectral
   Utilities
   )
