@@ -133,12 +133,17 @@ struct PackedGeometry {
   // Jacobian. Coefficients are refreshed once per stage and consumed directly
   // by the device frame-field kernel.
   device_affine_map_data_type affine_map_data_device{};
-  // Shape-map data. The coefficient view stores, per element, the spectral
-  // expansions of lambda, dt(lambda), and its three Cartesian angular
-  // derivatives. Point data stores the static transition function, its
-  // radius-divided value, and its Cartesian gradient.
+  // Shape-map data. The coefficient view stores, per distinct Shape
+  // function-of-time group, the spectral expansions of lambda, dt(lambda),
+  // and its three Cartesian angular derivatives. Elements select their shared
+  // coefficient set through shape_group_index_device. Point data stores the
+  // static transition function, its radius-divided value, and its Cartesian
+  // gradient.
   device_shape_coefficients_type shape_coefficients_device{};
   device_shape_point_data_type shape_point_data_device{};
+  ::Kokkos::View<size_t*> shape_group_index_device{};
+  std::vector<size_t> shape_group_index_host{};
+  std::vector<size_t> shape_group_representative_element_host{};
   ::Kokkos::View<double**, ::Kokkos::LayoutRight>
       shape_recurrence_alpha_device{};
   ::Kokkos::View<double**, ::Kokkos::LayoutRight>

@@ -146,13 +146,13 @@ KOKKOS_INLINE_FUNCTION void multiply_matrices_3d(const double (&left)[9],
 
 KOKKOS_INLINE_FUNCTION void interpolate_shape_fields(
     const double* const coefficients, const size_t l_max,
-    const double* const alpha, const double* const beta,
-    const double* const pmm, const size_t* const coefficient_indices,
-    const double theta, const double phi, double (&result)[5]) {
+    const size_t coefficient_field_stride, const double* const alpha,
+    const double* const beta, const double* const pmm,
+    const size_t* const coefficient_indices, const double theta,
+    const double phi, double (&result)[5]) {
   constexpr size_t num_fields = 5;
   const size_t n_theta = l_max + 1;
   const size_t l1 = l_max + 1;
-  const size_t spectral_size = 2 * l1 * l1;
   const size_t b_offset = l1 * n_theta;
   const double cos_theta = cos(theta);
   const double sin_theta = sin(theta);
@@ -166,7 +166,7 @@ KOKKOS_INLINE_FUNCTION void interpolate_shape_fields(
       y_np1[field] = y_n[field];
       y_n[field] = cos_theta * alpha[recurrence_index] * y_np1[field] +
                    beta[recurrence_index] * y_np2 +
-                   coefficients[field * spectral_size +
+                   coefficients[field * coefficient_field_stride +
                                 coefficient_indices[recurrence_index]];
     }
   }
@@ -174,7 +174,7 @@ KOKKOS_INLINE_FUNCTION void interpolate_shape_fields(
     result[field] = 0.5 * pmm[0] *
                     (beta[recurrence_index] * y_np1[field] +
                      cos_theta * alpha[recurrence_index] * y_n[field] +
-                     coefficients[field * spectral_size +
+                     coefficients[field * coefficient_field_stride +
                                   coefficient_indices[recurrence_index]]);
   }
   ++recurrence_index;
@@ -205,12 +205,12 @@ KOKKOS_INLINE_FUNCTION void interpolate_shape_fields(
         cosine_y_n[field] =
             cos_theta * alpha[recurrence_index] * cosine_y_np1[field] +
             beta[recurrence_index] * cosine_y_np2 +
-            coefficients[field * spectral_size +
+            coefficients[field * coefficient_field_stride +
                          coefficient_indices[recurrence_index]];
         sine_y_n[field] =
             cos_theta * alpha[recurrence_index] * sine_y_np1[field] +
             beta[recurrence_index] * sine_y_np2 +
-            coefficients[field * spectral_size + b_offset +
+            coefficients[field * coefficient_field_stride + b_offset +
                          coefficient_indices[recurrence_index]];
       }
     }
@@ -220,13 +220,14 @@ KOKKOS_INLINE_FUNCTION void interpolate_shape_fields(
           pbar_factor *
           (beta[recurrence_index] * cosine_y_np1[field] +
            cos_theta * alpha[recurrence_index] * cosine_y_n[field] +
-           coefficients[field * spectral_size +
+           coefficients[field * coefficient_field_stride +
                         coefficient_indices[recurrence_index]]);
       const double sine_value =
-          pbar_factor * (beta[recurrence_index] * sine_y_np1[field] +
-                         cos_theta * alpha[recurrence_index] * sine_y_n[field] +
-                         coefficients[field * spectral_size + b_offset +
-                                      coefficient_indices[recurrence_index]]);
+          pbar_factor *
+          (beta[recurrence_index] * sine_y_np1[field] +
+           cos_theta * alpha[recurrence_index] * sine_y_n[field] +
+           coefficients[field * coefficient_field_stride + b_offset +
+                        coefficient_indices[recurrence_index]]);
       result[field] += cosine_value * cos_m_phi - sine_value * sin_m_phi;
     }
     ++recurrence_index;
@@ -236,7 +237,8 @@ KOKKOS_INLINE_FUNCTION void interpolate_shape_fields(
 KOKKOS_INLINE_FUNCTION void shape_frame_fields(
     const double (&source_coords)[3], const double (&center)[3],
     const double* const point_data, const double* const coefficients,
-    const size_t l_max, const double* const alpha, const double* const beta,
+    const size_t l_max, const size_t coefficient_field_stride,
+    const double* const alpha, const double* const beta,
     const double* const pmm, const size_t* const coefficient_indices,
     double (&target_coords)[3], double (&frame_velocity)[3],
     double (&inverse_jacobian)[9]) {
@@ -249,8 +251,9 @@ KOKKOS_INLINE_FUNCTION void shape_frame_fields(
                              centered_coords[2]);
   const double phi = atan2(centered_coords[1], centered_coords[0]);
   double shape_fields[5]{};
-  interpolate_shape_fields(coefficients, l_max, alpha, beta, pmm,
-                           coefficient_indices, theta, phi, shape_fields);
+  interpolate_shape_fields(coefficients, l_max, coefficient_field_stride, alpha,
+                           beta, pmm, coefficient_indices, theta, phi,
+                           shape_fields);
 
   const double transition = point_data[ShapePointData::transition_offset];
   const double map_factor = 1.0 - transition * shape_fields[0];
@@ -508,6 +511,7 @@ KOKKOS_INLINE_FUNCTION void shape_composed_frame_fields(
     const double (&grid_coords)[3], const double (&center)[3],
     const double* const shape_point_data,
     const double* const shape_coefficients, const size_t shape_l_max,
+    const size_t shape_coefficient_field_stride,
     const double* const shape_alpha, const double* const shape_beta,
     const double* const shape_pmm, const size_t* const shape_indices,
     const double* const skew_data, const double* const affine_data,
@@ -519,10 +523,11 @@ KOKKOS_INLINE_FUNCTION void shape_composed_frame_fields(
     double (&grid_to_distorted_inverse_jacobian)[9],
     double (&distorted_to_inertial_jacobian)[9],
     double (&distorted_to_inertial_inverse_jacobian)[9]) {
-  shape_frame_fields(
-      grid_coords, center, shape_point_data, shape_coefficients, shape_l_max,
-      shape_alpha, shape_beta, shape_pmm, shape_indices, distorted_coords,
-      grid_to_distorted_frame_velocity, grid_to_distorted_inverse_jacobian);
+  shape_frame_fields(grid_coords, center, shape_point_data, shape_coefficients,
+                     shape_l_max, shape_coefficient_field_stride, shape_alpha,
+                     shape_beta, shape_pmm, shape_indices, distorted_coords,
+                     grid_to_distorted_frame_velocity,
+                     grid_to_distorted_inverse_jacobian);
 
   double outer_coords[3]{distorted_coords[0], distorted_coords[1],
                          distorted_coords[2]};

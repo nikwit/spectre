@@ -263,6 +263,8 @@ void update_frame_fields_device(
       packed_geometry->element_has_distorted_frame_device;
   const auto affine_map_data = packed_geometry->affine_map_data_device;
   const auto shape_coefficients = packed_geometry->shape_coefficients_device;
+  const size_t shape_coefficient_field_stride = shape_coefficients.extent(2);
+  const auto shape_group_index = packed_geometry->shape_group_index_device;
   const auto shape_point_data = packed_geometry->shape_point_data_device;
   const auto shape_recurrence_alpha =
       packed_geometry->shape_recurrence_alpha_device;
@@ -386,13 +388,14 @@ void update_frame_fields_device(
                     : &affine_map_data(e, 0);
             shape_composed_frame_fields(
                 grid_coords, center, &shape_point_data(e, p, 0),
-                &shape_coefficients(e, 0, 0), shape_lmax(e),
-                &shape_recurrence_alpha(e, 0), &shape_recurrence_beta(e, 0),
-                &shape_recurrence_pmm(e, 0), &shape_recurrence_indices(e, 0),
-                skew_data, affine_data, include_skew, include_affine, inertial,
-                velocity, grid_to_inertial_inv_jac, distorted,
-                grid_to_distorted_velocity, grid_to_distorted_inv_jac,
-                distorted_to_inertial_jac, distorted_to_inertial_inv_jac);
+                &shape_coefficients(shape_group_index(e), 0, 0), shape_lmax(e),
+                shape_coefficient_field_stride, &shape_recurrence_alpha(e, 0),
+                &shape_recurrence_beta(e, 0), &shape_recurrence_pmm(e, 0),
+                &shape_recurrence_indices(e, 0), skew_data, affine_data,
+                include_skew, include_affine, inertial, velocity,
+                grid_to_inertial_inv_jac, distorted, grid_to_distorted_velocity,
+                grid_to_distorted_inv_jac, distorted_to_inertial_jac,
+                distorted_to_inertial_inv_jac);
             intermediate_fields_are_set = element_has_distorted_frame(e) != 0;
           } else if (kind == rigid_rotation_z_kind) {
             rigid_rotation_z_frame_fields(
@@ -989,6 +992,11 @@ void initialize_shape_map_data(
   const size_t num_elements = packed_topology.local_element_ids.size();
   const size_t points_per_element = packed_topology.points_per_element;
   packed_geometry->shape_lmax_host.assign(num_elements, 0);
+  packed_geometry->shape_group_index_host.assign(num_elements, 0);
+  packed_geometry->shape_group_representative_element_host.clear();
+  std::map<std::tuple<std::string, std::optional<std::string>, size_t, double>,
+           size_t>
+      group_by_shape{};
   size_t max_lmax = 0;
   for (size_t e = 0; e < num_elements; ++e) {
     const int kind = packed_geometry->element_map_kind_host[e];
@@ -1013,23 +1021,36 @@ void initialize_shape_map_data(
         1;
     packed_geometry->shape_lmax_host[e] = lmax;
     max_lmax = std::max(max_lmax, lmax);
+    const auto [group, inserted] =
+        group_by_shape.emplace(std::tuple{shape.shape_function_of_time_name,
+                                          shape.size_function_of_time_name,
+                                          lmax, shape.truncation_limit},
+                               group_by_shape.size());
+    packed_geometry->shape_group_index_host[e] = group->second;
+    if (inserted) {
+      packed_geometry->shape_group_representative_element_host.push_back(e);
+    }
   }
   if (max_lmax == 0) {
     return;
   }
 
+  const size_t num_shape_groups =
+      packed_geometry->shape_group_representative_element_host.size();
   const size_t max_spectral_size =
       ylm::Spherepack::spectral_size(max_lmax, max_lmax);
   const size_t max_recurrence_size = (max_lmax + 1) * (max_lmax + 2) / 2;
   packed_geometry->shape_coefficients_device =
       typename evolution::Kokkos::PackedGeometry<
           gh::System<VolumeDim>>::device_shape_coefficients_type{
-          "GhBatchedShapeCoefficients", num_elements, 5, max_spectral_size};
+          "GhBatchedShapeCoefficients", num_shape_groups, 5, max_spectral_size};
   packed_geometry->shape_point_data_device =
       typename evolution::Kokkos::PackedGeometry<
           gh::System<VolumeDim>>::device_shape_point_data_type{
           "GhBatchedShapePointData", num_elements, points_per_element,
           ShapePointData::size};
+  packed_geometry->shape_group_index_device =
+      ::Kokkos::View<size_t*>{"GhBatchedShapeGroupIndex", num_elements};
   packed_geometry->shape_recurrence_alpha_device = {
       "GhBatchedShapeRecurrenceAlpha", num_elements, max_recurrence_size};
   packed_geometry->shape_recurrence_beta_device = {
@@ -1045,6 +1066,8 @@ void initialize_shape_map_data(
 
   auto host_point_data =
       ::Kokkos::create_mirror_view(packed_geometry->shape_point_data_device);
+  auto host_group_index =
+      ::Kokkos::create_mirror_view(packed_geometry->shape_group_index_device);
   auto host_alpha = ::Kokkos::create_mirror_view(
       packed_geometry->shape_recurrence_alpha_device);
   auto host_beta = ::Kokkos::create_mirror_view(
@@ -1060,6 +1083,7 @@ void initialize_shape_map_data(
   for (size_t e = 0; e < num_elements; ++e) {
     const size_t lmax = packed_geometry->shape_lmax_host[e];
     host_lmax(e) = lmax;
+    host_group_index(e) = packed_geometry->shape_group_index_host[e];
     if (lmax == 0) {
       continue;
     }
@@ -1149,6 +1173,8 @@ void initialize_shape_map_data(
   }
   ::Kokkos::deep_copy(packed_geometry->shape_point_data_device,
                       host_point_data);
+  ::Kokkos::deep_copy(packed_geometry->shape_group_index_device,
+                      host_group_index);
   ::Kokkos::deep_copy(packed_geometry->shape_recurrence_alpha_device,
                       host_alpha);
   ::Kokkos::deep_copy(packed_geometry->shape_recurrence_beta_device, host_beta);
@@ -1172,90 +1198,82 @@ void stage_shape_coefficients(
   }
   auto host_coefficients =
       ::Kokkos::create_mirror_view(packed_geometry->shape_coefficients_device);
-  std::map<size_t, std::array<DataVector, 5>> coefficients_by_block{};
-  for (size_t e = 0; e < packed_topology.local_element_ids.size(); ++e) {
+  for (size_t group = 0;
+       group < packed_geometry->shape_group_representative_element_host.size();
+       ++group) {
+    const size_t e =
+        packed_geometry->shape_group_representative_element_host[group];
     const size_t evaluation_lmax = packed_geometry->shape_lmax_host[e];
-    if (evaluation_lmax == 0) {
-      continue;
-    }
     const size_t block_id = packed_topology.local_element_ids[e].block_id();
-    auto coefficients = coefficients_by_block.find(block_id);
-    if (coefficients == coefficients_by_block.end()) {
-      const auto& shape =
-          std::get<domain::CoordinateMaps::TimeDependent::ShapeMapDescriptor>(
-              packed_geometry->block_map_descriptors_host.at(block_id)
-                  ->front());
-      auto [shape_coefs, shape_coef_derivs, shape_coef_dderivs] =
-          functions_of_time.at(shape.shape_function_of_time_name)
-              ->func_and_2_derivs(time);
-      if (shape.size_function_of_time_name.has_value()) {
-        ASSERT(shape_coefs[0] == 0.0 and shape_coef_derivs[0] == 0.0,
-               "A separately controlled Shape size requires zero l=0 Shape "
-               "coefficients.");
-        const auto size =
-            functions_of_time.at(*shape.size_function_of_time_name)
-                ->func_and_deriv(time);
-        constexpr double size_to_spherepack = M_SQRT1_2 * M_2_SQRTPI;
-        shape_coefs[0] = size_to_spherepack * size[0][0];
-        shape_coef_derivs[0] = size_to_spherepack * size[1][0];
+    const auto& shape =
+        std::get<domain::CoordinateMaps::TimeDependent::ShapeMapDescriptor>(
+            packed_geometry->block_map_descriptors_host.at(block_id)->front());
+    auto [shape_coefs, shape_coef_derivs, shape_coef_dderivs] =
+        functions_of_time.at(shape.shape_function_of_time_name)
+            ->func_and_2_derivs(time);
+    if (shape.size_function_of_time_name.has_value()) {
+      ASSERT(shape_coefs[0] == 0.0 and shape_coef_derivs[0] == 0.0,
+             "A separately controlled Shape size requires zero l=0 Shape "
+             "coefficients.");
+      const auto size = functions_of_time.at(*shape.size_function_of_time_name)
+                            ->func_and_deriv(time);
+      constexpr double size_to_spherepack = M_SQRT1_2 * M_2_SQRTPI;
+      shape_coefs[0] = size_to_spherepack * size[0][0];
+      shape_coef_derivs[0] = size_to_spherepack * size[1][0];
+    }
+    const size_t source_lmax =
+        domain::CoordinateMaps::TimeDependent::lmax_from_coefs(shape_coefs);
+    ylm::SpherepackIterator source_iterator{source_lmax, source_lmax};
+    size_t truncated_lmax = 2;
+    for (size_t l = source_lmax; l > 2; --l) {
+      bool keep_l = false;
+      for (int m = static_cast<int>(l); m >= -static_cast<int>(l); --m) {
+        source_iterator.set(l, m);
+        const size_t index = source_iterator();
+        keep_l = keep_l or
+                 std::abs(shape_coefs[index]) > shape.truncation_limit or
+                 std::abs(shape_coef_derivs[index]) > shape.truncation_limit or
+                 std::abs(shape_coef_dderivs[index]) > shape.truncation_limit;
       }
-      const size_t source_lmax =
-          domain::CoordinateMaps::TimeDependent::lmax_from_coefs(shape_coefs);
-      ylm::SpherepackIterator source_iterator{source_lmax, source_lmax};
-      size_t truncated_lmax = 2;
-      for (size_t l = source_lmax; l > 2; --l) {
-        bool keep_l = false;
-        for (int m = static_cast<int>(l); m >= -static_cast<int>(l); --m) {
-          source_iterator.set(l, m);
-          const size_t index = source_iterator();
-          keep_l =
-              keep_l or std::abs(shape_coefs[index]) > shape.truncation_limit or
-              std::abs(shape_coef_derivs[index]) > shape.truncation_limit or
-              std::abs(shape_coef_dderivs[index]) > shape.truncation_limit;
-        }
-        if (keep_l) {
-          truncated_lmax = l;
-          break;
-        }
+      if (keep_l) {
+        truncated_lmax = l;
+        break;
       }
-      const ylm::SpherepackIterator truncated_iterator{truncated_lmax,
-                                                       truncated_lmax};
-      const ylm::SpherepackIterator evaluation_iterator{evaluation_lmax,
-                                                        evaluation_lmax};
-      const auto extend_coefficients = [&](const DataVector& source) {
-        const DataVector truncated =
-            domain::CoordinateMaps::TimeDependent::truncate_coefs(
-                source, source_iterator, truncated_iterator);
-        return domain::CoordinateMaps::TimeDependent::truncate_coefs(
-            truncated, truncated_iterator, evaluation_iterator);
-      };
-      std::array<DataVector, 5> staged{extend_coefficients(shape_coefs),
-                                       extend_coefficients(shape_coef_derivs),
-                                       DataVector{}, DataVector{},
-                                       DataVector{}};
-      const ylm::Spherepack spherepack{evaluation_lmax, evaluation_lmax};
-      const auto angular_gradient = spherepack.gradient_from_coefs(staged[0]);
-      const auto theta_phis = spherepack.theta_phi_points();
-      std::array<DataVector, 3> cartesian_gradient{
-          DataVector{spherepack.physical_size()},
-          DataVector{spherepack.physical_size()},
-          DataVector{spherepack.physical_size()}};
-      cartesian_gradient[0] =
-          cos(theta_phis[0]) * cos(theta_phis[1]) * angular_gradient.get(0) -
-          sin(theta_phis[1]) * angular_gradient.get(1);
-      cartesian_gradient[1] =
-          cos(theta_phis[0]) * sin(theta_phis[1]) * angular_gradient.get(0) +
-          cos(theta_phis[1]) * angular_gradient.get(1);
-      cartesian_gradient[2] = -sin(theta_phis[0]) * angular_gradient.get(0);
-      for (size_t d = 0; d < 3; ++d) {
-        staged[2 + d] = spherepack.phys_to_spec(cartesian_gradient[d]);
-      }
-      coefficients =
-          coefficients_by_block.emplace(block_id, std::move(staged)).first;
+    }
+    const ylm::SpherepackIterator truncated_iterator{truncated_lmax,
+                                                     truncated_lmax};
+    const ylm::SpherepackIterator evaluation_iterator{evaluation_lmax,
+                                                      evaluation_lmax};
+    const auto extend_coefficients = [&](const DataVector& source) {
+      const DataVector truncated =
+          domain::CoordinateMaps::TimeDependent::truncate_coefs(
+              source, source_iterator, truncated_iterator);
+      return domain::CoordinateMaps::TimeDependent::truncate_coefs(
+          truncated, truncated_iterator, evaluation_iterator);
+    };
+    std::array<DataVector, 5> staged{extend_coefficients(shape_coefs),
+                                     extend_coefficients(shape_coef_derivs),
+                                     DataVector{}, DataVector{}, DataVector{}};
+    const ylm::Spherepack spherepack{evaluation_lmax, evaluation_lmax};
+    const auto angular_gradient = spherepack.gradient_from_coefs(staged[0]);
+    const auto theta_phis = spherepack.theta_phi_points();
+    std::array<DataVector, 3> cartesian_gradient{
+        DataVector{spherepack.physical_size()},
+        DataVector{spherepack.physical_size()},
+        DataVector{spherepack.physical_size()}};
+    cartesian_gradient[0] =
+        cos(theta_phis[0]) * cos(theta_phis[1]) * angular_gradient.get(0) -
+        sin(theta_phis[1]) * angular_gradient.get(1);
+    cartesian_gradient[1] =
+        cos(theta_phis[0]) * sin(theta_phis[1]) * angular_gradient.get(0) +
+        cos(theta_phis[1]) * angular_gradient.get(1);
+    cartesian_gradient[2] = -sin(theta_phis[0]) * angular_gradient.get(0);
+    for (size_t d = 0; d < 3; ++d) {
+      staged[2 + d] = spherepack.phys_to_spec(cartesian_gradient[d]);
     }
     for (size_t field = 0; field < 5; ++field) {
-      for (size_t i = 0; i < coefficients->second[field].size(); ++i) {
-        host_coefficients(e, field, i) = coefficients->second[field][i];
+      for (size_t i = 0; i < staged[field].size(); ++i) {
+        host_coefficients(group, field, i) = staged[field][i];
       }
     }
   }
