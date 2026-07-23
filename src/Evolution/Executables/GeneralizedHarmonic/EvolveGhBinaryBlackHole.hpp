@@ -243,7 +243,7 @@ struct EvolutionMetavars {
   static constexpr bool use_damped_harmonic_rollon = false;
   using system = gh::System<volume_dim>;
   using temporal_id = Tags::TimeStepId;
-  using TimeStepperBase = LtsTimeStepper;
+  using TimeStepperBase = TimeStepper;
 
   static constexpr bool local_time_stepping =
       TimeStepperBase::local_time_stepping;
