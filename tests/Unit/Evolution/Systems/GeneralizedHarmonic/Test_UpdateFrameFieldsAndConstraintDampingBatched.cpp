@@ -485,7 +485,12 @@ void test_update_frame_fields_and_constraint_damping_batched(
   const auto domain_static_cache_snapshot =
       snapshot_domain_static_caches(packed_geometry);
   if (include_shape) {
+    CHECK(packed_geometry.shape_raw_coefficients_device.extent(0) == 1);
+    CHECK(packed_geometry.shape_raw_coefficients_device.extent(1) == 2);
     CHECK(packed_geometry.shape_coefficients_device.extent(0) == 1);
+    CHECK(packed_geometry.shape_coefficients_device.extent(1) == 5);
+    CHECK(packed_geometry.shape_gradient_transform_device.extent(0) == 1);
+    CHECK(packed_geometry.shape_gradient_transform_device.extent(1) == 3);
     CHECK(packed_geometry.shape_group_representative_element_host.size() == 1);
     REQUIRE(packed_geometry.shape_group_index_host.size() ==
             packed_topology.local_element_ids.size());
@@ -493,7 +498,9 @@ void test_update_frame_fields_and_constraint_damping_batched(
       CHECK(group == 0);
     }
   } else {
+    CHECK(packed_geometry.shape_raw_coefficients_device.extent(0) == 0);
     CHECK(packed_geometry.shape_coefficients_device.extent(0) == 0);
+    CHECK(packed_geometry.shape_gradient_transform_device.extent(0) == 0);
     CHECK(packed_geometry.shape_group_representative_element_host.empty());
   }
 

@@ -981,6 +981,46 @@ void stage_rot_scale_trans_affine_data(
   }
 }
 
+std::array<std::vector<double>, 3> make_shape_gradient_transform(
+    const size_t lmax) {
+  const ylm::Spherepack spherepack{lmax, lmax};
+  const size_t spectral_size = spherepack.spectral_size();
+  std::array<std::vector<double>, 3> transform{};
+  for (auto& component : transform) {
+    component.assign(spectral_size * spectral_size, 0.0);
+  }
+
+  DataVector basis{spectral_size, 0.0};
+  const auto theta_phis = spherepack.theta_phi_points();
+  std::array<DataVector, 3> cartesian_gradient{
+      DataVector{spherepack.physical_size()},
+      DataVector{spherepack.physical_size()},
+      DataVector{spherepack.physical_size()}};
+  for (size_t source_coefficient = 0; source_coefficient < spectral_size;
+       ++source_coefficient) {
+    basis[source_coefficient] = 1.0;
+    const auto angular_gradient = spherepack.gradient_from_coefs(basis);
+    basis[source_coefficient] = 0.0;
+    cartesian_gradient[0] =
+        cos(theta_phis[0]) * cos(theta_phis[1]) * angular_gradient.get(0) -
+        sin(theta_phis[1]) * angular_gradient.get(1);
+    cartesian_gradient[1] =
+        cos(theta_phis[0]) * sin(theta_phis[1]) * angular_gradient.get(0) +
+        cos(theta_phis[1]) * angular_gradient.get(1);
+    cartesian_gradient[2] = -sin(theta_phis[0]) * angular_gradient.get(0);
+    for (size_t d = 0; d < 3; ++d) {
+      const DataVector gradient_coefficients =
+          spherepack.phys_to_spec(cartesian_gradient[d]);
+      for (size_t target_coefficient = 0; target_coefficient < spectral_size;
+           ++target_coefficient) {
+        transform[d][target_coefficient * spectral_size + source_coefficient] =
+            gradient_coefficients[target_coefficient];
+      }
+    }
+  }
+  return transform;
+}
+
 template <size_t VolumeDim>
 void initialize_shape_map_data(
     const gsl::not_null<
@@ -1040,10 +1080,20 @@ void initialize_shape_map_data(
   const size_t max_spectral_size =
       ylm::Spherepack::spectral_size(max_lmax, max_lmax);
   const size_t max_recurrence_size = (max_lmax + 1) * (max_lmax + 2) / 2;
+  packed_geometry->shape_raw_coefficients_device =
+      typename evolution::Kokkos::PackedGeometry<
+          gh::System<VolumeDim>>::device_shape_coefficients_type{
+          "GhBatchedShapeRawCoefficients", num_shape_groups, 2,
+          max_spectral_size};
   packed_geometry->shape_coefficients_device =
       typename evolution::Kokkos::PackedGeometry<
           gh::System<VolumeDim>>::device_shape_coefficients_type{
           "GhBatchedShapeCoefficients", num_shape_groups, 5, max_spectral_size};
+  packed_geometry->shape_gradient_transform_device =
+      typename evolution::Kokkos::PackedGeometry<
+          gh::System<VolumeDim>>::device_shape_gradient_transform_type{
+          "GhBatchedShapeGradientTransform", num_shape_groups, 3,
+          max_spectral_size, max_spectral_size};
   packed_geometry->shape_point_data_device =
       typename evolution::Kokkos::PackedGeometry<
           gh::System<VolumeDim>>::device_shape_point_data_type{
@@ -1068,6 +1118,9 @@ void initialize_shape_map_data(
       ::Kokkos::create_mirror_view(packed_geometry->shape_point_data_device);
   auto host_group_index =
       ::Kokkos::create_mirror_view(packed_geometry->shape_group_index_device);
+  auto host_gradient_transform = ::Kokkos::create_mirror_view(
+      packed_geometry->shape_gradient_transform_device);
+  ::Kokkos::deep_copy(host_gradient_transform, 0.0);
   auto host_alpha = ::Kokkos::create_mirror_view(
       packed_geometry->shape_recurrence_alpha_device);
   auto host_beta = ::Kokkos::create_mirror_view(
@@ -1080,6 +1133,31 @@ void initialize_shape_map_data(
       ::Kokkos::create_mirror_view(packed_geometry->shape_centers_device);
   auto host_lmax =
       ::Kokkos::create_mirror_view(packed_geometry->shape_lmax_device);
+  std::map<size_t, std::array<std::vector<double>, 3>>
+      gradient_transform_by_lmax{};
+  for (size_t group = 0; group < num_shape_groups; ++group) {
+    const size_t representative_element =
+        packed_geometry->shape_group_representative_element_host[group];
+    const size_t lmax =
+        packed_geometry->shape_lmax_host[representative_element];
+    auto [transform, inserted] = gradient_transform_by_lmax.try_emplace(lmax);
+    if (inserted) {
+      transform->second = make_shape_gradient_transform(lmax);
+    }
+    const size_t spectral_size = ylm::Spherepack::spectral_size(lmax, lmax);
+    for (size_t d = 0; d < 3; ++d) {
+      for (size_t target_coefficient = 0; target_coefficient < spectral_size;
+           ++target_coefficient) {
+        for (size_t source_coefficient = 0; source_coefficient < spectral_size;
+             ++source_coefficient) {
+          host_gradient_transform(group, d, target_coefficient,
+                                  source_coefficient) =
+              transform->second[d][target_coefficient * spectral_size +
+                                   source_coefficient];
+        }
+      }
+    }
+  }
   for (size_t e = 0; e < num_elements; ++e) {
     const size_t lmax = packed_geometry->shape_lmax_host[e];
     host_lmax(e) = lmax;
@@ -1175,6 +1253,8 @@ void initialize_shape_map_data(
                       host_point_data);
   ::Kokkos::deep_copy(packed_geometry->shape_group_index_device,
                       host_group_index);
+  ::Kokkos::deep_copy(packed_geometry->shape_gradient_transform_device,
+                      host_gradient_transform);
   ::Kokkos::deep_copy(packed_geometry->shape_recurrence_alpha_device,
                       host_alpha);
   ::Kokkos::deep_copy(packed_geometry->shape_recurrence_beta_device, host_beta);
@@ -1196,8 +1276,9 @@ void stage_shape_coefficients(
   if (packed_geometry->shape_coefficients_device.extent(0) == 0) {
     return;
   }
-  auto host_coefficients =
-      ::Kokkos::create_mirror_view(packed_geometry->shape_coefficients_device);
+  auto host_raw_coefficients = ::Kokkos::create_mirror_view(
+      packed_geometry->shape_raw_coefficients_device);
+  ::Kokkos::deep_copy(host_raw_coefficients, 0.0);
   for (size_t group = 0;
        group < packed_geometry->shape_group_representative_element_host.size();
        ++group) {
@@ -1251,34 +1332,46 @@ void stage_shape_coefficients(
       return domain::CoordinateMaps::TimeDependent::truncate_coefs(
           truncated, truncated_iterator, evaluation_iterator);
     };
-    std::array<DataVector, 5> staged{extend_coefficients(shape_coefs),
-                                     extend_coefficients(shape_coef_derivs),
-                                     DataVector{}, DataVector{}, DataVector{}};
-    const ylm::Spherepack spherepack{evaluation_lmax, evaluation_lmax};
-    const auto angular_gradient = spherepack.gradient_from_coefs(staged[0]);
-    const auto theta_phis = spherepack.theta_phi_points();
-    std::array<DataVector, 3> cartesian_gradient{
-        DataVector{spherepack.physical_size()},
-        DataVector{spherepack.physical_size()},
-        DataVector{spherepack.physical_size()}};
-    cartesian_gradient[0] =
-        cos(theta_phis[0]) * cos(theta_phis[1]) * angular_gradient.get(0) -
-        sin(theta_phis[1]) * angular_gradient.get(1);
-    cartesian_gradient[1] =
-        cos(theta_phis[0]) * sin(theta_phis[1]) * angular_gradient.get(0) +
-        cos(theta_phis[1]) * angular_gradient.get(1);
-    cartesian_gradient[2] = -sin(theta_phis[0]) * angular_gradient.get(0);
-    for (size_t d = 0; d < 3; ++d) {
-      staged[2 + d] = spherepack.phys_to_spec(cartesian_gradient[d]);
-    }
-    for (size_t field = 0; field < 5; ++field) {
+    const std::array<DataVector, 2> staged{
+        extend_coefficients(shape_coefs),
+        extend_coefficients(shape_coef_derivs)};
+    for (size_t field = 0; field < staged.size(); ++field) {
       for (size_t i = 0; i < staged[field].size(); ++i) {
-        host_coefficients(group, field, i) = staged[field][i];
+        host_raw_coefficients(group, field, i) = staged[field][i];
       }
     }
   }
-  ::Kokkos::deep_copy(packed_geometry->shape_coefficients_device,
-                      host_coefficients);
+  ::Kokkos::deep_copy(packed_geometry->shape_raw_coefficients_device,
+                      host_raw_coefficients);
+
+  const auto raw_coefficients = packed_geometry->shape_raw_coefficients_device;
+  const auto coefficients = packed_geometry->shape_coefficients_device;
+  const auto gradient_transform =
+      packed_geometry->shape_gradient_transform_device;
+  const size_t num_groups = raw_coefficients.extent(0);
+  const size_t coefficient_stride = raw_coefficients.extent(2);
+  ::Kokkos::parallel_for(
+      "GhBuildShapeGradientCoefficients", num_groups * coefficient_stride,
+      KOKKOS_LAMBDA(const int linear_index_int) {
+        const size_t linear_index = static_cast<size_t>(linear_index_int);
+        const size_t group = linear_index / coefficient_stride;
+        const size_t target_coefficient = linear_index % coefficient_stride;
+        coefficients(group, 0, target_coefficient) =
+            raw_coefficients(group, 0, target_coefficient);
+        coefficients(group, 1, target_coefficient) =
+            raw_coefficients(group, 1, target_coefficient);
+        for (size_t d = 0; d < 3; ++d) {
+          double gradient_coefficient = 0.0;
+          for (size_t source_coefficient = 0;
+               source_coefficient < coefficient_stride; ++source_coefficient) {
+            gradient_coefficient +=
+                gradient_transform(group, d, target_coefficient,
+                                   source_coefficient) *
+                raw_coefficients(group, 0, source_coefficient);
+          }
+          coefficients(group, 2 + d, target_coefficient) = gradient_coefficient;
+        }
+      });
 }
 
 template <size_t VolumeDim>
