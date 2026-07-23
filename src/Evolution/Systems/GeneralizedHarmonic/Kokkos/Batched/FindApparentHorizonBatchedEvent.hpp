@@ -25,6 +25,7 @@
 #include "Domain/FunctionsOfTime/Tags.hpp"
 #include "Evolution/Kokkos/PackedTags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/HostElementView.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/UpdateFrameFieldsBatched.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "NumericalAlgorithms/Interpolation/IrregularInterpolant.hpp"
 #include "NumericalAlgorithms/Strahlkorper/Strahlkorper.hpp"
@@ -66,6 +67,8 @@ namespace gh::Events {
 template <typename HorizonMetavars>
 class FindApparentHorizonBatched : public Event {
  public:
+  using packed_geometry_tag =
+      evolution::Kokkos::Tags::PackedGeometry<gh::System<3>>;
   explicit FindApparentHorizonBatched(CkMigrateMessage* /*unused*/) {}
   using PUP::able::register_constructor;
   WRAPPED_PUPable_decl_template(FindApparentHorizonBatched);  // NOLINT
@@ -85,18 +88,17 @@ class FindApparentHorizonBatched : public Event {
 
   using compute_tags_for_observation_box =
       typename HorizonMetavars::compute_tags_on_element;
-  using return_tags = tmpl::list<>;
+  using return_tags = tmpl::list<packed_geometry_tag>;
   using argument_tags =
       tmpl::list<evolution::Kokkos::Tags::PackedTopology<gh::System<3>>,
-                 evolution::Kokkos::Tags::PackedGeometry<gh::System<3>>,
                  evolution::Kokkos::Tags::PackedEvolutionState<gh::System<3>>,
                  typename HorizonMetavars::time_tag>;
 
   template <typename ArrayIndex, typename ParallelComponent,
             typename Metavariables>
   void operator()(
+      const gsl::not_null<typename packed_geometry_tag::type*> packed_geometry,
       const evolution::Kokkos::PackedTopology<gh::System<3>>& packed_topology,
-      const evolution::Kokkos::PackedGeometry<gh::System<3>>& packed_geometry,
       const evolution::Kokkos::PackedEvolutionState<gh::System<3>>&
           packed_evolution_state,
       const typename HorizonMetavars::time_tag::type& horizon_time,
@@ -104,6 +106,7 @@ class FindApparentHorizonBatched : public Event {
       const ArrayIndex& /*array_index*/,
       const ParallelComponent* const /*meta*/,
       const ObservationValue& /*observation_value*/) const {
+    gh::Actions::synchronize_frame_fields_to_host<3>(packed_geometry);
     const auto& blocks_to_interpolate =
         Parallel::get<ah::Tags::BlocksForHorizonFind>(cache);
     ASSERT(blocks_to_interpolate.contains(HorizonMetavars::name()),
@@ -119,7 +122,7 @@ class FindApparentHorizonBatched : public Event {
         ah::Component<Metavariables, HorizonMetavars>>(cache);
 
     gh::Batched::for_each_host_element_view(
-        packed_topology, packed_geometry, packed_evolution_state,
+        packed_topology, *packed_geometry, packed_evolution_state,
         [&blocks, &blocks_to_interpolate_for_this_target, &domain,
          &functions_of_time, &horizon_finder_proxy, &horizon_time,
          this](const gh::Batched::HostElementView& host_element_view) {
@@ -194,6 +197,8 @@ PUP::able::PUP_ID FindApparentHorizonBatched<HorizonMetavars>::my_PUP_ID =
 template <typename HorizonMetavars>
 class SendHorizonDataBatchedForControlSystem : public Event {
  public:
+  using packed_geometry_tag =
+      evolution::Kokkos::Tags::PackedGeometry<gh::System<3>>;
   explicit SendHorizonDataBatchedForControlSystem(
       CkMigrateMessage* /*unused*/) {}
   using PUP::able::register_constructor;
@@ -211,18 +216,17 @@ class SendHorizonDataBatchedForControlSystem : public Event {
   SendHorizonDataBatchedForControlSystem() = default;
 
   using compute_tags_for_observation_box = tmpl::list<>;
-  using return_tags = tmpl::list<>;
+  using return_tags = tmpl::list<packed_geometry_tag>;
   using argument_tags =
       tmpl::list<evolution::Kokkos::Tags::PackedTopology<gh::System<3>>,
-                 evolution::Kokkos::Tags::PackedGeometry<gh::System<3>>,
                  evolution::Kokkos::Tags::PackedEvolutionState<gh::System<3>>,
                  ::Tags::PreviousTriggerTime>;
 
   template <typename ArrayIndex, typename ParallelComponent,
             typename Metavariables>
   void operator()(
+      const gsl::not_null<typename packed_geometry_tag::type*> packed_geometry,
       const evolution::Kokkos::PackedTopology<gh::System<3>>& packed_topology,
-      const evolution::Kokkos::PackedGeometry<gh::System<3>>& packed_geometry,
       const evolution::Kokkos::PackedEvolutionState<gh::System<3>>&
           packed_evolution_state,
       const std::optional<double>& previous_trigger_time,
@@ -230,6 +234,7 @@ class SendHorizonDataBatchedForControlSystem : public Event {
       const ArrayIndex& /*array_index*/,
       const ParallelComponent* const /*meta*/,
       const ObservationValue& observation_value) const {
+    gh::Actions::synchronize_frame_fields_to_host<3>(packed_geometry);
     const LinkedMessageId<double> measurement_id{observation_value.value,
                                                  previous_trigger_time};
 
@@ -248,7 +253,7 @@ class SendHorizonDataBatchedForControlSystem : public Event {
         ah::Component<Metavariables, HorizonMetavars>>(cache);
 
     gh::Batched::for_each_host_element_view(
-        packed_topology, packed_geometry, packed_evolution_state,
+        packed_topology, *packed_geometry, packed_evolution_state,
         [&blocks, &blocks_to_interpolate_for_this_target, &domain,
          &functions_of_time, &horizon_finder_proxy, &measurement_id](
             const gh::Batched::HostElementView& host_element_view) {
@@ -402,6 +407,8 @@ class SendExcisionDataBatchedForSizeControl : public Event {
   }
 
  public:
+  using packed_geometry_tag =
+      evolution::Kokkos::Tags::PackedGeometry<gh::System<3>>;
   explicit SendExcisionDataBatchedForSizeControl(CkMigrateMessage* /*unused*/) {
   }
   using PUP::able::register_constructor;
@@ -420,18 +427,17 @@ class SendExcisionDataBatchedForSizeControl : public Event {
   SendExcisionDataBatchedForSizeControl() = default;
 
   using compute_tags_for_observation_box = tmpl::list<>;
-  using return_tags = tmpl::list<>;
+  using return_tags = tmpl::list<packed_geometry_tag>;
   using argument_tags =
       tmpl::list<evolution::Kokkos::Tags::PackedTopology<gh::System<3>>,
-                 evolution::Kokkos::Tags::PackedGeometry<gh::System<3>>,
                  evolution::Kokkos::Tags::PackedEvolutionState<gh::System<3>>,
                  ::Tags::PreviousTriggerTime>;
 
   template <typename ArrayIndex, typename ParallelComponent,
             typename Metavariables>
   void operator()(
+      const gsl::not_null<typename packed_geometry_tag::type*> packed_geometry,
       const evolution::Kokkos::PackedTopology<gh::System<3>>& packed_topology,
-      const evolution::Kokkos::PackedGeometry<gh::System<3>>& packed_geometry,
       const evolution::Kokkos::PackedEvolutionState<gh::System<3>>&
           packed_evolution_state,
       const std::optional<double>& previous_trigger_time,
@@ -439,6 +445,7 @@ class SendExcisionDataBatchedForSizeControl : public Event {
       const ArrayIndex& /*array_index*/,
       const ParallelComponent* const /*meta*/,
       const ObservationValue& observation_value) const {
+    gh::Actions::synchronize_frame_fields_to_host<3>(packed_geometry);
     const LinkedMessageId<double> measurement_id{observation_value.value,
                                                  previous_trigger_time};
     const auto& sphere =
@@ -457,7 +464,7 @@ class SendExcisionDataBatchedForSizeControl : public Event {
         Parallel::get<domain::Tags::FunctionsOfTime>(cache);
 
     gh::Batched::for_each_host_element_view(
-        packed_topology, packed_geometry, packed_evolution_state,
+        packed_topology, *packed_geometry, packed_evolution_state,
         [&domain, &filled_points, &functions_of_time, &interpolated_on_target,
          &target_points, time = measurement_id.id](
             const gh::Batched::HostElementView& host_element_view) {

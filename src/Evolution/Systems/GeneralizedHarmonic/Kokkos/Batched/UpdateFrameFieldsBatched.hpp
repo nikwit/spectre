@@ -15,6 +15,15 @@
 
 namespace gh::Actions {
 
+/// Synchronize device-evaluated coordinates, velocities, and intermediate
+/// Jacobians to the host caches used by observation and horizon events.
+///
+/// This is a no-op when the caches are already current.
+template <size_t VolumeDim>
+void synchronize_frame_fields_to_host(
+    gsl::not_null<evolution::Kokkos::PackedGeometry<gh::System<VolumeDim>>*>
+        packed_geometry);
+
 template <typename FunctionsOfTimeTag,
           bool AddFunctionsOfTimeToConstGlobalCache = true>
 struct UpdateFrameFieldsBatchedWithTag {

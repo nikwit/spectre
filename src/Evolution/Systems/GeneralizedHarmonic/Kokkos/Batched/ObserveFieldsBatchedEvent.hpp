@@ -13,6 +13,7 @@
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "DataStructures/VariablesKokkos.hpp"
 #include "Evolution/Kokkos/PackedTags.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/UpdateFrameFieldsBatched.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "IO/H5/TensorData.hpp"
@@ -49,6 +50,7 @@ class ObserveFieldsBatched : public Event {
   static constexpr size_t volume_dim = 3;
   using system = gh::System<volume_dim>;
   using host_variables_type = typename system::variables_tag::type;
+  using packed_geometry_tag = evolution::Kokkos::Tags::PackedGeometry<system>;
 
   struct SubfileName {
     using type = std::string;
@@ -70,18 +72,17 @@ class ObserveFieldsBatched : public Event {
       : subfile_path_("/" + subfile_name) {}
 
   using compute_tags_for_observation_box = tmpl::list<>;
-  using return_tags = tmpl::list<>;
+  using return_tags = tmpl::list<packed_geometry_tag>;
   using argument_tags =
       tmpl::list<evolution::Kokkos::Tags::PackedTopology<system>,
-                 evolution::Kokkos::Tags::PackedGeometry<system>,
                  evolution::Kokkos::Tags::PackedEvolutionState<system>,
                  ::Tags::Time>;
 
   template <typename ArrayIndex, typename ParallelComponent,
             typename Metavariables>
   void operator()(
+      const gsl::not_null<typename packed_geometry_tag::type*> packed_geometry,
       const evolution::Kokkos::PackedTopology<system>& packed_topology,
-      const evolution::Kokkos::PackedGeometry<system>& packed_geometry,
       const evolution::Kokkos::PackedEvolutionState<system>&
           packed_evolution_state,
       const double time, Parallel::GlobalCache<Metavariables>& cache,
@@ -92,13 +93,14 @@ class ObserveFieldsBatched : public Event {
     if (num_elements == 0) {
       return;
     }
+    gh::Actions::synchronize_frame_fields_to_host<volume_dim>(packed_geometry);
     const size_t points_per_element = packed_topology.points_per_element;
     ASSERT(packed_topology.total_points == num_elements * points_per_element,
            "ObserveFieldsBatched requires a uniform mesh: total points "
                << packed_topology.total_points << ", elements " << num_elements
                << ", points per element " << points_per_element);
     for (size_t d = 0; d < volume_dim; ++d) {
-      ASSERT(packed_geometry.inertial_coordinates_host[d].size() ==
+      ASSERT(packed_geometry->inertial_coordinates_host[d].size() ==
                  packed_topology.total_points,
              "Packed inertial-coordinate sizes do not match total packed "
              "points.");
@@ -140,7 +142,7 @@ class ObserveFieldsBatched : public Event {
             "InertialCoordinates" +
                 tnsr::I<DataVector, volume_dim,
                         Frame::Inertial>::component_suffix(d),
-            slice_component(packed_geometry.inertial_coordinates_host[d],
+            slice_component(packed_geometry->inertial_coordinates_host[d],
                             point_offset));
       }
       for (size_t i = 0; i < spacetime_metric.size(); ++i) {

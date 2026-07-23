@@ -492,6 +492,13 @@ void test_update_frame_fields_and_constraint_damping_batched(
     gh::Actions::UpdateFrameFieldsBatched::apply(
         make_not_null(&packed_geometry), packed_topology, domain,
         functions_of_time, time);
+    CHECK(packed_geometry.host_frame_fields_dirty);
+    gh::Actions::synchronize_frame_fields_to_host<Dim>(
+        make_not_null(&packed_geometry));
+    CHECK_FALSE(packed_geometry.host_frame_fields_dirty);
+    // A second synchronization is deliberately a no-op.
+    gh::Actions::synchronize_frame_fields_to_host<Dim>(
+        make_not_null(&packed_geometry));
     REQUIRE(packed_geometry.element_map_kind_host.size() ==
             packed_topology.local_element_ids.size());
     REQUIRE(packed_geometry.block_map_descriptors_host.size() == 1);

@@ -155,6 +155,10 @@ struct PackedGeometry {
   // first time derivative are staged to the device each stage.
   std::string device_map_function_of_time_name{};
   bool map_plan_initialized{false};
+  // Device map evaluation invalidates the host coordinate-map caches. Events
+  // synchronize them lazily, avoiding device-to-host transfers on ordinary
+  // RHS stages.
+  bool host_frame_fields_dirty{false};
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& /*p*/) {

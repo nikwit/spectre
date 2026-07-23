@@ -1672,6 +1672,24 @@ void build_map_plan(
 
 }  // namespace
 
+template <size_t VolumeDim>
+void synchronize_frame_fields_to_host(
+    const gsl::not_null<
+        evolution::Kokkos::PackedGeometry<gh::System<VolumeDim>>*>
+        packed_geometry) {
+  if (not packed_geometry->host_frame_fields_dirty) {
+    return;
+  }
+  copy_device_array_to_host<VolumeDim>(
+      packed_geometry->inertial_coordinates_device,
+      make_not_null(&packed_geometry->inertial_coordinates_host));
+  copy_device_array_to_host<VolumeDim>(
+      packed_geometry->mesh_velocity_device,
+      make_not_null(&packed_geometry->mesh_velocity_host));
+  copy_intermediate_frame_fields_to_host<VolumeDim>(packed_geometry);
+  packed_geometry->host_frame_fields_dirty = false;
+}
+
 template <typename FunctionsOfTimeTag,
           bool AddFunctionsOfTimeToConstGlobalCache>
 void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
@@ -1779,20 +1797,8 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
     update_frame_fields_device<volume_dim>(packed_geometry, points_per_element,
                                            total_points, fot_value,
                                            fot_value_dot);
-    // For a static domain the host geometry arrays are constant and were set
-    // during initialization, so leave them untouched. When a moving map is
-    // evaluated on the device, refresh the host coordinate and mesh-velocity
-    // arrays so the host-side observation and apparent-horizon consumers see
-    // the current geometry. (Narrowing this to observation/AH times is a later
-    // milestone.)
     if (not all_static) {
-      copy_device_array_to_host<volume_dim>(
-          packed_geometry->inertial_coordinates_device,
-          make_not_null(&packed_geometry->inertial_coordinates_host));
-      copy_device_array_to_host<volume_dim>(
-          packed_geometry->mesh_velocity_device,
-          make_not_null(&packed_geometry->mesh_velocity_host));
-      copy_intermediate_frame_fields_to_host<volume_dim>(packed_geometry);
+      packed_geometry->host_frame_fields_dirty = true;
     }
     return;
   }
@@ -1975,24 +1981,26 @@ void UpdateFrameFieldsBatchedWithTag<FunctionsOfTimeTag,
   ::Kokkos::deep_copy(packed_geometry->element_inverse_jacobian_device,
                       host_inverse_jacobian);
 
-  // In a mixed domain the host-evaluated entries above seed the device
-  // arrays, then this kernel overwrites only the supported entries. Refresh
-  // the host coordinate and velocity views afterward so host-side consumers
-  // see one coherent geometry snapshot.
+  // In a mixed domain the host-evaluated entries above seed the device arrays,
+  // then this kernel overwrites only the supported entries. Host observation
+  // caches are synchronized lazily by the events that consume them.
   if (has_device_evaluated) {
     seed_intermediate_frame_fields_on_device<volume_dim>(packed_geometry);
     update_frame_fields_device<volume_dim>(packed_geometry, points_per_element,
                                            total_points, fot_value,
                                            fot_value_dot);
-    copy_device_array_to_host<volume_dim>(
-        packed_geometry->inertial_coordinates_device,
-        make_not_null(&packed_geometry->inertial_coordinates_host));
-    copy_device_array_to_host<volume_dim>(
-        packed_geometry->mesh_velocity_device,
-        make_not_null(&packed_geometry->mesh_velocity_host));
-    copy_intermediate_frame_fields_to_host<volume_dim>(packed_geometry);
+    packed_geometry->host_frame_fields_dirty = true;
+  } else {
+    packed_geometry->host_frame_fields_dirty = false;
   }
 }
+
+template void synchronize_frame_fields_to_host<1>(
+    gsl::not_null<evolution::Kokkos::PackedGeometry<gh::System<1>>*>);
+template void synchronize_frame_fields_to_host<2>(
+    gsl::not_null<evolution::Kokkos::PackedGeometry<gh::System<2>>*>);
+template void synchronize_frame_fields_to_host<3>(
+    gsl::not_null<evolution::Kokkos::PackedGeometry<gh::System<3>>*>);
 
 template struct UpdateFrameFieldsBatchedWithTag<
     ::domain::Tags::FunctionsOfTimeInitialize>;

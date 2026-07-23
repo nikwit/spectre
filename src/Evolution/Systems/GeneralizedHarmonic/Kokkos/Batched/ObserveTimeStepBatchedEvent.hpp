@@ -17,6 +17,7 @@
 #include "DataStructures/VariablesKokkos.hpp"
 #include "Evolution/Initialization/InitialData.hpp"
 #include "Evolution/Kokkos/PackedTags.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Kokkos/Batched/UpdateFrameFieldsBatched.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Evolution/TypeTraits.hpp"
@@ -44,6 +45,7 @@ class ObserveNormsBatched : public Event {
   static constexpr size_t volume_dim = 3;
   using system = gh::System<volume_dim>;
   using host_variables_type = typename system::variables_tag::type;
+  using packed_geometry_tag = evolution::Kokkos::Tags::PackedGeometry<system>;
 
   struct SubfileName {
     using type = std::string;
@@ -101,18 +103,17 @@ class ObserveNormsBatched : public Event {
         tensors_to_observe_(tensors_to_observe) {}
 
   using compute_tags_for_observation_box = tmpl::list<>;
-  using return_tags = tmpl::list<>;
+  using return_tags = tmpl::list<packed_geometry_tag>;
   using argument_tags =
       tmpl::list<evolution::Kokkos::Tags::PackedTopology<gh::System<3>>,
-                 evolution::Kokkos::Tags::PackedGeometry<gh::System<3>>,
                  evolution::Kokkos::Tags::PackedEvolutionState<gh::System<3>>,
                  ::Tags::Time>;
 
   template <typename ArrayIndex, typename ParallelComponent,
             typename Metavariables>
   void operator()(
+      const gsl::not_null<typename packed_geometry_tag::type*> packed_geometry,
       const evolution::Kokkos::PackedTopology<gh::System<3>>& packed_topology,
-      const evolution::Kokkos::PackedGeometry<gh::System<3>>& packed_geometry,
       const evolution::Kokkos::PackedEvolutionState<gh::System<3>>&
           packed_evolution_state,
       const double time, Parallel::GlobalCache<Metavariables>& cache,
@@ -155,11 +156,13 @@ class ObserveNormsBatched : public Event {
         nullptr;
     host_variables_type error_vars{};
     if (observe_error_norms) {
-      ASSERT(packed_geometry.inertial_coordinates_host[0].size() ==
+      gh::Actions::synchronize_frame_fields_to_host<volume_dim>(
+          packed_geometry);
+      ASSERT(packed_geometry->inertial_coordinates_host[0].size() ==
                      packed_topology.total_points and
-                 packed_geometry.inertial_coordinates_host[1].size() ==
+                 packed_geometry->inertial_coordinates_host[1].size() ==
                      packed_topology.total_points and
-                 packed_geometry.inertial_coordinates_host[2].size() ==
+                 packed_geometry->inertial_coordinates_host[2].size() ==
                      packed_topology.total_points,
              "Packed inertial-coordinate sizes do not match total packed "
              "points.");
@@ -167,7 +170,7 @@ class ObserveNormsBatched : public Event {
           packed_topology.total_points};
       for (size_t d = 0; d < volume_dim; ++d) {
         inertial_coordinates.get(d) =
-            packed_geometry.inertial_coordinates_host[d];
+            packed_geometry->inertial_coordinates_host[d];
       }
 
       host_variables_type analytic_vars{packed_topology.total_points};
