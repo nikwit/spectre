@@ -22,7 +22,13 @@
 #include "Domain/CoordinateMaps/TimeDependent/ShapeMapTransitionFunctions/SphereTransition.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/ShapeMapTransitionFunctions/Wedge.hpp"
 #include "Domain/CoordinateMaps/TimeDependent/Skew.hpp"
+#include "Domain/Creators/BinaryCompactObject.hpp"
 #include "Domain/Creators/Rectilinear.hpp"
+#include "Domain/Creators/TimeDependentOptions/ExpansionMap.hpp"
+#include "Domain/Creators/TimeDependentOptions/RotationMap.hpp"
+#include "Domain/Creators/TimeDependentOptions/ShapeMap.hpp"
+#include "Domain/Creators/TimeDependentOptions/SkewMap.hpp"
+#include "Domain/Creators/TimeDependentOptions/TranslationMap.hpp"
 #include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "Domain/FunctionsOfTime/PiecewisePolynomial.hpp"
 #include "Domain/FunctionsOfTime/QuaternionFunctionOfTime.hpp"
@@ -38,6 +44,7 @@
 #include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/SpherepackIterator.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/KerrSchild.hpp"
+#include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/Minkowski.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/WrappedGr.hpp"
 #include "PointwiseFunctions/ConstraintDamping/Constant.hpp"
 #include "Utilities/Gsl.hpp"
@@ -48,6 +55,8 @@ namespace {
 constexpr size_t Dim = 3;
 using system = gh::System<Dim>;
 using hardcoded_solution = gh::Solutions::WrappedGr<gr::Solutions::KerrSchild>;
+using minkowski_solution =
+    gh::Solutions::WrappedGr<gr::Solutions::Minkowski<Dim>>;
 using packed_topology_type = evolution::Kokkos::PackedTopology<system>;
 using packed_geometry_type = evolution::Kokkos::PackedGeometry<system>;
 using packed_evolution_state_type =
@@ -579,6 +588,136 @@ void test_update_frame_fields_and_constraint_damping_batched(
   }
 }
 
+void test_binary_compact_object_device_maps_match_host() {
+  using domain::ObjectLabel;
+  using BcoTimeDependentMapOptions =
+      domain::creators::bco::TimeDependentMapOptions<false>;
+  using ExpansionMapOptions =
+      domain::creators::time_dependent_options::ExpansionMapOptions<false>;
+  using RotationMapOptions =
+      domain::creators::time_dependent_options::RotationMapOptions<false>;
+  using TranslationMapOptions =
+      domain::creators::time_dependent_options::TranslationMapOptions<Dim>;
+  using SkewMapOptions =
+      domain::creators::time_dependent_options::SkewMapOptions;
+  using ShapeMapOptionsA =
+      domain::creators::time_dependent_options::ShapeMapOptions<true,
+                                                                ObjectLabel::A>;
+  using ShapeMapOptionsB =
+      domain::creators::time_dependent_options::ShapeMapOptions<true,
+                                                                ObjectLabel::B>;
+  using KerrSchildFromBoyerLindquist =
+      domain::creators::time_dependent_options::KerrSchildFromBoyerLindquist;
+
+  const ExpansionMapOptions expansion_options{std::array{1.0, -4.8e-5, 2.0e-6},
+                                              50.0, -1.0e-6};
+  const RotationMapOptions rotation_options{std::array{0.004, -0.003, 0.017}};
+  const TranslationMapOptions translation_options{std::array{
+      std::array{0.01, -0.02, 0.03}, std::array{0.002, 0.001, -0.003},
+      std::array{-0.0001, 0.0002, 0.0003}}};
+  const SkewMapOptions skew_options{std::array{0.01, -0.004, 0.0002},
+                                    std::array{-0.02, 0.003, -0.0001}};
+  const ShapeMapOptionsA shape_options_a{
+      10, KerrSchildFromBoyerLindquist{0.62, std::array{0.2, -0.1, 0.15}},
+      std::array{0.01, -0.002, 0.0003}, 1.0e-12, true};
+  const ShapeMapOptionsB shape_options_b{
+      10, KerrSchildFromBoyerLindquist{0.17, std::array{-0.1, 0.2, 0.05}},
+      std::array{-0.02, 0.003, -0.0004}, 1.0e-12, false};
+
+  const domain::creators::BinaryCompactObject domain_creator{
+      domain::creators::BinaryCompactObject::Object{1.2, 5.5, 2.76, true, true},
+      domain::creators::BinaryCompactObject::Object{0.32, 5.5, -11.0, true,
+                                                    true},
+      std::array{0.049, 0.0},
+      91.8,
+      550.8,
+      1.2,
+      0_st,
+      3_st,
+      true,
+      domain::CoordinateMaps::Distribution::Logarithmic,
+      {},
+      domain::CoordinateMaps::Distribution::Linear,
+      120.0,
+      false,
+      false,
+      BcoTimeDependentMapOptions{
+          0.0, expansion_options, rotation_options, translation_options,
+          skew_options, shape_options_a, shape_options_b, std::nullopt}};
+  const auto domain = domain_creator.create_domain();
+  const auto functions_of_time = domain_creator.functions_of_time();
+  const auto initial_refinement_levels =
+      domain_creator.initial_refinement_levels();
+  const auto initial_extents = domain_creator.initial_extents();
+
+  packed_topology_type packed_topology{};
+  gh::Batched::Initialization::DriverState::apply(
+      make_not_null(&packed_topology), domain, initial_refinement_levels,
+      initial_extents, Spectral::Quadrature::GaussLobatto);
+
+  packed_geometry_type packed_geometry{};
+  packed_evolution_state_type packed_evolution_state{};
+  device_gamma0_type device_gamma0{};
+  device_gamma1_type device_gamma1{};
+  device_gamma2_type device_gamma2{};
+  const minkowski_solution solution{};
+  const gh::gauges::Harmonic gauge_condition{};
+  constexpr double gamma0_constant = 0.4;
+  constexpr double gamma1_constant = -0.7;
+  constexpr double gamma2_constant = 1.3;
+  const ConstraintDamping::Constant<Dim, Frame::Grid> damping_gamma0{
+      gamma0_constant};
+  const ConstraintDamping::Constant<Dim, Frame::Grid> damping_gamma1{
+      gamma1_constant};
+  const ConstraintDamping::Constant<Dim, Frame::Grid> damping_gamma2{
+      gamma2_constant};
+
+  gh::Actions::InitializeBatchedData::apply(
+      make_not_null(&packed_geometry), make_not_null(&packed_evolution_state),
+      make_not_null(&device_gamma0), make_not_null(&device_gamma1),
+      make_not_null(&device_gamma2), packed_topology, domain, functions_of_time,
+      solution, 0.0, gauge_condition, damping_gamma0, damping_gamma1,
+      damping_gamma2);
+
+  REQUIRE(packed_topology.local_element_ids.size() == domain.blocks().size());
+  CHECK(packed_geometry.shape_raw_coefficients_device.extent(0) == 2);
+  CHECK(packed_geometry.shape_coefficients_device.extent(0) == 2);
+  CHECK(packed_geometry.shape_group_representative_element_host.size() == 2);
+  REQUIRE(packed_geometry.element_map_kind_host.size() ==
+          packed_topology.local_element_ids.size());
+  for (size_t e = 0; e < packed_topology.local_element_ids.size(); ++e) {
+    const size_t block_id = packed_topology.local_element_ids[e].block_id();
+    CAPTURE(block_id);
+    CAPTURE(domain.blocks()[block_id].name());
+    CHECK(packed_geometry.element_map_kind_host[e] !=
+          static_cast<int>(gh::Actions::BatchedMapKind::HostEvaluated));
+  }
+
+  const auto domain_static_cache_snapshot =
+      snapshot_domain_static_caches(packed_geometry);
+  for (const double time : std::array{0.2, 1.1}) {
+    CAPTURE(time);
+    gh::Actions::UpdateFrameFieldsBatched::apply(
+        make_not_null(&packed_geometry), packed_topology, domain,
+        functions_of_time, time);
+    CHECK(packed_geometry.host_frame_fields_dirty);
+    gh::Actions::synchronize_frame_fields_to_host<Dim>(
+        make_not_null(&packed_geometry));
+    CHECK_FALSE(packed_geometry.host_frame_fields_dirty);
+    check_domain_static_caches_unchanged(domain_static_cache_snapshot,
+                                         packed_geometry);
+
+    gh::Actions::UpdateConstraintDampingBatched::apply(
+        make_not_null(&device_gamma0), make_not_null(&device_gamma1),
+        make_not_null(&device_gamma2), packed_geometry, functions_of_time, time,
+        damping_gamma0, damping_gamma1, damping_gamma2);
+    check_frame_fields_and_damping_at_time(
+        packed_topology, packed_geometry, domain, functions_of_time,
+        device_gamma0, device_gamma1, device_gamma2, time, gamma0_constant,
+        gamma1_constant, gamma2_constant);
+  }
+}
+
 }  // namespace
 
 SPECTRE_TEST_CASE(
@@ -599,4 +738,5 @@ SPECTRE_TEST_CASE(
       BlockRegion::Inner, false, false, true, false);
   test_update_frame_fields_and_constraint_damping_batched(
       BlockRegion::Inner, true, true, true, true);
+  test_binary_compact_object_device_maps_match_host();
 }
