@@ -80,6 +80,49 @@ def compare_reductions(cpu_file, gpu_file, subfile, rtol):
     return failures
 
 
+def compare_dat_pair(cpu_file, gpu_file, cpu_subfile, gpu_subfile, rtol, atol):
+    """Compare corresponding generic reduction tables by column name."""
+    cpu_legend, cpu_data = read_dat(cpu_file, cpu_subfile)
+    gpu_legend, gpu_data = read_dat(gpu_file, gpu_subfile)
+    failures = 0
+    label = f"{cpu_subfile} : {gpu_subfile}"
+    if cpu_data.shape[0] != gpu_data.shape[0]:
+        print(
+            f"  {label}: row count differs "
+            f"(cpu {cpu_data.shape[0]}, gpu {gpu_data.shape[0]})"
+        )
+        return 1
+    if "Time" not in cpu_legend or "Time" not in gpu_legend:
+        print(f"  {label}: missing Time column")
+        return 1
+    cpu_time = cpu_data[:, cpu_legend.index("Time")]
+    gpu_time = gpu_data[:, gpu_legend.index("Time")]
+    if not np.allclose(cpu_time, gpu_time, rtol=0, atol=atol):
+        print(f"  {label}: observation times differ")
+        return 1
+    for name in cpu_legend:
+        if name == "Time":
+            continue
+        if name not in gpu_legend:
+            print(f"  {label}: column '{name}' missing in GPU output")
+            failures += 1
+            continue
+        cpu_col = cpu_data[:, cpu_legend.index(name)]
+        gpu_col = gpu_data[:, gpu_legend.index(name)]
+        difference = np.abs(cpu_col - gpu_col)
+        allowed = atol + rtol * np.maximum(np.abs(cpu_col), np.abs(gpu_col))
+        scaled_error = np.max(difference / allowed)
+        worst_absolute = np.max(difference)
+        status = "OK " if scaled_error <= 1.0 else "FAIL"
+        if scaled_error > 1.0:
+            failures += 1
+        print(
+            f"  [{status}] {label} {name}: max abs diff "
+            f"{worst_absolute:.3e}, tolerance ratio {scaled_error:.3e}"
+        )
+    return failures
+
+
 def read_volume_observations(filename, subfile):
     """Return {obs_value: {grid_name: {component: array}}}."""
     result = {}
@@ -87,6 +130,14 @@ def read_volume_observations(filename, subfile):
         vol = f[subfile]
         for obs_group_name in vol:
             group = vol[obs_group_name]
+            # Standard observer files also store domain metadata directly
+            # under the volume subfile. Only ObservationId groups carry an
+            # observation value.
+            if (
+                not isinstance(group, h5py.Group)
+                or "observation_value" not in group.attrs
+            ):
+                continue
             obs_value = group.attrs["observation_value"]
             raw_names = (
                 np.array(group["grid_names"]).tobytes().decode().strip("\x00")
@@ -106,6 +157,8 @@ def read_volume_observations(filename, subfile):
             components = {}
             for key in group:
                 if key in (
+                    "BlockId",
+                    "ElementId",
                     "grid_names",
                     "total_extents",
                     "bases",
@@ -214,14 +267,54 @@ def main():
         ),
     )
     parser.add_argument("--coord-atol", type=float, default=1e-13)
+    parser.add_argument(
+        "--reduction-subfiles",
+        nargs="+",
+        default=("Norms.dat", "Errors.dat"),
+        help="Reduction subfiles to compare (default: Norms.dat Errors.dat).",
+    )
+    parser.add_argument(
+        "--dat-pair",
+        action="append",
+        default=[],
+        metavar="CPU_SUBFILE=GPU_SUBFILE",
+        help=(
+            "Additional corresponding reduction tables to compare. May be "
+            "specified multiple times, for example for horizon or control "
+            "system diagnostics."
+        ),
+    )
+    parser.add_argument(
+        "--dat-atol",
+        type=float,
+        default=1e-13,
+        help="Absolute tolerance for --dat-pair comparisons.",
+    )
     args = parser.parse_args()
 
     failures = 0
     print("Reduction comparison:")
-    for subfile in ("Norms.dat", "Errors.dat"):
+    for subfile in args.reduction_subfiles:
         failures += compare_reductions(
             args.cpu_reductions, args.gpu_reductions, subfile, args.rtol
         )
+    if args.dat_pair:
+        print("Additional reduction-table comparison:")
+        for pair in args.dat_pair:
+            if "=" not in pair:
+                parser.error(
+                    "--dat-pair must have the form CPU_SUBFILE=GPU_SUBFILE: "
+                    f"{pair}"
+                )
+            cpu_subfile, gpu_subfile = pair.split("=", maxsplit=1)
+            failures += compare_dat_pair(
+                args.cpu_reductions,
+                args.gpu_reductions,
+                cpu_subfile,
+                gpu_subfile,
+                args.rtol,
+                args.dat_atol,
+            )
     if args.cpu_volume and args.gpu_volume:
         print("Volume comparison:")
         failures += compare_volumes(
