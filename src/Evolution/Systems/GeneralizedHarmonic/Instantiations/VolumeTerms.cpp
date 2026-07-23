@@ -5,14 +5,17 @@
 
 #include "DataStructures/DataBox/PrefixHelpers.hpp"
 #include "DataStructures/DataBox/Prefixes.hpp"
-#include "DataStructures/Tags/MirrorView.hpp"
 #include "Evolution/DiscontinuousGalerkin/Actions/VolumeTermsImpl.tpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/TimeDerivative.hpp"
 #include "NumericalAlgorithms/LinearOperators/PartialDerivatives.tpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/Factory.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
+
+#ifdef SPECTRE_KOKKOS
+#include "DataStructures/Tags/MirrorView.hpp"
 #include "Utilities/Kokkos/KokkosCore.hpp"
+#endif
 
 #define DIM(data) BOOST_PP_TUPLE_ELEM(0, data)
 

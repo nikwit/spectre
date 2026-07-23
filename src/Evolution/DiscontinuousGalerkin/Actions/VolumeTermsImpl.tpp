@@ -16,7 +16,6 @@
 #include "DataStructures/Tensor/EagerMath/DeterminantAndInverse.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Variables.hpp"
-#include "DataStructures/VariablesKokkos.hpp"
 #include "Evolution/DiscontinuousGalerkin/TimeDerivativeDecisions.hpp"
 #include "Evolution/PassVariables.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Formulation.hpp"
@@ -32,8 +31,13 @@
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
 
+#ifdef SPECTRE_KOKKOS
+#include "DataStructures/VariablesKokkos.hpp"
+#endif
+
 namespace evolution::dg::Actions::detail {
 
+#ifdef SPECTRE_KOKKOS
 template <typename ComputeVolumeTimeDerivativeTerms, size_t Dim,
           typename TimeDerivativeArguments, typename VariablesTags,
           typename PartialDerivTags, typename FluxVariablesTags,
@@ -104,6 +108,8 @@ struct ComputeVolumeTermsOnDevice<
                                             TimeDerivativeArguments>...>
       time_derivative_args;
 };
+#endif
+
 /*
  * Computes the volume terms for a discontinuous Galerkin scheme.
  *

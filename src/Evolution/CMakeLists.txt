@@ -8,9 +8,6 @@ add_spectre_library(${LIBRARY})
 spectre_target_sources(
   ${LIBRARY}
   PRIVATE
-  Kokkos/CleanHistory.cpp
-  Kokkos/RecordTimeStepperData.cpp
-  Kokkos/UpdateU.cpp
   TagsDomain.cpp
   )
 
@@ -22,15 +19,6 @@ spectre_target_headers(
   BoundaryCorrectionTags.hpp
   ComputeTags.hpp
   Evolution.hpp
-  Kokkos/BoundaryBatchMetadata.hpp
-  Kokkos/CleanHistory.hpp
-  Kokkos/KokkosTimeStepperTags.hpp
-  Kokkos/PackedDataBundles.hpp
-  Kokkos/PackedTags.hpp
-  Kokkos/RecordTimeStepperData.hpp
-  Kokkos/SystemTraits.hpp
-  Kokkos/SyncKokkosToHost.hpp
-  Kokkos/UpdateU.hpp
   NumericInitialData.hpp
   PassVariables.hpp
   Protocols.hpp
@@ -57,13 +45,43 @@ target_link_libraries(
   Utilities
   PRIVATE
   LinearOperators
-  TimeKokkos
   INTERFACE
   Observer
   Parallel
   ParallelArrayCollection
   SystemUtilities
   )
+
+if(SPECTRE_KOKKOS)
+  spectre_target_sources(
+    ${LIBRARY}
+    PRIVATE
+    Kokkos/CleanHistory.cpp
+    Kokkos/RecordTimeStepperData.cpp
+    Kokkos/UpdateU.cpp
+    )
+
+  spectre_target_headers(
+    ${LIBRARY}
+    INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
+    HEADERS
+    Kokkos/BoundaryBatchMetadata.hpp
+    Kokkos/CleanHistory.hpp
+    Kokkos/KokkosTimeStepperTags.hpp
+    Kokkos/PackedDataBundles.hpp
+    Kokkos/PackedTags.hpp
+    Kokkos/RecordTimeStepperData.hpp
+    Kokkos/SystemTraits.hpp
+    Kokkos/SyncKokkosToHost.hpp
+    Kokkos/UpdateU.hpp
+    )
+
+  target_link_libraries(
+    ${LIBRARY}
+    PRIVATE
+    TimeKokkos
+    )
+endif()
 
 add_dependencies(
   ${LIBRARY}

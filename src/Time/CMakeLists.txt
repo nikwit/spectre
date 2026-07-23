@@ -82,7 +82,9 @@ target_link_libraries(
 
 add_subdirectory(Actions)
 add_subdirectory(ChangeSlabSize)
-add_subdirectory(Kokkos)
+if(SPECTRE_KOKKOS)
+  add_subdirectory(Kokkos)
+endif()
 add_subdirectory(OptionTags)
 add_subdirectory(StepChoosers)
 add_subdirectory(Tags)
