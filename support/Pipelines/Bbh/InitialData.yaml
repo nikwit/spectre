@@ -42,6 +42,16 @@ Background: &background
     CenterOfMassOffset:
       - &y_offset {{ CenterOfMassOffset_y }}
       - &z_offset {{ CenterOfMassOffset_z }}
+{% if Background == "HarmonicSchwarzschild" %}
+    ObjectLeft: &kerr_left
+      HarmonicSchwarzschild:
+        Mass: &mass_left {{ ConformalMassLeft }}
+        Center: [0., 0., 0.]
+    ObjectRight: &kerr_right
+      HarmonicSchwarzschild:
+        Mass: &mass_right {{ ConformalMassRight }}
+        Center: [0., 0., 0.]
+{% else %}
     ObjectLeft: &kerr_left
       KerrSchild:
         Mass: &mass_left {{ ConformalMassLeft }}
@@ -60,6 +70,7 @@ Background: &background
           - {{ ConformalSpinRight_z }}
         Center: [0., 0., 0.]
         Velocity: [0., 0., 0.]
+{% endif %}
     AngularVelocity: {{ OrbitalAngularVelocity }}
     Expansion: {{ RadialExpansionVelocity }}
     LinearVelocity:
@@ -151,18 +162,28 @@ DomainCreator:
       ShapeMapA:
         LMax: {{ HorizonLMax }}
         CoefficientTruncationLimit: 0.
+{% if Background == "HarmonicSchwarzschild" %}
+        InitialValues: Spherical
+        SizeInitialValues: [0., 0., 0.]
+{% else %}
         InitialValues:
           Mass: *mass_right
           Spin: *spin_right
         SizeInitialValues: Auto
+{% endif %}
         TransitionEndsAtCube: False
       ShapeMapB:
         CoefficientTruncationLimit: 0.
         LMax: {{ HorizonLMax }}
+{% if Background == "HarmonicSchwarzschild" %}
+        InitialValues: Spherical
+        SizeInitialValues: [0., 0., 0.]
+{% else %}
         InitialValues:
           Mass: *mass_left
           Spin: *spin_left
         SizeInitialValues: Auto
+{% endif %}
         TransitionEndsAtCube: False
       GridCenters: None
 

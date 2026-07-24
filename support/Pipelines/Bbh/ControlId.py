@@ -159,10 +159,14 @@ def control_id(
     ]["ApparentHorizon"]["Rotation"]
     horizon_rotation_b[2] -= orbital_angular_velocity
 
+    # The isolated solution superposed for the background, e.g. 'KerrSchild'
+    # or 'HarmonicSchwarzschild'
+    background = next(iter(binary_data["ObjectRight"]))
+
     # Combine initial choices of free data in a dictionary
     initial_free_data = dict(
-        conformal_mass_a=binary_data["ObjectRight"]["KerrSchild"]["Mass"],
-        conformal_mass_b=binary_data["ObjectLeft"]["KerrSchild"]["Mass"],
+        conformal_mass_a=binary_data["ObjectRight"][background]["Mass"],
+        conformal_mass_b=binary_data["ObjectLeft"][background]["Mass"],
         horizon_rotation_a=horizon_rotation_a,
         horizon_rotation_b=horizon_rotation_b,
         center_of_mass_offset=[x_offset, y_offset, z_offset],
@@ -230,6 +234,7 @@ def control_id(
                 refinement_level=refinement_level,
                 polynomial_order=polynomial_order,
                 negative_expansion_bc=negative_expansion_bc,
+                background=background,
             )
 
         # Initialize dictionary to hold the measured physical parameters

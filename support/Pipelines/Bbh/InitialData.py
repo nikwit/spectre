@@ -61,6 +61,7 @@ def id_parameters(
     refinement_level: int,
     polynomial_order: int,
     negative_expansion_bc: bool,
+    background: str,
     target_params: Dict[TargetParams, Union[float, Sequence[float]]],
 ):
     """Determine initial data parameters from options.
@@ -81,6 +82,10 @@ def id_parameters(
       polynomial_order: p-refinement level.
       negative_expansion_bc: Place the excision boundaries inside of the
         apparent horizons.
+      background: Isolated solution to superpose for the background, one of
+        "KerrSchild" or "HarmonicSchwarzschild". The harmonic-coordinates
+        background produces initial data whose gauge is close to a stationary
+        state of harmonic-gauge evolutions, but supports only zero spins.
       target_params: Target parameters for the initial data control loop.
     """
     for required_target in [
@@ -103,11 +108,23 @@ def id_parameters(
 
     # Spins
     chi_A = np.asarray(target_params["DimensionlessSpinA"])
-    r_plus_A = conformal_mass_a * (1.0 + np.sqrt(1 - np.dot(chi_A, chi_A)))
+    chi_B = np.asarray(target_params["DimensionlessSpinB"])
+    if background == "HarmonicSchwarzschild":
+        if max(np.linalg.norm(chi_A), np.linalg.norm(chi_B)) > 0.0:
+            raise ValueError(
+                "The 'HarmonicSchwarzschild' background supports only zero"
+                " target spins. Use the 'KerrSchild' background for spinning"
+                " configurations."
+            )
+        # In harmonic coordinates the horizon is at r = M (the harmonic radial
+        # coordinate is the areal radius minus M)
+        r_plus_A = conformal_mass_a
+        r_plus_B = conformal_mass_b
+    else:
+        r_plus_A = conformal_mass_a * (1.0 + np.sqrt(1 - np.dot(chi_A, chi_A)))
+        r_plus_B = conformal_mass_b * (1.0 + np.sqrt(1 - np.dot(chi_B, chi_B)))
     Omega_A = horizon_rotation_a
     Omega_A[2] += orbital_angular_velocity
-    chi_B = np.asarray(target_params["DimensionlessSpinB"])
-    r_plus_B = conformal_mass_b * (1.0 + np.sqrt(1 - np.dot(chi_B, chi_B)))
     Omega_B = horizon_rotation_b
     Omega_B[2] += orbital_angular_velocity
     if negative_expansion_bc:
@@ -137,6 +154,7 @@ def id_parameters(
         40 if max(np.linalg.norm(chi_A), np.linalg.norm(chi_B)) > 0.9 else 20
     )
     return {
+        "Background": background,
         "ConformalMassRight": conformal_mass_a,
         "ConformalMassLeft": conformal_mass_b,
         "XRight": x_A,
@@ -188,6 +206,8 @@ def generate_id(
     horizon_rotation_b: Optional[Sequence[float]] = None,
     center_of_mass_offset: Sequence[float] = [0.0, 0.0, 0.0],
     linear_velocity: Sequence[float] = [0.0, 0.0, 0.0],
+    # Background
+    background: str = "KerrSchild",
     # Resolution
     refinement_level: int = 1,
     polynomial_order: int = 9,
@@ -314,9 +334,13 @@ def generate_id(
         ), "For eccentricity control the target eccentricity must be set."
 
     # This is an empirical factor based on an equal-mass non-spinning case, in
-    # which ~0.41 conformal masses result in ~0.5 horizon masses.
+    # which ~0.41 conformal masses result in ~0.5 horizon masses. For the
+    # harmonic-coordinates background the dressing is much weaker (measured
+    # ~0.96-0.98 conformal/horizon mass for a q=4 configuration).
     # mass_initial_guess_factor = 1.0
-    mass_initial_guess_factor = 0.82
+    mass_initial_guess_factor = (
+        0.97 if background == "HarmonicSchwarzschild" else 0.82
+    )
     if conformal_mass_a is None:
         conformal_mass_a = mass_initial_guess_factor * target_params["MassA"]
     if conformal_mass_b is None:
@@ -361,6 +385,7 @@ def generate_id(
         refinement_level=refinement_level,
         polynomial_order=polynomial_order,
         negative_expansion_bc=negative_expansion_bc,
+        background=background,
         target_params=target_params,
     )
     logger.debug(f"Initial data parameters: {pretty_repr(id_params)}")
@@ -474,6 +499,19 @@ def generate_id(
     help=(
         "Time to merger. Specify together with a zero eccentricity to compute"
         " initial orbital parameters for a circular orbit."
+    ),
+)
+# Background
+@click.option(
+    "--background",
+    type=click.Choice(["KerrSchild", "HarmonicSchwarzschild"]),
+    default="KerrSchild",
+    show_default=True,
+    help=(
+        "Isolated solution to superpose for the background. The"
+        " 'HarmonicSchwarzschild' background produces initial data whose gauge"
+        " is close to a stationary state of harmonic-gauge evolutions, but"
+        " supports only zero spins."
     ),
 )
 # Resolution

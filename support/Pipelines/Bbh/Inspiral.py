@@ -251,6 +251,17 @@ def inspiral_parameters(
     else:
         id_shape_A = id_domain_creator["TimeDependentMaps"]["ShapeMapA"]
         id_shape_B = id_domain_creator["TimeDependentMaps"]["ShapeMapB"]
+        # Spherical ID shape maps (used e.g. by the harmonic-coordinates
+        # background) are equivalent to a zero-spin Kerr shape, which is a
+        # coordinate sphere
+        if id_shape_A["InitialValues"] == "Spherical":
+            id_shape_A = {
+                "InitialValues": {"Mass": mass_a, "Spin": [0.0, 0.0, 0.0]}
+            }
+        if id_shape_B["InitialValues"] == "Spherical":
+            id_shape_B = {
+                "InitialValues": {"Mass": mass_b, "Spin": [0.0, 0.0, 0.0]}
+            }
         id_binary = id_input_file["Background"]["Binary"]
         horizons_filename = (
             Path(id_horizons_path)
