@@ -64,6 +64,23 @@ if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     Utilities
     )
 
+  set(executable SphericalTransformBenchmark)
+
+  add_spectre_executable(
+    ${executable}
+    EXCLUDE_FROM_ALL
+    SphericalTransformBenchmark.cpp
+    )
+
+  target_link_libraries(
+    ${executable}
+    PRIVATE
+    DataStructures
+    Libsharp
+    SphericalHarmonics
+    Utilities
+    )
+
   set(executable ShapeJacobianBenchmark)
 
   add_spectre_executable(
