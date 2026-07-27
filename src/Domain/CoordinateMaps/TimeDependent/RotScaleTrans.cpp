@@ -11,6 +11,7 @@
 #include <pup.h>
 #include <pup_stl.h>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -39,6 +40,21 @@
 #include "Utilities/TypeTraits/RemoveReferenceWrapper.hpp"
 
 namespace domain::CoordinateMaps::TimeDependent {
+
+namespace {
+// Create a tensor of DataVectors with uninitialized values (or of plain
+// doubles), for use in code paths that assign every component before use.
+// This avoids the wasted zero-initialization of `make_with_value`.
+template <typename ResultTensor, typename T>
+ResultTensor make_uninitialized(const T& used_for_size) {
+  if constexpr (std::is_same_v<tt::remove_cvref_wrap_t<T>, DataVector>) {
+    return ResultTensor{dereference_wrapper(used_for_size).size()};
+  } else {
+    (void)used_for_size;
+    return ResultTensor{};
+  }
+}
+}  // namespace
 
 template <size_t Dim>
 RotScaleTrans<Dim>::RotScaleTrans(
@@ -73,23 +89,41 @@ std::array<tt::remove_cvref_wrap_t<T>, Dim> RotScaleTrans<Dim>::operator()(
         std::string, std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
         functions_of_time) const {
   std::array<tt::remove_cvref_wrap_t<T>, Dim> result{};
-  for (size_t i = 0; i < Dim; i++) {
-    gsl::at(result, i) = gsl::at(source_coords, i);
+  // The radius is only needed to blend the maps in the transition region
+  tt::remove_cvref_wrap_t<T> radius{};
+  if (region_ == BlockRegion::Transition and
+      (scale_f_of_t_a_.has_value() or trans_f_of_t_.has_value())) {
+    radius = square(dereference_wrapper(source_coords[0]));
+    for (size_t i = 1; i < Dim; ++i) {
+      radius += square(dereference_wrapper(gsl::at(source_coords, i)));
+    }
+    radius = sqrt(radius);
   }
-  const tt::remove_cvref_wrap_t<T> radius = magnitude(result);
-  // Rotation Map
+  // Rotation Map. Outside the transition region the expansion is a constant
+  // factor, so fold it into the rotation matrix to save a pass over the data.
   if (rot_f_of_t_.has_value()) {
-    const Matrix rot_matrix = rotation_matrix<Dim>(
+    Matrix rot_matrix = rotation_matrix<Dim>(
         time, *(functions_of_time.at(rot_f_of_t_.value())));
+    if (scale_f_of_t_a_.has_value() and region_ != BlockRegion::Transition) {
+      rot_matrix *=
+          region_ == BlockRegion::Inner
+              ? functions_of_time.at(scale_f_of_t_a_.value())->func(time)[0][0]
+              : functions_of_time.at(scale_f_of_t_b_.value())->func(time)[0][0];
+    }
     for (size_t i = 0; i < Dim; i++) {
       gsl::at(result, i) = rot_matrix(i, 0) * source_coords[0];
       for (size_t j = 1; j < Dim; j++) {
         gsl::at(result, i) += rot_matrix(i, j) * gsl::at(source_coords, j);
       }
     }
+  } else {
+    for (size_t i = 0; i < Dim; i++) {
+      gsl::at(result, i) = gsl::at(source_coords, i);
+    }
   }
   // Expansion Map
-  if (scale_f_of_t_a_.has_value()) {
+  if (scale_f_of_t_a_.has_value() and
+      (region_ == BlockRegion::Transition or not rot_f_of_t_.has_value())) {
     const double scale_a_of_t =
         functions_of_time.at(scale_f_of_t_a_.value())->func(time)[0][0];
     const double scale_b_of_t =
@@ -472,12 +506,16 @@ std::array<tt::remove_cvref_wrap_t<T>, Dim> RotScaleTrans<Dim>::frame_velocity(
   std::array<tt::remove_cvref_wrap_t<T>, Dim> result =
       make_with_value<std::array<tt::remove_cvref_wrap_t<T>, Dim>>(
           dereference_wrapper(source_coords[0]), 0.0);
-  tt::remove_cvref_wrap_t<T> radius =
-      square(dereference_wrapper(source_coords[0]));
-  for (size_t i = 1; i < Dim; ++i) {
-    radius += square(dereference_wrapper(gsl::at(source_coords, i)));
+  // The radius is only needed to blend the maps in the transition region
+  tt::remove_cvref_wrap_t<T> radius{};
+  if (region_ == BlockRegion::Transition and
+      (scale_f_of_t_a_.has_value() or trans_f_of_t_.has_value())) {
+    radius = square(dereference_wrapper(source_coords[0]));
+    for (size_t i = 1; i < Dim; ++i) {
+      radius += square(dereference_wrapper(gsl::at(source_coords, i)));
+    }
+    radius = sqrt(radius);
   }
-  radius = sqrt(radius);
   // Rotation map with no expansion
   if (rot_f_of_t_.has_value() and not scale_f_of_t_a_.has_value()) {
     const Matrix rot_matrix_deriv = rotation_matrix_deriv<Dim>(
@@ -669,12 +707,37 @@ RotScaleTrans<Dim>::jacobian(
     const std::unordered_map<
         std::string, std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
         functions_of_time) const {
-  auto result = make_with_value<
+  auto result = make_uninitialized<
       tnsr::Ij<tt::remove_cvref_wrap_t<T>, Dim, Frame::NoFrame>>(
-      dereference_wrapper(source_coords[0]), 0.0);
-  // Making the identity in case rotation isn't specified.
-  for (size_t i = 0; i < Dim; i++) {
-    result.get(i, i) = 1;
+      source_coords[0]);
+  // Outside the transition region the jacobian is a constant matrix: the
+  // expansion is a constant factor, the rotation matrix is position
+  // independent, and the translation does not contribute.
+  if (region_ != BlockRegion::Transition) {
+    const double scale =
+        scale_f_of_t_a_.has_value()
+            ? (region_ == BlockRegion::Inner
+                   ? functions_of_time.at(scale_f_of_t_a_.value())
+                         ->func(time)[0][0]
+                   : functions_of_time.at(scale_f_of_t_b_.value())
+                         ->func(time)[0][0])
+            : 1.0;
+    if (rot_f_of_t_.has_value()) {
+      const Matrix rot_matrix = rotation_matrix<Dim>(
+          time, *(functions_of_time.at(rot_f_of_t_.value())));
+      for (size_t i = 0; i < Dim; i++) {
+        for (size_t j = 0; j < Dim; j++) {
+          result.get(i, j) = scale * rot_matrix(i, j);
+        }
+      }
+    } else {
+      for (size_t i = 0; i < Dim; i++) {
+        for (size_t j = 0; j < Dim; j++) {
+          result.get(i, j) = i == j ? scale : 0.0;
+        }
+      }
+    }
+    return result;
   }
   const tt::remove_cvref_wrap_t<T> radius = magnitude(source_coords);
   // Rotation map with no expansion
@@ -694,62 +757,47 @@ RotScaleTrans<Dim>::jacobian(
         functions_of_time.at(scale_f_of_t_a_.value())->func(time)[0][0];
     const double scale_b_of_t =
         functions_of_time.at(scale_f_of_t_b_.value())->func(time)[0][0];
-    if (region_ == BlockRegion::Inner) {
-      for (size_t i = 0; i < Dim; i++) {
-        result.get(i, i) = scale_a_of_t;
-      }
-    } else if (region_ == BlockRegion::Transition) {
-      for (size_t k = 0; k < get_size(radius); k++) {
-        const double alpha = inner_radius_ * outer_radius_ /
-                             (square((get_element(radius, k))) *
-                              (inner_radius_ - outer_radius_));
-        // Optimization from SpEC to reduce roundoff.
-        // Closer to outer radius
-        if (1.0 - get_element(radius, k) / (inner_radius_ + outer_radius_) <
-            .5) {
-          double radial_scaling_factor =
-              ((outer_radius_ - get_element(radius, k)) *
-               (scale_a_of_t - scale_b_of_t) * inner_radius_) /
-              ((outer_radius_ - inner_radius_) * get_element(radius, k));
-          for (size_t i = 0; i < Dim; i++) {
-            for (size_t j = 0; j < Dim; j++) {
-              get_element(result.get(i, j), k) =
-                  alpha *
-                  get_element(dereference_wrapper(gsl::at(source_coords, i)),
-                              k) *
-                  (scale_a_of_t - scale_b_of_t) *
-                  get_element(dereference_wrapper(gsl::at(source_coords, j)),
-                              k) /
-                  get_element(radius, k);
-            }
-            get_element(result.get(i, i), k) +=
-                scale_b_of_t + radial_scaling_factor;
+    for (size_t k = 0; k < get_size(radius); k++) {
+      const double alpha =
+          inner_radius_ * outer_radius_ /
+          (square((get_element(radius, k))) * (inner_radius_ - outer_radius_));
+      // Optimization from SpEC to reduce roundoff.
+      // Closer to outer radius
+      if (1.0 - get_element(radius, k) / (inner_radius_ + outer_radius_) < .5) {
+        double radial_scaling_factor =
+            ((outer_radius_ - get_element(radius, k)) *
+             (scale_a_of_t - scale_b_of_t) * inner_radius_) /
+            ((outer_radius_ - inner_radius_) * get_element(radius, k));
+        for (size_t i = 0; i < Dim; i++) {
+          for (size_t j = 0; j < Dim; j++) {
+            get_element(result.get(i, j), k) =
+                alpha *
+                get_element(dereference_wrapper(gsl::at(source_coords, i)), k) *
+                (scale_a_of_t - scale_b_of_t) *
+                get_element(dereference_wrapper(gsl::at(source_coords, j)), k) /
+                get_element(radius, k);
           }
-          // Closer to inner radius
-        } else {
-          double radial_scaling_factor =
-              ((inner_radius_ - get_element(radius, k)) *
-               (scale_a_of_t - scale_b_of_t) * outer_radius_) /
-              ((outer_radius_ - inner_radius_) * get_element(radius, k));
-          for (size_t i = 0; i < Dim; i++) {
-            for (size_t j = 0; j < Dim; j++) {
-              get_element(result.get(i, j), k) =
-                  alpha *
-                  get_element(dereference_wrapper(gsl::at(source_coords, i)),
-                              k) *
-                  (scale_a_of_t - scale_b_of_t) *
-                  get_element(dereference_wrapper(gsl::at(source_coords, j)),
-                              k) /
-                  get_element(radius, k);
-            }
-            get_element(result.get(i, i), k) +=
-                scale_a_of_t + radial_scaling_factor;
-          }
+          get_element(result.get(i, i), k) +=
+              scale_b_of_t + radial_scaling_factor;
         }
-      }
-    } else {
-      for (size_t i = 0; i < Dim; i++) {
-        result.get(i, i) = scale_b_of_t;
+        // Closer to inner radius
+      } else {
+        double radial_scaling_factor =
+            ((inner_radius_ - get_element(radius, k)) *
+             (scale_a_of_t - scale_b_of_t) * outer_radius_) /
+            ((outer_radius_ - inner_radius_) * get_element(radius, k));
+        for (size_t i = 0; i < Dim; i++) {
+          for (size_t j = 0; j < Dim; j++) {
+            get_element(result.get(i, j), k) =
+                alpha *
+                get_element(dereference_wrapper(gsl::at(source_coords, i)), k) *
+                (scale_a_of_t - scale_b_of_t) *
+                get_element(dereference_wrapper(gsl::at(source_coords, j)), k) /
+                get_element(radius, k);
+          }
+          get_element(result.get(i, i), k) +=
+              scale_a_of_t + radial_scaling_factor;
+        }
       }
     }
   }
@@ -761,100 +809,89 @@ RotScaleTrans<Dim>::jacobian(
         functions_of_time.at(scale_f_of_t_a_.value())->func(time)[0][0];
     const double scale_b_of_t =
         functions_of_time.at(scale_f_of_t_b_.value())->func(time)[0][0];
-    if (region_ == BlockRegion::Inner) {
-      for (size_t i = 0; i < Dim; i++) {
-        for (size_t j = 0; j < Dim; j++) {
-          result.get(i, j) = scale_a_of_t * rot_matrix(i, j);
-        }
-      }
-    } else if (region_ == BlockRegion::Transition) {
-      for (size_t k = 0; k < get_size(radius); k++) {
-        const double alpha = inner_radius_ * outer_radius_ /
-                             (square((get_element(radius, k))) *
-                              (inner_radius_ - outer_radius_));
-        // Optimization from SpEC to reduce roundoff.
-        // Closer to outer radius
-        if (1.0 - get_element(radius, k) / (inner_radius_ + outer_radius_) <
-            .5) {
-          double radial_scaling_factor =
-              ((outer_radius_ - get_element(radius, k)) *
-               (scale_a_of_t - scale_b_of_t) * inner_radius_) /
-              ((outer_radius_ - inner_radius_) * get_element(radius, k));
-          for (size_t i = 0; i < Dim; i++) {
-            double rotated_coords = 0;
-            for (size_t l = 0; l < Dim; l++) {
-              rotated_coords +=
-                  rot_matrix(i, l) *
-                  get_element(dereference_wrapper(gsl::at(source_coords, l)),
-                              k);
-            }
-            for (size_t j = 0; j < Dim; j++) {
-              get_element(result.get(i, j), k) =
-                  scale_b_of_t * rot_matrix(i, j) +
-                  alpha * rotated_coords * (scale_a_of_t - scale_b_of_t) *
-                      get_element(
-                          dereference_wrapper(gsl::at(source_coords, j)), k) /
-                      get_element(radius, k) +
-                  rot_matrix(i, j) * radial_scaling_factor;
-            }
+    for (size_t k = 0; k < get_size(radius); k++) {
+      const double alpha =
+          inner_radius_ * outer_radius_ /
+          (square((get_element(radius, k))) * (inner_radius_ - outer_radius_));
+      // Optimization from SpEC to reduce roundoff.
+      // Closer to outer radius
+      if (1.0 - get_element(radius, k) / (inner_radius_ + outer_radius_) < .5) {
+        double radial_scaling_factor =
+            ((outer_radius_ - get_element(radius, k)) *
+             (scale_a_of_t - scale_b_of_t) * inner_radius_) /
+            ((outer_radius_ - inner_radius_) * get_element(radius, k));
+        for (size_t i = 0; i < Dim; i++) {
+          double rotated_coords = 0;
+          for (size_t l = 0; l < Dim; l++) {
+            rotated_coords +=
+                rot_matrix(i, l) *
+                get_element(dereference_wrapper(gsl::at(source_coords, l)), k);
           }
-          // Closer to inner radius
-        } else {
-          double radial_scaling_factor =
-              ((inner_radius_ - get_element(radius, k)) *
-               (scale_a_of_t - scale_b_of_t) * outer_radius_) /
-              ((outer_radius_ - inner_radius_) * get_element(radius, k));
-          for (size_t i = 0; i < Dim; i++) {
-            double rotated_coords = 0;
-            for (size_t l = 0; l < Dim; l++) {
-              rotated_coords +=
-                  rot_matrix(i, l) *
-                  get_element(dereference_wrapper(gsl::at(source_coords, l)),
-                              k);
-            }
-            for (size_t j = 0; j < Dim; j++) {
-              get_element(result.get(i, j), k) =
-                  scale_a_of_t * rot_matrix(i, j) +
-                  alpha * rotated_coords * (scale_a_of_t - scale_b_of_t) *
-                      get_element(
-                          dereference_wrapper(gsl::at(source_coords, j)), k) /
-                      get_element(radius, k) +
-                  rot_matrix(i, j) * radial_scaling_factor;
-            }
+          for (size_t j = 0; j < Dim; j++) {
+            get_element(result.get(i, j), k) =
+                scale_b_of_t * rot_matrix(i, j) +
+                alpha * rotated_coords * (scale_a_of_t - scale_b_of_t) *
+                    get_element(dereference_wrapper(gsl::at(source_coords, j)),
+                                k) /
+                    get_element(radius, k) +
+                rot_matrix(i, j) * radial_scaling_factor;
           }
         }
-      }
-    } else {
-      for (size_t i = 0; i < Dim; i++) {
-        for (size_t j = 0; j < Dim; j++) {
-          result.get(i, j) = scale_b_of_t * rot_matrix(i, j);
+        // Closer to inner radius
+      } else {
+        double radial_scaling_factor =
+            ((inner_radius_ - get_element(radius, k)) *
+             (scale_a_of_t - scale_b_of_t) * outer_radius_) /
+            ((outer_radius_ - inner_radius_) * get_element(radius, k));
+        for (size_t i = 0; i < Dim; i++) {
+          double rotated_coords = 0;
+          for (size_t l = 0; l < Dim; l++) {
+            rotated_coords +=
+                rot_matrix(i, l) *
+                get_element(dereference_wrapper(gsl::at(source_coords, l)), k);
+          }
+          for (size_t j = 0; j < Dim; j++) {
+            get_element(result.get(i, j), k) =
+                scale_a_of_t * rot_matrix(i, j) +
+                alpha * rotated_coords * (scale_a_of_t - scale_b_of_t) *
+                    get_element(dereference_wrapper(gsl::at(source_coords, j)),
+                                k) /
+                    get_element(radius, k) +
+                rot_matrix(i, j) * radial_scaling_factor;
+          }
         }
       }
     }
   }
-  // Translation map
+  // Translation only: the rotation and expansion part of the jacobian is the
+  // identity, which the branches above did not write because `result` is
+  // uninitialized.
+  else {
+    for (size_t i = 0; i < Dim; i++) {
+      for (size_t j = 0; j < Dim; j++) {
+        result.get(i, j) = i == j ? 1.0 : 0.0;
+      }
+    }
+  }
+  // Translation map. Only contributes in the transition region, which is the
+  // only region reachable here.
   if (trans_f_of_t_.has_value()) {
-      const DataVector trans_func_of_time =
-          functions_of_time.at(trans_f_of_t_.value())->func_and_deriv(time)[0];
-      for (size_t i = 0; i < Dim; i++) {
-        const double deriv_translation_factor =
-            (-gsl::at(trans_func_of_time, i) / (outer_radius_ - inner_radius_));
-        for (size_t j = 0; j < Dim; j++) {
-          for (size_t k = 0; k < get_size(radius); k++) {
-            // The jacobian is the identity for the translation map in regions
-            // not between the inner and outer radius.
-            if (region_ == BlockRegion::Transition) {
-              // using the derivative of the radial falloff factor as
-              // \frac{dw}{dr} = \frac{-1.0}{R_{out} - R{in}}
-              get_element(result.get(i, j), k) +=
-                  deriv_translation_factor *
-                  get_element(dereference_wrapper(gsl::at(source_coords, j)),
-                              k) /
-                  get_element(radius, k);
-            }
-          }
+    const DataVector trans_func_of_time =
+        functions_of_time.at(trans_f_of_t_.value())->func_and_deriv(time)[0];
+    for (size_t i = 0; i < Dim; i++) {
+      // using the derivative of the radial falloff factor as
+      // \frac{dw}{dr} = \frac{-1.0}{R_{out} - R{in}}
+      const double deriv_translation_factor =
+          (-gsl::at(trans_func_of_time, i) / (outer_radius_ - inner_radius_));
+      for (size_t j = 0; j < Dim; j++) {
+        for (size_t k = 0; k < get_size(radius); k++) {
+          get_element(result.get(i, j), k) +=
+              deriv_translation_factor *
+              get_element(dereference_wrapper(gsl::at(source_coords, j)), k) /
+              get_element(radius, k);
         }
       }
+    }
   }
   return result;
 }
@@ -867,6 +904,38 @@ RotScaleTrans<Dim>::inv_jacobian(
     const std::unordered_map<
         std::string, std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
         functions_of_time) const {
+  // Outside the transition region the jacobian is a constant matrix with the
+  // analytic inverse R^T / scale, see `jacobian`.
+  if (region_ != BlockRegion::Transition) {
+    auto result = make_uninitialized<
+        tnsr::Ij<tt::remove_cvref_wrap_t<T>, Dim, Frame::NoFrame>>(
+        source_coords[0]);
+    const double inv_scale =
+        scale_f_of_t_a_.has_value()
+            ? 1.0 / (region_ == BlockRegion::Inner
+                         ? functions_of_time.at(scale_f_of_t_a_.value())
+                               ->func(time)[0][0]
+                         : functions_of_time.at(scale_f_of_t_b_.value())
+                               ->func(time)[0][0])
+            : 1.0;
+    if (rot_f_of_t_.has_value()) {
+      const Matrix rot_matrix = rotation_matrix<Dim>(
+          time, *(functions_of_time.at(rot_f_of_t_.value())));
+      for (size_t i = 0; i < Dim; i++) {
+        for (size_t j = 0; j < Dim; j++) {
+          // The inverse of a rotation matrix is its transpose
+          result.get(i, j) = inv_scale * rot_matrix(j, i);
+        }
+      }
+    } else {
+      for (size_t i = 0; i < Dim; i++) {
+        for (size_t j = 0; j < Dim; j++) {
+          result.get(i, j) = i == j ? inv_scale : 0.0;
+        }
+      }
+    }
+    return result;
+  }
   return determinant_and_inverse(
              jacobian(source_coords, time, functions_of_time))
       .second;

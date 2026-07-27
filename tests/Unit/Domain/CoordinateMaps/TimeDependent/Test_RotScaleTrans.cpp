@@ -33,6 +33,47 @@
 #include "Utilities/GetOutput.hpp"
 #include "Utilities/Serialization/Serialize.hpp"
 
+// Check that the map, jacobian, inverse jacobian, and frame velocity
+// evaluated on a DataVector of points agree with evaluations at the
+// individual points, so the batched (DataVector) code paths are consistent
+// with the pointwise (double) code paths that are checked against numerical
+// derivatives elsewhere in this test.
+template <size_t Dim>
+void check_datavector_consistency(
+    const domain::CoordinateMaps::TimeDependent::RotScaleTrans<Dim>& map,
+    const std::array<DataVector, Dim>& points, const double time,
+    const std::unordered_map<
+        std::string, std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>&
+        functions_of_time) {
+  const size_t num_points = points[0].size();
+  const auto mapped_dv = map(points, time, functions_of_time);
+  const auto jacobian_dv = map.jacobian(points, time, functions_of_time);
+  const auto inv_jacobian_dv =
+      map.inv_jacobian(points, time, functions_of_time);
+  const auto frame_velocity_dv =
+      map.frame_velocity(points, time, functions_of_time);
+  for (size_t k = 0; k < num_points; ++k) {
+    std::array<double, Dim> point{};
+    for (size_t i = 0; i < Dim; ++i) {
+      gsl::at(point, i) = gsl::at(points, i)[k];
+    }
+    const auto mapped = map(point, time, functions_of_time);
+    const auto jacobian = map.jacobian(point, time, functions_of_time);
+    const auto inv_jacobian = map.inv_jacobian(point, time, functions_of_time);
+    const auto frame_velocity =
+        map.frame_velocity(point, time, functions_of_time);
+    for (size_t i = 0; i < Dim; ++i) {
+      CHECK(gsl::at(mapped_dv, i)[k] == approx(gsl::at(mapped, i)));
+      CHECK(gsl::at(frame_velocity_dv, i)[k] ==
+            approx(gsl::at(frame_velocity, i)));
+      for (size_t j = 0; j < Dim; ++j) {
+        CHECK(jacobian_dv.get(i, j)[k] == approx(jacobian.get(i, j)));
+        CHECK(inv_jacobian_dv.get(i, j)[k] == approx(inv_jacobian.get(i, j)));
+      }
+    }
+  }
+}
+
 template <size_t Dim>
 void test_RotScaleTrans() {
   MAKE_GENERATOR(gen);
@@ -216,6 +257,17 @@ void test_RotScaleTrans() {
     auto points = make_with_random_values<DataVector>(
         make_not_null(&gen), make_not_null(&dist_double), DataVector(5));
     gsl::at(point_xi_dv, i) = points;
+  }
+
+  for (const auto& map_to_check :
+       {rot_scale_trans_map_inner, rot_scale_trans_map_transition,
+        rot_scale_trans_map_outer, rot_scale_map_inner,
+        rot_scale_map_transition, rot_scale_map_outer, rot_trans_map_inner,
+        rot_trans_map_transition, rot_trans_map_outer, scale_trans_map_inner,
+        scale_trans_map_transition, scale_trans_map_outer, rot_map,
+        scale_map_inner, scale_map_transition, scale_map_outer, trans_map_inner,
+        trans_map_transition, trans_map_outer}) {
+    check_datavector_consistency(map_to_check, point_xi_dv, 0.7, f_of_t_list);
   }
 
   while (t < final_time) {
