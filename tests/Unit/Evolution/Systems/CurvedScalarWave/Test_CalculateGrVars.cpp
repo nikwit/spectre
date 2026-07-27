@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <random>
 
 #include "DataStructures/DataBox/DataBox.hpp"
@@ -58,7 +59,8 @@ struct Metavariables {
 
 template <typename BackgroundSpacetime>
 void test(const BackgroundSpacetime& background_spacetime,
-          const gsl::not_null<std::mt19937*> generator) {
+          const gsl::not_null<std::mt19937*> generator,
+          const std::optional<Approx>& custom_approx = std::nullopt) {
   static constexpr size_t Dim = BackgroundSpacetime::volume_dim;
   using system = CurvedScalarWave::System<Dim>;
   using metavars = Metavariables<Dim, system, BackgroundSpacetime>;
@@ -79,11 +81,19 @@ void test(const BackgroundSpacetime& background_spacetime,
       random_coords, time, typename system::spacetime_tag_list{});
   // check that each tag corresponds to analytic solution now
   tmpl::for_each<typename system::spacetime_tag_list>(
-      [&runner, &element_id, &solution_at_coords](auto spacetime_tag_v) {
+      [&runner, &element_id, &solution_at_coords,
+       &custom_approx](auto spacetime_tag_v) {
         using spacetime_tag = tmpl::type_from<decltype(spacetime_tag_v)>;
-        CHECK(ActionTesting::get_databox_tag<comp, spacetime_tag>(runner,
-                                                                  element_id) ==
-              get<spacetime_tag>(solution_at_coords));
+        if (custom_approx.has_value()) {
+          CHECK_ITERABLE_CUSTOM_APPROX(
+              (ActionTesting::get_databox_tag<comp, spacetime_tag>(runner,
+                                                                   element_id)),
+              get<spacetime_tag>(solution_at_coords), custom_approx.value());
+        } else {
+          CHECK(ActionTesting::get_databox_tag<comp, spacetime_tag>(
+                    runner, element_id) ==
+                get<spacetime_tag>(solution_at_coords));
+        }
       });
 }
 
@@ -95,5 +105,10 @@ SPECTRE_TEST_CASE("Unit.Evolution.Systems.CurvedScalarWave.CalculateGrVars",
   test(gr::Solutions::Minkowski<3>(), make_not_null(&generator));
   test(gr::Solutions::KerrSchild(1., {0.5, 0., 0.1}, {0.2, 0.5, -0.7}),
        make_not_null(&generator));
+  // Zero spin and zero velocity dispatches to the fast path
+  // `zero_spin_kerr_schild_gr_vars`, which agrees with the generic solution
+  // only up to roundoff
+  test(gr::Solutions::KerrSchild(1.3, {0., 0., 0.}, {0.2, 0.5, -0.7}),
+       make_not_null(&generator), Approx::custom().epsilon(1e-12).scale(1.0));
 }
 }  // namespace

@@ -11,6 +11,7 @@ spectre_target_sources(
   ApplyTensorYlmFilter.cpp
   Characteristics.cpp
   Constraints.cpp
+  KerrSchildGrVars.cpp
   SpectralFilter.cpp
   TimeDerivative.cpp
   )
@@ -26,6 +27,7 @@ spectre_target_headers(
   CalculateGrVars.hpp
   Constraints.hpp
   Initialize.hpp
+  KerrSchildGrVars.hpp
   PsiSquared.hpp
   SpectralFilter.hpp
   System.hpp
@@ -49,6 +51,7 @@ target_link_libraries(
   Utilities
   INTERFACE
   GeneralRelativity
+  GeneralRelativitySolutions
   )
 
 add_subdirectory(Actions)

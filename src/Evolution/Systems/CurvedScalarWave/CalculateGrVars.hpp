@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <type_traits>
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
@@ -12,10 +13,12 @@
 #include "Evolution/Initialization/InitialData.hpp"
 #include "Evolution/Initialization/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/BackgroundSpacetime.hpp"
+#include "Evolution/Systems/CurvedScalarWave/KerrSchildGrVars.hpp"
 #include "Evolution/Systems/CurvedScalarWave/System.hpp"
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "PointwiseFunctions/AnalyticData/Tags.hpp"
+#include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/KerrSchild.hpp"
 
 /// \cond
 namespace Tags {
@@ -58,6 +61,26 @@ struct CalculateGrVars {
       const auto& domain = db::get<domain::Tags::Domain<Dim>>(box);
       const auto& block = domain.blocks()[element_id.block_id()];
       if (not block.is_time_dependent()) {
+        return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+      }
+    }
+    // Fast path: for a Kerr-Schild background with zero spin and zero
+    // velocity all requested quantities have short closed forms, which
+    // `zero_spin_kerr_schild_gr_vars` evaluates in a single pass directly
+    // into the DataBox, avoiding the generic solution's intermediates and
+    // the copies through `initial_data`.
+    if constexpr (std::is_same_v<typename Metavariables::background_spacetime,
+                                 gr::Solutions::KerrSchild> and
+                  Dim == 3) {
+      const auto& background =
+          db::get<CurvedScalarWave::Tags::BackgroundSpacetime<
+              typename Metavariables::background_spacetime>>(box);
+      if (background.zero_spin() and background.zero_velocity()) {
+        db::mutate_apply<
+            typename System::spacetime_tag_list,
+            tmpl::list<domain::Tags::Coordinates<Dim, Frame::Inertial>>>(
+            &zero_spin_kerr_schild_gr_vars, make_not_null(&box),
+            background.mass(), background.center());
         return {Parallel::AlgorithmExecution::Continue, std::nullopt};
       }
     }

@@ -19,6 +19,7 @@ set(LIBRARY_SOURCES
   Test_Characteristics.cpp
   Test_InitializeConstraintDampingGammas.cpp
   Test_InitializeEvolvedVariables.cpp
+  Test_KerrSchildGrVars.cpp
   Test_PsiSquared.cpp
   Test_System.cpp
   Test_Tags.cpp
