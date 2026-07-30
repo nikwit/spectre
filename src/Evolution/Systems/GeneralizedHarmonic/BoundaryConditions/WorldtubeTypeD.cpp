@@ -65,13 +65,18 @@ WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(
              "ConstraintPreservingPhysicalAnalyticGhostGauge") {
     return WorldtubeTypeDType::
         ConstraintPreservingPhysicalAnalyticGhostGauge;
+  } else if (type_read ==
+             "ConstraintPreservingPhysicalSommerfeldGhostGauge") {
+    return WorldtubeTypeDType::
+        ConstraintPreservingPhysicalSommerfeldGhostGauge;
   }
   PARSE_ERROR(options.context(),
               "Failed to convert input option to "
               "WorldtubeTypeDType::Type. Must "
               "be one of ConstraintPreserving, ConstraintPreservingPhysical, "
-              "ConstraintPreservingPhysicalFrozenGauge or "
-              "ConstraintPreservingPhysicalAnalyticGhostGauge");
+              "ConstraintPreservingPhysicalFrozenGauge, "
+              "ConstraintPreservingPhysicalAnalyticGhostGauge or "
+              "ConstraintPreservingPhysicalSommerfeldGhostGauge");
 }
 }  // namespace detail
 
@@ -87,12 +92,14 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
               ? std::move(*analytic_gauge_prescription)
               : nullptr),
       gauge_relaxation_rate_(gauge_relaxation_rate) {
-  if (type_ == detail::WorldtubeTypeDType::
-                   ConstraintPreservingPhysicalAnalyticGhostGauge and
+  if ((type_ == detail::WorldtubeTypeDType::
+                    ConstraintPreservingPhysicalAnalyticGhostGauge or
+       type_ == detail::WorldtubeTypeDType::
+                    ConstraintPreservingPhysicalSommerfeldGhostGauge) and
       analytic_gauge_prescription_ == nullptr) {
     PARSE_ERROR(context,
-                "Type ConstraintPreservingPhysicalAnalyticGhostGauge requires "
-                "an AnalyticGaugePrescription, but None was given.");
+                "This Type requires an AnalyticGaugePrescription, but None "
+                "was given.");
   }
   if (gauge_relaxation_rate_ < 0.) {
     PARSE_ERROR(context,
@@ -397,11 +404,16 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
              type_ == detail::WorldtubeTypeDType::
                           ConstraintPreservingPhysicalFrozenGauge or
              type_ == detail::WorldtubeTypeDType::
-                          ConstraintPreservingPhysicalAnalyticGhostGauge) {
-    // AnalyticGhostGauge leaves the gauge sector frozen here and adds the
-    // relaxation towards the model value below.
+                          ConstraintPreservingPhysicalAnalyticGhostGauge or
+             type_ == detail::WorldtubeTypeDType::
+                          ConstraintPreservingPhysicalSommerfeldGhostGauge) {
+    // AnalyticGhostGauge leaves the gauge sector frozen here and adds only the
+    // relaxation below; SommerfeldGhostGauge keeps the Sommerfeld radiation
+    // term and adds the relaxation on top of it.
     const auto gauge_sector_condition =
-        (type_ == detail::WorldtubeTypeDType::ConstraintPreservingPhysical)
+        (type_ == detail::WorldtubeTypeDType::ConstraintPreservingPhysical or
+         type_ == detail::WorldtubeTypeDType::
+                      ConstraintPreservingPhysicalSommerfeldGhostGauge)
             ? Bjorhus::GaugeSectorCondition::Sommerfeld
             : Bjorhus::GaugeSectorCondition::Frozen;
     Bjorhus::
@@ -425,7 +437,9 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
   }
 
   if (type_ == detail::WorldtubeTypeDType::
-                   ConstraintPreservingPhysicalAnalyticGhostGauge) {
+                   ConstraintPreservingPhysicalAnalyticGhostGauge or
+      type_ == detail::WorldtubeTypeDType::
+                   ConstraintPreservingPhysicalSommerfeldGhostGauge) {
     // Relax the gauge sector towards the model value,
     //   dt u^-_ab|gauge = -kappa (u^-_ab - u^-_model,ab)|gauge.
     // The gauge sector was left frozen above, i.e. the correction there is

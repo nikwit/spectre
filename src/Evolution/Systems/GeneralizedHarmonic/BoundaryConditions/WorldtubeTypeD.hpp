@@ -61,7 +61,23 @@ enum class WorldtubeTypeDType {
   /// \f$u^{-,\rm model}\f$ and not its time derivative, which would require a
   /// second time derivative of the model. Requires
   /// `AnalyticGaugePrescription`.
-  ConstraintPreservingPhysicalAnalyticGhostGauge
+  ConstraintPreservingPhysicalAnalyticGhostGauge,
+  /// Both gauge terms together:
+  /// \f$\partial_t u^-_{ab}|_{\rm gauge}
+  ///    = -(\gamma_2 - 1/r)(\partial_t u^g_{ab})|_{\rm gauge}
+  ///      - \kappa\,(u^-_{ab} - u^{-,\rm model}_{ab})|_{\rm gauge}\f$.
+  ///
+  /// The two terms do different jobs and are not alternatives. The Sommerfeld
+  /// term is a *radiation* condition: it lets whatever gauge dynamics the
+  /// interior generates leave without strong reflection, and it is the term
+  /// that matters when \f$\partial_t g\f$ at the boundary is large. The
+  /// relaxation is *Dirichlet-like*: it supplies the gauge information that
+  /// flows in from the excised region, and carries content when the
+  /// configuration is nearly stationary and \f$\partial_t g \to 0\f$ makes the
+  /// Sommerfeld term vanish.
+  ///
+  /// Requires `AnalyticGaugePrescription`.
+  ConstraintPreservingPhysicalSommerfeldGhostGauge
 };
 
 WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(
@@ -104,22 +120,27 @@ namespace gh::BoundaryConditions {
  * all the above conditions are also imposed on characteristic modes with speeds
  * exactly zero.
  *
- * This class provides two choices of combinations of the above corrections:
- *  - `ConstraintPreserving` : this imposes the constraint-preserving and
- * gauge-controlling corrections;
- *  - `ConstraintPreservingPhysical` : this additionally restricts the influx of
- * any physical gravitational waves from the outer boundary, in addition to
- * preventing the influx of constraint violations and gauge perturbations.
+ * See `detail::WorldtubeTypeDType` for the available combinations. They differ
+ * only in the gauge sector: Sommerfeld, frozen, relaxation towards a model
+ * \f$u^-\f$, or Sommerfeld and the relaxation together.
  *
  * We refer to `Bjorhus::constraint_preserving_corrections_dt_v_psi()`,
- * `Bjorhus::constraint_preserving_corrections_dt_v_zero()`,
- * `Bjorhus::constraint_preserving_gauge_corrections_dt_v_minus()`, and
- * `Bjorhus::constraint_preserving_gauge_physical_corrections_dt_v_minus()`
+ * `Bjorhus::constraint_preserving_corrections_dt_v_zero()`, and
+ * and the `_worldtube` variant of
+ * `Bjorhus::constraint_preserving_gauge_physical_corrections_dt_v_minus`,
  * for the further details on implementation.
  *
- * \note These boundary conditions assume a spherical outer boundary. Also, we
- * do not yet have an option to inject incoming gravitational waves at the outer
- * boundary.
+ * \note Unlike `ConstraintPreservingBjorhus`, from which much of the above was
+ * inherited, this is an **inner** boundary condition applied at a worldtube
+ * around a hole, and several statements above have to be read with that in
+ * mind. In particular the physical sector does not "disallow any incoming
+ * waves": the incoming radiative field is *supplied*, from the \f$\Psi_0\f$
+ * inferred by the type-D inversion, because at an excision that field
+ * carries physical information out of the region that was removed. Likewise the
+ * Sommerfeld condition's \f$1/r\f$ is the distance from the origin of the
+ * inertial coordinates, which is the local worldtube radius only when the
+ * worldtube is centred there: true for a single hole at the origin,
+ * false for a drifting or binary hole.
  */
 template <size_t Dim>
 class WorldtubeTypeD final : public BoundaryCondition<Dim> {
