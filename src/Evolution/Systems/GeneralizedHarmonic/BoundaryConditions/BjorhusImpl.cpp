@@ -922,6 +922,7 @@ template <size_t VolumeDim, typename DataType>
 void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
     const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
         bc_dt_v_minus,
+    const GaugeSectorCondition gauge_sector_condition,
     const Scalar<DataType>& gamma2,
     const tnsr::I<DataType, VolumeDim, Frame::Inertial>& inertial_coords,
     const tnsr::i<DataType, VolumeDim, Frame::Inertial>&
@@ -980,10 +981,23 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
       projection_Ab, projection_AB, inverse_spatial_metric, extrinsic_curvature,
       spacetime_metric, inverse_spacetime_metric, three_index_constraint,
       char_projected_rhs_dt_v_minus, phi, d_phi, d_pi, char_speeds);
-  detail::add_gauge_sommerfeld_terms_to_dt_v_minus(
-      bc_dt_v_minus, gamma2, inertial_coords, incoming_null_one_form,
-      outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
-      projection_Ab, char_projected_rhs_dt_v_psi);
+
+  // bc_dt_v_minus was initialised to -char_projected_rhs_dt_v_minus above,
+  // which freezes every sector; each sector's term then restores its intended
+  // condition. So GaugeSectorCondition::Frozen is simply the absence of the
+  // Sommerfeld term, and needs no separate correction of its own.
+  switch (gauge_sector_condition) {
+    case GaugeSectorCondition::Sommerfeld:
+      detail::add_gauge_sommerfeld_terms_to_dt_v_minus(
+          bc_dt_v_minus, gamma2, inertial_coords, incoming_null_one_form,
+          outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
+          projection_Ab, char_projected_rhs_dt_v_psi);
+      break;
+    case GaugeSectorCondition::Frozen:
+      break;
+    default:
+      ERROR("Unknown GaugeSectorCondition.");
+  }
 }
 }  // namespace gh::BoundaryConditions::Bjorhus
 
@@ -1198,6 +1212,8 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
           const gsl::not_null<                                                 \
               tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>*>              \
               bc_dt_v_minus,                                                   \
+          const gh::BoundaryConditions::Bjorhus::GaugeSectorCondition          \
+              gauge_sector_condition,                                          \
           const Scalar<DTYPE(data)>& gamma2,                                   \
           const tnsr::I<DTYPE(data), DIM(data), Frame::Inertial>&              \
               inertial_coords,                                                 \

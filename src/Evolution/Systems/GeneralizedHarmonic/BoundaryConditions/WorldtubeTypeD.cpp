@@ -55,11 +55,14 @@ WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(
     return WorldtubeTypeDType::ConstraintPreserving;
   } else if (type_read == "ConstraintPreservingPhysical") {
     return WorldtubeTypeDType::ConstraintPreservingPhysical;
+  } else if (type_read == "ConstraintPreservingPhysicalFrozenGauge") {
+    return WorldtubeTypeDType::ConstraintPreservingPhysicalFrozenGauge;
   }
   PARSE_ERROR(options.context(),
               "Failed to convert input option to "
               "WorldtubeTypeDType::Type. Must "
-              "be one of ConstraintPreserving or ConstraintPreservingPhysical");
+              "be one of ConstraintPreserving, ConstraintPreservingPhysical or "
+              "ConstraintPreservingPhysicalFrozenGauge");
 }
 }  // namespace detail
 
@@ -328,10 +331,17 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
         char_projected_rhs_dt_v_psi, char_projected_rhs_dt_v_minus,
         constraint_char_zero_plus, constraint_char_zero_minus, char_speeds);
   } else if (type_ ==
-             detail::WorldtubeTypeDType::ConstraintPreservingPhysical) {
+                 detail::WorldtubeTypeDType::ConstraintPreservingPhysical or
+             type_ == detail::WorldtubeTypeDType::
+                          ConstraintPreservingPhysicalFrozenGauge) {
+    const auto gauge_sector_condition =
+        (type_ == detail::WorldtubeTypeDType::ConstraintPreservingPhysical)
+            ? Bjorhus::GaugeSectorCondition::Sommerfeld
+            : Bjorhus::GaugeSectorCondition::Frozen;
     Bjorhus::
         constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
-            make_not_null(&bc_dt_v_minus), gamma2, coords, normal_covector,
+            make_not_null(&bc_dt_v_minus), gauge_sector_condition, gamma2,
+            coords, normal_covector,
             unit_interface_normal_vector, spacetime_unit_normal_vector,
             incoming_null_one_form, outgoing_null_one_form,
             incoming_null_vector, outgoing_null_vector, projection_ab,

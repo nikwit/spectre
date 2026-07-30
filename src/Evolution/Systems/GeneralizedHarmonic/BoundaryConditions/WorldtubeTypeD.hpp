@@ -38,7 +38,17 @@ struct Coordinates;
 namespace gh::BoundaryConditions::detail {
 enum class WorldtubeTypeDType {
   ConstraintPreserving,
-  ConstraintPreservingPhysical
+  /// Constraint-preserving, physical (inferred \f$\Psi_0\f$), and the
+  /// Bayliss-Turkel Sommerfeld gauge condition.
+  ConstraintPreservingPhysical,
+  /// As `ConstraintPreservingPhysical`, but with the gauge sector frozen,
+  /// \f$\partial_t u^-_{ab}|_{\rm gauge} = 0\f$, instead of the Sommerfeld
+  /// condition. The Sommerfeld condition is an outer-boundary prescription
+  /// whose \f$1/r\f$ is measured from the origin of the inertial coordinates,
+  /// so it is correct at a worldtube only when the worldtube is centred on that
+  /// origin; freezing needs no model input and isolates the effect of the gauge
+  /// condition.
+  ConstraintPreservingPhysicalFrozenGauge
 };
 
 WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(

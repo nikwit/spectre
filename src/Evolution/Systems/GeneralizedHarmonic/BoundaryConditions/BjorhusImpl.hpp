@@ -254,11 +254,49 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus(
     const std::array<DataType, 4>& char_speeds,
     const MathFunction<1, Frame::Inertial>* incoming_wave_profile = nullptr);
 
+/*!
+ * \brief Which condition to impose on the gauge sector of \f$u^-_{ab}\f$ at a
+ * worldtube (inner) boundary.
+ *
+ * \details With \f$k_a\f$ and \f$l_a\f$ the incoming and outgoing null
+ * one-forms normalised as \f$k_a = (n_a - s_a)/\sqrt{2}\f$,
+ * \f$l_a = (n_a + s_a)/\sqrt{2}\f$, so that \f$k\cdot k = l\cdot l = 0\f$ and
+ * \f$k\cdot l = -1\f$, a symmetric tensor decomposes as
+ *
+ * \f{align*}{
+ * X_{ab} = A k_ak_b + B l_al_b + C(k_al_b + l_ak_b)
+ *          + (k_aV_b + V_ak_b) + (l_aW_b + W_al_b) + T_{ab},
+ * \f}
+ *
+ * with \f$V_a, W_a\f$ transverse and \f$T_{ab}\f$ transverse-traceless. The
+ * gauge sector is the four-dimensional span
+ * \f$\{k_ak_b,\ k_al_b + l_ak_b,\ k_aV_b + V_ak_b\}\f$, complementing the four
+ * constraint-preserving components \f$\{l_al_b,\ l_aW_b + W_al_b,\ P_{ab}\}\f$
+ * and the two physical (transverse-traceless) ones \f$T_{ab}\f$.
+ */
+enum class GaugeSectorCondition {
+  /// Bayliss-Turkel \f$L=0\f$ Sommerfeld condition, Eq. (25) of
+  /// \cite Rinne2007ui. Note this is an *outer* boundary prescription: the
+  /// \f$1/r\f$ it uses is the distance from the origin of `inertial_coords`,
+  /// which coincides with the local radius of the worldtube only when the
+  /// worldtube is centred on that origin.
+  Sommerfeld,
+  /// Freeze the gauge sector, \f$\partial_t u^-_{ab}|_{\rm gauge} = 0\f$.
+  ///
+  /// The correction is initialised to \f$-\partial_t u^-_{ab}\f$, which freezes
+  /// every sector, and each sector's term then restores its intended
+  /// condition. Freezing the gauge sector therefore just means omitting
+  /// `add_gauge_sommerfeld_terms_to_dt_v_minus()`. This is well posed and needs
+  /// no model input, so it isolates whether a missing gauge condition is
+  /// responsible for an instability.
+  Frozen
+};
+
 template <size_t VolumeDim, typename DataType>
 void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
     gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
         bc_dt_v_minus,
-    const Scalar<DataType>& gamma2,
+    GaugeSectorCondition gauge_sector_condition, const Scalar<DataType>& gamma2,
     const tnsr::I<DataType, VolumeDim, Frame::Inertial>& inertial_coords,
     const tnsr::i<DataType, VolumeDim, Frame::Inertial>&
         unit_interface_normal_one_form,
