@@ -112,6 +112,40 @@ void constraint_preserving_corrections_dt_v_zero(
 
 namespace detail {
 template <size_t VolumeDim, typename DataType>
+void add_gauge_sector_terms_to_dt_v_minus(
+    const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
+        bc_dt_v_minus,
+    const DataType& scalar_coefficient,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& incoming_null_one_form,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& outgoing_null_one_form,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& incoming_null_vector,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& outgoing_null_vector,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& source) {
+  for (size_t a = 0; a <= VolumeDim; ++a) {
+    for (size_t b = a; b <= VolumeDim; ++b) {
+      for (size_t c = 0; c <= VolumeDim; ++c) {
+        for (size_t d = 0; d <= VolumeDim; ++d) {
+          bc_dt_v_minus->get(a, b) +=
+              (incoming_null_one_form.get(a) * projection_Ab.get(c, b) *
+                   outgoing_null_vector.get(d) +
+               incoming_null_one_form.get(b) * projection_Ab.get(c, a) *
+                   outgoing_null_vector.get(d) -
+               (incoming_null_one_form.get(a) * outgoing_null_one_form.get(b) *
+                    incoming_null_vector.get(c) * outgoing_null_vector.get(d) +
+                incoming_null_one_form.get(b) * outgoing_null_one_form.get(a) *
+                    incoming_null_vector.get(c) * outgoing_null_vector.get(d) +
+                incoming_null_one_form.get(a) * incoming_null_one_form.get(b) *
+                    outgoing_null_vector.get(c) *
+                    outgoing_null_vector.get(d))) *
+              scalar_coefficient * source.get(c, d);
+        }
+      }
+    }
+  }
+}
+
+template <size_t VolumeDim, typename DataType>
 void add_gauge_sommerfeld_terms_to_dt_v_minus(
     const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
         bc_dt_v_minus,
@@ -135,28 +169,10 @@ void add_gauge_sommerfeld_terms_to_dt_v_minus(
   inertial_radius_or_scalar_factor =
       get(gamma2) - (gauge_bc_coeff / sqrt(inertial_radius_or_scalar_factor));
 
-  for (size_t a = 0; a <= VolumeDim; ++a) {
-    for (size_t b = a; b <= VolumeDim; ++b) {
-      for (size_t c = 0; c <= VolumeDim; ++c) {
-        for (size_t d = 0; d <= VolumeDim; ++d) {
-          bc_dt_v_minus->get(a, b) +=
-              (incoming_null_one_form.get(a) * projection_Ab.get(c, b) *
-                   outgoing_null_vector.get(d) +
-               incoming_null_one_form.get(b) * projection_Ab.get(c, a) *
-                   outgoing_null_vector.get(d) -
-               (incoming_null_one_form.get(a) * outgoing_null_one_form.get(b) *
-                    incoming_null_vector.get(c) * outgoing_null_vector.get(d) +
-                incoming_null_one_form.get(b) * outgoing_null_one_form.get(a) *
-                    incoming_null_vector.get(c) * outgoing_null_vector.get(d) +
-                incoming_null_one_form.get(a) * incoming_null_one_form.get(b) *
-                    outgoing_null_vector.get(c) *
-                    outgoing_null_vector.get(d))) *
-              inertial_radius_or_scalar_factor *
-              char_projected_rhs_dt_v_psi.get(c, d);
-        }
-      }
-    }
-  }
+  add_gauge_sector_terms_to_dt_v_minus(
+      bc_dt_v_minus, inertial_radius_or_scalar_factor, incoming_null_one_form,
+      outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
+      projection_Ab, char_projected_rhs_dt_v_psi);
 }
 
 template <size_t VolumeDim, typename DataType>
@@ -1045,6 +1061,23 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
               projection_Ab,                                                   \
           const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>&             \
               char_projected_rhs_dt_v_psi);                                    \
+  template void gh::BoundaryConditions::Bjorhus::detail::                      \
+      add_gauge_sector_terms_to_dt_v_minus(                                    \
+          const gsl::not_null<                                                 \
+              tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>*>              \
+              bc_dt_v_minus,                                                   \
+          const DTYPE(data) & scalar_coefficient,                              \
+          const tnsr::a<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              incoming_null_one_form,                                          \
+          const tnsr::a<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              outgoing_null_one_form,                                          \
+          const tnsr::A<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              incoming_null_vector,                                            \
+          const tnsr::A<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              outgoing_null_vector,                                            \
+          const tnsr::Ab<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              projection_Ab,                                                   \
+          const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>& source);    \
   template void gh::BoundaryConditions::Bjorhus::detail::                      \
       add_constraint_dependent_terms_to_dt_v_minus(                            \
           const gsl::not_null<                                                 \

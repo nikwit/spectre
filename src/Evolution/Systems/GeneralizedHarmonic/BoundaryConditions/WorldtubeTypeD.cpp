@@ -12,8 +12,10 @@
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/BjorhusImpl.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Characteristics.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Constraints.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Options/ParseOptions.hpp"
+#include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/Factory.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ExtrinsicCurvature.hpp"
 #include "PointwiseFunctions/GeneralRelativity/InterfaceNullNormal.hpp"
 #include "PointwiseFunctions/GeneralRelativity/InverseSpacetimeMetric.hpp"
@@ -23,9 +25,11 @@
 #include "PointwiseFunctions/GeneralRelativity/SpacetimeNormalOneForm.hpp"
 #include "PointwiseFunctions/GeneralRelativity/SpacetimeNormalVector.hpp"
 #include "PointwiseFunctions/GeneralRelativity/SpatialMetric.hpp"
+#include "Utilities/CallWithDynamicType.hpp"
 #include "Utilities/ContainerHelpers.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
 #include "Utilities/Gsl.hpp"
+#include "Utilities/TaggedTuple.hpp"
 
 namespace gh::BoundaryConditions {
 namespace {
@@ -57,18 +61,72 @@ WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(
     return WorldtubeTypeDType::ConstraintPreservingPhysical;
   } else if (type_read == "ConstraintPreservingPhysicalFrozenGauge") {
     return WorldtubeTypeDType::ConstraintPreservingPhysicalFrozenGauge;
+  } else if (type_read ==
+             "ConstraintPreservingPhysicalAnalyticGhostGauge") {
+    return WorldtubeTypeDType::
+        ConstraintPreservingPhysicalAnalyticGhostGauge;
   }
   PARSE_ERROR(options.context(),
               "Failed to convert input option to "
               "WorldtubeTypeDType::Type. Must "
-              "be one of ConstraintPreserving, ConstraintPreservingPhysical or "
-              "ConstraintPreservingPhysicalFrozenGauge");
+              "be one of ConstraintPreserving, ConstraintPreservingPhysical, "
+              "ConstraintPreservingPhysicalFrozenGauge or "
+              "ConstraintPreservingPhysicalAnalyticGhostGauge");
 }
 }  // namespace detail
 
 template <size_t Dim>
-WorldtubeTypeD<Dim>::WorldtubeTypeD(const detail::WorldtubeTypeDType type)
-    : type_(type) {}
+WorldtubeTypeD<Dim>::WorldtubeTypeD(
+    const detail::WorldtubeTypeDType type,
+    std::optional<std::unique_ptr<evolution::initial_data::InitialData>>
+        analytic_gauge_prescription,
+    const double gauge_relaxation_rate, const Options::Context& context)
+    : type_(type),
+      analytic_gauge_prescription_(
+          analytic_gauge_prescription.has_value()
+              ? std::move(*analytic_gauge_prescription)
+              : nullptr),
+      gauge_relaxation_rate_(gauge_relaxation_rate) {
+  if (type_ == detail::WorldtubeTypeDType::
+                   ConstraintPreservingPhysicalAnalyticGhostGauge and
+      analytic_gauge_prescription_ == nullptr) {
+    PARSE_ERROR(context,
+                "Type ConstraintPreservingPhysicalAnalyticGhostGauge requires "
+                "an AnalyticGaugePrescription, but None was given.");
+  }
+  if (gauge_relaxation_rate_ < 0.) {
+    PARSE_ERROR(context,
+                "GaugeRelaxationRate must be non-negative, but got "
+                    << gauge_relaxation_rate_
+                    << ". A negative rate drives the gauge sector away from "
+                       "the model value.");
+  }
+}
+
+template <size_t Dim>
+WorldtubeTypeD<Dim>::WorldtubeTypeD(const WorldtubeTypeD& rhs)
+    : BoundaryCondition<Dim>(rhs),
+      type_(rhs.type_),
+      analytic_gauge_prescription_(
+          rhs.analytic_gauge_prescription_ == nullptr
+              ? nullptr
+              : rhs.analytic_gauge_prescription_->get_clone()),
+      gauge_relaxation_rate_(rhs.gauge_relaxation_rate_) {}
+
+template <size_t Dim>
+WorldtubeTypeD<Dim>& WorldtubeTypeD<Dim>::operator=(const WorldtubeTypeD& rhs) {
+  if (&rhs == this) {
+    return *this;
+  }
+  BoundaryCondition<Dim>::operator=(rhs);
+  type_ = rhs.type_;
+  analytic_gauge_prescription_ =
+      rhs.analytic_gauge_prescription_ == nullptr
+          ? nullptr
+          : rhs.analytic_gauge_prescription_->get_clone();
+  gauge_relaxation_rate_ = rhs.gauge_relaxation_rate_;
+  return *this;
+}
 
 template <size_t Dim>
 WorldtubeTypeD<Dim>::WorldtubeTypeD(CkMigrateMessage* const msg)
@@ -84,6 +142,8 @@ template <size_t Dim>
 void WorldtubeTypeD<Dim>::pup(PUP::er& p) {
   BoundaryCondition<Dim>::pup(p);
   p | type_;
+  p | analytic_gauge_prescription_;
+  p | gauge_relaxation_rate_;
 }
 
 template <size_t Dim>
@@ -122,7 +182,9 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
     // c.f. dg_interior_deriv_vars_tags
     const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_spacetime_metric,
     const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_pi,
-    const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi) const {
+    const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi,
+    // c.f. dg_gridless_tags
+    const double time) const {
   TempBuffer<tmpl::list<::Tags::TempI<0, Dim, Frame::Inertial, DataVector>,
                         ::Tags::Tempiaa<1, Dim, Frame::Inertial, DataVector>,
                         ::Tags::TempII<0, Dim, Frame::Inertial, DataVector>,
@@ -333,7 +395,11 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
   } else if (type_ ==
                  detail::WorldtubeTypeDType::ConstraintPreservingPhysical or
              type_ == detail::WorldtubeTypeDType::
-                          ConstraintPreservingPhysicalFrozenGauge) {
+                          ConstraintPreservingPhysicalFrozenGauge or
+             type_ == detail::WorldtubeTypeDType::
+                          ConstraintPreservingPhysicalAnalyticGhostGauge) {
+    // AnalyticGhostGauge leaves the gauge sector frozen here and adds the
+    // relaxation towards the model value below.
     const auto gauge_sector_condition =
         (type_ == detail::WorldtubeTypeDType::ConstraintPreservingPhysical)
             ? Bjorhus::GaugeSectorCondition::Sommerfeld
@@ -353,7 +419,58 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
   } else {
     ERROR(
         "Failed to set dtVMinus. Input option must be one of "
-        "ConstraintPreserving or ConstraintPreservingPhysical");
+        "ConstraintPreserving, ConstraintPreservingPhysical, "
+        "ConstraintPreservingPhysicalFrozenGauge or "
+        "ConstraintPreservingPhysicalAnalyticGhostGauge");
+  }
+
+  if (type_ == detail::WorldtubeTypeDType::
+                   ConstraintPreservingPhysicalAnalyticGhostGauge) {
+    // Relax the gauge sector towards the model value,
+    //   dt u^-_ab|gauge = -kappa (u^-_ab - u^-_model,ab)|gauge.
+    // The gauge sector was left frozen above, i.e. the correction there is
+    // -dt u^-_ab|gauge, so the term added here is the whole gauge condition.
+    // Only u^-_model is needed, never its time derivative: that is the point of
+    // the ghost form, since a Bjorhus form would need a second time derivative
+    // of the model.
+    using evolved_vars_tags = typename System<Dim>::variables_tag::tags_list;
+    const auto model = call_with_dynamic_type<
+        tuples::tagged_tuple_from_typelist<evolved_vars_tags>,
+        gh::Solutions::all_solutions<Dim>>(
+        analytic_gauge_prescription_.get(),
+        [&coords, &time](const auto* const solution_or_data) {
+          if constexpr (is_analytic_solution_v<
+                            std::decay_t<decltype(*solution_or_data)>>) {
+            return solution_or_data->variables(coords, time,
+                                               evolved_vars_tags{});
+          } else {
+            (void)time;
+            return solution_or_data->variables(coords, evolved_vars_tags{});
+          }
+        });
+
+    const auto v_minus_numerical =
+        get<Tags::VMinus<DataVector, Dim>>(characteristic_fields(
+            gamma2, inverse_spatial_metric, spacetime_metric, pi, phi,
+            normal_covector));
+    const auto v_minus_model =
+        get<Tags::VMinus<DataVector, Dim>>(characteristic_fields(
+            gamma2, inverse_spatial_metric,
+            get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(model),
+            get<Tags::Pi<DataVector, Dim>>(model),
+            get<Tags::Phi<DataVector, Dim>>(model), normal_covector));
+
+    auto delta_v_minus = v_minus_numerical;
+    for (size_t a = 0; a <= Dim; ++a) {
+      for (size_t b = a; b <= Dim; ++b) {
+        delta_v_minus.get(a, b) -= v_minus_model.get(a, b);
+      }
+    }
+    const DataVector kappa(get_size(get(gamma2)), gauge_relaxation_rate_);
+    Bjorhus::detail::add_gauge_sector_terms_to_dt_v_minus(
+        make_not_null(&bc_dt_v_minus), kappa, incoming_null_one_form,
+        outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
+        projection_Ab, delta_v_minus);
   }
 
   // Only add corrections at grid points where the char speeds are negative

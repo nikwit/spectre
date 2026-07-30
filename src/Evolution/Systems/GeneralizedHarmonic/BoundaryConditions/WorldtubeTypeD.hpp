@@ -18,12 +18,15 @@
 #include "Evolution/BoundaryConditions/Type.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/BoundaryCondition.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
+#include "Options/Auto.hpp"
 #include "Options/Options.hpp"
 #include "Options/String.hpp"
 #include "PointwiseFunctions/AnalyticData/Tags.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/AnalyticSolution.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ConstraintDampingTags.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
+#include "PointwiseFunctions/InitialDataUtilities/InitialData.hpp"
+#include "Time/Tags/Time.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Serialization/CharmPupable.hpp"
 #include "Utilities/TMPL.hpp"
@@ -48,7 +51,17 @@ enum class WorldtubeTypeDType {
   /// so it is correct at a worldtube only when the worldtube is centred on that
   /// origin; freezing needs no model input and isolates the effect of the gauge
   /// condition.
-  ConstraintPreservingPhysicalFrozenGauge
+  ConstraintPreservingPhysicalFrozenGauge,
+  /// As `ConstraintPreservingPhysical`, but the gauge sector relaxes towards
+  /// the value of \f$u^-_{ab}\f$ computed from an analytic prescription:
+  /// \f$\partial_t u^-_{ab}|_{\rm gauge}
+  ///    = -\kappa\,(u^-_{ab} - u^{-,\rm model}_{ab})|_{\rm gauge}\f$.
+  ///
+  /// This is the "ghost" form of the gauge condition: it needs only
+  /// \f$u^{-,\rm model}\f$ and not its time derivative, which would require a
+  /// second time derivative of the model. Requires
+  /// `AnalyticGaugePrescription`.
+  ConstraintPreservingPhysicalAnalyticGhostGauge
 };
 
 WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(
@@ -119,21 +132,55 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
         "terms for VMinus."};
   };
 
-  using options = tmpl::list<TypeOptionTag>;
+  /// \brief Analytic prescription supplying the model value of
+  /// \f$u^-_{ab}|_{\rm gauge}\f$.
+  ///
+  /// Required for `Type: ConstraintPreservingPhysicalAnalyticGhostGauge`, and
+  /// `None` otherwise. In the worldtube matching scheme this is where the
+  /// fitted tidally-perturbed metric would enter instead; an analytic solution
+  /// is used here because it makes the model exactly known, so any deviation is
+  /// attributable to the boundary condition.
+  struct AnalyticGaugePrescription {
+    using type = Options::Auto<
+        std::unique_ptr<evolution::initial_data::InitialData>,
+        Options::AutoLabel::None>;
+    static std::string name() { return "AnalyticGaugePrescription"; }
+    static constexpr Options::String help{
+        "Analytic solution supplying the model value of u^-|gauge. Required "
+        "for Type: ConstraintPreservingPhysicalAnalyticGhostGauge, else None."};
+  };
+
+  /// \brief Relaxation rate \f$\kappa\f$, in inverse mass units, towards the
+  /// model value of the gauge sector.
+  struct GaugeRelaxationRate {
+    using type = double;
+    static std::string name() { return "GaugeRelaxationRate"; }
+    static constexpr Options::String help{
+        "Relaxation rate kappa towards the model gauge sector. Only used for "
+        "Type: ConstraintPreservingPhysicalAnalyticGhostGauge. kappa = 0 "
+        "reduces to freezing the gauge sector."};
+  };
+
+  using options = tmpl::list<TypeOptionTag, AnalyticGaugePrescription,
+                             GaugeRelaxationRate>;
   static constexpr Options::String help{
       "WorldtubeTypeD boundary conditions setting the value of the time "
       "derivatives of the spacetime metric, Phi and Pi to expressions that "
       "prevent the influx of constraint violations and reflections."};
   static std::string name() { return "WorldtubeTypeD"; }
 
-  explicit WorldtubeTypeD(detail::WorldtubeTypeDType type);
+  WorldtubeTypeD(
+      detail::WorldtubeTypeDType type,
+      std::optional<std::unique_ptr<evolution::initial_data::InitialData>>
+          analytic_gauge_prescription,
+      double gauge_relaxation_rate, const Options::Context& context = {});
 
   WorldtubeTypeD() = default;
   /// \cond
   WorldtubeTypeD(WorldtubeTypeD&&) = default;
   WorldtubeTypeD& operator=(WorldtubeTypeD&&) = default;
-  WorldtubeTypeD(const WorldtubeTypeD&) = default;
-  WorldtubeTypeD& operator=(const WorldtubeTypeD&) = default;
+  WorldtubeTypeD(const WorldtubeTypeD&);
+  WorldtubeTypeD& operator=(const WorldtubeTypeD&);
   /// \endcond
   ~WorldtubeTypeD() override = default;
 
@@ -174,7 +221,7 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
                                Frame::Inertial>,
                  ::Tags::deriv<Tags::Phi<DataVector, Dim>, tmpl::size_t<Dim>,
                                Frame::Inertial>>;
-  using dg_gridless_tags = tmpl::list<>;
+  using dg_gridless_tags = tmpl::list<::Tags::Time>;
 
   std::optional<std::string> dg_time_derivative(
       gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
@@ -213,7 +260,9 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
       // c.f. dg_interior_deriv_vars_tags
       const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_spacetime_metric,
       const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_pi,
-      const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi) const;
+      const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi,
+      // c.f. dg_gridless_tags
+      double time) const;
 
  private:
   void compute_intermediate_vars(
@@ -280,6 +329,9 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
 
   detail::WorldtubeTypeDType type_{
       detail::WorldtubeTypeDType::ConstraintPreservingPhysical};
+  std::unique_ptr<evolution::initial_data::InitialData>
+      analytic_gauge_prescription_{nullptr};
+  double gauge_relaxation_rate_{0.};
 };
 }  // namespace gh::BoundaryConditions
 

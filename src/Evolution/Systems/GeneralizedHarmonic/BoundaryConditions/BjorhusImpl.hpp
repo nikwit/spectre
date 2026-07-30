@@ -334,6 +334,44 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
 /// @}
 
 namespace detail {
+/*!
+ * \brief Add \f$-c\,X^{\rm gauge}_{ab}\f$ to the correction for
+ * \f$\partial_t u^-_{ab}\f$, for a scalar coefficient \f$c\f$ and a symmetric
+ * source \f$X_{ab}\f$.
+ *
+ * \details The tensor structure contracted with \f$X_{cd}\f$ below is exactly
+ * minus the projector onto the gauge sector (see `GaugeSectorCondition`): with
+ * \f$A = X_{cd}l^cl^d\f$, \f$C = X_{cd}k^cl^d\f$ and
+ * \f$Y_b = P^c{}_bX_{cd}l^d\f$ it evaluates to
+ *
+ * \f{align*}{
+ * k_aY_b + k_bY_a - (k_al_b + k_bl_a)C - k_ak_bA = -X^{\rm gauge}_{ab}.
+ * \f}
+ *
+ * Both the Sommerfeld condition and a relaxation towards a model value are of
+ * this form, differing only in \f$c\f$ and \f$X_{ab}\f$:
+ * - Sommerfeld: \f$c = \gamma_2 - 1/r\f$, \f$X_{ab} = \partial_t u^g_{ab}\f$;
+ * - relaxation towards a model: \f$c = \kappa\f$,
+ *   \f$X_{ab} = u^-_{ab} - u^{-,\rm model}_{ab}\f$, which imposes
+ *   \f$\partial_t u^-_{ab}|_{\rm gauge}
+ *      = -\kappa (u^-_{ab} - u^{-,\rm model}_{ab})|_{\rm gauge}\f$
+ *   when the correction has already been initialised to
+ *   \f$-\partial_t u^-_{ab}\f$. Note this needs only \f$u^{-,\rm model}\f$ and
+ *   not its time derivative, which is why it is preferred over supplying
+ *   \f$\partial_t u^{-,\rm model}\f$ directly.
+ */
+template <size_t VolumeDim, typename DataType>
+void add_gauge_sector_terms_to_dt_v_minus(
+    gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
+        bc_dt_v_minus,
+    const DataType& scalar_coefficient,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& incoming_null_one_form,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& outgoing_null_one_form,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& incoming_null_vector,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& outgoing_null_vector,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& source);
+
 template <size_t VolumeDim, typename DataType>
 void add_gauge_sommerfeld_terms_to_dt_v_minus(
     const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
