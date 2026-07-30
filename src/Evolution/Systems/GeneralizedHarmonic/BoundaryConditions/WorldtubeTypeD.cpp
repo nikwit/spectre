@@ -497,20 +497,23 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
   *dt_spacetime_metric_correction =
       get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(dt_evolved_vars);
 
-  if (face_mesh_velocity.has_value()) {
-    const auto radial_mesh_velocity =
-        get(dot_product(normal_covector, *face_mesh_velocity));
-    // we use 1e-10 instead of 0 below to allow for purely tangentially
-    // moving grids, eg a rotating sphere, with some leeway for
-    // floating-point errors.
-    if (max(radial_mesh_velocity) > 1.e-10) {
-      return {
-          "We found the radial mesh velocity points in the direction "
-          "of the outward normal, i.e. we possibly have an expanding "
-          "domain. Its unclear if proper boundary conditions are "
-          "imposed in this case."};
-    }
-  }
+  // Note: the outer-boundary class vetoes any radial mesh velocity here, on the
+  // grounds that an outward-moving boundary means an expanding domain whose
+  // characteristic analysis is unclear. That veto is inappropriate at a
+  // worldtube, and was inherited rather than re-derived.
+  //
+  // At an inner boundary `normal_covector` points into the excision, so an
+  // excision that tracks a moving hole has normal . v_mesh > 0 over half the
+  // sphere by construction — exactly the situation the worldtube scheme needs
+  // for a binary, where the worldtube follows the smaller hole. The veto
+  // therefore rejects the intended use.
+  //
+  // It is also redundant. The mesh velocity is already accounted for in the two
+  // places where it matters: the advective terms subtracted from dt of the
+  // evolved variables above, and the characteristic speeds, which have
+  // normal . v_mesh removed before any correction is applied or zeroed (compare
+  // DemandOutgoingCharSpeeds, which tests those corrected speeds rather than
+  // the mesh velocity itself). So no check is needed here.
 
   return {};
 }
