@@ -57,4 +57,32 @@ FitResult fit_map_parameters(
     const std::array<double, num_map_parameters>& p_start,
     const std::array<double, 3>& center_offset_start,
     const std::array<double, num_map_parameters>& pdot_estimate);
+
+/// Result of one linear rate fit (the `RateOde` mode).
+struct RateFitResult {
+  std::array<double, num_map_parameters> pdot{};
+  double residual_initial = 0.;
+  double residual_final = 0.;
+};
+
+/*!
+ * \brief Fit the rates \f$\dot p_A\f$ of the map parameters from the
+ * time-derivative content of the boundary data.
+ *
+ * The data-side time derivative is \f$\partial_t g_{ab} = \beta^k
+ * \Phi_{kab} - \alpha \Pi_{ab}\f$ (all data quantities); the model relation
+ * is \f$\partial_t g = -\left(g\, \sum_A \dot p_A R_A\, g\right)\f$ with the
+ * *data* metric in the sandwich (first-order equivalent to the model
+ * metric). Both sides are projected onto spherical-harmonic modes with
+ * l <= `config.fit_l_max` and the nine unpinned rates solved by linear
+ * least squares; the rate pins are the time derivatives of the value pins
+ * (\f$\ddot q^i = \ddot q^0 v_\text{center}\f$, trace rate zero for a
+ * constant trace pin). This is the online analogue of the offline
+ * "drives direct from Pi, Phi" measurement (findings §9).
+ */
+RateFitResult fit_map_parameter_rates(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config);
 }  // namespace gh::Worldtube

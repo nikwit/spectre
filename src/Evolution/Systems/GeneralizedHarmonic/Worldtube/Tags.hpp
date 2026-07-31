@@ -71,6 +71,19 @@ struct MatcherConfig {
         "with the fitted rates."};
     static type lower_bound() { return 0.; }
   };
+  struct RateOde {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Obtain p(t) by fitting the parameter rates pdot from the "
+        "time-derivative content of the boundary data (dt g = beta.Phi - "
+        "alpha.Pi, projected on the covariant response columns, a linear "
+        "solve) and integrating the first-order ODE dp/dt = pdot by the "
+        "trapezoid rule from p = 0 (Schwarzschild) at the first fit. The "
+        "algebraic value fit is bypassed. Complementary to the default "
+        "mode: uses the Pi channel instead of the u^- gauge components, "
+        "smooth by construction, but integration accumulates rate bias "
+        "with no restoring force."};
+  };
   struct FitCenterOffset {
     using type = bool;
     static constexpr Options::String help = {
@@ -82,7 +95,7 @@ struct MatcherConfig {
   };
 
   using options = tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin,
-                             FitLMax, FitInterval, FitCenterOffset>;
+                             FitLMax, FitInterval, FitCenterOffset, RateOde>;
   static constexpr Options::String help = {
       "Online worldtube matching: fit the 13 first-order affine-map "
       "parameters from the evolved fields on the excision sphere."};
@@ -91,14 +104,15 @@ struct MatcherConfig {
   MatcherConfig(double mass, const std::array<double, 3>& center,
                 const std::array<double, 3>& center_velocity,
                 double trace_strain_pin, size_t fit_l_max,
-                double fit_interval, bool fit_center_offset)
+                double fit_interval, bool fit_center_offset, bool rate_ode)
       : mass(mass),
         center(center),
         center_velocity(center_velocity),
         trace_strain_pin(trace_strain_pin),
         fit_l_max(fit_l_max),
         fit_interval(fit_interval),
-        fit_center_offset(fit_center_offset) {}
+        fit_center_offset(fit_center_offset),
+        rate_ode(rate_ode) {}
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& p);
@@ -110,6 +124,7 @@ struct MatcherConfig {
   size_t fit_l_max = 4;
   double fit_interval = 0.;
   bool fit_center_offset = false;
+  bool rate_ode = false;
 };
 
 bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs);

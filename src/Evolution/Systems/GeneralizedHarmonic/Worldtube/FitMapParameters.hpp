@@ -35,6 +35,7 @@
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "Time/Tags/Time.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -151,47 +152,110 @@ struct FitMapParameters {
     // converged offline fit by only ~5% of |p| (findings §15b). The rates
     // are computed afterwards, purely as an output for the boundary
     // condition's model Pi.
-    const std::array<double, num_map_parameters> zero_rates{};
-    std::array<double, num_map_parameters> p_start{};
-    std::array<double, 3> center_offset_start{};
-    if (state.valid) {
-      p_start = state.p;
-      center_offset_start = state.center_offset;
-    }
-
-    const FitResult result = fit_map_parameters(
-        metric_face, pi_face, phi_face, gamma2_face, coords_face,
-        ylm_transform, *config_opt, p_start, center_offset_start, zero_rates);
-
-    bool finite = true;
-    for (size_t a = 0; a < num_map_parameters; ++a) {
-      finite = finite and std::isfinite(gsl::at(result.p, a));
-    }
-    for (size_t i = 0; i < 3; ++i) {
-      finite = finite and std::isfinite(gsl::at(result.center_offset, i));
-    }
-
+    std::array<double, num_map_parameters> p_out{};
     std::array<double, num_map_parameters> pdot_out{};
-    if (finite) {
-      db::mutate<Tags::MapParameters>(
-          [&result, &time, &pdot_out](
-              const gsl::not_null<MapParameterData*> data) {
-            if (data->valid and time > data->last_fit_time) {
-              const double dt = time - data->last_fit_time;
-              for (size_t a = 0; a < num_map_parameters; ++a) {
-                gsl::at(pdot_out, a) =
-                    (gsl::at(result.p, a) - gsl::at(data->p, a)) / dt;
+    std::array<double, 3> center_offset_out{};
+    double residual_initial = 0.;
+    double residual_final = 0.;
+    double iterations = 0.;
+
+    if (config_opt->rate_ode) {
+      if (config_opt->fit_center_offset) {
+        ERROR(
+            "WorldtubeMatcher: RateOde and FitCenterOffset cannot be "
+            "combined.");
+      }
+      // Rate mode: fit pdot linearly from the Pi channel and integrate the
+      // first-order ODE dp/dt = pdot by the trapezoid rule; p starts at
+      // zero (Schwarzschild) at the first fit.
+      const RateFitResult rate = fit_map_parameter_rates(
+          metric_face, pi_face, phi_face, coords_face, ylm_transform,
+          *config_opt);
+      residual_initial = rate.residual_initial;
+      residual_final = rate.residual_final;
+      iterations = 1.;
+      bool finite = true;
+      for (size_t a = 0; a < num_map_parameters; ++a) {
+        finite = finite and std::isfinite(gsl::at(rate.pdot, a));
+      }
+      if (finite) {
+        db::mutate<Tags::MapParameters>(
+            [&rate, &time, &p_out](
+                const gsl::not_null<MapParameterData*> data) {
+              if (data->valid and time > data->last_fit_time) {
+                const double dt = time - data->last_fit_time;
+                data->previous_fit_time = data->last_fit_time;
+                data->p_previous = data->p;
+                for (size_t a = 0; a < num_map_parameters; ++a) {
+                  gsl::at(data->p, a) += 0.5 * dt *
+                                         (gsl::at(data->pdot, a) +
+                                          gsl::at(rate.pdot, a));
+                }
               }
-              data->previous_fit_time = data->last_fit_time;
-              data->p_previous = data->p;
-            }
-            data->last_fit_time = time;
-            data->p = result.p;
-            data->pdot = pdot_out;
-            data->center_offset = result.center_offset;
-            data->valid = true;
-          },
-          make_not_null(&box));
+              data->last_fit_time = time;
+              data->pdot = rate.pdot;
+              data->valid = true;
+              p_out = data->p;
+            },
+            make_not_null(&box));
+      }
+      pdot_out = rate.pdot;
+    } else {
+      // Value mode: the fit runs with zero drives — feeding the
+      // backward-difference rate estimate back into the fit is an unstable
+      // loop (the optimal p shifts to compensate a drive error by more than
+      // dt, so the estimate grows geometrically; measured x1.33 per fit at
+      // FitInterval 0.5). Zero drives in the fit is the offline pass-1,
+      // which differs from the converged offline fit by only ~5% of |p|
+      // (findings §15b). The rates are computed afterwards, purely as an
+      // output for the boundary condition's model Pi.
+      const std::array<double, num_map_parameters> zero_rates{};
+      std::array<double, num_map_parameters> p_start{};
+      std::array<double, 3> center_offset_start{};
+      if (state.valid) {
+        p_start = state.p;
+        center_offset_start = state.center_offset;
+      }
+
+      const FitResult result = fit_map_parameters(
+          metric_face, pi_face, phi_face, gamma2_face, coords_face,
+          ylm_transform, *config_opt, p_start, center_offset_start,
+          zero_rates);
+      residual_initial = result.residual_initial;
+      residual_final = result.residual_final;
+      iterations = static_cast<double>(result.iterations);
+
+      bool finite = true;
+      for (size_t a = 0; a < num_map_parameters; ++a) {
+        finite = finite and std::isfinite(gsl::at(result.p, a));
+      }
+      for (size_t i = 0; i < 3; ++i) {
+        finite = finite and std::isfinite(gsl::at(result.center_offset, i));
+      }
+
+      if (finite) {
+        db::mutate<Tags::MapParameters>(
+            [&result, &time, &pdot_out](
+                const gsl::not_null<MapParameterData*> data) {
+              if (data->valid and time > data->last_fit_time) {
+                const double dt = time - data->last_fit_time;
+                for (size_t a = 0; a < num_map_parameters; ++a) {
+                  gsl::at(pdot_out, a) =
+                      (gsl::at(result.p, a) - gsl::at(data->p, a)) / dt;
+                }
+                data->previous_fit_time = data->last_fit_time;
+                data->p_previous = data->p;
+              }
+              data->last_fit_time = time;
+              data->p = result.p;
+              data->pdot = pdot_out;
+              data->center_offset = result.center_offset;
+              data->valid = true;
+            },
+            make_not_null(&box));
+      }
+      p_out = result.p;
+      center_offset_out = result.center_offset;
     }
 
     // diagnostic row: time, p (13), pdot (13), residuals, iterations
@@ -219,17 +283,17 @@ struct FitMapParameters {
     row.reserve(3 * num_map_parameters);
     row.push_back(time);
     for (size_t a = 0; a < num_map_parameters; ++a) {
-      row.push_back(gsl::at(result.p, a));
+      row.push_back(gsl::at(p_out, a));
     }
     for (size_t a = 0; a < num_map_parameters; ++a) {
       row.push_back(gsl::at(pdot_out, a));
     }
     for (size_t i = 0; i < 3; ++i) {
-      row.push_back(gsl::at(result.center_offset, i));
+      row.push_back(gsl::at(center_offset_out, i));
     }
-    row.push_back(result.residual_initial);
-    row.push_back(result.residual_final);
-    row.push_back(static_cast<double>(result.iterations));
+    row.push_back(residual_initial);
+    row.push_back(residual_final);
+    row.push_back(iterations);
     Parallel::threaded_action<
         observers::ThreadedActions::WriteReductionDataRow>(
         writer[0], std::string{"/WorldtubeMatcher"}, std::move(legend),

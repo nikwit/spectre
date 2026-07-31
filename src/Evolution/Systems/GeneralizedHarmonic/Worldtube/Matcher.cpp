@@ -390,4 +390,142 @@ FitResult fit_map_parameters(
         config);
   return result;
 }
+
+RateFitResult fit_map_parameter_rates(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config) {
+  ASSERT(config.fit_l_max <= ylm_transform.l_max(),
+         "FitLMax " << config.fit_l_max << " exceeds the grid l_max "
+                    << ylm_transform.l_max());
+  const size_t n_points = get<0, 0>(spacetime_metric).size();
+  std::vector<size_t> mode_indices;
+  ylm::SpherepackIterator iter(ylm_transform.l_max(), ylm_transform.m_max());
+  for (size_t l = 0; l <= config.fit_l_max; ++l) {
+    for (int m = -static_cast<int>(l); m <= static_cast<int>(l); ++m) {
+      iter.set(l, m);
+      mode_indices.push_back(iter());
+    }
+  }
+
+  // data-side dt g = beta^k Phi_k - alpha Pi
+  const auto inverse_metric = determinant_and_inverse(spacetime_metric).second;
+  const DataVector lapse_sq = -1. / get<0, 0>(inverse_metric);
+  const DataVector lapse = sqrt(lapse_sq);
+  std::array<DataVector, 3> shift{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(shift, i) = lapse_sq * inverse_metric.get(0, i + 1);
+  }
+  tnsr::aa<DataVector, 3> dt_metric(n_points);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      dt_metric.get(a, b) = -lapse * pi.get(a, b);
+      for (size_t k = 0; k < 3; ++k) {
+        dt_metric.get(a, b) += gsl::at(shift, k) * phi.get(k, a, b);
+      }
+    }
+  }
+
+  // modes of the ten components of a symmetric rank-2 tensor
+  const auto tensor_modes =
+      [&ylm_transform, &mode_indices](const tnsr::aa<DataVector, 3>& tensor) {
+        std::vector<double> out;
+        out.reserve(10 * mode_indices.size());
+        for (size_t a = 0; a < 4; ++a) {
+          for (size_t b = a; b < 4; ++b) {
+            const DataVector spec =
+                ylm_transform.phys_to_spec(tensor.get(a, b));
+            for (const size_t idx : mode_indices) {
+              out.push_back(spec[idx]);
+            }
+          }
+        }
+        return out;
+      };
+  const std::vector<double> target = tensor_modes(dt_metric);
+
+  // rate-response columns for the nine unpinned rate directions: the rate
+  // embedding is the derivative of the value pins, so the trace pin drops
+  // out (constant) and the velocity pin loses its affine "1 + " part
+  std::array<DataVector, 3> y{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(y, i) = inertial_coords.get(i) - gsl::at(config.center, i);
+  }
+  constexpr size_t n_free = 9;
+  std::vector<std::vector<double>> columns(n_free);
+  for (size_t a = 0; a < n_free; ++a) {
+    std::array<double, num_map_parameters> rate_direction{};
+    if (a == 0) {
+      rate_direction[0] = 1.;
+      for (size_t i = 0; i < 3; ++i) {
+        gsl::at(rate_direction, 4 + i) = gsl::at(config.center_velocity, i);
+      }
+    } else if (a < 4) {
+      gsl::at(rate_direction, a) = 1.;
+    } else {
+      gsl::at(rate_direction, 3 + a) = 1.;
+      if (a == 4 or a == 7) {
+        rate_direction[12] = -1.;
+      }
+    }
+    tnsr::AA<DataVector, 3> response(n_points);
+    gh::Solutions::affine_map_model::inverse_metric_combination(
+        make_not_null(&response), y, config.mass, 0., rate_direction);
+    tnsr::aa<DataVector, 3> column(n_points, 0.);
+    for (size_t c = 0; c < 4; ++c) {
+      for (size_t d = c; d < 4; ++d) {
+        for (size_t e = 0; e < 4; ++e) {
+          for (size_t f = 0; f < 4; ++f) {
+            column.get(c, d) -= spacetime_metric.get(c, e) *
+                                response.get(e, f) *
+                                spacetime_metric.get(f, d);
+          }
+        }
+      }
+    }
+    columns[a] = tensor_modes(column);
+  }
+
+  // linear least squares via the normal equations
+  const size_t n_res = target.size();
+  std::vector<std::vector<double>> jtj(n_free, std::vector<double>(n_free, 0.));
+  std::vector<double> jtr(n_free, 0.);
+  for (size_t a = 0; a < n_free; ++a) {
+    for (size_t b = a; b < n_free; ++b) {
+      double sum = 0.;
+      for (size_t i = 0; i < n_res; ++i) {
+        sum += columns[a][i] * columns[b][i];
+      }
+      jtj[a][b] = sum;
+      jtj[b][a] = sum;
+    }
+    double sum = 0.;
+    for (size_t i = 0; i < n_res; ++i) {
+      sum += columns[a][i] * target[i];
+    }
+    jtr[a] = sum;
+  }
+  const auto x = solve_normal_equations(std::move(jtj), std::move(jtr));
+
+  RateFitResult result{};
+  result.residual_initial = norm_of(target);
+  std::vector<double> residual = target;
+  for (size_t a = 0; a < n_free; ++a) {
+    for (size_t i = 0; i < n_res; ++i) {
+      residual[i] -= x[a] * columns[a][i];
+    }
+  }
+  result.residual_final = norm_of(residual);
+  result.pdot[0] = x[0];
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(result.pdot, 1 + i) = x[1 + i];
+    gsl::at(result.pdot, 4 + i) = x[0] * gsl::at(config.center_velocity, i);
+  }
+  for (size_t i = 0; i < 5; ++i) {
+    gsl::at(result.pdot, 7 + i) = x[4 + i];
+  }
+  result.pdot[12] = -x[4] - x[7];
+  return result;
+}
 }  // namespace gh::Worldtube
