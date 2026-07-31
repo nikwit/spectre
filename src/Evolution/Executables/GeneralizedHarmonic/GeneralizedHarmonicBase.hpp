@@ -121,7 +121,10 @@
 #include "PointwiseFunctions/GeneralRelativity/SpacetimeNormalVector.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Surfaces/Tags.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
+#include "PointwiseFunctions/GeneralRelativity/ExtrinsicCurvature.hpp"
+#include "PointwiseFunctions/GeneralRelativity/QuadraticCurvatureScalars.hpp"
 #include "PointwiseFunctions/GeneralRelativity/WeylElectric.hpp"
+#include "PointwiseFunctions/GeneralRelativity/WeylMagnetic.hpp"
 #include "PointwiseFunctions/GeneralRelativity/WeylTypeD1.hpp"
 #include "PointwiseFunctions/InitialDataUtilities/InitialData.hpp"
 #include "PointwiseFunctions/InitialDataUtilities/Tags/InitialData.hpp"
@@ -258,6 +261,19 @@ struct ObserverTags {
               gr::Tags::WeylElectricCompute<DataVector, 3, Frame::Inertial>,
               gr::Tags::WeylElectricScalarCompute<DataVector, 3,
                                                   Frame::Inertial>,
+              // The magnetic part and the vacuum Gauss-Bonnet scalar
+              // G = 8 (E_ab E^ab - B_ab B^ab), as already registered by
+              // EvolveGhBinaryBlackHole. G is a scalar curvature invariant with
+              // no tetrad in it, so unlike Psi4Real it is usable for tracking
+              // the physical signal. B_ab vanishes for the Schwarzschild
+              // background, which makes WeylMagneticScalar a purely
+              // perturbative diagnostic needing no monopole subtraction.
+              gr::Tags::CovariantDerivativeOfExtrinsicCurvatureCompute<
+                  3, Frame::Inertial>,
+              gr::Tags::WeylMagneticCompute<DataVector, 3, Frame::Inertial>,
+              gr::Tags::WeylMagneticScalarCompute<DataVector, 3,
+                                                  Frame::Inertial>,
+              gr::Tags::GaussBonnetScalarCompute<DataVector>,
               gr::Tags::WeylTypeD1Compute<DataVector, 3, Frame::Inertial>,
               gr::Tags::WeylTypeD1ScalarCompute<DataVector, 3, Frame::Inertial>,
               gr::Tags::Psi4RealCompute<Frame::Inertial>>,
