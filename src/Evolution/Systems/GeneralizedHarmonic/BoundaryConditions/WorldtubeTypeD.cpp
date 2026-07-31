@@ -72,6 +72,8 @@ WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(
         ConstraintPreservingPhysicalSommerfeldGhostGauge;
   } else if (type_read == "ConstraintPreservingPhysicalOnlineGhostGauge") {
     return WorldtubeTypeDType::ConstraintPreservingPhysicalOnlineGhostGauge;
+  } else if (type_read == "ConstraintPreservingPhysicalGhostGauge") {
+    return WorldtubeTypeDType::ConstraintPreservingPhysicalGhostGauge;
   }
   PARSE_ERROR(options.context(),
               "Failed to convert input option to "
@@ -79,8 +81,9 @@ WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(
               "be one of ConstraintPreserving, ConstraintPreservingPhysical, "
               "ConstraintPreservingPhysicalFrozenGauge, "
               "ConstraintPreservingPhysicalAnalyticGhostGauge, "
-              "ConstraintPreservingPhysicalSommerfeldGhostGauge or "
-              "ConstraintPreservingPhysicalOnlineGhostGauge");
+              "ConstraintPreservingPhysicalSommerfeldGhostGauge, "
+              "ConstraintPreservingPhysicalOnlineGhostGauge or "
+              "ConstraintPreservingPhysicalGhostGauge");
 }
 }  // namespace detail
 
@@ -414,7 +417,9 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
              type_ == detail::WorldtubeTypeDType::
                           ConstraintPreservingPhysicalSommerfeldGhostGauge or
              type_ == detail::WorldtubeTypeDType::
-                          ConstraintPreservingPhysicalOnlineGhostGauge) {
+                          ConstraintPreservingPhysicalOnlineGhostGauge or
+             type_ == detail::WorldtubeTypeDType::
+                          ConstraintPreservingPhysicalGhostGauge) {
     // AnalyticGhostGauge leaves the gauge sector frozen here and adds only the
     // relaxation below; SommerfeldGhostGauge keeps the Sommerfeld radiation
     // term and adds the relaxation on top of it.
@@ -442,6 +447,22 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
         "ConstraintPreserving, ConstraintPreservingPhysical, "
         "ConstraintPreservingPhysicalFrozenGauge or "
         "ConstraintPreservingPhysicalAnalyticGhostGauge");
+  }
+
+  if (type_ ==
+      detail::WorldtubeTypeDType::ConstraintPreservingPhysicalGhostGauge) {
+    // The gauge sector is imposed weakly through the ghost data and the
+    // upwind penalty (see dg_ghost), so it must receive no Bjorhus
+    // correction at all: the corrections above start every sector frozen
+    // (bc_dt_v_minus = -char_projected_rhs), so add back the gauge
+    // projection of the projected volume RHS. The helper adds
+    // -kappa * P_gauge(source); with kappa = -1 and source =
+    // char_projected_rhs this is exactly + P_gauge(char_projected_rhs).
+    const DataVector minus_one_kappa(get_size(get(gamma2)), -1.0);
+    Bjorhus::detail::add_gauge_sector_terms_to_dt_v_minus(
+        make_not_null(&bc_dt_v_minus), minus_one_kappa,
+        incoming_null_one_form, outgoing_null_one_form, incoming_null_vector,
+        outgoing_null_vector, projection_Ab, char_projected_rhs_dt_v_minus);
   }
 
   if (type_ == detail::WorldtubeTypeDType::
@@ -587,6 +608,184 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
   // the mesh velocity itself). So no check is needed here.
 
   return {};
+}
+
+template <size_t Dim>
+std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
+    const gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
+        spacetime_metric_ghost,
+    const gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*> pi_ghost,
+    const gsl::not_null<tnsr::iaa<DataVector, Dim, Frame::Inertial>*>
+        phi_ghost,
+    const gsl::not_null<Scalar<DataVector>*> gamma1_ghost,
+    const gsl::not_null<Scalar<DataVector>*> gamma2_ghost,
+    const gsl::not_null<Scalar<DataVector>*> lapse_ghost,
+    const gsl::not_null<tnsr::I<DataVector, Dim, Frame::Inertial>*>
+        shift_ghost,
+    const gsl::not_null<tnsr::II<DataVector, Dim, Frame::Inertial>*>
+        inv_spatial_metric_ghost,
+    const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
+    /*face_mesh_velocity*/,
+    const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_covector,
+    const tnsr::I<DataVector, Dim, Frame::Inertial>& /*normal_vector*/,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
+    const tnsr::I<DataVector, Dim, Frame::Inertial>& coords,
+    const Scalar<DataVector>& gamma1, const Scalar<DataVector>& gamma2,
+    const Scalar<DataVector>& lapse,
+    const tnsr::I<DataVector, Dim, Frame::Inertial>& shift,
+    const tnsr::AA<DataVector, Dim, Frame::Inertial>& inverse_spacetime_metric,
+    const tnsr::A<DataVector, Dim, Frame::Inertial>&
+        spacetime_unit_normal_vector,
+    const tnsr::iaa<DataVector, Dim,
+                    Frame::Inertial>& /*three_index_constraint*/,
+    const tnsr::a<DataVector, Dim, Frame::Inertial>& /*gauge_source*/,
+    const tnsr::ab<DataVector, Dim, Frame::Inertial>&
+    /*spacetime_deriv_gauge_source*/,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>&
+    /*logical_dt_spacetime_metric*/,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& /*logical_dt_pi*/,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& /*logical_dt_phi*/,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& /*d_spacetime_metric*/,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& /*d_pi*/,
+    const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& /*d_phi*/,
+    const double time,
+    const std::optional<gh::Worldtube::MatcherConfig>& matcher_config,
+    const gh::Worldtube::MapParameterData& map_parameters) const {
+  // Interior copies first: for every Type except
+  // ConstraintPreservingPhysicalGhostGauge the ghost state equals the
+  // interior, the upwind flux is consistent, and the penalty contributes
+  // exactly zero.
+  *spacetime_metric_ghost = spacetime_metric;
+  *pi_ghost = pi;
+  *phi_ghost = phi;
+  *gamma1_ghost = gamma1;
+  *gamma2_ghost = gamma2;
+  *lapse_ghost = lapse;
+  *shift_ghost = shift;
+  const DataVector one_over_lapse_sqrd = 1.0 / (get(lapse) * get(lapse));
+  for (size_t i = 0; i < Dim; ++i) {
+    for (size_t j = i; j < Dim; ++j) {
+      inv_spatial_metric_ghost->get(i, j) =
+          inverse_spacetime_metric.get(1 + i, 1 + j) +
+          shift.get(i) * shift.get(j) * one_over_lapse_sqrd;
+    }
+  }
+
+  if (type_ !=
+      detail::WorldtubeTypeDType::ConstraintPreservingPhysicalGhostGauge) {
+    return {};
+  }
+
+  if constexpr (Dim == 3) {
+    if (not matcher_config.has_value()) {
+      ERROR(
+          "ConstraintPreservingPhysicalGhostGauge requires the "
+          "WorldtubeMatcher option to be active, but it is None.");
+    }
+    if (not map_parameters.valid) {
+      // no fit yet: ghost = interior, no driving
+      return {};
+    }
+
+    // model fields from the online matcher, extrapolated within the fit
+    // interval
+    std::array<double, gh::Worldtube::num_map_parameters> p =
+        map_parameters.p;
+    const double dt_extrapolate = time - map_parameters.last_fit_time;
+    for (size_t a = 0; a < gh::Worldtube::num_map_parameters; ++a) {
+      gsl::at(p, a) += dt_extrapolate * gsl::at(map_parameters.pdot, a);
+    }
+    std::array<double, 3> model_center = matcher_config->center;
+    for (size_t i = 0; i < 3; ++i) {
+      gsl::at(model_center, i) += gsl::at(map_parameters.center_offset, i);
+    }
+    tnsr::aa<DataVector, Dim, Frame::Inertial> model_metric{};
+    tnsr::aa<DataVector, Dim, Frame::Inertial> model_pi{};
+    tnsr::iaa<DataVector, Dim, Frame::Inertial> model_phi{};
+    gh::Solutions::affine_map_model::evolved_variables(
+        make_not_null(&model_metric), make_not_null(&model_pi),
+        make_not_null(&model_phi), coords, matcher_config->mass, model_center,
+        p, map_parameters.pdot);
+
+    // characteristic fields of the interior and of the model, in the same
+    // (interior) frame
+    const auto char_fields_interior =
+        characteristic_fields(gamma2, *inv_spatial_metric_ghost,
+                              spacetime_metric, pi, phi, normal_covector);
+    const auto v_minus_model =
+        get<Tags::VMinus<DataVector, Dim>>(characteristic_fields(
+            gamma2, *inv_spatial_metric_ghost, model_metric, model_pi,
+            model_phi, normal_covector));
+    const auto& v_minus_interior =
+        get<Tags::VMinus<DataVector, Dim>>(char_fields_interior);
+
+    // null frame pieces for the gauge projector
+    const size_t n_points = get(lapse).size();
+    tnsr::a<DataVector, Dim, Frame::Inertial> normal_one_form(n_points, 0.);
+    get<0>(normal_one_form) = -get(lapse);
+    tnsr::I<DataVector, Dim, Frame::Inertial> unit_interface_normal_vector(
+        n_points);
+    raise_or_lower_index(make_not_null(&unit_interface_normal_vector),
+                         normal_covector, *inv_spatial_metric_ghost);
+    tnsr::a<DataVector, Dim, Frame::Inertial> incoming_null_one_form(
+        n_points);
+    tnsr::a<DataVector, Dim, Frame::Inertial> outgoing_null_one_form(
+        n_points);
+    tnsr::A<DataVector, Dim, Frame::Inertial> incoming_null_vector(n_points);
+    tnsr::A<DataVector, Dim, Frame::Inertial> outgoing_null_vector(n_points);
+    gr::interface_null_normal(make_not_null(&incoming_null_one_form),
+                              normal_one_form, normal_covector, shift, -1.);
+    gr::interface_null_normal(make_not_null(&outgoing_null_one_form),
+                              normal_one_form, normal_covector, shift, 1.);
+    gr::interface_null_normal(make_not_null(&incoming_null_vector),
+                              spacetime_unit_normal_vector,
+                              unit_interface_normal_vector, -1.);
+    gr::interface_null_normal(make_not_null(&outgoing_null_vector),
+                              spacetime_unit_normal_vector,
+                              unit_interface_normal_vector, 1.);
+    tnsr::Ab<DataVector, Dim, Frame::Inertial> projection_Ab(n_points);
+    gr::transverse_projection_operator(
+        make_not_null(&projection_Ab), spacetime_unit_normal_vector,
+        normal_one_form, unit_interface_normal_vector, normal_covector,
+        shift);
+
+    // v^-_ghost = v^-_interior + P_gauge(v^-_model - v^-_interior), using
+    // the gauge-sector helper: it adds -kappa * P_gauge(delta), so with
+    // kappa = 1 and delta = (v^-_interior - v^-_model) it adds exactly the
+    // required replacement term.
+    auto v_minus_ghost = v_minus_interior;
+    auto delta_v_minus = v_minus_interior;
+    for (size_t a = 0; a <= Dim; ++a) {
+      for (size_t b = a; b <= Dim; ++b) {
+        delta_v_minus.get(a, b) -= v_minus_model.get(a, b);
+      }
+    }
+    const DataVector unit_kappa(n_points, 1.0);
+    Bjorhus::detail::add_gauge_sector_terms_to_dt_v_minus(
+        make_not_null(&v_minus_ghost), unit_kappa, incoming_null_one_form,
+        outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
+        projection_Ab, delta_v_minus);
+
+    // reassemble the ghost evolved fields; only Pi and the normal part of
+    // Phi change (the metric is the v_psi characteristic)
+    const auto ghost_evolved = evolved_fields_from_characteristic_fields(
+        gamma2,
+        get<Tags::VSpacetimeMetric<DataVector, Dim>>(char_fields_interior),
+        get<Tags::VZero<DataVector, Dim>>(char_fields_interior),
+        get<Tags::VPlus<DataVector, Dim>>(char_fields_interior),
+        v_minus_ghost, normal_covector);
+    *spacetime_metric_ghost =
+        get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(ghost_evolved);
+    *pi_ghost = get<Tags::Pi<DataVector, Dim>>(ghost_evolved);
+    *phi_ghost = get<Tags::Phi<DataVector, Dim>>(ghost_evolved);
+    return {};
+  } else {
+    ERROR(
+        "ConstraintPreservingPhysicalGhostGauge is only implemented in 3 "
+        "dimensions.");
+  }
 }
 
 template <size_t Dim>

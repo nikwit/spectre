@@ -86,7 +86,18 @@ enum class WorldtubeTypeDType {
   /// instead of an input-file prescription — the closed loop. Requires the
   /// `WorldtubeMatcher` option to be active; while no fit exists yet the
   /// gauge sector stays frozen. 3D only.
-  ConstraintPreservingPhysicalOnlineGhostGauge
+  ConstraintPreservingPhysicalOnlineGhostGauge,
+  /// Constraint-preserving and physical sectors by Bjorhus time-derivative
+  /// corrections as in `ConstraintPreservingPhysical*`; the **gauge sector
+  /// is imposed weakly through ghost data**: the exterior state equals the
+  /// interior except that the gauge projection of \f$u^-\f$ is replaced by
+  /// the online matcher's model, and the upwind penalty drives the jump. No
+  /// relaxation rate: the driving strength is set by the characteristic
+  /// speed and the DG lifting. The gauge sector receives no Bjorhus
+  /// correction (its volume dynamics stays free). Requires the
+  /// `WorldtubeMatcher` option; while no fit exists the ghost state equals
+  /// the interior (no driving). 3D only.
+  ConstraintPreservingPhysicalGhostGauge
 };
 
 WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(
@@ -223,8 +234,15 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   auto get_clone() const -> std::unique_ptr<
       domain::BoundaryConditions::BoundaryCondition> override;
 
+  // GhostAndTimeDerivative: the constraint-preserving and physical sectors
+  // are imposed by Bjorhus time-derivative corrections; for
+  // `ConstraintPreservingPhysicalGhostGauge` the gauge sector is imposed
+  // weakly through ghost data (the exterior state's u^- has its gauge
+  // projection replaced by the online-matcher model) driven by the upwind
+  // penalty. For all other Types the ghost state is a copy of the interior,
+  // so the penalty contributes exactly zero and the behavior is unchanged.
   static constexpr evolution::BoundaryConditions::Type bc_type =
-      evolution::BoundaryConditions::Type::TimeDerivative;
+      evolution::BoundaryConditions::Type::GhostAndTimeDerivative;
 
   void pup(PUP::er& p) override;
 
@@ -267,6 +285,53 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
           face_mesh_velocity,
       const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_covector,
       const tnsr::I<DataVector, Dim, Frame::Inertial>& /*normal_vector*/,
+      // c.f. dg_interior_evolved_variables_tags
+      const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
+      const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
+      // c.f. dg_interior_temporary_tags
+      const tnsr::I<DataVector, Dim, Frame::Inertial>& coords,
+      const Scalar<DataVector>& gamma1, const Scalar<DataVector>& gamma2,
+      const Scalar<DataVector>& lapse,
+      const tnsr::I<DataVector, Dim, Frame::Inertial>& shift,
+      const tnsr::AA<DataVector, Dim, Frame::Inertial>&
+          inverse_spacetime_metric,
+      const tnsr::A<DataVector, Dim, Frame::Inertial>&
+          spacetime_unit_normal_vector,
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& three_index_constraint,
+      const tnsr::a<DataVector, Dim, Frame::Inertial>& gauge_source,
+      const tnsr::ab<DataVector, Dim, Frame::Inertial>&
+          spacetime_deriv_gauge_source,
+      // c.f. dg_interior_dt_vars_tags
+      const tnsr::aa<DataVector, Dim, Frame::Inertial>&
+          logical_dt_spacetime_metric,
+      const tnsr::aa<DataVector, Dim, Frame::Inertial>& logical_dt_pi,
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& logical_dt_phi,
+      // c.f. dg_interior_deriv_vars_tags
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_spacetime_metric,
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_pi,
+      const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi,
+      // c.f. dg_gridless_tags
+      double time,
+      const std::optional<gh::Worldtube::MatcherConfig>& matcher_config,
+      const gh::Worldtube::MapParameterData& map_parameters) const;
+
+  std::optional<std::string> dg_ghost(
+      gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
+          spacetime_metric_ghost,
+      gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*> pi_ghost,
+      gsl::not_null<tnsr::iaa<DataVector, Dim, Frame::Inertial>*> phi_ghost,
+      gsl::not_null<Scalar<DataVector>*> gamma1_ghost,
+      gsl::not_null<Scalar<DataVector>*> gamma2_ghost,
+      gsl::not_null<Scalar<DataVector>*> lapse_ghost,
+      gsl::not_null<tnsr::I<DataVector, Dim, Frame::Inertial>*> shift_ghost,
+      gsl::not_null<tnsr::II<DataVector, Dim, Frame::Inertial>*>
+          inv_spatial_metric_ghost,
+
+      const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
+          face_mesh_velocity,
+      const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_covector,
+      const tnsr::I<DataVector, Dim, Frame::Inertial>& normal_vector,
       // c.f. dg_interior_evolved_variables_tags
       const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
       const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
