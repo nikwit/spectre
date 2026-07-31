@@ -73,6 +73,7 @@
 #include "PointwiseFunctions/GeneralRelativity/DetAndInverseSpatialMetric.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Surfaces/Tags.hpp"
 #include "Time/Actions/SelfStartActions.hpp"
+#include "Time/RecordTimeStepperData.hpp"
 #include "Time/AdvanceTime.hpp"
 #include "Time/ChangeSlabSize/Action.hpp"
 #include "Time/ChangeSlabSize/Tags.hpp"
@@ -81,6 +82,7 @@
 #include "Time/Tags/Time.hpp"
 #include "Time/Tags/TimeAndPrevious.hpp"
 #include "Utilities/Algorithm.hpp"
+#include "Utilities/TMPL.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/PrettyType.hpp"
 #include "Utilities/ProtocolHelpers.hpp"
@@ -234,17 +236,26 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
   // excision-sphere data at the top of each step (no-op when the
   // WorldtubeMatcher option is None).
   // The online worldtube matcher: FitMapParameters at the top of the step
-  // (the algebraic/ODE modes), AdvanceMapParameterOde directly after the
-  // RHS computation (the StepperOde mode, which records and updates through
-  // the element's own time stepper each substep).
-  using base_step_actions =
+  // (the algebraic/ODE modes), AdvanceMapParameterOde right before the
+  // system history is recorded (the StepperOde mode, which records and
+  // updates through the element's own time stepper each substep). Under
+  // global time stepping that places it after
+  // ApplyBoundaryCorrectionsToTimeDerivative, so the measured acceleration
+  // includes the boundary (ghost-penalty) contribution; under local time
+  // stepping the dt tags never contain the mortar corrections and the
+  // action sits directly after ComputeTimeDerivative.
+  using base_step_actions = tmpl::flatten<
       typename gh_base::template step_actions<EvolutionMetavars,
-                                              control_systems>;
+                                              control_systems>>;
+  using split_at_record = tmpl::split_at<
+      base_step_actions,
+      tmpl::index_of<base_step_actions,
+                     Actions::MutateApply<RecordTimeStepperData<system>>>>;
   using step_actions = tmpl::flatten<
       tmpl::list<gh::Worldtube::Actions::FitMapParameters,
-                 tmpl::front<base_step_actions>,
+                 tmpl::front<split_at_record>,
                  gh::Worldtube::Actions::AdvanceMapParameterOde,
-                 tmpl::pop_front<base_step_actions>>>;
+                 tmpl::back<split_at_record>>>;
 
   using initialization_actions = tmpl::push_back<
       tmpl::pop_back<typename gh_base::template initialization_actions<

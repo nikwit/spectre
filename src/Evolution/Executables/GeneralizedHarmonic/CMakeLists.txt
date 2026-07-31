@@ -77,6 +77,32 @@ target_compile_definitions(
   USE_LTS=true
   )
 
+# GTS variant: with global time stepping the boundary corrections are
+# applied to the time derivatives before they are recorded, so the
+# worldtube matcher's equations-of-motion measurement sees the complete
+# right-hand side (the configuration the scalar worldtube runs in).
+set(SINGLE_BH_GTS_EXECUTABLE EvolveGhSingleBlackHoleGts)
+add_spectre_executable(
+  ${SINGLE_BH_GTS_EXECUTABLE}
+  EXCLUDE_FROM_ALL
+  EvolveGhSingleBlackHole.cpp
+  )
+target_link_libraries(
+  ${SINGLE_BH_GTS_EXECUTABLE}
+  PRIVATE
+  ${LIBS_TO_LINK}
+  ApparentHorizonFinder
+  ApparentHorizonFinderCriteria
+  Cce
+  ControlSystem
+  Deadlock
+  )
+target_compile_definitions(
+  ${SINGLE_BH_GTS_EXECUTABLE}
+  PRIVATE
+  USE_LTS=false
+  )
+
 
 # BBH
 set(BBH_EXECUTABLE EvolveGhBinaryBlackHole)
