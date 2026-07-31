@@ -28,6 +28,34 @@ class er;
 /// \endcond
 
 namespace gh::Solutions {
+/// Free-function core of the first-order affine-map model, shared by the
+/// tabulated solution class below and the online worldtube matcher.
+namespace affine_map_model {
+/// out^{ab} = background_weight * G_0^{ab}(y) + sum_A c_A R_A^{ab}(y), with
+/// G_0 the harmonic-Schwarzschild inverse metric, R_A the thirteen
+/// first-order response columns of the matching scheme, and y coordinates
+/// relative to the centre. Transcribes
+/// worldtube_matching/responses.py.
+void inverse_metric_combination(gsl::not_null<tnsr::AA<DataVector, 3>*> out,
+                                const std::array<DataVector, 3>& y,
+                                double mass, double background_weight,
+                                const std::array<double, 13>& c);
+
+/// The generalized-harmonic evolved variables of the mapped solution at
+/// points `x`: the metric is the inverse of the combination above, Phi its
+/// central-difference spatial derivative (step 1e-4, matching the reference
+/// implementation), and Pi uses the coefficient drift
+/// \f$\partial_t g = -(g \sum_A \dot p_A R_A g)\f$ at a static centre with
+/// the model's own lapse and shift.
+void evolved_variables(gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+                       gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+                       gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+                       const tnsr::I<DataVector, 3>& x, double mass,
+                       const std::array<double, 3>& center,
+                       const std::array<double, 13>& p,
+                       const std::array<double, 13>& pdot);
+}  // namespace affine_map_model
+
 /*!
  * \brief Harmonic Schwarzschild pushed through the first-order affine
  * worldtube-matching map, with the thirteen map parameters supplied as

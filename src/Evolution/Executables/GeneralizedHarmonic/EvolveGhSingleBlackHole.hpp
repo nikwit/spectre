@@ -27,8 +27,11 @@
 #include "Evolution/Executables/GeneralizedHarmonic/GeneralizedHarmonicBase.hpp"
 #include "Evolution/Systems/Cce/Callbacks/DumpBondiSachsOnWorldtube.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Actions/SetInitialData.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/FitMapParameters.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Tags.hpp"
 #include "NumericalAlgorithms/Strahlkorper/IO/InitialShapeFromFile.hpp"
 #include "NumericalAlgorithms/Strahlkorper/InitialShape.hpp"
+#include "ParallelAlgorithms/Actions/InitializeItems.hpp"
 #include "Options/FactoryHelpers.hpp"
 #include "Options/Protocols/FactoryCreation.hpp"
 #include "Options/String.hpp"
@@ -226,9 +229,13 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
 
   using dg_registration_list = typename gh_base::dg_registration_list;
 
-  using step_actions =
+  // The online worldtube matcher fits the affine-map parameters from the
+  // excision-sphere data at the top of each step (no-op when the
+  // WorldtubeMatcher option is None).
+  using step_actions = tmpl::push_front<
       typename gh_base::template step_actions<EvolutionMetavars,
-                                              control_systems>;
+                                              control_systems>,
+      gh::Worldtube::Actions::FitMapParameters>;
 
   using initialization_actions = tmpl::push_back<
       tmpl::pop_back<typename gh_base::template initialization_actions<
@@ -236,6 +243,8 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
       control_system::Actions::InitializeMeasurements<control_systems>,
       intrp::Actions::ElementInitInterpPoints<volume_dim,
                                               interpolation_target_tags>,
+      Initialization::Actions::InitializeItems<
+          gh::Worldtube::Initialization::InitializeMapParameters>,
       tmpl::back<typename gh_base::template initialization_actions<
           EvolutionMetavars, use_control_systems>>>;
 
@@ -303,6 +312,7 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
         evolution::dg::Initialization::ProjectSpectralFilters<
             volume_dim, typename system::variables_tag::tags_list>,
         ::amr::projectors::DefaultInitialize<
+            gh::Worldtube::Tags::MapParameters,
             Initialization::Tags::InitialTimeDelta,
             Initialization::Tags::InitialSlabSize,
             ::domain::Tags::InitialExtents<volume_dim>,

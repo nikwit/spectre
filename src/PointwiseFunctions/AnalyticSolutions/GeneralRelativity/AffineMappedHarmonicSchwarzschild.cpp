@@ -21,6 +21,7 @@
 #include "Utilities/SetNumberOfGridPoints.hpp"
 
 namespace gh::Solutions {
+namespace affine_map_model {
 namespace {
 // Central-difference step for Phi, matching the reference implementation
 // (worldtube_matching fits use the same value, so the model a run applies is
@@ -30,12 +31,8 @@ constexpr double fd_step = 1.0e-4;
 // The six independent strain components in column order.
 constexpr std::array<std::array<size_t, 2>, 6> sigma_pairs{
     {{{0, 0}}, {{0, 1}}, {{0, 2}}, {{1, 1}}, {{1, 2}}, {{2, 2}}}};
+}  // namespace
 
-// out^{ab} = background_weight * G_0^{ab}(y) + sum_A c_A R_A^{ab}(y).
-//
-// Transcribes worldtube_matching/responses.py: inverse_harmonic_schwarzschild
-// and first_order_response_columns. `y` are coordinates relative to the
-// center.
 void inverse_metric_combination(
     const gsl::not_null<tnsr::AA<DataVector, 3>*> out,
     const std::array<DataVector, 3>& y, const double mass,
@@ -108,6 +105,7 @@ void inverse_metric_combination(
   }
 }
 
+namespace {
 tnsr::aa<DataVector, 3> metric_at(const std::array<DataVector, 3>& y,
                                   const double mass,
                                   const std::array<double, 13>& p) {
@@ -116,6 +114,81 @@ tnsr::aa<DataVector, 3> metric_at(const std::array<DataVector, 3>& y,
   return determinant_and_inverse(inverse_metric).second;
 }
 }  // namespace
+
+void evolved_variables(
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+    const gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+    const tnsr::I<DataVector, 3>& x, const double mass,
+    const std::array<double, 3>& center, const std::array<double, 13>& p,
+    const std::array<double, 13>& pdot) {
+  const size_t n_points = get<0>(x).size();
+  std::array<DataVector, 3> y{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(y, i) = x.get(i) - gsl::at(center, i);
+  }
+
+  set_number_of_grid_points(spacetime_metric, n_points);
+  set_number_of_grid_points(pi, n_points);
+  set_number_of_grid_points(phi, n_points);
+
+  tnsr::AA<DataVector, 3> inverse_metric(n_points);
+  inverse_metric_combination(make_not_null(&inverse_metric), y, mass, 1., p);
+  *spacetime_metric = determinant_and_inverse(inverse_metric).second;
+
+  // Phi by second-order central differences of the metric
+  for (size_t k = 0; k < 3; ++k) {
+    std::array<DataVector, 3> y_plus = y;
+    std::array<DataVector, 3> y_minus = y;
+    gsl::at(y_plus, k) += fd_step;
+    gsl::at(y_minus, k) -= fd_step;
+    const auto metric_plus = metric_at(y_plus, mass, p);
+    const auto metric_minus = metric_at(y_minus, mass, p);
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        phi->get(k, a, b) =
+            (metric_plus.get(a, b) - metric_minus.get(a, b)) / (2. * fd_step);
+      }
+    }
+  }
+
+  // d_t g_ab = -(g S g)_ab with S^{ab} = sum_A pdot_A R_A^{ab}: the
+  // coefficient drift of the model at a fixed point (the centre is static)
+  tnsr::AA<DataVector, 3> rate_direction(n_points);
+  inverse_metric_combination(make_not_null(&rate_direction), y, mass, 0.,
+                             pdot);
+  tnsr::aa<DataVector, 3> dt_metric(n_points, 0.);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      for (size_t c = 0; c < 4; ++c) {
+        for (size_t d = 0; d < 4; ++d) {
+          dt_metric.get(a, b) -= spacetime_metric->get(a, c) *
+                                 rate_direction.get(c, d) *
+                                 spacetime_metric->get(d, b);
+        }
+      }
+    }
+  }
+
+  // lapse and shift of the model metric itself;
+  // Pi_ab = (beta^k Phi_kab - d_t g_ab) / alpha
+  const DataVector lapse = 1. / sqrt(-get<0, 0>(inverse_metric));
+  std::array<DataVector, 3> shift{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(shift, i) =
+        -inverse_metric.get(0, i + 1) / get<0, 0>(inverse_metric);
+  }
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      pi->get(a, b) = -dt_metric.get(a, b);
+      for (size_t k = 0; k < 3; ++k) {
+        pi->get(a, b) += gsl::at(shift, k) * phi->get(k, a, b);
+      }
+      pi->get(a, b) /= lapse;
+    }
+  }
+}
+}  // namespace affine_map_model
 
 AffineMappedHarmonicSchwarzschild::AffineMappedHarmonicSchwarzschild(
     const double mass, const std::array<double, volume_dim>& center,
@@ -211,76 +284,22 @@ AffineMappedHarmonicSchwarzschild::all_variables(
   map_parameters(make_not_null(&p), make_not_null(&pdot), time);
 
   const size_t n_points = get<0>(x).size();
-  std::array<DataVector, 3> y{};
-  for (size_t i = 0; i < 3; ++i) {
-    gsl::at(y, i) = x.get(i) - gsl::at(center_, i);
-  }
-
   AllVars result{};
   auto& spacetime_metric =
       get<gr::Tags::SpacetimeMetric<DataVector, volume_dim>>(result);
   auto& pi = get<gh::Tags::Pi<DataVector, volume_dim>>(result);
   auto& phi = get<gh::Tags::Phi<DataVector, volume_dim>>(result);
-  set_number_of_grid_points(make_not_null(&spacetime_metric), n_points);
-  set_number_of_grid_points(make_not_null(&pi), n_points);
-  set_number_of_grid_points(make_not_null(&phi), n_points);
+  affine_map_model::evolved_variables(make_not_null(&spacetime_metric),
+                                      make_not_null(&pi), make_not_null(&phi),
+                                      x, mass_, center_, p, pdot);
 
-  tnsr::AA<DataVector, 3> inverse_metric(n_points);
-  inverse_metric_combination(make_not_null(&inverse_metric), y, mass_, 1., p);
-  spacetime_metric = determinant_and_inverse(inverse_metric).second;
-
-  // Phi by second-order central differences of the metric
-  for (size_t k = 0; k < 3; ++k) {
-    std::array<DataVector, 3> y_plus = y;
-    std::array<DataVector, 3> y_minus = y;
-    gsl::at(y_plus, k) += fd_step;
-    gsl::at(y_minus, k) -= fd_step;
-    const auto metric_plus = metric_at(y_plus, mass_, p);
-    const auto metric_minus = metric_at(y_minus, mass_, p);
-    for (size_t a = 0; a < 4; ++a) {
-      for (size_t b = a; b < 4; ++b) {
-        phi.get(k, a, b) =
-            (metric_plus.get(a, b) - metric_minus.get(a, b)) /
-            (2. * fd_step);
-      }
-    }
-  }
-
-  // d_t g_ab = -(g S g)_ab with S^{ab} = sum_A pdot_A R_A^{ab}: the
-  // coefficient drift of the model at a fixed point (the center is static)
-  tnsr::AA<DataVector, 3> rate_direction(n_points);
-  inverse_metric_combination(make_not_null(&rate_direction), y, mass_, 0.,
-                             pdot);
-  tnsr::aa<DataVector, 3> dt_metric(n_points, 0.);
-  for (size_t a = 0; a < 4; ++a) {
-    for (size_t b = a; b < 4; ++b) {
-      for (size_t c = 0; c < 4; ++c) {
-        for (size_t d = 0; d < 4; ++d) {
-          dt_metric.get(a, b) -= spacetime_metric.get(a, c) *
-                                 rate_direction.get(c, d) *
-                                 spacetime_metric.get(d, b);
-        }
-      }
-    }
-  }
-
-  // lapse and shift of the model metric itself
+  // lapse and shift from the metric
   auto& lapse = get<gr::Tags::Lapse<DataVector>>(result);
   auto& shift = get<gr::Tags::Shift<DataVector, volume_dim>>(result);
+  const auto inverse_metric = determinant_and_inverse(spacetime_metric).second;
   get(lapse) = 1. / sqrt(-get<0, 0>(inverse_metric));
   for (size_t i = 0; i < 3; ++i) {
     shift.get(i) = -inverse_metric.get(0, i + 1) / get<0, 0>(inverse_metric);
-  }
-
-  // Pi_ab = (beta^k Phi_kab - d_t g_ab) / alpha
-  for (size_t a = 0; a < 4; ++a) {
-    for (size_t b = a; b < 4; ++b) {
-      pi.get(a, b) = -dt_metric.get(a, b);
-      for (size_t k = 0; k < 3; ++k) {
-        pi.get(a, b) += shift.get(k) * phi.get(k, a, b);
-      }
-      pi.get(a, b) /= get(lapse);
-    }
   }
 
   // ADM quantities requested by gh::Actions::SetInitialData
