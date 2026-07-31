@@ -63,6 +63,16 @@ struct RateFitResult {
   std::array<double, num_map_parameters> pdot{};
   double residual_initial = 0.;
   double residual_final = 0.;
+  /// Held-out closure: relative residual per (component class, l) block,
+  /// indexed 5*class + l with class 0 = TT, 1 = Ti, 2 = ij and l = 0..4.
+  /// Evaluated on the isotropy-weighted rows regardless of solve weights.
+  std::array<double, 15> block_closure{};
+  /// Largest parameter shift when the boosts are re-solved on the
+  /// audit-preferred V1 blocks (TT l=1, Ti l=0) with everything else
+  /// frozen at the global solution.
+  double spread_vector = 0.;
+  /// Same for clock rate and strain on the C3 blocks (TT l=0, ij l=2).
+  double spread_clock_strain = 0.;
 };
 
 /*!

@@ -5,6 +5,8 @@
 
 #include <array>
 #include <cmath>
+#include <algorithm>
+#include <numeric>
 #include <cstddef>
 #include <utility>
 #include <vector>
@@ -189,6 +191,7 @@ GaugeComponents gauge_components(const tnsr::aa<DataVector, 3>& u,
 struct ModeSet {
   std::vector<size_t> indices;
   std::vector<double> weights;
+  std::vector<size_t> ells;
 };
 
 ModeSet kept_modes(const ylm::Spherepack& ylm_transform,
@@ -200,6 +203,7 @@ ModeSet kept_modes(const ylm::Spherepack& ylm_transform,
       iter.set(l, m);
       out.indices.push_back(iter());
       out.weights.push_back(m == 0 ? 1.0 : M_SQRT2);
+      out.ells.push_back(l);
     }
   }
   return out;
@@ -477,26 +481,61 @@ RateFitResult project_onto_rate_directions(
     columns[a] = tensor_modes(column);
   }
 
-  // linear least squares via the normal equations
+  // Per-row block labels: component class (0 = TT, 1 = Ti, 2 = ij) and l.
+  // Rows are ordered (a, b) major over the 10 tensor components, mode minor.
+  const size_t n_modes = modes.indices.size();
   const size_t n_res = target_modes.size();
-  std::vector<std::vector<double>> jtj(n_free, std::vector<double>(n_free, 0.));
-  std::vector<double> jtr(n_free, 0.);
-  for (size_t a = 0; a < n_free; ++a) {
-    for (size_t b = a; b < n_free; ++b) {
+  const auto row_class = [&n_modes](const size_t row) -> size_t {
+    const size_t comp = row / n_modes;  // 0..9 in (0,0),(0,1),..,(3,3) order
+    if (comp == 0) {
+      return 0;  // TT
+    }
+    return comp < 4 ? 1 : 2;  // Ti : ij
+  };
+  const auto row_ell = [&modes, &n_modes](const size_t row) -> size_t {
+    return modes.ells[row % n_modes];
+  };
+
+  // Solve weights on top of the isotropy weights already in the rows: the
+  // spatial monopole is demoted per config (q8 block analysis: it absorbs
+  // unmodeled content into trace strain and clock rate).
+  std::vector<double> solve_weight(n_res, 1.);
+  for (size_t i = 0; i < n_res; ++i) {
+    if (row_class(i) == 2 and row_ell(i) == 0) {
+      solve_weight[i] = config.spatial_monopole_weight;
+    }
+  }
+
+  // weighted linear least squares via the normal equations
+  const auto weighted_solve = [&](const std::vector<size_t>& free_set,
+                                  const std::vector<double>& target,
+                                  const std::vector<double>& weight) {
+    const size_t n_sub = free_set.size();
+    std::vector<std::vector<double>> jtj(n_sub,
+                                         std::vector<double>(n_sub, 0.));
+    std::vector<double> jtr(n_sub, 0.);
+    for (size_t a = 0; a < n_sub; ++a) {
+      for (size_t b = a; b < n_sub; ++b) {
+        double sum = 0.;
+        for (size_t i = 0; i < n_res; ++i) {
+          sum += square(weight[i]) * columns[free_set[a]][i] *
+                 columns[free_set[b]][i];
+        }
+        jtj[a][b] = sum;
+        jtj[b][a] = sum;
+      }
       double sum = 0.;
       for (size_t i = 0; i < n_res; ++i) {
-        sum += columns[a][i] * columns[b][i];
+        sum += square(weight[i]) * columns[free_set[a]][i] * target[i];
       }
-      jtj[a][b] = sum;
-      jtj[b][a] = sum;
+      jtr[a] = sum;
     }
-    double sum = 0.;
-    for (size_t i = 0; i < n_res; ++i) {
-      sum += columns[a][i] * target_modes[i];
-    }
-    jtr[a] = sum;
-  }
-  const auto x = solve_normal_equations(std::move(jtj), std::move(jtr));
+    return solve_normal_equations(std::move(jtj), std::move(jtr));
+  };
+
+  std::vector<size_t> all_free(n_free);
+  std::iota(all_free.begin(), all_free.end(), 0);
+  const auto x = weighted_solve(all_free, target_modes, solve_weight);
 
   RateFitResult result{};
   result.residual_initial = norm_of(target_modes);
@@ -507,6 +546,59 @@ RateFitResult project_onto_rate_directions(
     }
   }
   result.residual_final = norm_of(residual);
+
+  // Held-out closure: relative residual per (class, l) block, evaluated on
+  // the isotropy-weighted rows regardless of the solve weights, so demoted
+  // blocks are still measured.
+  for (size_t c = 0; c < 3; ++c) {
+    for (size_t l = 0; l <= 4; ++l) {
+      double rr = 0.;
+      double tt = 0.;
+      for (size_t i = 0; i < n_res; ++i) {
+        if (row_class(i) == c and row_ell(i) == l) {
+          rr += square(residual[i]);
+          tt += square(target_modes[i]);
+        }
+      }
+      gsl::at(result.block_closure, 5 * c + l) =
+          tt > 0. ? std::sqrt(rr / tt) : 0.;
+    }
+  }
+
+  // Estimator-spread diagnostics (q4/q8 audit): re-solve restricted
+  // subsystems on their audit-preferred blocks with the complementary
+  // parameters frozen at the global solution, and record the largest
+  // parameter shift. V1 rows (TT l=1, Ti l=0) determine the boosts; C3
+  // rows (TT l=0, ij l=2) determine clock rate and strain.
+  const auto restricted_spread = [&](const std::vector<size_t>& params,
+                                     const auto& row_in_blocks) {
+    std::vector<double> reduced = target_modes;
+    for (size_t a = 0; a < n_free; ++a) {
+      if (std::find(params.begin(), params.end(), a) == params.end()) {
+        for (size_t i = 0; i < n_res; ++i) {
+          reduced[i] -= x[a] * columns[a][i];
+        }
+      }
+    }
+    std::vector<double> mask(n_res, 0.);
+    for (size_t i = 0; i < n_res; ++i) {
+      mask[i] = row_in_blocks(row_class(i), row_ell(i)) ? 1. : 0.;
+    }
+    const auto x_sub = weighted_solve(params, reduced, mask);
+    double spread = 0.;
+    for (size_t a = 0; a < params.size(); ++a) {
+      spread = std::max(spread, std::abs(x_sub[a] - x[params[a]]));
+    }
+    return spread;
+  };
+  result.spread_vector = restricted_spread(
+      {1, 2, 3}, [](const size_t c, const size_t l) {
+        return (c == 0 and l == 1) or (c == 1 and l == 0);
+      });
+  result.spread_clock_strain = restricted_spread(
+      {0, 4, 5, 6, 7, 8}, [](const size_t c, const size_t l) {
+        return (c == 0 and l == 0) or (c == 2 and l == 2);
+      });
   result.pdot[0] = x[0];
   for (size_t i = 0; i < 3; ++i) {
     gsl::at(result.pdot, 1 + i) = x[1 + i];

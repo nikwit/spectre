@@ -19,6 +19,7 @@ void MatcherConfig::pup(PUP::er& p) {
   p | second_order_ode;
   p | stepper_ode;
   p | gauge_damping;
+  p | spatial_monopole_weight;
   p | fit_radial_index;
 }
 
@@ -33,6 +34,8 @@ bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
          lhs.second_order_ode == rhs.second_order_ode and
          lhs.stepper_ode == rhs.stepper_ode and
          lhs.gauge_damping == rhs.gauge_damping and
+         lhs.spatial_monopole_weight ==
+             rhs.spatial_monopole_weight and
          lhs.fit_radial_index == rhs.fit_radial_index;
 }
 

@@ -133,6 +133,17 @@ struct MatcherConfig {
         "oscillator, i.e. gauge-fixes the flat direction. Zero disables."};
     static double lower_bound() { return 0.; }
   };
+  struct SpatialMonopoleWeight {
+    using type = double;
+    static constexpr Options::String help = {
+        "Relative weight of the l = 0 modes of the spatial components in "
+        "the rate/acceleration least squares. The q8 block analysis found "
+        "the spatial monopole absorbs unmodeled content into the trace "
+        "strain and clock rate without degrading the condition number; "
+        "set to 0 to exclude it from the solve. The demoted rows are "
+        "still evaluated in the held-out closure diagnostics."};
+    static double lower_bound() { return 0.; }
+  };
   struct FitCenterOffset {
     using type = bool;
     static constexpr Options::String help = {
@@ -146,7 +157,8 @@ struct MatcherConfig {
   using options =
       tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin, FitLMax,
                  FitInterval, FitCenterOffset, RateOde, SecondOrderOde,
-                 StepperOde, GaugeDamping, FitRadialIndex>;
+                 StepperOde, GaugeDamping, SpatialMonopoleWeight,
+                 FitRadialIndex>;
   static constexpr Options::String help = {
       "Online worldtube matching: fit the 13 first-order affine-map "
       "parameters from the evolved fields on the excision sphere."};
@@ -157,7 +169,8 @@ struct MatcherConfig {
                 double trace_strain_pin, size_t fit_l_max,
                 double fit_interval, bool fit_center_offset, bool rate_ode,
                 bool second_order_ode, bool stepper_ode,
-                double gauge_damping, size_t fit_radial_index)
+                double gauge_damping, double spatial_monopole_weight,
+                size_t fit_radial_index)
       : mass(mass),
         center(center),
         center_velocity(center_velocity),
@@ -169,6 +182,7 @@ struct MatcherConfig {
         second_order_ode(second_order_ode),
         stepper_ode(stepper_ode),
         gauge_damping(gauge_damping),
+        spatial_monopole_weight(spatial_monopole_weight),
         fit_radial_index(fit_radial_index) {}
 
   // NOLINTNEXTLINE(google-runtime-references)
@@ -185,6 +199,7 @@ struct MatcherConfig {
   bool second_order_ode = false;
   bool stepper_ode = false;
   double gauge_damping = 0.;
+  double spatial_monopole_weight = 1.;
   size_t fit_radial_index = 0;
 };
 

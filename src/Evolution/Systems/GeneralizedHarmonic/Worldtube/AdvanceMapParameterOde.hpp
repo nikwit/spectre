@@ -285,8 +285,18 @@ struct AdvanceMapParameterOde {
       legend.emplace_back("ResidualInitial");
       legend.emplace_back("ResidualFinal");
       legend.emplace_back("Iterations");
+      static const std::array<std::string, 3> class_names{
+          {"TT", "Ti", "ij"}};
+      for (size_t c = 0; c < 3; ++c) {
+        for (size_t l = 0; l <= 4; ++l) {
+          legend.push_back("Closure_" + gsl::at(class_names, c) + "_l" +
+                           std::to_string(l));
+        }
+      }
+      legend.emplace_back("SpreadVector");
+      legend.emplace_back("SpreadClockStrain");
       std::vector<double> row;
-      row.reserve(3 * num_map_parameters);
+      row.reserve(3 * num_map_parameters + 20);
       row.push_back(time);
       for (size_t a = 0; a < num_map_parameters; ++a) {
         row.push_back(gsl::at(state.p, a));
@@ -300,6 +310,11 @@ struct AdvanceMapParameterOde {
       row.push_back(accel.residual_initial);
       row.push_back(accel.residual_final);
       row.push_back(1.);
+      for (size_t k = 0; k < 15; ++k) {
+        row.push_back(gsl::at(accel.block_closure, k));
+      }
+      row.push_back(accel.spread_vector);
+      row.push_back(accel.spread_clock_strain);
       Parallel::threaded_action<
           observers::ThreadedActions::WriteReductionDataRow>(
           writer[0], std::string{"/WorldtubeMatcher"}, std::move(legend),
