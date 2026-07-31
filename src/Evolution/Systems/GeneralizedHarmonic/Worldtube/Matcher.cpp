@@ -326,14 +326,14 @@ FitResult fit_map_parameters(
         make_not_null(&model_metric), make_not_null(&model_pi),
         make_not_null(&model_phi), inertial_coords, config.mass,
         model_center, p, pdot_estimate);
-    std::vector<double> modes = gauge_modes(
+    std::vector<double> model_modes = gauge_modes(
         gauge_components(u_minus_of(model_metric, model_pi, model_phi, frame),
                          frame),
         ylm_transform, modes);
-    for (size_t i = 0; i < modes.size(); ++i) {
-      modes[i] -= data_modes[i];
+    for (size_t i = 0; i < model_modes.size(); ++i) {
+      model_modes[i] -= data_modes[i];
     }
-    return modes;
+    return model_modes;
   };
 
   FitResult result{};
