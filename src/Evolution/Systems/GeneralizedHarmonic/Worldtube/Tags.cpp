@@ -48,6 +48,8 @@ void MapParameterData::pup(PUP::er& pupper) {
   pupper | center_offset;
   pupper | ode_state;
   pupper | ode_history;
+  pupper | ode_step_start;
+  pupper | ode_step_id;
   pupper | valid;
 }
 }  // namespace gh::Worldtube

@@ -11,6 +11,7 @@
 #include "DataStructures/DataBox/Tag.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "Time/History.hpp"
+#include "Time/TimeStepId.hpp"
 #include "Options/Auto.hpp"
 #include "Options/String.hpp"
 #include "Utilities/Gsl.hpp"
@@ -191,6 +192,11 @@ struct MapParameterData {
   /// time-stepper history
   DataVector ode_state{};
   TimeSteppers::History<DataVector> ode_history{};
+  /// Stepper-integrated mode: the state at the start of the current step
+  /// and that step's substep-0 id, so a rejected step restarts from the
+  /// correct value instead of the rejected end-of-step value
+  DataVector ode_step_start{};
+  TimeStepId ode_step_id{};
   bool valid = false;
 
   // NOLINTNEXTLINE(google-runtime-references)

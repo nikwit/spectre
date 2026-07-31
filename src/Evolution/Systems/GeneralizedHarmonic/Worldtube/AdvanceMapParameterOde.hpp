@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -175,7 +176,24 @@ struct AdvanceMapParameterOde {
             }
             history.undo_latest();
           }
-          history.integration_order(system_order);
+          if (time_step_id.substep() == 0) {
+            if (data->ode_step_id == time_step_id and
+                data->ode_step_start.size() == y.size()) {
+              // retry of a rejected step: y holds the rejected
+              // end-of-step value, not the value at the step start
+              y = data->ode_step_start;
+            } else {
+              data->ode_step_start = y;
+              data->ode_step_id = time_step_id;
+            }
+            // The order the current history depth supports (the update
+            // requires size >= order - 1 after this step's record is
+            // inserted), capped by the system's order. Ramps 2, 3, ...
+            // over the first steps, exactly as self-start would.
+            history.integration_order(
+                std::clamp(history.size() + 2, size_t{2}, system_order));
+          }
+          const size_t order = history.integration_order();
           DataVector dt_y(2 * num_map_parameters);
           for (size_t a = 0; a < num_map_parameters; ++a) {
             dt_y[a] = y[num_map_parameters + a];
@@ -183,6 +201,12 @@ struct AdvanceMapParameterOde {
           }
           history.insert(time_step_id, y, dt_y);
           stepper.update_u(make_not_null(&y), history, time_step);
+          if (time_step_id.substep() + 1 == stepper.number_of_substeps()) {
+            // pre-arm order growth: cleaning keeps order - 2 records, so
+            // clean at next step's intended order
+            history.integration_order(std::min(order + 1, system_order));
+            stepper.clean_history(make_not_null(&history));
+          }
           for (size_t a = 0; a < num_map_parameters; ++a) {
             gsl::at(data->p, a) = y[a];
             gsl::at(data->pdot, a) = y[num_map_parameters + a];
