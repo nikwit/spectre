@@ -15,6 +15,7 @@
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Options/ParseOptions.hpp"
+#include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/AffineMappedHarmonicSchwarzschild.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/Factory.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ExtrinsicCurvature.hpp"
 #include "PointwiseFunctions/GeneralRelativity/InterfaceNullNormal.hpp"
@@ -448,9 +449,16 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
     // the ghost form, since a Bjorhus form would need a second time derivative
     // of the model.
     using evolved_vars_tags = typename System<Dim>::variables_tag::tags_list;
+    // all_solutions plus the affine-map model; keep in sync with the
+    // executable's initial_data_list or the dispatch ERRORs at runtime
+    using gauge_prescriptions = tmpl::conditional_t<
+        Dim == 3,
+        tmpl::push_back<gh::Solutions::all_solutions<Dim>,
+                        gh::Solutions::AffineMappedHarmonicSchwarzschild>,
+        gh::Solutions::all_solutions<Dim>>;
     const auto model = call_with_dynamic_type<
         tuples::tagged_tuple_from_typelist<evolved_vars_tags>,
-        gh::Solutions::all_solutions<Dim>>(
+        gauge_prescriptions>(
         analytic_gauge_prescription_.get(),
         [&coords, &time](const auto* const solution_or_data) {
           if constexpr (is_analytic_solution_v<

@@ -8,6 +8,7 @@ add_spectre_library(${LIBRARY})
 spectre_target_sources(
   ${LIBRARY}
   PRIVATE
+  AffineMappedHarmonicSchwarzschild.cpp
   GaugeWave.cpp
   GaugePlaneWave.cpp
   HarmonicSchwarzschild.cpp
@@ -24,6 +25,7 @@ spectre_target_headers(
   ${LIBRARY}
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
+  AffineMappedHarmonicSchwarzschild.hpp
   Factory.hpp
   GaugeWave.hpp
   GaugePlaneWave.hpp

@@ -103,6 +103,7 @@
 #include "ParallelAlgorithms/Interpolation/Callbacks/ObserveTimeSeriesOnSurface.hpp"
 #include "ParallelAlgorithms/Interpolation/InterpolationTarget.hpp"
 #include "ParallelAlgorithms/Interpolation/Tags.hpp"
+#include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/AffineMappedHarmonicSchwarzschild.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/Factory.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/KerrSchild.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/SphericalKerrSchild.hpp"
@@ -170,7 +171,14 @@ struct ObserverTags {
   using variables_tag = typename system::variables_tag;
   using analytic_solution_fields = typename variables_tag::tags_list;
 
-  using initial_data_list = gh::Solutions::all_solutions<volume_dim>;
+  // all_solutions plus the worldtube gauge-prescription model. The model
+  // class is registered only here and in the WorldtubeTypeD dispatch, not in
+  // gh::Solutions::all_solutions, to keep the compile surface small.
+  using initial_data_list = tmpl::conditional_t<
+      volume_dim == 3,
+      tmpl::push_back<gh::Solutions::all_solutions<volume_dim>,
+                      gh::Solutions::AffineMappedHarmonicSchwarzschild>,
+      gh::Solutions::all_solutions<volume_dim>>;
 
   using analytic_compute = evolution::Tags::AnalyticSolutionsCompute<
       volume_dim, analytic_solution_fields, false, initial_data_list>;
@@ -329,10 +337,14 @@ struct FactoryCreation : tt::ConformsTo<Options::protocols::FactoryCreation> {
       tmpl::pair<gh::gauges::GaugeCondition, gh::gauges::all_gauges>,
       tmpl::pair<
           evolution::initial_data::InitialData,
-          tmpl::append<gh::Solutions::all_solutions<volume_dim>,
-                       tmpl::conditional_t<volume_dim == 3,
-                                           tmpl::list<gh::NumericInitialData>,
-                                           tmpl::list<>>>>,
+          tmpl::append<
+              gh::Solutions::all_solutions<volume_dim>,
+              tmpl::conditional_t<
+                  volume_dim == 3,
+                  tmpl::list<
+                      gh::NumericInitialData,
+                      gh::Solutions::AffineMappedHarmonicSchwarzschild>,
+                  tmpl::list<>>>>,
       tmpl::pair<LtsTimeStepper, TimeSteppers::lts_time_steppers>,
       tmpl::pair<MathFunction<1, Frame::Inertial>,
                  MathFunctions::all_math_functions<1, Frame::Inertial>>,
