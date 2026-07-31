@@ -153,17 +153,22 @@ struct FitMapParameters {
     // condition's model Pi.
     const std::array<double, num_map_parameters> zero_rates{};
     std::array<double, num_map_parameters> p_start{};
+    std::array<double, 3> center_offset_start{};
     if (state.valid) {
       p_start = state.p;
+      center_offset_start = state.center_offset;
     }
 
     const FitResult result = fit_map_parameters(
         metric_face, pi_face, phi_face, gamma2_face, coords_face,
-        ylm_transform, *config_opt, p_start, zero_rates);
+        ylm_transform, *config_opt, p_start, center_offset_start, zero_rates);
 
     bool finite = true;
     for (size_t a = 0; a < num_map_parameters; ++a) {
       finite = finite and std::isfinite(gsl::at(result.p, a));
+    }
+    for (size_t i = 0; i < 3; ++i) {
+      finite = finite and std::isfinite(gsl::at(result.center_offset, i));
     }
 
     std::array<double, num_map_parameters> pdot_out{};
@@ -183,6 +188,7 @@ struct FitMapParameters {
             data->last_fit_time = time;
             data->p = result.p;
             data->pdot = pdot_out;
+            data->center_offset = result.center_offset;
             data->valid = true;
           },
           make_not_null(&box));
@@ -203,6 +209,9 @@ struct FitMapParameters {
     for (const auto& name : names) {
       legend.push_back("dt_" + name);
     }
+    legend.emplace_back("q_x");
+    legend.emplace_back("q_y");
+    legend.emplace_back("q_z");
     legend.emplace_back("ResidualInitial");
     legend.emplace_back("ResidualFinal");
     legend.emplace_back("Iterations");
@@ -214,6 +223,9 @@ struct FitMapParameters {
     }
     for (size_t a = 0; a < num_map_parameters; ++a) {
       row.push_back(gsl::at(pdot_out, a));
+    }
+    for (size_t i = 0; i < 3; ++i) {
+      row.push_back(gsl::at(result.center_offset, i));
     }
     row.push_back(result.residual_initial);
     row.push_back(result.residual_final);

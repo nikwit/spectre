@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 #include "DataStructures/DataVector.hpp"
@@ -201,24 +202,23 @@ std::vector<double> gauge_modes(const GaugeComponents& gc,
   return out;
 }
 
-// x (9 free) -> p (13) with the kinematic velocity and trace pins
-std::array<double, num_map_parameters> embed(
-    const std::array<double, 9>& x, const MatcherConfig& config) {
-  std::array<double, num_map_parameters> p{};
-  p[0] = x[0];
+// x (9 or 12 free) -> (p (13), center offset q) with the kinematic velocity
+// and trace pins; x[9..11] = q when the zeroth-order offset is fitted. The
+// time offset q^0 is an exact zero mode of the static-in-time model and is
+// never a parameter.
+void embed(const gsl::not_null<std::array<double, num_map_parameters>*> p,
+           const gsl::not_null<std::array<double, 3>*> center_offset,
+           const std::vector<double>& x, const MatcherConfig& config) {
+  (*p)[0] = x[0];
   for (size_t i = 0; i < 3; ++i) {
-    gsl::at(p, 1 + i) = gsl::at(x, 1 + i);
-    gsl::at(p, 4 + i) = (1. + x[0]) * gsl::at(config.center_velocity, i);
+    gsl::at(*p, 1 + i) = x[1 + i];
+    gsl::at(*p, 4 + i) = (1. + x[0]) * gsl::at(config.center_velocity, i);
+    gsl::at(*center_offset, i) = config.fit_center_offset ? x[9 + i] : 0.;
   }
   for (size_t i = 0; i < 5; ++i) {
-    gsl::at(p, 7 + i) = gsl::at(x, 4 + i);
+    gsl::at(*p, 7 + i) = x[4 + i];
   }
-  p[12] = 3. * config.trace_strain_pin - x[4] - x[7];
-  return p;
-}
-
-std::array<double, 9> extract(const std::array<double, num_map_parameters>& p) {
-  return {p[0], p[1], p[2], p[3], p[7], p[8], p[9], p[10], p[11]};
+  (*p)[12] = 3. * config.trace_strain_pin - x[4] - x[7];
 }
 
 double norm_of(const std::vector<double>& v) {
@@ -229,37 +229,37 @@ double norm_of(const std::vector<double>& v) {
   return std::sqrt(out);
 }
 
-// solve the 9x9 normal equations by Gaussian elimination with partial
+// solve the n x n normal equations by Gaussian elimination with partial
 // pivoting
-std::array<double, 9> solve_normal_equations(
-    std::array<std::array<double, 9>, 9> a, std::array<double, 9> b) {
-  for (size_t col = 0; col < 9; ++col) {
+std::vector<double> solve_normal_equations(std::vector<std::vector<double>> a,
+                                           std::vector<double> b) {
+  const size_t n = b.size();
+  for (size_t col = 0; col < n; ++col) {
     size_t pivot = col;
-    for (size_t row = col + 1; row < 9; ++row) {
-      if (std::abs(gsl::at(gsl::at(a, row), col)) >
-          std::abs(gsl::at(gsl::at(a, pivot), col))) {
+    for (size_t row = col + 1; row < n; ++row) {
+      if (std::abs(a[row][col]) > std::abs(a[pivot][col])) {
         pivot = row;
       }
     }
-    std::swap(gsl::at(a, col), gsl::at(a, pivot));
-    std::swap(gsl::at(b, col), gsl::at(b, pivot));
-    const double diag = gsl::at(gsl::at(a, col), col);
-    for (size_t row = col + 1; row < 9; ++row) {
-      const double factor = gsl::at(gsl::at(a, row), col) / diag;
-      for (size_t k = col; k < 9; ++k) {
-        gsl::at(gsl::at(a, row), k) -= factor * gsl::at(gsl::at(a, col), k);
+    std::swap(a[col], a[pivot]);
+    std::swap(b[col], b[pivot]);
+    const double diag = a[col][col];
+    for (size_t row = col + 1; row < n; ++row) {
+      const double factor = a[row][col] / diag;
+      for (size_t k = col; k < n; ++k) {
+        a[row][k] -= factor * a[col][k];
       }
-      gsl::at(b, row) -= factor * gsl::at(b, col);
+      b[row] -= factor * b[col];
     }
   }
-  std::array<double, 9> x{};
-  for (size_t row_plus_one = 9; row_plus_one > 0; --row_plus_one) {
+  std::vector<double> x(n, 0.);
+  for (size_t row_plus_one = n; row_plus_one > 0; --row_plus_one) {
     const size_t row = row_plus_one - 1;
-    double sum = gsl::at(b, row);
-    for (size_t k = row + 1; k < 9; ++k) {
-      sum -= gsl::at(gsl::at(a, row), k) * gsl::at(x, k);
+    double sum = b[row];
+    for (size_t k = row + 1; k < n; ++k) {
+      sum -= a[row][k] * x[k];
     }
-    gsl::at(x, row) = sum / gsl::at(gsl::at(a, row), row);
+    x[row] = sum / a[row][row];
   }
   return x;
 }
@@ -272,6 +272,7 @@ FitResult fit_map_parameters(
     const tnsr::I<DataVector, 3>& inertial_coords,
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
     const std::array<double, num_map_parameters>& p_start,
+    const std::array<double, 3>& center_offset_start,
     const std::array<double, num_map_parameters>& pdot_estimate) {
   ASSERT(config.fit_l_max <= ylm_transform.l_max(),
          "FitLMax " << config.fit_l_max << " exceeds the grid l_max "
@@ -294,16 +295,23 @@ FitResult fit_map_parameters(
                                    frame),
                   ylm_transform, mode_indices);
 
+  const size_t n_free = config.fit_center_offset ? 12 : 9;
   const auto residual_of =
-      [&](const std::array<double, 9>& x) -> std::vector<double> {
-    const auto p = embed(x, config);
+      [&](const std::vector<double>& x) -> std::vector<double> {
+    std::array<double, num_map_parameters> p{};
+    std::array<double, 3> center_offset{};
+    embed(make_not_null(&p), make_not_null(&center_offset), x, config);
+    std::array<double, 3> model_center = config.center;
+    for (size_t i = 0; i < 3; ++i) {
+      gsl::at(model_center, i) += gsl::at(center_offset, i);
+    }
     tnsr::aa<DataVector, 3> model_metric{};
     tnsr::aa<DataVector, 3> model_pi{};
     tnsr::iaa<DataVector, 3> model_phi{};
     gh::Solutions::affine_map_model::evolved_variables(
         make_not_null(&model_metric), make_not_null(&model_pi),
         make_not_null(&model_phi), inertial_coords, config.mass,
-        config.center, p, pdot_estimate);
+        model_center, p, pdot_estimate);
     std::vector<double> modes = gauge_modes(
         gauge_components(u_minus_of(model_metric, model_pi, model_phi, frame),
                          frame),
@@ -315,7 +323,19 @@ FitResult fit_map_parameters(
   };
 
   FitResult result{};
-  std::array<double, 9> x = extract(p_start);
+  std::vector<double> x(n_free, 0.);
+  x[0] = p_start[0];
+  for (size_t i = 0; i < 3; ++i) {
+    x[1 + i] = gsl::at(p_start, 1 + i);
+  }
+  for (size_t i = 0; i < 5; ++i) {
+    x[4 + i] = gsl::at(p_start, 7 + i);
+  }
+  if (config.fit_center_offset) {
+    for (size_t i = 0; i < 3; ++i) {
+      x[9 + i] = gsl::at(center_offset_start, i);
+    }
+  }
   std::vector<double> residual = residual_of(x);
   result.residual_initial = norm_of(residual);
 
@@ -324,39 +344,40 @@ FitResult fit_map_parameters(
   const size_t n_res = residual.size();
   for (size_t iteration = 0; iteration < max_iterations; ++iteration) {
     // finite-difference Jacobian
-    std::array<std::vector<double>, 9> jac{};
-    for (size_t a = 0; a < 9; ++a) {
+    std::vector<std::vector<double>> jac(n_free);
+    for (size_t a = 0; a < n_free; ++a) {
       auto x_plus = x;
-      gsl::at(x_plus, a) += fd_step;
-      gsl::at(jac, a) = residual_of(x_plus);
+      x_plus[a] += fd_step;
+      jac[a] = residual_of(x_plus);
       for (size_t i = 0; i < n_res; ++i) {
-        gsl::at(jac, a)[i] = (gsl::at(jac, a)[i] - residual[i]) / fd_step;
+        jac[a][i] = (jac[a][i] - residual[i]) / fd_step;
       }
     }
-    std::array<std::array<double, 9>, 9> jtj{};
-    std::array<double, 9> jtr{};
-    for (size_t a = 0; a < 9; ++a) {
-      for (size_t b = a; b < 9; ++b) {
+    std::vector<std::vector<double>> jtj(n_free,
+                                         std::vector<double>(n_free, 0.));
+    std::vector<double> jtr(n_free, 0.);
+    for (size_t a = 0; a < n_free; ++a) {
+      for (size_t b = a; b < n_free; ++b) {
         double sum = 0.;
         for (size_t i = 0; i < n_res; ++i) {
-          sum += gsl::at(jac, a)[i] * gsl::at(jac, b)[i];
+          sum += jac[a][i] * jac[b][i];
         }
-        gsl::at(gsl::at(jtj, a), b) = sum;
-        gsl::at(gsl::at(jtj, b), a) = sum;
+        jtj[a][b] = sum;
+        jtj[b][a] = sum;
       }
       double sum = 0.;
       for (size_t i = 0; i < n_res; ++i) {
-        sum += gsl::at(jac, a)[i] * residual[i];
+        sum += jac[a][i] * residual[i];
       }
-      gsl::at(jtr, a) = -sum;
+      jtr[a] = -sum;
     }
-    const auto delta = solve_normal_equations(jtj, jtr);
+    const auto delta = solve_normal_equations(std::move(jtj), std::move(jtr));
     double max_delta = 0.;
     double max_x = 0.;
-    for (size_t a = 0; a < 9; ++a) {
-      gsl::at(x, a) += gsl::at(delta, a);
-      max_delta = std::max(max_delta, std::abs(gsl::at(delta, a)));
-      max_x = std::max(max_x, std::abs(gsl::at(x, a)));
+    for (size_t a = 0; a < n_free; ++a) {
+      x[a] += delta[a];
+      max_delta = std::max(max_delta, std::abs(delta[a]));
+      max_x = std::max(max_x, std::abs(x[a]));
     }
     residual = residual_of(x);
     result.iterations = iteration + 1;
@@ -365,7 +386,8 @@ FitResult fit_map_parameters(
     }
   }
   result.residual_final = norm_of(residual);
-  result.p = embed(x, config);
+  embed(make_not_null(&result.p), make_not_null(&result.center_offset), x,
+        config);
   return result;
 }
 }  // namespace gh::Worldtube

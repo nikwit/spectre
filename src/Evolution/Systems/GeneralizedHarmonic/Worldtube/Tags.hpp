@@ -71,9 +71,18 @@ struct MatcherConfig {
         "with the fitted rates."};
     static type lower_bound() { return 0.; }
   };
+  struct FitCenterOffset {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Also fit the zeroth-order spatial offset q^i of the map: the model "
+        "is evaluated about Center + q with q fitted (exactly, not "
+        "linearized), correcting an imperfect worldtube center online. The "
+        "time offset q^0 is an exact zero mode of the static-in-time model "
+        "and is never fitted."};
+  };
 
   using options = tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin,
-                             FitLMax, FitInterval>;
+                             FitLMax, FitInterval, FitCenterOffset>;
   static constexpr Options::String help = {
       "Online worldtube matching: fit the 13 first-order affine-map "
       "parameters from the evolved fields on the excision sphere."};
@@ -82,13 +91,14 @@ struct MatcherConfig {
   MatcherConfig(double mass, const std::array<double, 3>& center,
                 const std::array<double, 3>& center_velocity,
                 double trace_strain_pin, size_t fit_l_max,
-                double fit_interval)
+                double fit_interval, bool fit_center_offset)
       : mass(mass),
         center(center),
         center_velocity(center_velocity),
         trace_strain_pin(trace_strain_pin),
         fit_l_max(fit_l_max),
-        fit_interval(fit_interval) {}
+        fit_interval(fit_interval),
+        fit_center_offset(fit_center_offset) {}
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& p);
@@ -99,6 +109,7 @@ struct MatcherConfig {
   double trace_strain_pin = 0.;
   size_t fit_l_max = 4;
   double fit_interval = 0.;
+  bool fit_center_offset = false;
 };
 
 bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs);
@@ -114,6 +125,7 @@ struct MapParameterData {
   std::array<double, num_map_parameters> p{};
   std::array<double, num_map_parameters> p_previous{};
   std::array<double, num_map_parameters> pdot{};
+  std::array<double, 3> center_offset{};
   bool valid = false;
 
   // NOLINTNEXTLINE(google-runtime-references)

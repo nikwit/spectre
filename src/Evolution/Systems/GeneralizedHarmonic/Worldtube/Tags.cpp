@@ -14,6 +14,7 @@ void MatcherConfig::pup(PUP::er& p) {
   p | trace_strain_pin;
   p | fit_l_max;
   p | fit_interval;
+  p | fit_center_offset;
 }
 
 bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
@@ -21,7 +22,8 @@ bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
          lhs.center_velocity == rhs.center_velocity and
          lhs.trace_strain_pin == rhs.trace_strain_pin and
          lhs.fit_l_max == rhs.fit_l_max and
-         lhs.fit_interval == rhs.fit_interval;
+         lhs.fit_interval == rhs.fit_interval and
+         lhs.fit_center_offset == rhs.fit_center_offset;
 }
 
 bool operator!=(const MatcherConfig& lhs, const MatcherConfig& rhs) {
@@ -34,6 +36,7 @@ void MapParameterData::pup(PUP::er& pupper) {
   pupper | p;
   pupper | p_previous;
   pupper | pdot;
+  pupper | center_offset;
   pupper | valid;
 }
 }  // namespace gh::Worldtube

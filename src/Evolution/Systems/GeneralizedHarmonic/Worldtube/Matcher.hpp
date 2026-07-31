@@ -21,6 +21,9 @@ namespace gh::Worldtube {
 /// Diagnostics and result of one online fit.
 struct FitResult {
   std::array<double, num_map_parameters> p{};
+  /// Fitted zeroth-order spatial offset of the map: the model is centred at
+  /// `config.center + center_offset`. Zero unless `FitCenterOffset` is on.
+  std::array<double, 3> center_offset{};
   double residual_initial = 0.;
   double residual_final = 0.;
   size_t iterations = 0;
@@ -52,5 +55,6 @@ FitResult fit_map_parameters(
     const tnsr::I<DataVector, 3>& inertial_coords,
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
     const std::array<double, num_map_parameters>& p_start,
+    const std::array<double, 3>& center_offset_start,
     const std::array<double, num_map_parameters>& pdot_estimate);
 }  // namespace gh::Worldtube
