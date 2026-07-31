@@ -182,16 +182,38 @@ GaugeComponents gauge_components(const tnsr::aa<DataVector, 3>& u,
 
 // modal coefficients with l <= fit_l_max of the six gauge-component fields,
 // concatenated
+// Kept spherical-harmonic modes with weights that make the least-squares
+// objective rotation-invariant: Spherepack coefficients of unit-L2
+// harmonics are sqrt(2) smaller for m != 0 than for m = 0, so uniform
+// weighting of the raw coefficients over-weights the polar axis.
+struct ModeSet {
+  std::vector<size_t> indices;
+  std::vector<double> weights;
+};
+
+ModeSet kept_modes(const ylm::Spherepack& ylm_transform,
+                   const size_t fit_l_max) {
+  ModeSet out;
+  ylm::SpherepackIterator iter(ylm_transform.l_max(), ylm_transform.m_max());
+  for (size_t l = 0; l <= fit_l_max; ++l) {
+    for (int m = -static_cast<int>(l); m <= static_cast<int>(l); ++m) {
+      iter.set(l, m);
+      out.indices.push_back(iter());
+      out.weights.push_back(m == 0 ? 1.0 : M_SQRT2);
+    }
+  }
+  return out;
+}
+
 std::vector<double> gauge_modes(const GaugeComponents& gc,
                                 const ylm::Spherepack& ylm_transform,
-                                const std::vector<size_t>& mode_indices) {
+                                const ModeSet& modes) {
   std::vector<double> out;
-  out.reserve(6 * mode_indices.size());
-  const auto append = [&out, &ylm_transform,
-                       &mode_indices](const DataVector& field) {
+  out.reserve(6 * modes.indices.size());
+  const auto append = [&out, &ylm_transform, &modes](const DataVector& field) {
     const DataVector spec = ylm_transform.phys_to_spec(field);
-    for (const size_t idx : mode_indices) {
-      out.push_back(spec[idx]);
+    for (size_t k = 0; k < modes.indices.size(); ++k) {
+      out.push_back(modes.weights[k] * spec[modes.indices[k]]);
     }
   };
   append(gc.a);
@@ -277,15 +299,7 @@ FitResult fit_map_parameters(
   ASSERT(config.fit_l_max <= ylm_transform.l_max(),
          "FitLMax " << config.fit_l_max << " exceeds the grid l_max "
                     << ylm_transform.l_max());
-  // modal indices with l <= fit_l_max
-  std::vector<size_t> mode_indices;
-  ylm::SpherepackIterator iter(ylm_transform.l_max(), ylm_transform.m_max());
-  for (size_t l = 0; l <= config.fit_l_max; ++l) {
-    for (int m = -static_cast<int>(l); m <= static_cast<int>(l); ++m) {
-      iter.set(l, m);
-      mode_indices.push_back(iter());
-    }
-  }
+  const ModeSet modes = kept_modes(ylm_transform, config.fit_l_max);
 
   const SphereFrame frame =
       build_frame(spacetime_metric, gamma2, inertial_coords, config.center);
@@ -293,7 +307,7 @@ FitResult fit_map_parameters(
       gauge_modes(gauge_components(u_minus_of(spacetime_metric, pi, phi,
                                               frame),
                                    frame),
-                  ylm_transform, mode_indices);
+                  ylm_transform, modes);
 
   const size_t n_free = config.fit_center_offset ? 12 : 9;
   const auto residual_of =
@@ -315,7 +329,7 @@ FitResult fit_map_parameters(
     std::vector<double> modes = gauge_modes(
         gauge_components(u_minus_of(model_metric, model_pi, model_phi, frame),
                          frame),
-        ylm_transform, mode_indices);
+        ylm_transform, modes);
     for (size_t i = 0; i < modes.size(); ++i) {
       modes[i] -= data_modes[i];
     }
@@ -401,26 +415,19 @@ RateFitResult project_onto_rate_directions(
     const tnsr::I<DataVector, 3>& inertial_coords,
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config) {
   const size_t n_points = get<0, 0>(spacetime_metric).size();
-  std::vector<size_t> mode_indices;
-  ylm::SpherepackIterator iter(ylm_transform.l_max(), ylm_transform.m_max());
-  for (size_t l = 0; l <= config.fit_l_max; ++l) {
-    for (int m = -static_cast<int>(l); m <= static_cast<int>(l); ++m) {
-      iter.set(l, m);
-      mode_indices.push_back(iter());
-    }
-  }
+  const ModeSet modes = kept_modes(ylm_transform, config.fit_l_max);
 
-  // modes of the ten components of a symmetric rank-2 tensor
+  // weighted modes of the ten components of a symmetric rank-2 tensor
   const auto tensor_modes =
-      [&ylm_transform, &mode_indices](const tnsr::aa<DataVector, 3>& tensor) {
+      [&ylm_transform, &modes](const tnsr::aa<DataVector, 3>& tensor) {
         std::vector<double> out;
-        out.reserve(10 * mode_indices.size());
+        out.reserve(10 * modes.indices.size());
         for (size_t a = 0; a < 4; ++a) {
           for (size_t b = a; b < 4; ++b) {
             const DataVector spec =
                 ylm_transform.phys_to_spec(tensor.get(a, b));
-            for (const size_t idx : mode_indices) {
-              out.push_back(spec[idx]);
+            for (size_t k = 0; k < modes.indices.size(); ++k) {
+              out.push_back(modes.weights[k] * spec[modes.indices[k]]);
             }
           }
         }
@@ -549,6 +556,7 @@ RateFitResult fit_map_parameter_accelerations(
     const tnsr::aa<DataVector, 3>& dt_spacetime_metric,
     const tnsr::aa<DataVector, 3>& dt_pi,
     const tnsr::iaa<DataVector, 3>& dt_phi,
+    const std::array<double, num_map_parameters>& pdot_state,
     const tnsr::I<DataVector, 3>& inertial_coords,
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config) {
   ASSERT(config.fit_l_max <= ylm_transform.l_max(),
@@ -594,6 +602,42 @@ RateFitResult fit_map_parameter_accelerations(
       for (size_t k = 0; k < 3; ++k) {
         d2t_metric.get(a, b) += gsl::at(dt_shift, k) * phi.get(k, a, b) +
                                 gsl::at(shift, k) * dt_phi.get(k, a, b);
+      }
+    }
+  }
+  // Subtract the pdot-quadratic Hessian term of the model's second time
+  // derivative: within the amplitude-linear map, g(p) = (G_Schw^{-1} +
+  // sum_A p_A R_A)^{-1} gives exactly
+  //   d2t g = -(g (sum_A pddot_A R_A) g) + 2 g S g S g,
+  // with S = sum_A pdot_A R_A. Moving the S-term to the data side keeps the
+  // solve linear in pddot and the truncation consistent for a second-order
+  // ODE (previously it was dropped as quasi-static).
+  std::array<DataVector, 3> y{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(y, i) = inertial_coords.get(i) - gsl::at(config.center, i);
+  }
+  tnsr::AA<DataVector, 3> s_response(n_points);
+  gh::Solutions::affine_map_model::inverse_metric_combination(
+      make_not_null(&s_response), y, config.mass, 0., pdot_state);
+  tnsr::aa<DataVector, 3> g_s_g(n_points, 0.);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      for (size_t c = 0; c < 4; ++c) {
+        for (size_t d = 0; d < 4; ++d) {
+          g_s_g.get(a, b) += spacetime_metric.get(a, c) *
+                             s_response.get(c, d) * spacetime_metric.get(d, b);
+        }
+      }
+    }
+  }
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      for (size_t c = 0; c < 4; ++c) {
+        for (size_t d = 0; d < 4; ++d) {
+          d2t_metric.get(a, b) -= 2. * g_s_g.get(a, c) *
+                                  s_response.get(c, d) *
+                                  spacetime_metric.get(d, b);
+        }
       }
     }
   }

@@ -120,6 +120,19 @@ struct MatcherConfig {
         "during self-start, and TimeStepId-keyed rewind on step rejection. "
         "FitInterval is ignored. Mutually exclusive with the other modes."};
   };
+  struct GaugeDamping {
+    using type = double;
+    static constexpr Options::String help = {
+        "Restoring rate gamma for the ODE modes: the integrated "
+        "acceleration is pddot_meas - 2*gamma*pdot - gamma^2*(p - pin), "
+        "with the pin the kinematic pin values (zero for the unpinned "
+        "parameters). The affine map is pure gauge, so (p, pdot) is a "
+        "double zero root of the raw equations-of-motion loop; any "
+        "measurement bias epsilon splits it into +-sqrt(epsilon), one "
+        "growing. gamma^2 > epsilon turns the pair into a damped "
+        "oscillator, i.e. gauge-fixes the flat direction. Zero disables."};
+    static double lower_bound() { return 0.; }
+  };
   struct FitCenterOffset {
     using type = bool;
     static constexpr Options::String help = {
@@ -133,7 +146,7 @@ struct MatcherConfig {
   using options =
       tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin, FitLMax,
                  FitInterval, FitCenterOffset, RateOde, SecondOrderOde,
-                 StepperOde, FitRadialIndex>;
+                 StepperOde, GaugeDamping, FitRadialIndex>;
   static constexpr Options::String help = {
       "Online worldtube matching: fit the 13 first-order affine-map "
       "parameters from the evolved fields on the excision sphere."};
@@ -144,7 +157,7 @@ struct MatcherConfig {
                 double trace_strain_pin, size_t fit_l_max,
                 double fit_interval, bool fit_center_offset, bool rate_ode,
                 bool second_order_ode, bool stepper_ode,
-                size_t fit_radial_index)
+                double gauge_damping, size_t fit_radial_index)
       : mass(mass),
         center(center),
         center_velocity(center_velocity),
@@ -155,6 +168,7 @@ struct MatcherConfig {
         rate_ode(rate_ode),
         second_order_ode(second_order_ode),
         stepper_ode(stepper_ode),
+        gauge_damping(gauge_damping),
         fit_radial_index(fit_radial_index) {}
 
   // NOLINTNEXTLINE(google-runtime-references)
@@ -170,6 +184,7 @@ struct MatcherConfig {
   bool rate_ode = false;
   bool second_order_ode = false;
   bool stepper_ode = false;
+  double gauge_damping = 0.;
   size_t fit_radial_index = 0;
 };
 

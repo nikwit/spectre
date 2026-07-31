@@ -192,7 +192,8 @@ struct FitMapParameters {
                    db::get<::Tags::dt<gh::Tags::Phi<DataVector, Dim>>>(box));
       const RateFitResult accel = fit_map_parameter_accelerations(
           metric_face, pi_face, phi_face, dt_metric_face, dt_pi_face,
-          dt_phi_face, coords_face, ylm_transform, *config_opt);
+          dt_phi_face, db::get<Tags::MapParameters>(box).pdot, coords_face,
+          ylm_transform, *config_opt);
       residual_initial = accel.residual_initial;
       residual_final = accel.residual_final;
       iterations = 1.;
@@ -202,8 +203,29 @@ struct FitMapParameters {
       }
       if (finite) {
         db::mutate<Tags::MapParameters>(
-            [&accel, &time, &p_out, &pdot_out](
+            [&accel, &time, &p_out, &pdot_out, &config_opt](
                 const gsl::not_null<MapParameterData*> data) {
+              std::array<double, num_map_parameters> acc = accel.pdot;
+              if (const double gamma = config_opt->gauge_damping;
+                  gamma > 0.) {
+                // damped-oscillator gauge fixing of the free parameters,
+                // unfolded through the pins (see AdvanceMapParameterOde)
+                static constexpr std::array<size_t, 9> free_indices{
+                    {0, 1, 2, 3, 7, 8, 9, 10, 11}};
+                std::array<double, num_map_parameters> damp{};
+                for (const size_t a : free_indices) {
+                  gsl::at(damp, a) = -2. * gamma * gsl::at(data->pdot, a) -
+                                     gamma * gamma * gsl::at(data->p, a);
+                }
+                for (size_t i = 0; i < 3; ++i) {
+                  gsl::at(damp, 4 + i) =
+                      damp[0] * gsl::at(config_opt->center_velocity, i);
+                }
+                damp[12] = -damp[7] - damp[10];
+                for (size_t a = 0; a < num_map_parameters; ++a) {
+                  gsl::at(acc, a) += gsl::at(damp, a);
+                }
+              }
               if (data->valid and time > data->last_fit_time) {
                 const double dt = time - data->last_fit_time;
                 data->previous_fit_time = data->last_fit_time;
@@ -216,11 +238,11 @@ struct FitMapParameters {
                                              gsl::at(data->pddot, a);
                   gsl::at(data->pdot, a) +=
                       0.5 * dt *
-                      (gsl::at(data->pddot, a) + gsl::at(accel.pdot, a));
+                      (gsl::at(data->pddot, a) + gsl::at(acc, a));
                 }
               }
               data->last_fit_time = time;
-              data->pddot = accel.pdot;
+              data->pddot = acc;
               data->valid = true;
               p_out = data->p;
               pdot_out = data->pdot;

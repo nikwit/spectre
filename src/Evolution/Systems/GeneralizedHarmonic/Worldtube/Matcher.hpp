@@ -96,10 +96,14 @@ RateFitResult fit_map_parameter_rates(
  * \f$\partial_t\Pi\f$, \f$\partial_t\Phi\f$, \f$\partial_t g\f$ the sliced
  * `dt` variables (the actual equations of motion) and \f$\partial_t\alpha,
  * \partial_t\beta\f$ derived from \f$\partial_t g\f$ by the 3+1 algebra.
- * The model relation at leading (quasi-static) order is \f$\partial_t^2 g =
- * -\left(g\, \sum_A \ddot p_A R_A\, g\right)\f$, so the projection and the
- * acceleration-level pins are identical in structure to the rate fit. The
- * returned `pdot` member holds \f$\ddot p\f$.
+ * The model relation, exact within the amplitude-linear map, is
+ * \f$\partial_t^2 g = -\left(g\, \sum_A \ddot p_A R_A\, g\right)
+ * + 2\, g S g S g\f$ with \f$S = \sum_A \dot p_A R_A\f$ built from the
+ * current state `pdot_state`; the (pdot-quadratic) Hessian term is
+ * subtracted from the data-side target, so the solve stays linear in
+ * \f$\ddot p\f$ and the projection and acceleration-level pins are
+ * identical in structure to the rate fit. The returned `pdot` member
+ * holds \f$\ddot p\f$.
  */
 RateFitResult fit_map_parameter_accelerations(
     const tnsr::aa<DataVector, 3>& spacetime_metric,
@@ -107,6 +111,7 @@ RateFitResult fit_map_parameter_accelerations(
     const tnsr::aa<DataVector, 3>& dt_spacetime_metric,
     const tnsr::aa<DataVector, 3>& dt_pi,
     const tnsr::iaa<DataVector, 3>& dt_phi,
+    const std::array<double, num_map_parameters>& pdot_state,
     const tnsr::I<DataVector, 3>& inertial_coords,
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config);
 }  // namespace gh::Worldtube

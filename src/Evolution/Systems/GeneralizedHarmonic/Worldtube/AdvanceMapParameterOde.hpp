@@ -139,9 +139,21 @@ struct AdvanceMapParameterOde {
                  db::get<::Tags::dt<gh::Tags::Phi<DataVector, Dim>>>(box));
 
     const ylm::Spherepack& ylm_transform = ylm::get_spherepack_cache(l_max);
+    // current pdot state for the exact (pdot-quadratic) Hessian term of the
+    // model's second time derivative
+    std::array<double, num_map_parameters> pdot_state{};
+    {
+      const auto& current = db::get<Tags::MapParameters>(box);
+      if (current.ode_state.size() == 2 * num_map_parameters) {
+        for (size_t a = 0; a < num_map_parameters; ++a) {
+          gsl::at(pdot_state, a) =
+              current.ode_state[num_map_parameters + a];
+        }
+      }
+    }
     const RateFitResult accel = fit_map_parameter_accelerations(
         metric_face, pi_face, phi_face, dt_metric_face, dt_pi_face,
-        dt_phi_face, coords_face, ylm_transform, *config_opt);
+        dt_phi_face, pdot_state, coords_face, ylm_transform, *config_opt);
     bool finite = true;
     for (size_t a = 0; a < num_map_parameters; ++a) {
       finite = finite and std::isfinite(gsl::at(accel.pdot, a));
@@ -176,6 +188,10 @@ struct AdvanceMapParameterOde {
             }
             history.undo_latest();
           }
+          // one-step methods (RK) require the history order to equal their
+          // fixed order and keep no cross-step records; multistep (Adams)
+          // ramps with the ODE's own history depth
+          const bool multistep = stepper.number_of_past_steps() > 0;
           if (time_step_id.substep() == 0) {
             if (data->ode_step_id == time_step_id and
                 data->ode_step_start.size() == y.size()) {
@@ -186,12 +202,14 @@ struct AdvanceMapParameterOde {
               data->ode_step_start = y;
               data->ode_step_id = time_step_id;
             }
-            // The order the current history depth supports (the update
-            // requires size >= order - 1 after this step's record is
+            // Multistep: the order the current history depth supports (the
+            // update requires size >= order - 1 after this step's record is
             // inserted), capped by the system's order. Ramps 2, 3, ...
             // over the first steps, exactly as self-start would.
             history.integration_order(
-                std::clamp(history.size() + 2, size_t{2}, system_order));
+                multistep
+                    ? std::clamp(history.size() + 2, size_t{2}, system_order)
+                    : system_order);
           }
           const size_t order = history.integration_order();
           DataVector dt_y(2 * num_map_parameters);
@@ -199,14 +217,36 @@ struct AdvanceMapParameterOde {
             dt_y[a] = y[num_map_parameters + a];
             dt_y[num_map_parameters + a] = gsl::at(accel.pdot, a);
           }
+          if (const double gamma = config_opt->gauge_damping; gamma > 0.) {
+            // damped-oscillator gauge fixing of the free parameters,
+            // unfolded through the pins so the pinned relations stay exact
+            static constexpr std::array<size_t, 9> free_indices{
+                {0, 1, 2, 3, 7, 8, 9, 10, 11}};
+            std::array<double, num_map_parameters> damp{};
+            for (const size_t a : free_indices) {
+              gsl::at(damp, a) = -2. * gamma * y[num_map_parameters + a] -
+                                 gamma * gamma * y[a];
+            }
+            for (size_t i = 0; i < 3; ++i) {
+              gsl::at(damp, 4 + i) =
+                  damp[0] * gsl::at(config_opt->center_velocity, i);
+            }
+            damp[12] = -damp[7] - damp[10];
+            for (size_t a = 0; a < num_map_parameters; ++a) {
+              dt_y[num_map_parameters + a] += gsl::at(damp, a);
+            }
+          }
           history.insert(time_step_id, y, dt_y);
           stepper.update_u(make_not_null(&y), history, time_step);
-          if (time_step_id.substep() + 1 == stepper.number_of_substeps()) {
+          if (multistep and
+              time_step_id.substep() + 1 == stepper.number_of_substeps()) {
             // pre-arm order growth: cleaning keeps order - 2 records, so
             // clean at next step's intended order
             history.integration_order(std::min(order + 1, system_order));
-            stepper.clean_history(make_not_null(&history));
           }
+          // mirror the harness: clean after every update; the stepper's
+          // implementation no-ops when not applicable
+          stepper.clean_history(make_not_null(&history));
           for (size_t a = 0; a < num_map_parameters; ++a) {
             gsl::at(data->p, a) = y[a];
             gsl::at(data->pdot, a) = y[num_map_parameters + a];
