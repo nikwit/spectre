@@ -16,6 +16,7 @@ void MatcherConfig::pup(PUP::er& p) {
   p | fit_interval;
   p | fit_center_offset;
   p | rate_ode;
+  p | fit_radial_index;
 }
 
 bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
@@ -25,7 +26,8 @@ bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
          lhs.fit_l_max == rhs.fit_l_max and
          lhs.fit_interval == rhs.fit_interval and
          lhs.fit_center_offset == rhs.fit_center_offset and
-         lhs.rate_ode == rhs.rate_ode;
+         lhs.rate_ode == rhs.rate_ode and
+         lhs.fit_radial_index == rhs.fit_radial_index;
 }
 
 bool operator!=(const MatcherConfig& lhs, const MatcherConfig& rhs) {

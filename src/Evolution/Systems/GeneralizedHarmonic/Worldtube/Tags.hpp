@@ -71,6 +71,17 @@ struct MatcherConfig {
         "with the fitted rates."};
     static type lower_bound() { return 0.; }
   };
+  struct FitRadialIndex {
+    using type = size_t;
+    static constexpr Options::String help = {
+        "Radial collocation index of the worldtube element at which the fit "
+        "reads the fields: 0 is the excision face itself. In the closed "
+        "loop the boundary condition clamps the gauge components of u^- at "
+        "index 0 (the fit then sees no signal and the loop settles on the "
+        "trivial frozen fixed point), so fit a few points off the boundary "
+        "(index 4 is r ~ 2.55 for the standard Shell0) and let the BC "
+        "impose the model at the face."};
+  };
   struct RateOde {
     using type = bool;
     static constexpr Options::String help = {
@@ -94,8 +105,9 @@ struct MatcherConfig {
         "and is never fitted."};
   };
 
-  using options = tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin,
-                             FitLMax, FitInterval, FitCenterOffset, RateOde>;
+  using options =
+      tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin, FitLMax,
+                 FitInterval, FitCenterOffset, RateOde, FitRadialIndex>;
   static constexpr Options::String help = {
       "Online worldtube matching: fit the 13 first-order affine-map "
       "parameters from the evolved fields on the excision sphere."};
@@ -104,7 +116,8 @@ struct MatcherConfig {
   MatcherConfig(double mass, const std::array<double, 3>& center,
                 const std::array<double, 3>& center_velocity,
                 double trace_strain_pin, size_t fit_l_max,
-                double fit_interval, bool fit_center_offset, bool rate_ode)
+                double fit_interval, bool fit_center_offset, bool rate_ode,
+                size_t fit_radial_index)
       : mass(mass),
         center(center),
         center_velocity(center_velocity),
@@ -112,7 +125,8 @@ struct MatcherConfig {
         fit_l_max(fit_l_max),
         fit_interval(fit_interval),
         fit_center_offset(fit_center_offset),
-        rate_ode(rate_ode) {}
+        rate_ode(rate_ode),
+        fit_radial_index(fit_radial_index) {}
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& p);
@@ -125,6 +139,7 @@ struct MatcherConfig {
   double fit_interval = 0.;
   bool fit_center_offset = false;
   bool rate_ode = false;
+  size_t fit_radial_index = 0;
 };
 
 bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs);

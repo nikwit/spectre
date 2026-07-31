@@ -70,14 +70,17 @@ WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(
              "ConstraintPreservingPhysicalSommerfeldGhostGauge") {
     return WorldtubeTypeDType::
         ConstraintPreservingPhysicalSommerfeldGhostGauge;
+  } else if (type_read == "ConstraintPreservingPhysicalOnlineGhostGauge") {
+    return WorldtubeTypeDType::ConstraintPreservingPhysicalOnlineGhostGauge;
   }
   PARSE_ERROR(options.context(),
               "Failed to convert input option to "
               "WorldtubeTypeDType::Type. Must "
               "be one of ConstraintPreserving, ConstraintPreservingPhysical, "
               "ConstraintPreservingPhysicalFrozenGauge, "
-              "ConstraintPreservingPhysicalAnalyticGhostGauge or "
-              "ConstraintPreservingPhysicalSommerfeldGhostGauge");
+              "ConstraintPreservingPhysicalAnalyticGhostGauge, "
+              "ConstraintPreservingPhysicalSommerfeldGhostGauge or "
+              "ConstraintPreservingPhysicalOnlineGhostGauge");
 }
 }  // namespace detail
 
@@ -192,7 +195,9 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
     const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_pi,
     const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi,
     // c.f. dg_gridless_tags
-    const double time) const {
+    const double time,
+    const std::optional<gh::Worldtube::MatcherConfig>& matcher_config,
+    const gh::Worldtube::MapParameterData& map_parameters) const {
   TempBuffer<tmpl::list<::Tags::TempI<0, Dim, Frame::Inertial, DataVector>,
                         ::Tags::Tempiaa<1, Dim, Frame::Inertial, DataVector>,
                         ::Tags::TempII<0, Dim, Frame::Inertial, DataVector>,
@@ -407,7 +412,9 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
              type_ == detail::WorldtubeTypeDType::
                           ConstraintPreservingPhysicalAnalyticGhostGauge or
              type_ == detail::WorldtubeTypeDType::
-                          ConstraintPreservingPhysicalSommerfeldGhostGauge) {
+                          ConstraintPreservingPhysicalSommerfeldGhostGauge or
+             type_ == detail::WorldtubeTypeDType::
+                          ConstraintPreservingPhysicalOnlineGhostGauge) {
     // AnalyticGhostGauge leaves the gauge sector frozen here and adds only the
     // relaxation below; SommerfeldGhostGauge keeps the Sommerfeld radiation
     // term and adds the relaxation on top of it.
@@ -440,7 +447,9 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
   if (type_ == detail::WorldtubeTypeDType::
                    ConstraintPreservingPhysicalAnalyticGhostGauge or
       type_ == detail::WorldtubeTypeDType::
-                   ConstraintPreservingPhysicalSommerfeldGhostGauge) {
+                   ConstraintPreservingPhysicalSommerfeldGhostGauge or
+      type_ == detail::WorldtubeTypeDType::
+                   ConstraintPreservingPhysicalOnlineGhostGauge) {
     // Relax the gauge sector towards the model value,
     //   dt u^-_ab|gauge = -kappa (u^-_ab - u^-_model,ab)|gauge.
     // The gauge sector was left frozen above, i.e. the correction there is
@@ -449,50 +458,90 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
     // the ghost form, since a Bjorhus form would need a second time derivative
     // of the model.
     using evolved_vars_tags = typename System<Dim>::variables_tag::tags_list;
-    // all_solutions plus the affine-map model; keep in sync with the
-    // executable's initial_data_list or the dispatch ERRORs at runtime
-    using gauge_prescriptions = tmpl::conditional_t<
-        Dim == 3,
-        tmpl::push_back<gh::Solutions::all_solutions<Dim>,
-                        gh::Solutions::AffineMappedHarmonicSchwarzschild>,
-        gh::Solutions::all_solutions<Dim>>;
-    const auto model = call_with_dynamic_type<
-        tuples::tagged_tuple_from_typelist<evolved_vars_tags>,
-        gauge_prescriptions>(
-        analytic_gauge_prescription_.get(),
-        [&coords, &time](const auto* const solution_or_data) {
-          if constexpr (is_analytic_solution_v<
-                            std::decay_t<decltype(*solution_or_data)>>) {
-            return solution_or_data->variables(coords, time,
-                                               evolved_vars_tags{});
-          } else {
-            (void)time;
-            return solution_or_data->variables(coords, evolved_vars_tags{});
+    using EvolvedVars = tuples::tagged_tuple_from_typelist<evolved_vars_tags>;
+    std::optional<EvolvedVars> model{};
+    if (type_ == detail::WorldtubeTypeDType::
+                     ConstraintPreservingPhysicalOnlineGhostGauge) {
+      // The closed loop: the model comes from the online matcher's latest
+      // fit, extrapolated linearly within the fit interval. While no fit
+      // exists yet the gauge sector simply stays frozen.
+      if constexpr (Dim == 3) {
+        if (not matcher_config.has_value()) {
+          ERROR(
+              "ConstraintPreservingPhysicalOnlineGhostGauge requires the "
+              "WorldtubeMatcher option to be active, but it is None.");
+        }
+        if (map_parameters.valid) {
+          std::array<double, gh::Worldtube::num_map_parameters> p =
+              map_parameters.p;
+          const double dt_extrapolate = time - map_parameters.last_fit_time;
+          for (size_t a = 0; a < gh::Worldtube::num_map_parameters; ++a) {
+            gsl::at(p, a) += dt_extrapolate * gsl::at(map_parameters.pdot, a);
           }
-        });
-
-    const auto v_minus_numerical =
-        get<Tags::VMinus<DataVector, Dim>>(characteristic_fields(
-            gamma2, inverse_spatial_metric, spacetime_metric, pi, phi,
-            normal_covector));
-    const auto v_minus_model =
-        get<Tags::VMinus<DataVector, Dim>>(characteristic_fields(
-            gamma2, inverse_spatial_metric,
-            get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(model),
-            get<Tags::Pi<DataVector, Dim>>(model),
-            get<Tags::Phi<DataVector, Dim>>(model), normal_covector));
-
-    auto delta_v_minus = v_minus_numerical;
-    for (size_t a = 0; a <= Dim; ++a) {
-      for (size_t b = a; b <= Dim; ++b) {
-        delta_v_minus.get(a, b) -= v_minus_model.get(a, b);
+          std::array<double, 3> model_center = matcher_config->center;
+          for (size_t i = 0; i < 3; ++i) {
+            gsl::at(model_center, i) +=
+                gsl::at(map_parameters.center_offset, i);
+          }
+          model.emplace();
+          gh::Solutions::affine_map_model::evolved_variables(
+              make_not_null(
+                  &get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(*model)),
+              make_not_null(&get<Tags::Pi<DataVector, Dim>>(*model)),
+              make_not_null(&get<Tags::Phi<DataVector, Dim>>(*model)), coords,
+              matcher_config->mass, model_center, p, map_parameters.pdot);
+        }
+      } else {
+        ERROR(
+            "ConstraintPreservingPhysicalOnlineGhostGauge is only "
+            "implemented in 3 dimensions.");
       }
+    } else {
+      // all_solutions plus the affine-map model; keep in sync with the
+      // executable's initial_data_list or the dispatch ERRORs at runtime
+      using gauge_prescriptions = tmpl::conditional_t<
+          Dim == 3,
+          tmpl::push_back<gh::Solutions::all_solutions<Dim>,
+                          gh::Solutions::AffineMappedHarmonicSchwarzschild>,
+          gh::Solutions::all_solutions<Dim>>;
+      model = call_with_dynamic_type<EvolvedVars, gauge_prescriptions>(
+          analytic_gauge_prescription_.get(),
+          [&coords, &time](const auto* const solution_or_data) {
+            if constexpr (is_analytic_solution_v<
+                              std::decay_t<decltype(*solution_or_data)>>) {
+              return solution_or_data->variables(coords, time,
+                                                 evolved_vars_tags{});
+            } else {
+              (void)time;
+              return solution_or_data->variables(coords, evolved_vars_tags{});
+            }
+          });
     }
-    const DataVector kappa(get_size(get(gamma2)), gauge_relaxation_rate_);
-    Bjorhus::detail::add_gauge_sector_terms_to_dt_v_minus(
-        make_not_null(&bc_dt_v_minus), kappa, incoming_null_one_form,
-        outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
-        projection_Ab, delta_v_minus);
+
+    if (model.has_value()) {
+      const auto v_minus_numerical =
+          get<Tags::VMinus<DataVector, Dim>>(characteristic_fields(
+              gamma2, inverse_spatial_metric, spacetime_metric, pi, phi,
+              normal_covector));
+      const auto v_minus_model =
+          get<Tags::VMinus<DataVector, Dim>>(characteristic_fields(
+              gamma2, inverse_spatial_metric,
+              get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(*model),
+              get<Tags::Pi<DataVector, Dim>>(*model),
+              get<Tags::Phi<DataVector, Dim>>(*model), normal_covector));
+
+      auto delta_v_minus = v_minus_numerical;
+      for (size_t a = 0; a <= Dim; ++a) {
+        for (size_t b = a; b <= Dim; ++b) {
+          delta_v_minus.get(a, b) -= v_minus_model.get(a, b);
+        }
+      }
+      const DataVector kappa(get_size(get(gamma2)), gauge_relaxation_rate_);
+      Bjorhus::detail::add_gauge_sector_terms_to_dt_v_minus(
+          make_not_null(&bc_dt_v_minus), kappa, incoming_null_one_form,
+          outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
+          projection_Ab, delta_v_minus);
+    }
   }
 
   // Only add corrections at grid points where the char speeds are negative

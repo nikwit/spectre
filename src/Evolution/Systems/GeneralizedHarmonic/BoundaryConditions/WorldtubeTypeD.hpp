@@ -18,6 +18,7 @@
 #include "Evolution/BoundaryConditions/Type.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/BoundaryCondition.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Tags.hpp"
 #include "Options/Auto.hpp"
 #include "Options/Options.hpp"
 #include "Options/String.hpp"
@@ -77,7 +78,15 @@ enum class WorldtubeTypeDType {
   /// Sommerfeld term vanish.
   ///
   /// Requires `AnalyticGaugePrescription`.
-  ConstraintPreservingPhysicalSommerfeldGhostGauge
+  ConstraintPreservingPhysicalSommerfeldGhostGauge,
+  /// As `ConstraintPreservingPhysicalAnalyticGhostGauge`, but the model
+  /// \f$u^{-,\rm model}\f$ is built from the *online* worldtube matcher's
+  /// latest fitted map parameters (`gh::Worldtube::Tags::MapParameters`,
+  /// extrapolated linearly within the fit interval with the fitted rates)
+  /// instead of an input-file prescription — the closed loop. Requires the
+  /// `WorldtubeMatcher` option to be active; while no fit exists yet the
+  /// gauge sector stays frozen. 3D only.
+  ConstraintPreservingPhysicalOnlineGhostGauge
 };
 
 WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(
@@ -242,7 +251,9 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
                                Frame::Inertial>,
                  ::Tags::deriv<Tags::Phi<DataVector, Dim>, tmpl::size_t<Dim>,
                                Frame::Inertial>>;
-  using dg_gridless_tags = tmpl::list<::Tags::Time>;
+  using dg_gridless_tags =
+      tmpl::list<::Tags::Time, gh::Worldtube::Tags::Matcher,
+                 gh::Worldtube::Tags::MapParameters>;
 
   std::optional<std::string> dg_time_derivative(
       gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
@@ -283,7 +294,9 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
       const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_pi,
       const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi,
       // c.f. dg_gridless_tags
-      double time) const;
+      double time,
+      const std::optional<gh::Worldtube::MatcherConfig>& matcher_config,
+      const gh::Worldtube::MapParameterData& map_parameters) const;
 
  private:
   void compute_intermediate_vars(

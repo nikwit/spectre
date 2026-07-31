@@ -109,12 +109,18 @@ struct FitMapParameters {
                << n_theta << " x " << n_phi);
     const size_t n_face = n_theta * n_phi;
 
-    // slice a volume component to the inner radial face (radial index is
-    // the fastest-varying, matching the Ylm filter's storage convention)
-    const auto face_slice = [n_radial, n_face](const DataVector& volume) {
+    // slice a volume component at the configured radial collocation index
+    // (0 = the excision face; radial is the fastest-varying index, matching
+    // the Ylm filter's storage convention)
+    const size_t radial_index = config_opt->fit_radial_index;
+    ASSERT(radial_index < n_radial,
+           "FitRadialIndex " << radial_index << " out of range for "
+                             << n_radial << " radial points");
+    const auto face_slice = [n_radial, n_face,
+                             radial_index](const DataVector& volume) {
       DataVector face(n_face);
       for (size_t k = 0; k < n_face; ++k) {
-        face[k] = volume[k * n_radial];
+        face[k] = volume[k * n_radial + radial_index];
       }
       return face;
     };
