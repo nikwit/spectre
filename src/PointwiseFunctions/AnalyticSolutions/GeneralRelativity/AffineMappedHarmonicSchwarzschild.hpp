@@ -41,10 +41,17 @@ void inverse_metric_combination(gsl::not_null<tnsr::AA<DataVector, 3>*> out,
                                 double mass, double background_weight,
                                 const std::array<double, 13>& c);
 
+/// The analytic spatial derivative \f$\partial_k\f$ of
+/// `inverse_metric_combination` with respect to the local coordinates y.
+void spatial_derivative_of_inverse_metric_combination(
+    gsl::not_null<tnsr::iAA<DataVector, 3>*> out,
+    const std::array<DataVector, 3>& y, double mass,
+    double background_weight, const std::array<double, 13>& c);
+
 /// The generalized-harmonic evolved variables of the mapped solution at
 /// points `x`: the metric is the inverse of the combination above, Phi its
-/// central-difference spatial derivative (step 1e-4, matching the reference
-/// implementation), and Pi uses the coefficient drift
+/// analytic spatial derivative \f$\Phi_{kab} = -(g\, \partial_k G^{-1}\,
+/// g)_{ab}\f$, and Pi uses the coefficient drift
 /// \f$\partial_t g = -(g \sum_A \dot p_A R_A g)\f$ at a static centre with
 /// the model's own lapse and shift.
 void evolved_variables(gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,

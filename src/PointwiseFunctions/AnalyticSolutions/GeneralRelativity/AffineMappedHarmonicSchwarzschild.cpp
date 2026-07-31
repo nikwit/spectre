@@ -23,11 +23,6 @@
 namespace gh::Solutions {
 namespace affine_map_model {
 namespace {
-// Central-difference step for Phi, matching the reference implementation
-// (worldtube_matching fits use the same value, so the model a run applies is
-// exactly the model the offline fit validated).
-constexpr double fd_step = 1.0e-4;
-
 // The six independent strain components in column order.
 constexpr std::array<std::array<size_t, 2>, 6> sigma_pairs{
     {{{0, 0}}, {{0, 1}}, {{0, 2}}, {{1, 1}}, {{1, 2}}, {{2, 2}}}};
@@ -105,15 +100,122 @@ void inverse_metric_combination(
   }
 }
 
-namespace {
-tnsr::aa<DataVector, 3> metric_at(const std::array<DataVector, 3>& y,
-                                  const double mass,
-                                  const std::array<double, 13>& p) {
-  tnsr::AA<DataVector, 3> inverse_metric(y[0].size());
-  inverse_metric_combination(make_not_null(&inverse_metric), y, mass, 1., p);
-  return determinant_and_inverse(inverse_metric).second;
+void spatial_derivative_of_inverse_metric_combination(
+    const gsl::not_null<tnsr::iAA<DataVector, 3>*> out,
+    const std::array<DataVector, 3>& y, const double mass,
+    const double background_weight, const std::array<double, 13>& c) {
+  const size_t n_points = y[0].size();
+  DataVector rho(n_points, 0.);
+  for (size_t i = 0; i < 3; ++i) {
+    rho += square(gsl::at(y, i));
+  }
+  rho = sqrt(rho);
+  std::array<DataVector, 3> n{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(n, i) = gsl::at(y, i) / rho;
+  }
+
+  const DataVector r = rho + mass;
+  const DataVector f = 1. - 2. * mass / r;
+  const DataVector big_f = 1. + 2. * mass / r;
+  const DataVector f_prime = 2. * mass / square(r);
+  const DataVector big_f_prime = -2. * mass / square(r);
+  const DataVector h = 4. * square(mass) / square(r);
+  const DataVector h_prime = -8. * square(mass) / cube(r);
+  const DataVector h_pp = 24. * square(mass) / (square(r) * square(r));
+  const DataVector g_perp = square(rho) / square(r);
+  const DataVector g_perp_prime = 2. * mass * rho / cube(r);
+  const DataVector g_perp_pp =
+      2. * mass / cube(r) - 6. * mass * rho / (square(r) * square(r));
+  const DataVector g_par = -square(mass) / square(r);
+  const DataVector g_par_prime = 2. * square(mass) / cube(r);
+  const DataVector g_par_pp = -6. * square(mass) / (square(r) * square(r));
+  const DataVector background_tt_prime =
+      2. * mass / square(r) * (square(big_f) - 2. * f * big_f + 2.);
+  const DataVector background_tt_pp =
+      -4. * mass / cube(r) * (square(big_f) - 2. * f * big_f + 2.) +
+      8. * square(mass) / (square(r) * square(r)) * (f - 2. * big_f);
+
+  const double c_qdot0 = c[0];
+  const std::array<double, 3> c_beta{{c[1], c[2], c[3]}};
+  const std::array<double, 3> c_qdot{{c[4], c[5], c[6]}};
+  std::array<std::array<double, 3>, 3> c_sigma{};
+  for (size_t pair = 0; pair < 6; ++pair) {
+    const auto [i, j] = gsl::at(sigma_pairs, pair);
+    gsl::at(gsl::at(c_sigma, i), j) = c[7 + pair];
+    gsl::at(gsl::at(c_sigma, j), i) = c[7 + pair];
+  }
+
+  DataVector beta_dot_n(n_points, 0.);
+  DataVector sigma_nn(n_points, 0.);
+  std::array<DataVector, 3> sigma_n{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(sigma_n, i) = DataVector(n_points, 0.);
+  }
+  for (size_t i = 0; i < 3; ++i) {
+    beta_dot_n += gsl::at(c_beta, i) * gsl::at(n, i);
+    for (size_t j = 0; j < 3; ++j) {
+      sigma_nn +=
+          gsl::at(gsl::at(c_sigma, i), j) * gsl::at(n, i) * gsl::at(n, j);
+      gsl::at(sigma_n, i) +=
+          gsl::at(gsl::at(c_sigma, i), j) * gsl::at(n, j);
+    }
+  }
+
+  for (size_t k = 0; k < 3; ++k) {
+    const DataVector& nk = gsl::at(n, k);
+    // dk of the angular factors
+    const DataVector dk_bn = (gsl::at(c_beta, k) - beta_dot_n * nk) / rho;
+    const DataVector dk_snn =
+        2. * (gsl::at(sigma_n, k) - sigma_nn * nk) / rho;
+    const auto dk_n = [&n, &rho, &nk, k](const size_t i) -> DataVector {
+      return ((i == k ? 1. : 0.) - gsl::at(n, i) * nk) / rho;
+    };
+
+    out->get(k, 0, 0) =
+        (background_weight + 2. * c_qdot0) * background_tt_prime * nk +
+        2. * h_prime * nk * beta_dot_n + 2. * h * dk_bn -
+        nk * sigma_nn * background_tt_prime -
+        rho * dk_snn * background_tt_prime -
+        rho * sigma_nn * background_tt_pp * nk;
+    for (size_t i = 0; i < 3; ++i) {
+      const DataVector dk_ni = dk_n(i);
+      out->get(k, 0, i + 1) =
+          (background_weight + c_qdot0) *
+              (h_prime * nk * gsl::at(n, i) + h * dk_ni) +
+          g_par_prime * nk * beta_dot_n * gsl::at(n, i) +
+          g_par * (dk_bn * gsl::at(n, i) + beta_dot_n * dk_ni) +
+          g_perp_prime * nk * gsl::at(c_beta, i) -
+          (big_f_prime * (1. + h) + big_f * h_prime) * nk *
+              gsl::at(c_qdot, i) +
+          (dk_snn * (h - rho * h_prime) - sigma_nn * rho * h_pp * nk) *
+              gsl::at(n, i) +
+          sigma_nn * (h - rho * h_prime) * dk_ni;
+      for (size_t j = i; j < 3; ++j) {
+        const DataVector dk_nj = dk_n(j);
+        const DataVector dk_ninj = dk_ni * gsl::at(n, j) +
+                                   gsl::at(n, i) * dk_nj;
+        out->get(k, i + 1, j + 1) =
+            background_weight *
+                (g_par_prime * nk * gsl::at(n, i) * gsl::at(n, j) +
+                 g_par * dk_ninj +
+                 (i == j ? 1. : 0.) * g_perp_prime * nk) +
+            h_prime * nk *
+                (gsl::at(c_qdot, i) * gsl::at(n, j) +
+                 gsl::at(c_qdot, j) * gsl::at(n, i)) +
+            h * (gsl::at(c_qdot, i) * dk_nj + gsl::at(c_qdot, j) * dk_ni) +
+            2. * g_perp_prime * nk * gsl::at(gsl::at(c_sigma, i), j) -
+            (i == j ? 1. : 0.) *
+                (nk * sigma_nn * g_perp_prime + rho * dk_snn * g_perp_prime +
+                 rho * sigma_nn * g_perp_pp * nk) +
+            (dk_snn * (2. * g_par - rho * g_par_prime) +
+             sigma_nn * (g_par_prime - rho * g_par_pp) * nk) *
+                gsl::at(n, i) * gsl::at(n, j) +
+            sigma_nn * (2. * g_par - rho * g_par_prime) * dk_ninj;
+      }
+    }
+  }
 }
-}  // namespace
 
 void evolved_variables(
     const gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
@@ -136,18 +238,21 @@ void evolved_variables(
   inverse_metric_combination(make_not_null(&inverse_metric), y, mass, 1., p);
   *spacetime_metric = determinant_and_inverse(inverse_metric).second;
 
-  // Phi by second-order central differences of the metric
+  // Phi analytically: Phi_kab = d_k g_ab = -(g d_k G^{-1} g)_ab
+  tnsr::iAA<DataVector, 3> dk_inverse(n_points);
+  spatial_derivative_of_inverse_metric_combination(make_not_null(&dk_inverse),
+                                                   y, mass, 1., p);
   for (size_t k = 0; k < 3; ++k) {
-    std::array<DataVector, 3> y_plus = y;
-    std::array<DataVector, 3> y_minus = y;
-    gsl::at(y_plus, k) += fd_step;
-    gsl::at(y_minus, k) -= fd_step;
-    const auto metric_plus = metric_at(y_plus, mass, p);
-    const auto metric_minus = metric_at(y_minus, mass, p);
     for (size_t a = 0; a < 4; ++a) {
       for (size_t b = a; b < 4; ++b) {
-        phi->get(k, a, b) =
-            (metric_plus.get(a, b) - metric_minus.get(a, b)) / (2. * fd_step);
+        phi->get(k, a, b) = 0.;
+        for (size_t cc = 0; cc < 4; ++cc) {
+          for (size_t d = 0; d < 4; ++d) {
+            phi->get(k, a, b) -= spacetime_metric->get(a, cc) *
+                                 dk_inverse.get(k, cc, d) *
+                                 spacetime_metric->get(d, b);
+          }
+        }
       }
     }
   }
