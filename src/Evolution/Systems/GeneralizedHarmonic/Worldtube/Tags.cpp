@@ -16,6 +16,7 @@ void MatcherConfig::pup(PUP::er& p) {
   p | fit_interval;
   p | fit_center_offset;
   p | rate_ode;
+  p | second_order_ode;
   p | fit_radial_index;
 }
 
@@ -27,6 +28,7 @@ bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
          lhs.fit_interval == rhs.fit_interval and
          lhs.fit_center_offset == rhs.fit_center_offset and
          lhs.rate_ode == rhs.rate_ode and
+         lhs.second_order_ode == rhs.second_order_ode and
          lhs.fit_radial_index == rhs.fit_radial_index;
 }
 
@@ -40,6 +42,7 @@ void MapParameterData::pup(PUP::er& pupper) {
   pupper | p;
   pupper | p_previous;
   pupper | pdot;
+  pupper | pddot;
   pupper | center_offset;
   pupper | valid;
 }

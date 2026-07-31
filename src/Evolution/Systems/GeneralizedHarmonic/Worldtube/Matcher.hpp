@@ -85,4 +85,28 @@ RateFitResult fit_map_parameter_rates(
     const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
     const tnsr::I<DataVector, 3>& inertial_coords,
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config);
+
+/*!
+ * \brief Fit the accelerations \f$\ddot p_A\f$ of the map parameters from
+ * the evolution equations (the `SecondOrderOde` mode).
+ *
+ * The data-side second time derivative is assembled from the GH right-hand
+ * sides: \f$\partial_t^2 g = \partial_t\beta\,\Phi + \beta\,\partial_t\Phi
+ * - \partial_t\alpha\,\Pi - \alpha\,\partial_t\Pi\f$, with
+ * \f$\partial_t\Pi\f$, \f$\partial_t\Phi\f$, \f$\partial_t g\f$ the sliced
+ * `dt` variables (the actual equations of motion) and \f$\partial_t\alpha,
+ * \partial_t\beta\f$ derived from \f$\partial_t g\f$ by the 3+1 algebra.
+ * The model relation at leading (quasi-static) order is \f$\partial_t^2 g =
+ * -\left(g\, \sum_A \ddot p_A R_A\, g\right)\f$, so the projection and the
+ * acceleration-level pins are identical in structure to the rate fit. The
+ * returned `pdot` member holds \f$\ddot p\f$.
+ */
+RateFitResult fit_map_parameter_accelerations(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
+    const tnsr::aa<DataVector, 3>& dt_spacetime_metric,
+    const tnsr::aa<DataVector, 3>& dt_pi,
+    const tnsr::iaa<DataVector, 3>& dt_phi,
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config);
 }  // namespace gh::Worldtube

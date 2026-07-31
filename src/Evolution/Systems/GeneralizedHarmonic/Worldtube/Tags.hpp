@@ -95,6 +95,18 @@ struct MatcherConfig {
         "smooth by construction, but integration accumulates rate bias "
         "with no restoring force."};
   };
+  struct SecondOrderOde {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Obtain p(t) by fitting the parameter accelerations pddot from the "
+        "evolution equations (d2t g assembled from the GH right-hand sides "
+        "stored in the DataBox, projected on the covariant response columns, "
+        "a linear solve) and integrating the second-order ODE by velocity "
+        "Verlet from (p, pdot) = (0, 0) (Schwarzschild) at the first fit. "
+        "Produces a smooth, dynamically consistent (p, pdot) pair - the "
+        "scalar-worldtube architecture. Mutually exclusive with RateOde and "
+        "FitCenterOffset."};
+  };
   struct FitCenterOffset {
     using type = bool;
     static constexpr Options::String help = {
@@ -107,7 +119,8 @@ struct MatcherConfig {
 
   using options =
       tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin, FitLMax,
-                 FitInterval, FitCenterOffset, RateOde, FitRadialIndex>;
+                 FitInterval, FitCenterOffset, RateOde, SecondOrderOde,
+                 FitRadialIndex>;
   static constexpr Options::String help = {
       "Online worldtube matching: fit the 13 first-order affine-map "
       "parameters from the evolved fields on the excision sphere."};
@@ -117,7 +130,7 @@ struct MatcherConfig {
                 const std::array<double, 3>& center_velocity,
                 double trace_strain_pin, size_t fit_l_max,
                 double fit_interval, bool fit_center_offset, bool rate_ode,
-                size_t fit_radial_index)
+                bool second_order_ode, size_t fit_radial_index)
       : mass(mass),
         center(center),
         center_velocity(center_velocity),
@@ -126,6 +139,7 @@ struct MatcherConfig {
         fit_interval(fit_interval),
         fit_center_offset(fit_center_offset),
         rate_ode(rate_ode),
+        second_order_ode(second_order_ode),
         fit_radial_index(fit_radial_index) {}
 
   // NOLINTNEXTLINE(google-runtime-references)
@@ -139,6 +153,7 @@ struct MatcherConfig {
   double fit_interval = 0.;
   bool fit_center_offset = false;
   bool rate_ode = false;
+  bool second_order_ode = false;
   size_t fit_radial_index = 0;
 };
 
@@ -155,6 +170,7 @@ struct MapParameterData {
   std::array<double, num_map_parameters> p{};
   std::array<double, num_map_parameters> p_previous{};
   std::array<double, num_map_parameters> pdot{};
+  std::array<double, num_map_parameters> pddot{};
   std::array<double, 3> center_offset{};
   bool valid = false;
 

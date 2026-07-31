@@ -165,7 +165,65 @@ struct FitMapParameters {
     double residual_final = 0.;
     double iterations = 0.;
 
-    if (config_opt->rate_ode) {
+    if (config_opt->second_order_ode) {
+      if (config_opt->fit_center_offset or config_opt->rate_ode) {
+        ERROR(
+            "WorldtubeMatcher: SecondOrderOde cannot be combined with "
+            "RateOde or FitCenterOffset.");
+      }
+      // Second-order mode: fit pddot from the evolution equations (the dt
+      // variables hold the GH right-hand sides; at the top of the step they
+      // are one step stale, a small fraction of FitInterval) and integrate
+      // (p, pdot) by velocity Verlet from (0, 0) at the first fit.
+      tnsr::aa<DataVector, Dim> dt_metric_face{};
+      tnsr::aa<DataVector, Dim> dt_pi_face{};
+      tnsr::iaa<DataVector, Dim> dt_phi_face{};
+      slice_tensor(
+          make_not_null(&dt_metric_face),
+          db::get<::Tags::dt<gr::Tags::SpacetimeMetric<DataVector, Dim>>>(
+              box));
+      slice_tensor(make_not_null(&dt_pi_face),
+                   db::get<::Tags::dt<gh::Tags::Pi<DataVector, Dim>>>(box));
+      slice_tensor(make_not_null(&dt_phi_face),
+                   db::get<::Tags::dt<gh::Tags::Phi<DataVector, Dim>>>(box));
+      const RateFitResult accel = fit_map_parameter_accelerations(
+          metric_face, pi_face, phi_face, dt_metric_face, dt_pi_face,
+          dt_phi_face, coords_face, ylm_transform, *config_opt);
+      residual_initial = accel.residual_initial;
+      residual_final = accel.residual_final;
+      iterations = 1.;
+      bool finite = true;
+      for (size_t a = 0; a < num_map_parameters; ++a) {
+        finite = finite and std::isfinite(gsl::at(accel.pdot, a));
+      }
+      if (finite) {
+        db::mutate<Tags::MapParameters>(
+            [&accel, &time, &p_out, &pdot_out](
+                const gsl::not_null<MapParameterData*> data) {
+              if (data->valid and time > data->last_fit_time) {
+                const double dt = time - data->last_fit_time;
+                data->previous_fit_time = data->last_fit_time;
+                data->p_previous = data->p;
+                for (size_t a = 0; a < num_map_parameters; ++a) {
+                  // velocity Verlet: advance with the stored acceleration,
+                  // then update the rate with the average of old and new
+                  gsl::at(data->p, a) += dt * gsl::at(data->pdot, a) +
+                                         0.5 * dt * dt *
+                                             gsl::at(data->pddot, a);
+                  gsl::at(data->pdot, a) +=
+                      0.5 * dt *
+                      (gsl::at(data->pddot, a) + gsl::at(accel.pdot, a));
+                }
+              }
+              data->last_fit_time = time;
+              data->pddot = accel.pdot;
+              data->valid = true;
+              p_out = data->p;
+              pdot_out = data->pdot;
+            },
+            make_not_null(&box));
+      }
+    } else if (config_opt->rate_ode) {
       if (config_opt->fit_center_offset) {
         ERROR(
             "WorldtubeMatcher: RateOde and FitCenterOffset cannot be "

@@ -391,14 +391,15 @@ FitResult fit_map_parameters(
   return result;
 }
 
-RateFitResult fit_map_parameter_rates(
+namespace {
+// Shared core of the rate and acceleration fits: project a symmetric-tensor
+// target onto the nine unpinned rate directions of the covariant response,
+// -(g R_A g), and unfold the (rate-level) pins.
+RateFitResult project_onto_rate_directions(
+    const tnsr::aa<DataVector, 3>& target,
     const tnsr::aa<DataVector, 3>& spacetime_metric,
-    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
     const tnsr::I<DataVector, 3>& inertial_coords,
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config) {
-  ASSERT(config.fit_l_max <= ylm_transform.l_max(),
-         "FitLMax " << config.fit_l_max << " exceeds the grid l_max "
-                    << ylm_transform.l_max());
   const size_t n_points = get<0, 0>(spacetime_metric).size();
   std::vector<size_t> mode_indices;
   ylm::SpherepackIterator iter(ylm_transform.l_max(), ylm_transform.m_max());
@@ -406,24 +407,6 @@ RateFitResult fit_map_parameter_rates(
     for (int m = -static_cast<int>(l); m <= static_cast<int>(l); ++m) {
       iter.set(l, m);
       mode_indices.push_back(iter());
-    }
-  }
-
-  // data-side dt g = beta^k Phi_k - alpha Pi
-  const auto inverse_metric = determinant_and_inverse(spacetime_metric).second;
-  const DataVector lapse_sq = -1. / get<0, 0>(inverse_metric);
-  const DataVector lapse = sqrt(lapse_sq);
-  std::array<DataVector, 3> shift{};
-  for (size_t i = 0; i < 3; ++i) {
-    gsl::at(shift, i) = lapse_sq * inverse_metric.get(0, i + 1);
-  }
-  tnsr::aa<DataVector, 3> dt_metric(n_points);
-  for (size_t a = 0; a < 4; ++a) {
-    for (size_t b = a; b < 4; ++b) {
-      dt_metric.get(a, b) = -lapse * pi.get(a, b);
-      for (size_t k = 0; k < 3; ++k) {
-        dt_metric.get(a, b) += gsl::at(shift, k) * phi.get(k, a, b);
-      }
     }
   }
 
@@ -443,7 +426,7 @@ RateFitResult fit_map_parameter_rates(
         }
         return out;
       };
-  const std::vector<double> target = tensor_modes(dt_metric);
+  const std::vector<double> target_modes = tensor_modes(target);
 
   // rate-response columns for the nine unpinned rate directions: the rate
   // embedding is the derivative of the value pins, so the trace pin drops
@@ -488,7 +471,7 @@ RateFitResult fit_map_parameter_rates(
   }
 
   // linear least squares via the normal equations
-  const size_t n_res = target.size();
+  const size_t n_res = target_modes.size();
   std::vector<std::vector<double>> jtj(n_free, std::vector<double>(n_free, 0.));
   std::vector<double> jtr(n_free, 0.);
   for (size_t a = 0; a < n_free; ++a) {
@@ -502,15 +485,15 @@ RateFitResult fit_map_parameter_rates(
     }
     double sum = 0.;
     for (size_t i = 0; i < n_res; ++i) {
-      sum += columns[a][i] * target[i];
+      sum += columns[a][i] * target_modes[i];
     }
     jtr[a] = sum;
   }
   const auto x = solve_normal_equations(std::move(jtj), std::move(jtr));
 
   RateFitResult result{};
-  result.residual_initial = norm_of(target);
-  std::vector<double> residual = target;
+  result.residual_initial = norm_of(target_modes);
+  std::vector<double> residual = target_modes;
   for (size_t a = 0; a < n_free; ++a) {
     for (size_t i = 0; i < n_res; ++i) {
       residual[i] -= x[a] * columns[a][i];
@@ -527,5 +510,94 @@ RateFitResult fit_map_parameter_rates(
   }
   result.pdot[12] = -x[4] - x[7];
   return result;
+}
+}  // namespace
+
+RateFitResult fit_map_parameter_rates(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config) {
+  ASSERT(config.fit_l_max <= ylm_transform.l_max(),
+         "FitLMax " << config.fit_l_max << " exceeds the grid l_max "
+                    << ylm_transform.l_max());
+  const size_t n_points = get<0, 0>(spacetime_metric).size();
+  // data-side dt g = beta^k Phi_k - alpha Pi (the kinematic identity)
+  const auto inverse_metric = determinant_and_inverse(spacetime_metric).second;
+  const DataVector lapse_sq = -1. / get<0, 0>(inverse_metric);
+  const DataVector lapse = sqrt(lapse_sq);
+  std::array<DataVector, 3> shift{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(shift, i) = lapse_sq * inverse_metric.get(0, i + 1);
+  }
+  tnsr::aa<DataVector, 3> dt_metric(n_points);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      dt_metric.get(a, b) = -lapse * pi.get(a, b);
+      for (size_t k = 0; k < 3; ++k) {
+        dt_metric.get(a, b) += gsl::at(shift, k) * phi.get(k, a, b);
+      }
+    }
+  }
+  return project_onto_rate_directions(dt_metric, spacetime_metric,
+                                      inertial_coords, ylm_transform, config);
+}
+
+RateFitResult fit_map_parameter_accelerations(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
+    const tnsr::aa<DataVector, 3>& dt_spacetime_metric,
+    const tnsr::aa<DataVector, 3>& dt_pi,
+    const tnsr::iaa<DataVector, 3>& dt_phi,
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config) {
+  ASSERT(config.fit_l_max <= ylm_transform.l_max(),
+         "FitLMax " << config.fit_l_max << " exceeds the grid l_max "
+                    << ylm_transform.l_max());
+  const size_t n_points = get<0, 0>(spacetime_metric).size();
+  // lapse and shift and their time derivatives from the metric and its dt:
+  // dt G^{ab} = -(G dt_g G)^{ab};  alpha = (-G^tt)^{-1/2};
+  // dt alpha = (alpha^3/2) dt G^tt;  beta^i = alpha^2 G^ti.
+  const auto inverse_metric = determinant_and_inverse(spacetime_metric).second;
+  const DataVector lapse_sq = -1. / get<0, 0>(inverse_metric);
+  const DataVector lapse = sqrt(lapse_sq);
+  std::array<DataVector, 3> shift{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(shift, i) = lapse_sq * inverse_metric.get(0, i + 1);
+  }
+  tnsr::AA<DataVector, 3> dt_inverse_metric(n_points, 0.);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      for (size_t c = 0; c < 4; ++c) {
+        for (size_t d = 0; d < 4; ++d) {
+          dt_inverse_metric.get(a, b) -= inverse_metric.get(a, c) *
+                                         dt_spacetime_metric.get(c, d) *
+                                         inverse_metric.get(d, b);
+        }
+      }
+    }
+  }
+  const DataVector dt_lapse =
+      0.5 * lapse * lapse_sq * get<0, 0>(dt_inverse_metric);
+  std::array<DataVector, 3> dt_shift{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(dt_shift, i) =
+        2. * lapse * dt_lapse * inverse_metric.get(0, i + 1) +
+        lapse_sq * dt_inverse_metric.get(0, i + 1);
+  }
+  // d2t g = dt beta . Phi + beta . dt Phi - dt alpha . Pi - alpha . dt Pi
+  tnsr::aa<DataVector, 3> d2t_metric(n_points);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      d2t_metric.get(a, b) =
+          -dt_lapse * pi.get(a, b) - lapse * dt_pi.get(a, b);
+      for (size_t k = 0; k < 3; ++k) {
+        d2t_metric.get(a, b) += gsl::at(dt_shift, k) * phi.get(k, a, b) +
+                                gsl::at(shift, k) * dt_phi.get(k, a, b);
+      }
+    }
+  }
+  return project_onto_rate_directions(d2t_metric, spacetime_metric,
+                                      inertial_coords, ylm_transform, config);
 }
 }  // namespace gh::Worldtube
