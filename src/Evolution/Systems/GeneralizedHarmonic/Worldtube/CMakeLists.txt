@@ -12,6 +12,7 @@ spectre_target_headers(
   ${LIBRARY}
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
+  AdvanceMapParameterOde.hpp
   FitMapParameters.hpp
   Matcher.hpp
   Tags.hpp

@@ -27,6 +27,7 @@
 #include "Evolution/Executables/GeneralizedHarmonic/GeneralizedHarmonicBase.hpp"
 #include "Evolution/Systems/Cce/Callbacks/DumpBondiSachsOnWorldtube.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Actions/SetInitialData.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/AdvanceMapParameterOde.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/FitMapParameters.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Tags.hpp"
 #include "NumericalAlgorithms/Strahlkorper/IO/InitialShapeFromFile.hpp"
@@ -232,10 +233,18 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
   // The online worldtube matcher fits the affine-map parameters from the
   // excision-sphere data at the top of each step (no-op when the
   // WorldtubeMatcher option is None).
-  using step_actions = tmpl::push_front<
+  // The online worldtube matcher: FitMapParameters at the top of the step
+  // (the algebraic/ODE modes), AdvanceMapParameterOde directly after the
+  // RHS computation (the StepperOde mode, which records and updates through
+  // the element's own time stepper each substep).
+  using base_step_actions =
       typename gh_base::template step_actions<EvolutionMetavars,
-                                              control_systems>,
-      gh::Worldtube::Actions::FitMapParameters>;
+                                              control_systems>;
+  using step_actions = tmpl::flatten<
+      tmpl::list<gh::Worldtube::Actions::FitMapParameters,
+                 tmpl::front<base_step_actions>,
+                 gh::Worldtube::Actions::AdvanceMapParameterOde,
+                 tmpl::pop_front<base_step_actions>>>;
 
   using initialization_actions = tmpl::push_back<
       tmpl::pop_back<typename gh_base::template initialization_actions<

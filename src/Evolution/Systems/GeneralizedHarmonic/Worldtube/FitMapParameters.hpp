@@ -74,6 +74,10 @@ struct FitMapParameters {
     if (not config_opt.has_value()) {
       return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
+    if (config_opt->stepper_ode) {
+      // handled by Actions::AdvanceMapParameterOde after the RHS computation
+      return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+    }
     const auto& element = db::get<domain::Tags::Element<Dim>>(box);
     const auto inner_face = Direction<Dim>::lower_xi();
     if (element.id().block_id() != 0 or

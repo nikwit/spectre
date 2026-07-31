@@ -9,6 +9,8 @@
 #include <optional>
 
 #include "DataStructures/DataBox/Tag.hpp"
+#include "DataStructures/DataVector.hpp"
+#include "Time/History.hpp"
 #include "Options/Auto.hpp"
 #include "Options/String.hpp"
 #include "Utilities/Gsl.hpp"
@@ -107,6 +109,16 @@ struct MatcherConfig {
         "scalar-worldtube architecture. Mutually exclusive with RateOde and "
         "FitCenterOffset."};
   };
+  struct StepperOde {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Integrate (p, pdot) through the element's own TimeStepper: the "
+        "acceleration is measured from the just-computed right-hand sides "
+        "at every (sub)step and recorded in a TimeSteppers::History, with "
+        "the integration order slaved to the system history, dormancy "
+        "during self-start, and TimeStepId-keyed rewind on step rejection. "
+        "FitInterval is ignored. Mutually exclusive with the other modes."};
+  };
   struct FitCenterOffset {
     using type = bool;
     static constexpr Options::String help = {
@@ -120,7 +132,7 @@ struct MatcherConfig {
   using options =
       tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin, FitLMax,
                  FitInterval, FitCenterOffset, RateOde, SecondOrderOde,
-                 FitRadialIndex>;
+                 StepperOde, FitRadialIndex>;
   static constexpr Options::String help = {
       "Online worldtube matching: fit the 13 first-order affine-map "
       "parameters from the evolved fields on the excision sphere."};
@@ -130,7 +142,8 @@ struct MatcherConfig {
                 const std::array<double, 3>& center_velocity,
                 double trace_strain_pin, size_t fit_l_max,
                 double fit_interval, bool fit_center_offset, bool rate_ode,
-                bool second_order_ode, size_t fit_radial_index)
+                bool second_order_ode, bool stepper_ode,
+                size_t fit_radial_index)
       : mass(mass),
         center(center),
         center_velocity(center_velocity),
@@ -140,6 +153,7 @@ struct MatcherConfig {
         fit_center_offset(fit_center_offset),
         rate_ode(rate_ode),
         second_order_ode(second_order_ode),
+        stepper_ode(stepper_ode),
         fit_radial_index(fit_radial_index) {}
 
   // NOLINTNEXTLINE(google-runtime-references)
@@ -154,6 +168,7 @@ struct MatcherConfig {
   bool fit_center_offset = false;
   bool rate_ode = false;
   bool second_order_ode = false;
+  bool stepper_ode = false;
   size_t fit_radial_index = 0;
 };
 
@@ -172,6 +187,10 @@ struct MapParameterData {
   std::array<double, num_map_parameters> pdot{};
   std::array<double, num_map_parameters> pddot{};
   std::array<double, 3> center_offset{};
+  /// Stepper-integrated mode: the 26-component state (p, pdot) and its
+  /// time-stepper history
+  DataVector ode_state{};
+  TimeSteppers::History<DataVector> ode_history{};
   bool valid = false;
 
   // NOLINTNEXTLINE(google-runtime-references)
