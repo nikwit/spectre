@@ -74,7 +74,7 @@ struct FitMapParameters {
     if (not config_opt.has_value()) {
       return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
-    if (config_opt->stepper_ode) {
+    if (config_opt->stepper_ode and config_opt->uplus_anchor == 0.) {
       // handled by Actions::AdvanceMapParameterOde after the RHS computation
       return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
@@ -86,8 +86,14 @@ struct FitMapParameters {
     }
     const double time = db::get<::Tags::Time>(box);
     const auto& state = db::get<Tags::MapParameters>(box);
-    if (state.valid and
-        time < state.last_fit_time + config_opt->fit_interval - 1.0e-12) {
+    if (config_opt->stepper_ode) {
+      if (state.anchor_valid and
+          time < state.anchor_time + config_opt->fit_interval - 1.0e-12) {
+        return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+      }
+    } else if (state.valid and
+               time <
+                   state.last_fit_time + config_opt->fit_interval - 1.0e-12) {
       return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
 
@@ -168,6 +174,67 @@ struct FitMapParameters {
     double residual_initial = 0.;
     double residual_final = 0.;
     double iterations = 0.;
+
+    if (config_opt->stepper_ode) {
+      // u^+ anchor: value-fit the map to the gauge projection of the
+      // OUTGOING characteristic (normal_sign -1) — the channel the ghost
+      // BC does not set, i.e. the data the ambient evolution feeds the
+      // excision. Consumed by AdvanceMapParameterOde as the weak drive
+      // -2 kappa (pdot - pdot_anchor) - kappa^2 (p - p_anchor).
+      const std::array<double, num_map_parameters> zero_rates{};
+      std::array<double, num_map_parameters> p_start{};
+      const std::array<double, 3> center_offset_start{};
+      if (state.anchor_valid) {
+        p_start = state.anchor_p;
+      }
+      const FitResult result = fit_map_parameters(
+          metric_face, pi_face, phi_face, gamma2_face, coords_face,
+          ylm_transform, *config_opt, p_start, center_offset_start,
+          zero_rates, -1.0);
+      bool finite = true;
+      for (size_t a = 0; a < num_map_parameters; ++a) {
+        finite = finite and std::isfinite(gsl::at(result.p, a));
+      }
+      if (finite) {
+        db::mutate<Tags::MapParameters>(
+            [&result, &time](const gsl::not_null<MapParameterData*> data) {
+              if (data->anchor_valid) {
+                data->anchor_p_previous = data->anchor_p;
+                data->anchor_time_previous = data->anchor_time;
+              }
+              data->anchor_p = result.p;
+              data->anchor_time = time;
+              data->anchor_valid = true;
+            },
+            make_not_null(&box));
+      }
+      auto& writer = Parallel::get_parallel_component<
+          observers::ObserverWriter<Metavariables>>(cache);
+      std::vector<std::string> legend{"Time"};
+      static const std::array<std::string, num_map_parameters> names{
+          {"qdot0", "b_x", "b_y", "b_z", "v_x", "v_y", "v_z", "s_xx",
+           "s_xy", "s_xz", "s_yy", "s_yz", "s_zz"}};
+      for (const auto& name : names) {
+        legend.push_back("anchor_" + name);
+      }
+      legend.emplace_back("ResidualInitial");
+      legend.emplace_back("ResidualFinal");
+      legend.emplace_back("Iterations");
+      std::vector<double> row;
+      row.reserve(num_map_parameters + 4);
+      row.push_back(time);
+      for (size_t a = 0; a < num_map_parameters; ++a) {
+        row.push_back(gsl::at(result.p, a));
+      }
+      row.push_back(result.residual_initial);
+      row.push_back(result.residual_final);
+      row.push_back(static_cast<double>(result.iterations));
+      Parallel::threaded_action<
+          observers::ThreadedActions::WriteReductionDataRow>(
+          writer[0], std::string{"/WorldtubeAnchor"}, std::move(legend),
+          std::make_tuple(std::move(row)));
+      return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+    }
 
     if (config_opt->second_order_ode) {
       if (config_opt->fit_center_offset or config_opt->rate_ode) {
@@ -310,7 +377,7 @@ struct FitMapParameters {
       const FitResult result = fit_map_parameters(
           metric_face, pi_face, phi_face, gamma2_face, coords_face,
           ylm_transform, *config_opt, p_start, center_offset_start,
-          zero_rates);
+          zero_rates, config_opt->fit_uplus ? -1.0 : 1.0);
       residual_initial = result.residual_initial;
       residual_final = result.residual_final;
       iterations = static_cast<double>(result.iterations);
@@ -324,15 +391,26 @@ struct FitMapParameters {
       }
 
       if (finite) {
+        // the rates fed to the boundary condition's model Pi come from the
+        // evolution equations (dt g = beta Phi - alpha Pi projected on the
+        // rate directions), not from backward differences of the fits:
+        // smooth, and independent of the fit history (feeding fit
+        // differences back was the measured x1.33-per-fit instability)
+        const RateFitResult rate = fit_map_parameter_rates(
+            metric_face, pi_face, phi_face, coords_face, ylm_transform,
+            *config_opt);
+        bool rate_finite = true;
+        for (size_t a = 0; a < num_map_parameters; ++a) {
+          rate_finite =
+              rate_finite and std::isfinite(gsl::at(rate.pdot, a));
+        }
+        if (rate_finite) {
+          pdot_out = rate.pdot;
+        }
         db::mutate<Tags::MapParameters>(
             [&result, &time, &pdot_out](
                 const gsl::not_null<MapParameterData*> data) {
               if (data->valid and time > data->last_fit_time) {
-                const double dt = time - data->last_fit_time;
-                for (size_t a = 0; a < num_map_parameters; ++a) {
-                  gsl::at(pdot_out, a) =
-                      (gsl::at(result.p, a) - gsl::at(data->p, a)) / dt;
-                }
                 data->previous_fit_time = data->last_fit_time;
                 data->p_previous = data->p;
               }

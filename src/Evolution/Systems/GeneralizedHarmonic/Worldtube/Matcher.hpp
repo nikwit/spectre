@@ -56,7 +56,8 @@ FitResult fit_map_parameters(
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
     const std::array<double, num_map_parameters>& p_start,
     const std::array<double, 3>& center_offset_start,
-    const std::array<double, num_map_parameters>& pdot_estimate);
+    const std::array<double, num_map_parameters>& pdot_estimate,
+    double normal_sign);
 
 /// Result of one linear rate fit (the `RateOde` mode).
 struct RateFitResult {

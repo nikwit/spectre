@@ -19,6 +19,8 @@ void MatcherConfig::pup(PUP::er& p) {
   p | second_order_ode;
   p | stepper_ode;
   p | gauge_damping;
+  p | uplus_anchor;
+  p | fit_uplus;
   p | spatial_monopole_weight;
   p | fit_radial_index;
 }
@@ -34,6 +36,8 @@ bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
          lhs.second_order_ode == rhs.second_order_ode and
          lhs.stepper_ode == rhs.stepper_ode and
          lhs.gauge_damping == rhs.gauge_damping and
+         lhs.uplus_anchor == rhs.uplus_anchor and
+         lhs.fit_uplus == rhs.fit_uplus and
          lhs.spatial_monopole_weight ==
              rhs.spatial_monopole_weight and
          lhs.fit_radial_index == rhs.fit_radial_index;
@@ -55,6 +59,11 @@ void MapParameterData::pup(PUP::er& pupper) {
   pupper | ode_history;
   pupper | ode_step_start;
   pupper | ode_step_id;
+  pupper | anchor_p;
+  pupper | anchor_p_previous;
+  pupper | anchor_time;
+  pupper | anchor_time_previous;
+  pupper | anchor_valid;
   pupper | valid;
 }
 }  // namespace gh::Worldtube

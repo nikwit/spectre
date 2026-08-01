@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -217,24 +218,61 @@ struct AdvanceMapParameterOde {
             dt_y[a] = y[num_map_parameters + a];
             dt_y[num_map_parameters + a] = gsl::at(accel.pdot, a);
           }
+          static constexpr std::array<size_t, 9> free_indices{
+              {0, 1, 2, 3, 7, 8, 9, 10, 11}};
+          const auto add_pin_consistent_drive =
+              [&dt_y, &config_opt](
+                  const std::array<double, num_map_parameters>& raw) {
+                std::array<double, num_map_parameters> drive{};
+                for (const size_t a : free_indices) {
+                  gsl::at(drive, a) = gsl::at(raw, a);
+                }
+                for (size_t i = 0; i < 3; ++i) {
+                  gsl::at(drive, 4 + i) =
+                      drive[0] * gsl::at(config_opt->center_velocity, i);
+                }
+                drive[12] = -drive[7] - drive[10];
+                for (size_t a = 0; a < num_map_parameters; ++a) {
+                  dt_y[num_map_parameters + a] += gsl::at(drive, a);
+                }
+              };
           if (const double gamma = config_opt->gauge_damping; gamma > 0.) {
             // damped-oscillator gauge fixing of the free parameters,
             // unfolded through the pins so the pinned relations stay exact
-            static constexpr std::array<size_t, 9> free_indices{
-                {0, 1, 2, 3, 7, 8, 9, 10, 11}};
             std::array<double, num_map_parameters> damp{};
             for (const size_t a : free_indices) {
               gsl::at(damp, a) = -2. * gamma * y[num_map_parameters + a] -
                                  gamma * gamma * y[a];
             }
-            for (size_t i = 0; i < 3; ++i) {
-              gsl::at(damp, 4 + i) =
-                  damp[0] * gsl::at(config_opt->center_velocity, i);
+            add_pin_consistent_drive(damp);
+          }
+          if (const double kappa = config_opt->uplus_anchor;
+              kappa > 0. and data->anchor_valid) {
+            // weak drive toward the u^+ value fit: the anchor is the map
+            // determination from the outgoing characteristic, which the
+            // ghost BC cannot manufacture — a measured gauge reference
+            // rather than an imposed one
+            std::array<double, num_map_parameters> anchor_rate{};
+            if (data->anchor_time > data->anchor_time_previous and
+                data->anchor_time_previous >
+                    std::numeric_limits<double>::lowest()) {
+              const double dt_anchor =
+                  data->anchor_time - data->anchor_time_previous;
+              for (const size_t a : free_indices) {
+                gsl::at(anchor_rate, a) =
+                    (gsl::at(data->anchor_p, a) -
+                     gsl::at(data->anchor_p_previous, a)) /
+                    dt_anchor;
+              }
             }
-            damp[12] = -damp[7] - damp[10];
-            for (size_t a = 0; a < num_map_parameters; ++a) {
-              dt_y[num_map_parameters + a] += gsl::at(damp, a);
+            std::array<double, num_map_parameters> drive{};
+            for (const size_t a : free_indices) {
+              gsl::at(drive, a) =
+                  -2. * kappa *
+                      (y[num_map_parameters + a] - gsl::at(anchor_rate, a)) -
+                  kappa * kappa * (y[a] - gsl::at(data->anchor_p, a));
             }
+            add_pin_consistent_drive(drive);
           }
           history.insert(time_step_id, y, dt_y);
           stepper.update_u(make_not_null(&y), history, time_step);

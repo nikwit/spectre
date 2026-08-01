@@ -135,17 +135,21 @@ SphereFrame build_frame(const tnsr::aa<DataVector, 3>& metric,
   return fr;
 }
 
-// u^-_ab = Pi_ab + n_out^k Phi_kab - gamma_2 g_ab
+// u^\pm_ab = Pi_ab \pm n_out^k Phi_kab - gamma_2 g_ab; normal_sign +1
+// gives the incoming characteristic the ghost BC sets, -1 the outgoing
+// one (into the excision), which the BC never touches.
 tnsr::aa<DataVector, 3> u_minus_of(const tnsr::aa<DataVector, 3>& metric,
                                    const tnsr::aa<DataVector, 3>& pi,
                                    const tnsr::iaa<DataVector, 3>& phi,
-                                   const SphereFrame& fr) {
+                                   const SphereFrame& fr,
+                                   const double normal_sign) {
   tnsr::aa<DataVector, 3> u(fr.n_points);
   for (size_t a = 0; a < 4; ++a) {
     for (size_t b = a; b < 4; ++b) {
       u.get(a, b) = pi.get(a, b) - fr.gamma2 * metric.get(a, b);
       for (size_t k = 0; k < 3; ++k) {
-        u.get(a, b) += gsl::at(fr.normal_up, k) * phi.get(k, a, b);
+        u.get(a, b) += normal_sign * gsl::at(fr.normal_up, k) *
+                       phi.get(k, a, b);
       }
     }
   }
@@ -299,7 +303,8 @@ FitResult fit_map_parameters(
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
     const std::array<double, num_map_parameters>& p_start,
     const std::array<double, 3>& center_offset_start,
-    const std::array<double, num_map_parameters>& pdot_estimate) {
+    const std::array<double, num_map_parameters>& pdot_estimate,
+    const double normal_sign) {
   ASSERT(config.fit_l_max <= ylm_transform.l_max(),
          "FitLMax " << config.fit_l_max << " exceeds the grid l_max "
                     << ylm_transform.l_max());
@@ -309,7 +314,7 @@ FitResult fit_map_parameters(
       build_frame(spacetime_metric, gamma2, inertial_coords, config.center);
   const std::vector<double> data_modes =
       gauge_modes(gauge_components(u_minus_of(spacetime_metric, pi, phi,
-                                              frame),
+                                              frame, normal_sign),
                                    frame),
                   ylm_transform, modes);
 
@@ -331,7 +336,8 @@ FitResult fit_map_parameters(
         make_not_null(&model_phi), inertial_coords, config.mass,
         model_center, p, pdot_estimate);
     std::vector<double> model_modes = gauge_modes(
-        gauge_components(u_minus_of(model_metric, model_pi, model_phi, frame),
+        gauge_components(u_minus_of(model_metric, model_pi, model_phi, frame,
+                                    normal_sign),
                          frame),
         ylm_transform, modes);
     for (size_t i = 0; i < model_modes.size(); ++i) {

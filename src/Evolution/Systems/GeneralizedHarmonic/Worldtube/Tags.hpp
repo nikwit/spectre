@@ -133,6 +133,32 @@ struct MatcherConfig {
         "oscillator, i.e. gauge-fixes the flat direction. Zero disables."};
     static double lower_bound() { return 0.; }
   };
+  struct UPlusAnchor {
+    using type = double;
+    static constexpr Options::String help = {
+        "Anchor rate kappa for the StepperOde mode: every FitInterval the "
+        "map parameters are value-fitted to the gauge projection of the "
+        "OUTGOING characteristic u^+ = Pi - n Phi - gamma2 g (same null "
+        "projectors as u^-), the one channel the ghost BC does not set, "
+        "and the ODE acceleration gains -2 kappa (pdot - pdot_anchor) "
+        "- kappa^2 (p - p_anchor) on the free directions, unfolded "
+        "through the pins. u^+ is the data the ambient evolution feeds "
+        "the excision, so this anchors the map to the ambient chart and "
+        "lifts the double zero root of the self-referential loop "
+        "(kappa^2 must exceed the loop bias epsilon). Zero disables."};
+    static double lower_bound() { return 0.; }
+  };
+  struct FitUPlus {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Target the value fit at the gauge projection of the OUTGOING "
+        "characteristic u^+ = Pi - n Phi - gamma2 g instead of u^-. u^+ "
+        "is the data the ambient evolution feeds the excision and the one "
+        "channel the ghost BC does not set, so the fit reads a quantity "
+        "the closed loop cannot manufacture (the u^- value fit at the "
+        "face measures the penalty-driven combination and is "
+        "tautological)."};
+  };
   struct SpatialMonopoleWeight {
     using type = double;
     static constexpr Options::String help = {
@@ -157,8 +183,8 @@ struct MatcherConfig {
   using options =
       tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin, FitLMax,
                  FitInterval, FitCenterOffset, RateOde, SecondOrderOde,
-                 StepperOde, GaugeDamping, SpatialMonopoleWeight,
-                 FitRadialIndex>;
+                 StepperOde, GaugeDamping, UPlusAnchor, FitUPlus,
+                 SpatialMonopoleWeight, FitRadialIndex>;
   static constexpr Options::String help = {
       "Online worldtube matching: fit the 13 first-order affine-map "
       "parameters from the evolved fields on the excision sphere."};
@@ -169,7 +195,8 @@ struct MatcherConfig {
                 double trace_strain_pin, size_t fit_l_max,
                 double fit_interval, bool fit_center_offset, bool rate_ode,
                 bool second_order_ode, bool stepper_ode,
-                double gauge_damping, double spatial_monopole_weight,
+                double gauge_damping, double uplus_anchor,
+                bool fit_uplus, double spatial_monopole_weight,
                 size_t fit_radial_index)
       : mass(mass),
         center(center),
@@ -182,6 +209,8 @@ struct MatcherConfig {
         second_order_ode(second_order_ode),
         stepper_ode(stepper_ode),
         gauge_damping(gauge_damping),
+        uplus_anchor(uplus_anchor),
+        fit_uplus(fit_uplus),
         spatial_monopole_weight(spatial_monopole_weight),
         fit_radial_index(fit_radial_index) {}
 
@@ -199,6 +228,8 @@ struct MatcherConfig {
   bool second_order_ode = false;
   bool stepper_ode = false;
   double gauge_damping = 0.;
+  double uplus_anchor = 0.;
+  bool fit_uplus = false;
   double spatial_monopole_weight = 1.;
   size_t fit_radial_index = 0;
 };
@@ -227,6 +258,14 @@ struct MapParameterData {
   /// correct value instead of the rejected end-of-step value
   DataVector ode_step_start{};
   TimeStepId ode_step_id{};
+  /// u^+ anchor state: the latest and previous value fits of the map to
+  /// the gauge projection of the outgoing characteristic, their times,
+  /// and the warm-start vector of the Gauss-Newton solve
+  std::array<double, num_map_parameters> anchor_p{};
+  std::array<double, num_map_parameters> anchor_p_previous{};
+  double anchor_time = std::numeric_limits<double>::lowest();
+  double anchor_time_previous = std::numeric_limits<double>::lowest();
+  bool anchor_valid = false;
   bool valid = false;
 
   // NOLINTNEXTLINE(google-runtime-references)
