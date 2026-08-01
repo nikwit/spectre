@@ -22,6 +22,8 @@ void MatcherConfig::pup(PUP::er& p) {
   p | uplus_anchor;
   p | fit_uplus;
   p | kretschmann_trace_pin;
+  p | trace_pin_interval;
+  p | fit_trace_strain;
   p | spatial_monopole_weight;
   p | fit_radial_index;
 }
@@ -41,6 +43,8 @@ bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
          lhs.fit_uplus == rhs.fit_uplus and
          lhs.kretschmann_trace_pin ==
              rhs.kretschmann_trace_pin and
+         lhs.trace_pin_interval == rhs.trace_pin_interval and
+         lhs.fit_trace_strain == rhs.fit_trace_strain and
          lhs.spatial_monopole_weight ==
              rhs.spatial_monopole_weight and
          lhs.fit_radial_index == rhs.fit_radial_index;
@@ -62,6 +66,8 @@ void MapParameterData::pup(PUP::er& pupper) {
   pupper | ode_history;
   pupper | ode_step_start;
   pupper | ode_step_id;
+  pupper | trace_pin_value;
+  pupper | trace_pin_time;
   pupper | anchor_p;
   pupper | anchor_p_previous;
   pupper | anchor_time;

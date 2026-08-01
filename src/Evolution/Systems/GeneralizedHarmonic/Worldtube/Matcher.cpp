@@ -241,15 +241,19 @@ void embed(const gsl::not_null<std::array<double, num_map_parameters>*> p,
            const std::vector<double>& x, const MatcherConfig& config,
            const double trace_pin) {
   (*p)[0] = x[0];
+  const size_t n_strain = config.fit_trace_strain ? 6 : 5;
   for (size_t i = 0; i < 3; ++i) {
     gsl::at(*p, 1 + i) = x[1 + i];
     gsl::at(*p, 4 + i) = (1. + x[0]) * gsl::at(config.center_velocity, i);
-    gsl::at(*center_offset, i) = config.fit_center_offset ? x[9 + i] : 0.;
+    gsl::at(*center_offset, i) =
+        config.fit_center_offset ? x[4 + n_strain + i] : 0.;
   }
-  for (size_t i = 0; i < 5; ++i) {
+  for (size_t i = 0; i < n_strain; ++i) {
     gsl::at(*p, 7 + i) = x[4 + i];
   }
-  (*p)[12] = 3. * trace_pin - x[4] - x[7];
+  if (not config.fit_trace_strain) {
+    (*p)[12] = 3. * trace_pin - x[4] - x[7];
+  }
 }
 
 double norm_of(const std::vector<double>& v) {
@@ -319,7 +323,8 @@ FitResult fit_map_parameters(
                                    frame),
                   ylm_transform, modes);
 
-  const size_t n_free = config.fit_center_offset ? 12 : 9;
+  const size_t n_base = config.fit_trace_strain ? 10 : 9;
+  const size_t n_free = config.fit_center_offset ? n_base + 3 : n_base;
   const auto residual_of =
       [&](const std::vector<double>& x) -> std::vector<double> {
     std::array<double, num_map_parameters> p{};
@@ -354,12 +359,12 @@ FitResult fit_map_parameters(
   for (size_t i = 0; i < 3; ++i) {
     x[1 + i] = gsl::at(p_start, 1 + i);
   }
-  for (size_t i = 0; i < 5; ++i) {
+  for (size_t i = 0; i + 4 < n_base; ++i) {
     x[4 + i] = gsl::at(p_start, 7 + i);
   }
   if (config.fit_center_offset) {
     for (size_t i = 0; i < 3; ++i) {
-      x[9 + i] = gsl::at(center_offset_start, i);
+      x[n_base + i] = gsl::at(center_offset_start, i);
     }
   }
   std::vector<double> residual = residual_of(x);

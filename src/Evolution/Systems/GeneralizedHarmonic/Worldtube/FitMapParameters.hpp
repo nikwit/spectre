@@ -195,7 +195,12 @@ struct FitMapParameters {
     // gives tr sigma / 3 = 1 - <rho>/<R> via the l=0 sphere means
     // (findings 12).
     double trace_pin = config_opt->trace_strain_pin;
-    if (config_opt->kretschmann_trace_pin) {
+    if (config_opt->kretschmann_trace_pin and
+        state.trace_pin_time > std::numeric_limits<double>::lowest() and
+        time < state.trace_pin_time + config_opt->trace_pin_interval -
+                   1.0e-12) {
+      trace_pin = state.trace_pin_value;
+    } else if (config_opt->kretschmann_trace_pin) {
       const auto& inv_jacobian = db::get<domain::Tags::InverseJacobian<
           Dim, Frame::ElementLogical, Frame::Inertial>>(box);
       const auto deriv_phi_volume = partial_derivative(
@@ -252,8 +257,17 @@ struct FitMapParameters {
       };
       trace_pin = 1. - sphere_mean(rho_gb) / sphere_mean(coord_r);
       if (not std::isfinite(trace_pin)) {
-        trace_pin = config_opt->trace_strain_pin;
+        trace_pin = state.trace_pin_time >
+                            std::numeric_limits<double>::lowest()
+                        ? state.trace_pin_value
+                        : config_opt->trace_strain_pin;
       }
+      db::mutate<Tags::MapParameters>(
+          [&trace_pin, &time](const gsl::not_null<MapParameterData*> data) {
+            data->trace_pin_value = trace_pin;
+            data->trace_pin_time = time;
+          },
+          make_not_null(&box));
     }
 
     if (config_opt->stepper_ode) {

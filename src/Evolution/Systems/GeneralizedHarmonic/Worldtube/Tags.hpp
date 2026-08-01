@@ -172,6 +172,28 @@ struct MatcherConfig {
         "one strain direction the metric fit cannot own). Applies to the "
         "value-fit modes; the ODE modes keep the constant."};
   };
+  struct TracePinInterval {
+    using type = double;
+    static constexpr Options::String help = {
+        "Recompute cadence of the Kretschmann trace pin (held constant "
+        "in between). The pin is secular physics and must NOT be an "
+        "instantaneous closure: recomputing it every substep couples the "
+        "fit to the fields through the second-derivative operator at "
+        "unit gain and blows up in ~2 M regardless of the value-fit "
+        "cadence (measured). Ignored unless KretschmannTracePin."};
+    static double lower_bound() { return 0.; }
+  };
+  struct FitTraceStrain {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Free the trace of the strain as a tenth fit parameter instead "
+        "of pinning it: the trace then rides the same ambient anchor as "
+        "the other directions (meaningful for the u^+ target, which the "
+        "ghost BC cannot drag). TraceStrainPin/KretschmannTracePin then "
+        "affect nothing in the solve; the Kretschmann measurement, if "
+        "enabled, is logged as an open-loop diagnostic only (closing it "
+        "as feedback measured a sampled-loop gain of -2, findings 15t)."};
+  };
   struct SpatialMonopoleWeight {
     using type = double;
     static constexpr Options::String help = {
@@ -197,8 +219,8 @@ struct MatcherConfig {
       tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin, FitLMax,
                  FitInterval, FitCenterOffset, RateOde, SecondOrderOde,
                  StepperOde, GaugeDamping, UPlusAnchor, FitUPlus,
-                 KretschmannTracePin, SpatialMonopoleWeight,
-                 FitRadialIndex>;
+                 KretschmannTracePin, TracePinInterval, FitTraceStrain,
+                 SpatialMonopoleWeight, FitRadialIndex>;
   static constexpr Options::String help = {
       "Online worldtube matching: fit the 13 first-order affine-map "
       "parameters from the evolved fields on the excision sphere."};
@@ -211,6 +233,7 @@ struct MatcherConfig {
                 bool second_order_ode, bool stepper_ode,
                 double gauge_damping, double uplus_anchor,
                 bool fit_uplus, bool kretschmann_trace_pin,
+                double trace_pin_interval, bool fit_trace_strain,
                 double spatial_monopole_weight, size_t fit_radial_index)
       : mass(mass),
         center(center),
@@ -226,6 +249,8 @@ struct MatcherConfig {
         uplus_anchor(uplus_anchor),
         fit_uplus(fit_uplus),
         kretschmann_trace_pin(kretschmann_trace_pin),
+        trace_pin_interval(trace_pin_interval),
+        fit_trace_strain(fit_trace_strain),
         spatial_monopole_weight(spatial_monopole_weight),
         fit_radial_index(fit_radial_index) {}
 
@@ -246,6 +271,8 @@ struct MatcherConfig {
   double uplus_anchor = 0.;
   bool fit_uplus = false;
   bool kretschmann_trace_pin = false;
+  double trace_pin_interval = 0.5;
+  bool fit_trace_strain = false;
   double spatial_monopole_weight = 1.;
   size_t fit_radial_index = 0;
 };
@@ -274,6 +301,9 @@ struct MapParameterData {
   /// correct value instead of the rejected end-of-step value
   DataVector ode_step_start{};
   TimeStepId ode_step_id{};
+  /// Kretschmann trace pin: the held value and its measurement time
+  double trace_pin_value = 0.;
+  double trace_pin_time = std::numeric_limits<double>::lowest();
   /// u^+ anchor state: the latest and previous value fits of the map to
   /// the gauge projection of the outgoing characteristic, their times,
   /// and the warm-start vector of the Gauss-Newton solve
