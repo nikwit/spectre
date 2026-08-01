@@ -86,15 +86,22 @@ struct FitMapParameters {
     }
     const double time = db::get<::Tags::Time>(box);
     const auto& state = db::get<Tags::MapParameters>(box);
-    if (config_opt->stepper_ode) {
-      if (state.anchor_valid and
-          time < state.anchor_time + config_opt->fit_interval - 1.0e-12) {
+    // FitInterval 0 means fit at every invocation, with no time
+    // comparison at all: substep times need not be monotone (a stepper
+    // may have equal or decreasing stage times), and a high-water-mark
+    // gate would silently skip fits and hold a p fitted at a LATER time
+    // than the fields it is applied to.
+    if (config_opt->fit_interval > 0.) {
+      if (config_opt->stepper_ode) {
+        if (state.anchor_valid and
+            time < state.anchor_time + config_opt->fit_interval - 1.0e-12) {
+          return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+        }
+      } else if (state.valid and
+                 time < state.last_fit_time + config_opt->fit_interval -
+                            1.0e-12) {
         return {Parallel::AlgorithmExecution::Continue, std::nullopt};
       }
-    } else if (state.valid and
-               time <
-                   state.last_fit_time + config_opt->fit_interval - 1.0e-12) {
-      return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
 
     const auto& mesh = db::get<domain::Tags::Mesh<Dim>>(box);
