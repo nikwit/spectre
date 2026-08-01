@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <string>
 #include <vector>
 
 #include "DataStructures/DataVector.hpp"
@@ -241,4 +242,146 @@ SPECTRE_TEST_CASE(
       CHECK_ITERABLE_CUSTOM_APPROX(pi.get(a, b), expected, custom);
     }
   }
+}
+
+// Is a boost inside the span of the thirteen response columns? Project the
+// O(v) part of the exact boosted metric at t = 0 (where the secular
+// displacement -v t is absent, so only the tensor-transformation content
+// remains) onto the columns and report both the coefficients and what is
+// left over. If the leftover is at round-off the model can represent a
+// boost and any online failure is the fit's; if not, it cannot.
+SPECTRE_TEST_CASE(
+    "Unit.PointwiseFunctions.AnalyticSolutions.Gr."
+    "AffineMappedHarmonicSchwarzschild.BoostInSpan",
+    "[PointwiseFunctions][Unit]") {
+  const auto x = sample_points();
+  const size_t n_points = get<0>(x).size();
+  const double v = 1.e-4;
+  const double eps = 1.e-6;
+
+  const auto model = [&x](const std::array<double, 13>& p) {
+    tnsr::aa<DataVector, 3> g{};
+    tnsr::aa<DataVector, 3> local_pi{};
+    tnsr::iaa<DataVector, 3> local_phi{};
+    gh::Solutions::affine_map_model::evolved_variables(
+        make_not_null(&g), make_not_null(&local_pi), make_not_null(&local_phi),
+        x, mass, centre, p, zero_p);
+    return g;
+  };
+
+  const auto base = model(zero_p);
+  tnsr::aa<DataVector, 3> boosted{};
+  tnsr::aa<DataVector, 3> boosted_pi{};
+  tnsr::iaa<DataVector, 3> boosted_phi{};
+  gh::Solutions::affine_map_model::boosted_evolved_variables(
+      make_not_null(&boosted), make_not_null(&boosted_pi),
+      make_not_null(&boosted_phi), x, 0., mass, centre, zero_p, zero_p,
+      {{0., 0., v}});
+
+  // flatten (10 components x n_points)
+  const size_t n_rows = 10 * n_points;
+  std::vector<double> target(n_rows, 0.);
+  std::vector<std::vector<double>> columns(13, std::vector<double>(n_rows, 0.));
+  size_t row = 0;
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      for (size_t k = 0; k < n_points; ++k) {
+        target[row + k] = (boosted.get(a, b)[k] - base.get(a, b)[k]) / v;
+      }
+      row += n_points;
+    }
+  }
+  for (size_t col = 0; col < 13; ++col) {
+    std::array<double, 13> p{};
+    gsl::at(p, col) = eps;
+    const auto perturbed = model(p);
+    row = 0;
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        for (size_t k = 0; k < n_points; ++k) {
+          columns[col][row + k] =
+              (perturbed.get(a, b)[k] - base.get(a, b)[k]) / eps;
+        }
+        row += n_points;
+      }
+    }
+  }
+
+  // normal equations, Gaussian elimination with partial pivoting
+  std::vector<std::vector<double>> ata(13, std::vector<double>(14, 0.));
+  for (size_t i = 0; i < 13; ++i) {
+    for (size_t j = 0; j < 13; ++j) {
+      double sum = 0.;
+      for (size_t r = 0; r < n_rows; ++r) {
+        sum += columns[i][r] * columns[j][r];
+      }
+      ata[i][j] = sum;
+    }
+    double rhs = 0.;
+    for (size_t r = 0; r < n_rows; ++r) {
+      rhs += columns[i][r] * target[r];
+    }
+    ata[i][13] = rhs;
+  }
+  for (size_t i = 0; i < 13; ++i) {
+    size_t pivot = i;
+    for (size_t r = i + 1; r < 13; ++r) {
+      if (std::abs(ata[r][i]) > std::abs(ata[pivot][i])) {
+        pivot = r;
+      }
+    }
+    std::swap(ata[i], ata[pivot]);
+    for (size_t r = 0; r < 13; ++r) {
+      if (r == i or std::abs(ata[i][i]) < 1.e-300) {
+        continue;
+      }
+      const double factor = ata[r][i] / ata[i][i];
+      for (size_t col = i; col < 14; ++col) {
+        ata[r][col] -= factor * ata[i][col];
+      }
+    }
+  }
+  std::array<double, 13> coefficients{};
+  for (size_t i = 0; i < 13; ++i) {
+    gsl::at(coefficients, i) =
+        std::abs(ata[i][i]) < 1.e-300 ? 0. : ata[i][13] / ata[i][i];
+  }
+
+  double target_norm = 0.;
+  double leftover = 0.;
+  for (size_t r = 0; r < n_rows; ++r) {
+    double fit = 0.;
+    for (size_t col = 0; col < 13; ++col) {
+      fit += gsl::at(coefficients, col) * columns[col][r];
+    }
+    leftover += square(target[r] - fit);
+    target_norm += square(target[r]);
+  }
+  const double relative = std::sqrt(leftover / target_norm);
+
+  const std::array<std::string, 13> names{
+      {"qdot0", "b_x", "b_y", "b_z", "qdot_x", "qdot_y", "qdot_z", "s_xx",
+       "s_xy", "s_xz", "s_yy", "s_yz", "s_zz"}};
+  for (size_t i = 0; i < 13; ++i) {
+    INFO("coefficient of " + gsl::at(names, i) +
+         " per unit v: " + std::to_string(gsl::at(coefficients, i)));
+    CHECK(true);
+  }
+  // A boost is exactly beta_i = qdot^i = +v_i and nothing else.
+  // to O(v), the accuracy of the finite difference in v that built target
+  Approx unit = Approx::custom().epsilon(2. * v).scale(1.);
+  CHECK(unit(gsl::at(coefficients, 3)) == 1.);  // b_z
+  CHECK(unit(gsl::at(coefficients, 6)) == 1.);  // qdot_z
+  for (const size_t other :
+       {0_st, 1_st, 2_st, 4_st, 5_st, 7_st, 8_st, 9_st, 10_st, 11_st, 12_st}) {
+    INFO("spurious content in " + gsl::at(names, other));
+    CHECK(std::abs(gsl::at(coefficients, other)) < 20. * v);
+  }
+  // What is left over is the O(v) remainder of the finite difference in v,
+  // not a gap in the model space, so it must scale linearly with v. Assert
+  // that rather than a fixed floor: the model DOES contain a boost.
+  INFO("relative leftover after projecting the boost onto the columns: " +
+       std::to_string(relative));
+  CHECK(relative < 2. * v);
+  CHECK(relative > 0.1 * v);
 }
