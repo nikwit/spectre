@@ -16,6 +16,7 @@
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "Options/ParseError.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ExtrinsicCurvature.hpp"
+#include "PointwiseFunctions/SpecialRelativity/LorentzBoostMatrix.hpp"
 #include "Utilities/ConstantExpressions.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/SetNumberOfGridPoints.hpp"
@@ -314,6 +315,131 @@ void evolved_variables(
     }
   }
 }
+void boosted_evolved_variables(
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+    const gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+    const tnsr::I<DataVector, 3>& x, const double time, const double mass,
+    const std::array<double, 3>& center, const std::array<double, 13>& p,
+    const std::array<double, 13>& pdot,
+    const std::array<double, 3>& boost_velocity, const bool centre_advection) {
+  if (boost_velocity == std::array<double, 3>{{0., 0., 0.}}) {
+    evolved_variables(spacetime_metric, pi, phi, x, mass, center, p, pdot,
+                      centre_advection);
+    return;
+  }
+  const size_t n_points = get<0>(x).size();
+
+  // lorentz_boost_matrix(v) is Lambda^a_abar = dx^a_lab / dx^abar_rest, so the
+  // matrix taking lab coordinates and lab derivative indices to the rest frame
+  // is the one built from -v. Call it M^abar_a = dx^abar / dx^a.
+  tnsr::I<double, 3, Frame::NoFrame> minus_v{};
+  for (size_t i = 0; i < 3; ++i) {
+    minus_v.get(i) = -gsl::at(boost_velocity, i);
+  }
+  const auto boost = sr::lorentz_boost_matrix(minus_v);
+
+  // rest-frame coordinates of the lab points, measured from the centre:
+  // X^abar = M^abar_b (t, x - centre)^b. The hole is at the origin of the
+  // rest frame, so pass these to the static solution with a zero centre.
+  tnsr::I<DataVector, 3> rest_coords(n_points);
+  for (size_t i = 0; i < 3; ++i) {
+    rest_coords.get(i) = boost.get(i + 1, 0) * time;
+    for (size_t j = 0; j < 3; ++j) {
+      rest_coords.get(i) +=
+          boost.get(i + 1, j + 1) * (x.get(j) - gsl::at(center, j));
+    }
+  }
+
+  tnsr::aa<DataVector, 3> rest_metric{};
+  tnsr::aa<DataVector, 3> rest_pi{};
+  tnsr::iaa<DataVector, 3> rest_phi{};
+  // The map parameters are evaluated at the *lab* time. For a pure boost
+  // (p = pdot = 0) that is exact; combining a boost with a time-dependent p
+  // mixes the two frames' time coordinates and is only first-order
+  // consistent, which is why the boost tests run at p = 0.
+  evolved_variables(make_not_null(&rest_metric), make_not_null(&rest_pi),
+                    make_not_null(&rest_phi), rest_coords, mass, {{0., 0., 0.}},
+                    p, pdot, centre_advection);
+
+  // d_nu g_ab in the rest frame: the spatial part is Phi, and the time part
+  // comes back out of Pi's definition, dt g = beta^k Phi_k - alpha Pi.
+  const auto rest_inverse = determinant_and_inverse(rest_metric).second;
+  const DataVector rest_lapse = 1. / sqrt(-get<0, 0>(rest_inverse));
+  std::array<std::array<std::array<DataVector, 4>, 4>, 4> rest_deriv{};
+  for (size_t nu = 0; nu < 4; ++nu) {
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = 0; b < 4; ++b) {
+        DataVector& entry = gsl::at(gsl::at(gsl::at(rest_deriv, nu), a), b);
+        if (nu == 0) {
+          entry = -rest_lapse * rest_pi.get(a, b);
+          for (size_t k = 0; k < 3; ++k) {
+            const DataVector shift_k =
+                -rest_inverse.get(0, k + 1) / get<0, 0>(rest_inverse);
+            entry += shift_k * rest_phi.get(k, a, b);
+          }
+        } else {
+          entry = rest_phi.get(nu - 1, a, b);
+        }
+      }
+    }
+  }
+
+  // g_ab(lab) = M^c_a M^d_b g_cd(rest);
+  // d_mu g_ab(lab) = M^e_mu M^c_a M^d_b d_e g_cd(rest).
+  set_number_of_grid_points(spacetime_metric, n_points);
+  set_number_of_grid_points(phi, n_points);
+  set_number_of_grid_points(pi, n_points);
+  std::array<std::array<std::array<DataVector, 4>, 4>, 4> lab_deriv{};
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      spacetime_metric->get(a, b) = 0.;
+      for (size_t c = 0; c < 4; ++c) {
+        for (size_t d = 0; d < 4; ++d) {
+          spacetime_metric->get(a, b) +=
+              boost.get(c, a) * boost.get(d, b) * rest_metric.get(c, d);
+        }
+      }
+    }
+  }
+  for (size_t mu = 0; mu < 4; ++mu) {
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        DataVector& entry = gsl::at(gsl::at(gsl::at(lab_deriv, mu), a), b);
+        entry = DataVector(n_points, 0.);
+        for (size_t e = 0; e < 4; ++e) {
+          for (size_t c = 0; c < 4; ++c) {
+            for (size_t d = 0; d < 4; ++d) {
+              entry += boost.get(e, mu) * boost.get(c, a) * boost.get(d, b) *
+                       gsl::at(gsl::at(gsl::at(rest_deriv, e), c), d);
+            }
+          }
+        }
+      }
+    }
+  }
+  for (size_t k = 0; k < 3; ++k) {
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        phi->get(k, a, b) = gsl::at(gsl::at(gsl::at(lab_deriv, k + 1), a), b);
+      }
+    }
+  }
+  // Pi from the lab lapse and shift
+  const auto lab_inverse = determinant_and_inverse(*spacetime_metric).second;
+  const DataVector lab_lapse = 1. / sqrt(-get<0, 0>(lab_inverse));
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      pi->get(a, b) = -gsl::at(gsl::at(gsl::at(lab_deriv, 0), a), b);
+      for (size_t k = 0; k < 3; ++k) {
+        const DataVector shift_k =
+            -lab_inverse.get(0, k + 1) / get<0, 0>(lab_inverse);
+        pi->get(a, b) += shift_k * phi->get(k, a, b);
+      }
+      pi->get(a, b) /= lab_lapse;
+    }
+  }
+}
 }  // namespace affine_map_model
 
 AffineMappedHarmonicSchwarzschild::AffineMappedHarmonicSchwarzschild(
@@ -321,14 +447,24 @@ AffineMappedHarmonicSchwarzschild::AffineMappedHarmonicSchwarzschild(
     std::vector<double> parameter_times,
     std::vector<std::array<double, number_of_parameters>> parameter_values,
     std::vector<std::array<double, number_of_parameters>> parameter_rates,
+    const std::array<double, volume_dim>& velocity,
     const Options::Context& context)
     : mass_(mass),
       center_(center),
       parameter_times_(std::move(parameter_times)),
       parameter_values_(std::move(parameter_values)),
-      parameter_rates_(std::move(parameter_rates)) {
+      parameter_rates_(std::move(parameter_rates)),
+      velocity_(velocity) {
   if (parameter_times_.empty()) {
     PARSE_ERROR(context, "ParameterTimes must not be empty.");
+  }
+  double v_squared = 0.;
+  for (size_t i = 0; i < volume_dim; ++i) {
+    v_squared += square(gsl::at(velocity_, i));
+  }
+  if (v_squared >= 1.) {
+    PARSE_ERROR(context, "Velocity must be subluminal, but |v|^2 = "
+                             << v_squared << ".");
   }
   if (not std::is_sorted(parameter_times_.begin(), parameter_times_.end()) or
       std::adjacent_find(parameter_times_.begin(), parameter_times_.end()) !=
@@ -415,9 +551,9 @@ AffineMappedHarmonicSchwarzschild::all_variables(
       get<gr::Tags::SpacetimeMetric<DataVector, volume_dim>>(result);
   auto& pi = get<gh::Tags::Pi<DataVector, volume_dim>>(result);
   auto& phi = get<gh::Tags::Phi<DataVector, volume_dim>>(result);
-  affine_map_model::evolved_variables(make_not_null(&spacetime_metric),
-                                      make_not_null(&pi), make_not_null(&phi),
-                                      x, mass_, center_, p, pdot);
+  affine_map_model::boosted_evolved_variables(
+      make_not_null(&spacetime_metric), make_not_null(&pi), make_not_null(&phi),
+      x, time, mass_, center_, p, pdot, velocity_);
 
   // lapse and shift from the metric
   auto& lapse = get<gr::Tags::Lapse<DataVector>>(result);
@@ -458,6 +594,7 @@ void AffineMappedHarmonicSchwarzschild::pup(PUP::er& p) {
   p | parameter_times_;
   p | parameter_values_;
   p | parameter_rates_;
+  p | velocity_;
   if (p.isUnpacking()) {
     build_splines();
   }
@@ -468,7 +605,8 @@ bool operator==(const AffineMappedHarmonicSchwarzschild& lhs,
   return lhs.mass_ == rhs.mass_ and lhs.center_ == rhs.center_ and
          lhs.parameter_times_ == rhs.parameter_times_ and
          lhs.parameter_values_ == rhs.parameter_values_ and
-         lhs.parameter_rates_ == rhs.parameter_rates_;
+         lhs.parameter_rates_ == rhs.parameter_rates_ and
+         lhs.velocity_ == rhs.velocity_;
 }
 
 bool operator!=(const AffineMappedHarmonicSchwarzschild& lhs,

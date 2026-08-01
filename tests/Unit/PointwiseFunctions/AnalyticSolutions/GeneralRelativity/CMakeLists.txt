@@ -4,6 +4,7 @@
 set(LIBRARY "Test_GeneralRelativitySolutions")
 
 set(LIBRARY_SOURCES
+  Test_AffineMappedHarmonicSchwarzschild.cpp
   Test_GaugeWave.cpp
   Test_GaugePlaneWave.cpp
   Test_HarmonicSchwarzschild.cpp
@@ -31,6 +32,7 @@ target_link_libraries(
   LinearOperators
   Options
   Spectral
+  SpecialRelativity
   Utilities
   )
 

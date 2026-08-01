@@ -2,6 +2,8 @@
 # See LICENSE.txt for details.
 
 Executable: EvolveGhSingleBlackHole
+Testing:
+  Check: parse
 
 ---
 
@@ -106,11 +108,11 @@ EvolutionSystem:
         MovementMethod: ExpansionFactor
         Gaussian1:
           Amplitude: 7.0
-          Width: 2.5                 
+          Width: 2.5
           Center: *Center
         Gaussian2:
-          Amplitude: 0.1             
-          Width: 100.0                 
+          Amplitude: 0.1
+          Width: 100.0
           Center: *Center
         Gaussian3:
           Amplitude: 0.0
@@ -125,11 +127,11 @@ EvolutionSystem:
         MovementMethod: ExpansionFactor
         Gaussian1:
           Amplitude: 7.0
-          Width: 2.5                 
+          Width: 2.5
           Center: *Center
         Gaussian2:
-          Amplitude: 0.1             
-          Width: 100.0                 
+          Amplitude: 0.1
+          Width: 100.0
           Center: *Center
         Gaussian3:
           Amplitude: 0.0
@@ -249,7 +251,7 @@ EventsAndTriggersAtSlabs:
   #        Offset: 0
   #  Events:
   #    - ApparentHorizon
-  #    - ExcisionBoundary  
+  #    - ExcisionBoundary
   # Never terminate... run until something fails!
 
 EventsAndTriggersAtCheckpoints:
@@ -328,7 +330,8 @@ ControlSystems:
     #   AverageTimescaleFraction: 0.25
     #   Average0thDeriv: false
     # Controller:
-    #   UpdateFraction: 0.2 # if you find your run is going slow, try adjusting this to be 0.2
+    #   UpdateFraction: 0.2 # if the run is going slow, try
+    #                      # adjusting this to 0.2
     # TimescaleTuner:
     #   InitialTimescales: 0.2
     #   MinTimescale: 1.0e-2
@@ -343,7 +346,8 @@ ControlSystems:
     #   AverageTimescaleFraction: 0.25
     #   Average0thDeriv: true
     # Controller:
-    #   UpdateFraction: 0.1 # Could also adjust this to 0.1 and see if it's stable.
+    #   UpdateFraction: 0.1 # could also adjust this to 0.1
+    #                      # and see if it is stable
     # TimescaleTuner:
     #   InitialTimescales: 0.2
     #   MinTimescale: 1.0e-4

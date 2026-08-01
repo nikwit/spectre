@@ -65,6 +65,50 @@ void evolved_variables(gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
                        const std::array<double, 13>& p,
                        const std::array<double, 13>& pdot,
                        bool centre_advection = true);
+
+/*!
+ * \brief The same evolved variables for a hole moving with constant
+ * `boost_velocity`, as an exact Lorentz boost of the static solution.
+ *
+ * A Lorentz boost is a constant linear coordinate transformation, so
+ * \f$\Box x'^\mu = \Lambda^\mu{}_\nu \Box x^\nu = 0\f$: the boosted
+ * solution is still exactly harmonic, and still an exact solution of the
+ * Einstein equations at every order in \f$v\f$ — unlike prescribing a
+ * velocity through the first-order map, which is exact only to
+ * \f$O(v)\f$. With \f$M^{\bar a}{}_a = \partial x^{\bar a}/\partial x^a\f$
+ * the matrix into the hole's rest frame (`lorentz_boost_matrix(-v)`),
+ *
+ * \f{align}{
+ * g_{ab}(x) &= M^{\bar c}{}_a M^{\bar d}{}_b\, \hat g_{\bar c\bar d}(\bar x),
+ * \\
+ * \partial_\mu g_{ab}(x) &= M^{\bar e}{}_\mu M^{\bar c}{}_a M^{\bar d}{}_b\,
+ *   \partial_{\bar e} \hat g_{\bar c \bar d}(\bar x),
+ * \f}
+ *
+ * evaluated at the rest-frame image \f$\bar x^{\bar a} = M^{\bar a}{}_b
+ * (t, x - c)^b\f$. The rest-frame \f$\partial_{\bar e}\hat g\f$ needs only
+ * the analytic spatial derivative above plus \f$\partial_t \hat g =
+ * \beta^k \Phi_k - \alpha \Pi\f$, so no new derivatives and no finite
+ * differences are involved; the lab \f$\Pi\f$ and \f$\Phi\f$ are then
+ * rebuilt from the transformed derivatives with the lab lapse and shift.
+ *
+ * To first order in \f$v\f$ a boost is the map direction
+ * \f$\beta_i = \dot q^i = -v_i\f$ with \f$\dot q^0 = \sigma_{ij} = 0\f$;
+ * at second order it carries the known \f$\gamma - 1 = v^2/2\f$ clock
+ * offset and longitudinal contraction, so the residual error of a
+ * first-order fit against this data is a *predicted* \f$O(v^2)\f$ rather
+ * than an uncontrolled one. The map parameters are evaluated at the lab
+ * time, which is exact for `p = pdot = 0` and only first-order consistent
+ * otherwise. `boost_velocity` zero delegates to `evolved_variables`.
+ */
+void boosted_evolved_variables(
+    gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+    gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+    gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+    const tnsr::I<DataVector, 3>& x, double time, double mass,
+    const std::array<double, 3>& center, const std::array<double, 13>& p,
+    const std::array<double, 13>& pdot,
+    const std::array<double, 3>& boost_velocity, bool centre_advection = true);
 }  // namespace affine_map_model
 
 /*!
@@ -164,13 +208,29 @@ class AffineMappedHarmonicSchwarzschild
         "entering Pi. Supply the rates the offline fit used; they are not "
         "differentiated internally."};
   };
-  using options =
-      tmpl::list<Mass, Center, ParameterTimes, ParameterValues,
-                 ParameterRates>;
+  struct Velocity {
+    using type = std::array<double, volume_dim>;
+    static constexpr Options::String help = {
+        "Constant boost velocity of the hole, applied as an EXACT Lorentz "
+        "boost of the (mapped) static solution rather than through the "
+        "first-order map. A boost is a constant linear transformation, so "
+        "the result is still exactly harmonic and still an exact solution "
+        "at every order in v -- which makes it the controlled ground truth "
+        "for testing whether the matcher recovers a velocity. Its "
+        "first-order content is beta_i = qdot^i = -v_i; the O(v^2) "
+        "remainder (gamma - 1 = v^2/2 and the longitudinal contraction) is "
+        "analytically known, so a first-order fit's error against this "
+        "data is predicted rather than uncontrolled. Zero for a hole at "
+        "rest. Note that without a tracking excision the hole walks toward "
+        "the boundary at speed v, which bounds the usable run length."};
+  };
+  using options = tmpl::list<Mass, Center, ParameterTimes, ParameterValues,
+                             ParameterRates, Velocity>;
   static constexpr Options::String help = {
       "Harmonic Schwarzschild pushed through the first-order affine "
       "worldtube-matching map, with the 13 map parameters tabulated in "
-      "time. With all parameters zero this is HarmonicSchwarzschild."};
+      "time, optionally boosted exactly. With all parameters and the "
+      "velocity zero this is HarmonicSchwarzschild."};
 
   AffineMappedHarmonicSchwarzschild() = default;
   AffineMappedHarmonicSchwarzschild(
@@ -188,6 +248,7 @@ class AffineMappedHarmonicSchwarzschild
       std::vector<double> parameter_times,
       std::vector<std::array<double, number_of_parameters>> parameter_values,
       std::vector<std::array<double, number_of_parameters>> parameter_rates,
+      const std::array<double, volume_dim>& velocity = {{0., 0., 0.}},
       const Options::Context& context = {});
 
   auto get_clone() const
@@ -243,6 +304,7 @@ class AffineMappedHarmonicSchwarzschild
 
   double mass_ = 1.0;
   std::array<double, volume_dim> center_{{0., 0., 0.}};
+  std::array<double, volume_dim> velocity_{{0., 0., 0.}};
   std::vector<double> parameter_times_{};
   std::vector<std::array<double, number_of_parameters>> parameter_values_{};
   std::vector<std::array<double, number_of_parameters>> parameter_rates_{};
