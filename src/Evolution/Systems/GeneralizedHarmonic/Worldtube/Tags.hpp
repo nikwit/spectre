@@ -10,10 +10,11 @@
 
 #include "DataStructures/DataBox/Tag.hpp"
 #include "DataStructures/DataVector.hpp"
-#include "Time/History.hpp"
-#include "Time/TimeStepId.hpp"
 #include "Options/Auto.hpp"
 #include "Options/String.hpp"
+#include "Time/History.hpp"
+#include "Time/TimeStepId.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -215,12 +216,39 @@ struct MatcherConfig {
         "and is never fitted."};
   };
 
+  struct FitVelocity {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Free the three map velocities qdot^i instead of pinning them "
+        "kinematically to (1 + qdot^0) CenterVelocity. All thirteen map "
+        "parameters are then fitted (with FitTraceStrain), which is what "
+        "the binary needs: the hole's centre moves relative to the "
+        "excision centre and its velocity is wanted as an input to the "
+        "control system rather than an output of it. Only the value fit "
+        "supports this; combining it with a rate/ODE mode is an error. "
+        "findings 9 measured qdot^i = (1 + qdot^0) dz/dT offline to 2.3% "
+        "-- freeing it tests that relation online."};
+  };
+  struct CentreAdvection {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Include the centre-motion term -qdot^k Phi_kab in the model's "
+        "d_t g, i.e. let the model know its centre moves. This is the "
+        "only channel that puts qdot^i into Pi, where derivative-like "
+        "quantities are well determined; with it off, qdot^i is visible "
+        "only in g and Phi. Physically it should always be on -- off is "
+        "for the A/B that demonstrates the difference. Identically zero "
+        "when qdot^i = 0, so it cannot alter a run whose velocity is "
+        "pinned to a vanishing CenterVelocity."};
+  };
+
   using options =
       tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin, FitLMax,
                  FitInterval, FitCenterOffset, RateOde, SecondOrderOde,
                  StepperOde, GaugeDamping, UPlusAnchor, FitUPlus,
                  KretschmannTracePin, TracePinInterval, FitTraceStrain,
-                 SpatialMonopoleWeight, FitRadialIndex>;
+                 FitVelocity, CentreAdvection, SpatialMonopoleWeight,
+                 FitRadialIndex>;
   static constexpr Options::String help = {
       "Online worldtube matching: fit the 13 first-order affine-map "
       "parameters from the evolved fields on the excision sphere."};
@@ -228,12 +256,12 @@ struct MatcherConfig {
   MatcherConfig() = default;
   MatcherConfig(double mass, const std::array<double, 3>& center,
                 const std::array<double, 3>& center_velocity,
-                double trace_strain_pin, size_t fit_l_max,
-                double fit_interval, bool fit_center_offset, bool rate_ode,
-                bool second_order_ode, bool stepper_ode,
-                double gauge_damping, double uplus_anchor,
+                double trace_strain_pin, size_t fit_l_max, double fit_interval,
+                bool fit_center_offset, bool rate_ode, bool second_order_ode,
+                bool stepper_ode, double gauge_damping, double uplus_anchor,
                 bool fit_uplus, bool kretschmann_trace_pin,
                 double trace_pin_interval, bool fit_trace_strain,
+                bool fit_velocity, bool centre_advection,
                 double spatial_monopole_weight, size_t fit_radial_index)
       : mass(mass),
         center(center),
@@ -251,8 +279,19 @@ struct MatcherConfig {
         kretschmann_trace_pin(kretschmann_trace_pin),
         trace_pin_interval(trace_pin_interval),
         fit_trace_strain(fit_trace_strain),
+        fit_velocity(fit_velocity),
+        centre_advection(centre_advection),
         spatial_monopole_weight(spatial_monopole_weight),
-        fit_radial_index(fit_radial_index) {}
+        fit_radial_index(fit_radial_index) {
+    if (fit_velocity and (rate_ode or second_order_ode or stepper_ode)) {
+      ERROR(
+          "FitVelocity is implemented for the value fit only: the rate and "
+          "acceleration solves carry their own velocity pin (qddot^i = "
+          "qddot^0 v_centre) and a fixed nine-column layout, so enabling "
+          "both would silently keep the velocity pinned. Set RateOde, "
+          "SecondOrderOde and StepperOde false.");
+    }
+  }
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& p);
@@ -273,6 +312,8 @@ struct MatcherConfig {
   bool kretschmann_trace_pin = false;
   double trace_pin_interval = 0.5;
   bool fit_trace_strain = false;
+  bool fit_velocity = false;
+  bool centre_advection = true;
   double spatial_monopole_weight = 1.;
   size_t fit_radial_index = 0;
 };
@@ -304,6 +345,15 @@ struct MapParameterData {
   /// Kretschmann trace pin: the held value and its measurement time
   double trace_pin_value = 0.;
   double trace_pin_time = std::numeric_limits<double>::lowest();
+  /// Open-loop centre measurement from the l = 1 content of the
+  /// Kretschmann radius on the excision sphere, with the previous sample so
+  /// its backward difference can be logged as an independent velocity. A
+  /// diagnostic only: never an input to the solve (findings 15t).
+  std::array<double, 3> gb_dipole{};
+  std::array<double, 3> gb_dipole_previous{};
+  std::array<double, 3> gb_dipole_velocity{};
+  double gb_dipole_time = std::numeric_limits<double>::lowest();
+  double gb_dipole_time_previous = std::numeric_limits<double>::lowest();
   /// u^+ anchor state: the latest and previous value fits of the map to
   /// the gauge projection of the outgoing characteristic, their times,
   /// and the warm-start vector of the Gauss-Newton solve

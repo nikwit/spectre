@@ -51,16 +51,20 @@ void spatial_derivative_of_inverse_metric_combination(
 /// The generalized-harmonic evolved variables of the mapped solution at
 /// points `x`: the metric is the inverse of the combination above, Phi its
 /// analytic spatial derivative \f$\Phi_{kab} = -(g\, \partial_k G^{-1}\,
-/// g)_{ab}\f$, and Pi uses the coefficient drift
-/// \f$\partial_t g = -(g \sum_A \dot p_A R_A g)\f$ at a static centre with
-/// the model's own lapse and shift.
+/// g)_{ab}\f$, and \f$\partial_t g\f$ the sum of the coefficient drift
+/// \f$-(g \sum_A \dot p_A R_A g)\f$ and, unless `centre_advection` is
+/// false, the motion of the centre \f$-\dot q^k \Phi_{kab}\f$. Pi is formed
+/// with the model's own lapse and shift. Setting `centre_advection` false
+/// recovers the static-centre form used before findings 15w; it changes
+/// nothing when \f$\dot q^i = 0\f$.
 void evolved_variables(gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
                        gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
                        gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
                        const tnsr::I<DataVector, 3>& x, double mass,
                        const std::array<double, 3>& center,
                        const std::array<double, 13>& p,
-                       const std::array<double, 13>& pdot);
+                       const std::array<double, 13>& pdot,
+                       bool centre_advection = true);
 }  // namespace affine_map_model
 
 /*!

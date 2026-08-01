@@ -223,7 +223,7 @@ void evolved_variables(
     const gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
     const tnsr::I<DataVector, 3>& x, const double mass,
     const std::array<double, 3>& center, const std::array<double, 13>& p,
-    const std::array<double, 13>& pdot) {
+    const std::array<double, 13>& pdot, const bool centre_advection) {
   const size_t n_points = get<0>(x).size();
   std::array<DataVector, 3> y{};
   for (size_t i = 0; i < 3; ++i) {
@@ -258,7 +258,7 @@ void evolved_variables(
   }
 
   // d_t g_ab = -(g S g)_ab with S^{ab} = sum_A pdot_A R_A^{ab}: the
-  // coefficient drift of the model at a fixed point (the centre is static)
+  // coefficient drift of the model at a fixed point
   tnsr::AA<DataVector, 3> rate_direction(n_points);
   inverse_metric_combination(make_not_null(&rate_direction), y, mass, 0.,
                              pdot);
@@ -270,6 +270,27 @@ void evolved_variables(
           dt_metric.get(a, b) -= spacetime_metric->get(a, c) *
                                  rate_direction.get(c, d) *
                                  spacetime_metric->get(d, b);
+        }
+      }
+    }
+  }
+
+  // Centre advection. The map displaces the centre by qdot^i t, a secular
+  // piece the instantaneous model drops (a fit at fixed t absorbs the
+  // accumulated displacement into the centre offset instead). Its time
+  // derivative survives: g(x, t) = g_hat(x - c - qdot t) gives
+  // d_t g_ab = -qdot^k d_k g_ab = -qdot^k Phi_kab, evaluated with the Phi
+  // just built analytically. This is the only place the velocity reaches
+  // Pi; without it qdot^i is determined by g and Phi alone, which is the
+  // weak channel (findings 9: freely fitted time jets inflate ~1e3 off the
+  // metric while the same quantities come out clean off Pi). It vanishes
+  // identically whenever qdot^i = 0, so it cannot perturb any run whose
+  // velocity is pinned to a zero CenterVelocity.
+  if (centre_advection) {
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        for (size_t k = 0; k < 3; ++k) {
+          dt_metric.get(a, b) -= gsl::at(p, 4 + k) * phi->get(k, a, b);
         }
       }
     }

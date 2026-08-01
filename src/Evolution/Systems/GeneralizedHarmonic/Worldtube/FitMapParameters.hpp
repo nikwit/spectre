@@ -262,10 +262,52 @@ struct FitMapParameters {
                         ? state.trace_pin_value
                         : config_opt->trace_strain_pin;
       }
+      // l = 1 content of the same field is the centre displacement: with the
+      // hole at d relative to the sphere centre, rho_GB = |x - d| ~ r -
+      // d.nhat, and nhat_z = cos(theta) = sqrt(4 pi / 3) Y_10, so
+      // d_i = -sqrt(3 / 4 pi) c_{1m}. Spherepack stores the m != 0
+      // coefficients a factor sqrt(2) small relative to unit-L2 harmonics
+      // (findings 15m), which the weight below undoes. Open-loop only.
+      std::array<double, 3> dipole{};
+      {
+        const DataVector spec = ylm_transform.phys_to_spec(rho_gb);
+        ylm::SpherepackIterator iter(ylm_transform.l_max(),
+                                     ylm_transform.m_max());
+        const double norm = -std::sqrt(3. / (4. * M_PI));
+        const double m_weight = std::sqrt(2.);
+        // (l=1, m=0) -> z; the two m=1 coefficients -> x (cos) and y (sin)
+        iter.set(1, 0);
+        dipole[2] = norm * spec[iter()];
+        iter.set(1, 1);
+        dipole[0] = norm * m_weight * spec[iter()];
+        iter.set(1, -1);
+        dipole[1] = norm * m_weight * spec[iter()];
+        for (size_t i = 0; i < 3; ++i) {
+          if (not std::isfinite(gsl::at(dipole, i))) {
+            gsl::at(dipole, i) = 0.;
+          }
+        }
+      }
       db::mutate<Tags::MapParameters>(
-          [&trace_pin, &time](const gsl::not_null<MapParameterData*> data) {
+          [&trace_pin, &dipole,
+           &time](const gsl::not_null<MapParameterData*> data) {
             data->trace_pin_value = trace_pin;
             data->trace_pin_time = time;
+            // backward difference against the previous sample: an
+            // independent velocity estimate, for comparison with the
+            // fitted qdot^i (findings 15w)
+            if (data->gb_dipole_time > std::numeric_limits<double>::lowest() and
+                time > data->gb_dipole_time) {
+              const double dt = time - data->gb_dipole_time;
+              for (size_t i = 0; i < 3; ++i) {
+                gsl::at(data->gb_dipole_velocity, i) =
+                    (gsl::at(dipole, i) - gsl::at(data->gb_dipole, i)) / dt;
+              }
+              data->gb_dipole_previous = data->gb_dipole;
+              data->gb_dipole_time_previous = data->gb_dipole_time;
+            }
+            data->gb_dipole = dipole;
+            data->gb_dipole_time = time;
           },
           make_not_null(&box));
     }
@@ -543,6 +585,14 @@ struct FitMapParameters {
     legend.emplace_back("ResidualFinal");
     legend.emplace_back("Iterations");
     legend.emplace_back("TracePin");
+    // open-loop centre measurement from the l = 1 Kretschmann radius and its
+    // backward difference: the independent comparison for a fitted velocity
+    for (const std::string& c : {"x", "y", "z"}) {
+      legend.push_back("GbDipole_" + c);
+    }
+    for (const std::string& c : {"x", "y", "z"}) {
+      legend.push_back("GbDipoleVel_" + c);
+    }
     std::vector<double> row;
     row.reserve(3 * num_map_parameters);
     row.push_back(time);
@@ -559,6 +609,15 @@ struct FitMapParameters {
     row.push_back(residual_final);
     row.push_back(iterations);
     row.push_back(trace_pin);
+    {
+      const auto& fresh = db::get<Tags::MapParameters>(box);
+      for (size_t i = 0; i < 3; ++i) {
+        row.push_back(gsl::at(fresh.gb_dipole, i));
+      }
+      for (size_t i = 0; i < 3; ++i) {
+        row.push_back(gsl::at(fresh.gb_dipole_velocity, i));
+      }
+    }
     Parallel::threaded_action<
         observers::ThreadedActions::WriteReductionDataRow>(
         writer[0], std::string{"/WorldtubeMatcher"}, std::move(legend),

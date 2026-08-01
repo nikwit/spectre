@@ -510,7 +510,8 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
                   &get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(*model)),
               make_not_null(&get<Tags::Pi<DataVector, Dim>>(*model)),
               make_not_null(&get<Tags::Phi<DataVector, Dim>>(*model)), coords,
-              matcher_config->mass, model_center, p, map_parameters.pdot);
+              matcher_config->mass, model_center, p, map_parameters.pdot,
+              matcher_config->centre_advection);
         }
       } else {
         ERROR(
@@ -707,7 +708,7 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
     gh::Solutions::affine_map_model::evolved_variables(
         make_not_null(&model_metric), make_not_null(&model_pi),
         make_not_null(&model_phi), coords, matcher_config->mass, model_center,
-        p, map_parameters.pdot);
+        p, map_parameters.pdot, matcher_config->centre_advection);
 
     // characteristic fields of the interior and of the model, in the same
     // (interior) frame

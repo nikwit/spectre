@@ -24,6 +24,8 @@ void MatcherConfig::pup(PUP::er& p) {
   p | kretschmann_trace_pin;
   p | trace_pin_interval;
   p | fit_trace_strain;
+  p | fit_velocity;
+  p | centre_advection;
   p | spatial_monopole_weight;
   p | fit_radial_index;
 }
@@ -41,12 +43,12 @@ bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
          lhs.gauge_damping == rhs.gauge_damping and
          lhs.uplus_anchor == rhs.uplus_anchor and
          lhs.fit_uplus == rhs.fit_uplus and
-         lhs.kretschmann_trace_pin ==
-             rhs.kretschmann_trace_pin and
+         lhs.kretschmann_trace_pin == rhs.kretschmann_trace_pin and
          lhs.trace_pin_interval == rhs.trace_pin_interval and
          lhs.fit_trace_strain == rhs.fit_trace_strain and
-         lhs.spatial_monopole_weight ==
-             rhs.spatial_monopole_weight and
+         lhs.fit_velocity == rhs.fit_velocity and
+         lhs.centre_advection == rhs.centre_advection and
+         lhs.spatial_monopole_weight == rhs.spatial_monopole_weight and
          lhs.fit_radial_index == rhs.fit_radial_index;
 }
 
@@ -68,6 +70,11 @@ void MapParameterData::pup(PUP::er& pupper) {
   pupper | ode_step_id;
   pupper | trace_pin_value;
   pupper | trace_pin_time;
+  pupper | gb_dipole;
+  pupper | gb_dipole_previous;
+  pupper | gb_dipole_velocity;
+  pupper | gb_dipole_time;
+  pupper | gb_dipole_time_previous;
   pupper | anchor_p;
   pupper | anchor_p_previous;
   pupper | anchor_time;

@@ -232,21 +232,29 @@ std::vector<double> gauge_modes(const GaugeComponents& gc,
   return out;
 }
 
-// x (9 or 12 free) -> (p (13), center offset q) with the kinematic velocity
-// and trace pins; x[9..11] = q when the zeroth-order offset is fitted. The
-// time offset q^0 is an exact zero mode of the static-in-time model and is
-// never a parameter.
+// The free vector, in order:
+//   x[0]                    qdot^0
+//   x[1..3]                 beta_i
+//   x[4 .. 3+n_strain]      sigma (5 pinned-trace components, or all 6)
+//   next 3, if FitVelocity  qdot^i     (else pinned to (1+qdot^0) v_centre)
+//   next 3, if FitCenterOffset  q^i
+// so 9 free at the leanest and 16 with everything on. The time offset q^0 is
+// an exact zero mode of the static-in-time model and is never a parameter.
 void embed(const gsl::not_null<std::array<double, num_map_parameters>*> p,
            const gsl::not_null<std::array<double, 3>*> center_offset,
            const std::vector<double>& x, const MatcherConfig& config,
            const double trace_pin) {
   (*p)[0] = x[0];
   const size_t n_strain = config.fit_trace_strain ? 6 : 5;
+  const size_t velocity_start = 4 + n_strain;
+  const size_t offset_start = velocity_start + (config.fit_velocity ? 3 : 0);
   for (size_t i = 0; i < 3; ++i) {
     gsl::at(*p, 1 + i) = x[1 + i];
-    gsl::at(*p, 4 + i) = (1. + x[0]) * gsl::at(config.center_velocity, i);
+    gsl::at(*p, 4 + i) = config.fit_velocity
+                             ? x[velocity_start + i]
+                             : (1. + x[0]) * gsl::at(config.center_velocity, i);
     gsl::at(*center_offset, i) =
-        config.fit_center_offset ? x[4 + n_strain + i] : 0.;
+        config.fit_center_offset ? x[offset_start + i] : 0.;
   }
   for (size_t i = 0; i < n_strain; ++i) {
     gsl::at(*p, 7 + i) = x[4 + i];
@@ -323,7 +331,8 @@ FitResult fit_map_parameters(
                                    frame),
                   ylm_transform, modes);
 
-  const size_t n_base = config.fit_trace_strain ? 10 : 9;
+  const size_t n_strain = config.fit_trace_strain ? 6 : 5;
+  const size_t n_base = 4 + n_strain + (config.fit_velocity ? 3 : 0);
   const size_t n_free = config.fit_center_offset ? n_base + 3 : n_base;
   const auto residual_of =
       [&](const std::vector<double>& x) -> std::vector<double> {
@@ -340,8 +349,8 @@ FitResult fit_map_parameters(
     tnsr::iaa<DataVector, 3> model_phi{};
     gh::Solutions::affine_map_model::evolved_variables(
         make_not_null(&model_metric), make_not_null(&model_pi),
-        make_not_null(&model_phi), inertial_coords, config.mass,
-        model_center, p, pdot_estimate);
+        make_not_null(&model_phi), inertial_coords, config.mass, model_center,
+        p, pdot_estimate, config.centre_advection);
     std::vector<double> model_modes = gauge_modes(
         gauge_components(u_minus_of(model_metric, model_pi, model_phi, frame,
                                     normal_sign),
@@ -359,8 +368,13 @@ FitResult fit_map_parameters(
   for (size_t i = 0; i < 3; ++i) {
     x[1 + i] = gsl::at(p_start, 1 + i);
   }
-  for (size_t i = 0; i + 4 < n_base; ++i) {
+  for (size_t i = 0; i < n_strain; ++i) {
     x[4 + i] = gsl::at(p_start, 7 + i);
+  }
+  if (config.fit_velocity) {
+    for (size_t i = 0; i < 3; ++i) {
+      x[4 + n_strain + i] = gsl::at(p_start, 4 + i);
+    }
   }
   if (config.fit_center_offset) {
     for (size_t i = 0; i < 3; ++i) {
