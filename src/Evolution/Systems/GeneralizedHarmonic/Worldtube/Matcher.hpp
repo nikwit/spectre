@@ -125,4 +125,35 @@ RateFitResult fit_map_parameter_accelerations(
     const std::array<double, num_map_parameters>& pdot_state,
     const tnsr::I<DataVector, 3>& inertial_coords,
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config);
+
+/*!
+ * \brief Fit \f$\ddot p_A\f$ against the time derivative of the gauge
+ * projection of the OUTGOING characteristic (the `StepperOde` +
+ * `FitUPlus` mode).
+ *
+ * The target is \f$\partial_t\{A^+, C^+, V^+\}\f$ of
+ * \f$u^+ = \Pi - n^k\Phi_k - \gamma_2 g\f$ under the same null
+ * projectors as \f$u^-\f$, including the frame-motion terms (the data
+ * frame and its time derivative are used on both sides). The penalty
+ * drags only the \f$u^-\f$ projection of the fields, so this sensor
+ * does not echo the map's own drift along gauge directions — the
+ * self-consistency that produced the §15l double zero root is absent by
+ * construction. The model side is evaluated at the current
+ * (`p_state`, `pdot_state`) with all pieces analytic;
+ * \f$\ddot p\f$ enters only through \f$\partial_t\Pi_{\rm model}\f$,
+ * linearly. `block_closure` reports {A, C, V} x l in the 15 slots;
+ * the estimator-spread members are not defined for this target and stay
+ * zero.
+ */
+RateFitResult fit_map_parameter_accelerations_uplus(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
+    const tnsr::aa<DataVector, 3>& dt_spacetime_metric,
+    const tnsr::aa<DataVector, 3>& dt_pi,
+    const tnsr::iaa<DataVector, 3>& dt_phi,
+    const Scalar<DataVector>& gamma2,
+    const std::array<double, num_map_parameters>& p_state,
+    const std::array<double, num_map_parameters>& pdot_state,
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config);
 }  // namespace gh::Worldtube

@@ -118,6 +118,7 @@ struct AdvanceMapParameterOde {
     tnsr::aa<DataVector, Dim> metric_face{};
     tnsr::aa<DataVector, Dim> pi_face{};
     tnsr::iaa<DataVector, Dim> phi_face{};
+    Scalar<DataVector> gamma2_face{};
     tnsr::I<DataVector, Dim> coords_face{};
     tnsr::aa<DataVector, Dim> dt_metric_face{};
     tnsr::aa<DataVector, Dim> dt_pi_face{};
@@ -128,6 +129,8 @@ struct AdvanceMapParameterOde {
                  db::get<gh::Tags::Pi<DataVector, Dim>>(box));
     slice_tensor(make_not_null(&phi_face),
                  db::get<gh::Tags::Phi<DataVector, Dim>>(box));
+    slice_tensor(make_not_null(&gamma2_face),
+                 db::get<gh::Tags::ConstraintGamma2>(box));
     slice_tensor(
         make_not_null(&coords_face),
         db::get<domain::Tags::Coordinates<Dim, Frame::Inertial>>(box));
@@ -140,21 +143,34 @@ struct AdvanceMapParameterOde {
                  db::get<::Tags::dt<gh::Tags::Phi<DataVector, Dim>>>(box));
 
     const ylm::Spherepack& ylm_transform = ylm::get_spherepack_cache(l_max);
-    // current pdot state for the exact (pdot-quadratic) Hessian term of the
-    // model's second time derivative
+    // current (p, pdot) state: pdot feeds the exact Hessian term of the
+    // model's second time derivative; p additionally centres the model
+    // for the u^+ sensor
+    std::array<double, num_map_parameters> p_state{};
     std::array<double, num_map_parameters> pdot_state{};
     {
       const auto& current = db::get<Tags::MapParameters>(box);
       if (current.ode_state.size() == 2 * num_map_parameters) {
         for (size_t a = 0; a < num_map_parameters; ++a) {
+          gsl::at(p_state, a) = current.ode_state[a];
           gsl::at(pdot_state, a) =
               current.ode_state[num_map_parameters + a];
         }
       }
     }
-    const RateFitResult accel = fit_map_parameter_accelerations(
-        metric_face, pi_face, phi_face, dt_metric_face, dt_pi_face,
-        dt_phi_face, pdot_state, coords_face, ylm_transform, *config_opt);
+    // sensor: FitUPlus targets dt of the gauge projection of the outgoing
+    // characteristic (the channel the ghost BC does not set); otherwise
+    // the original all-components d2t g projection
+    const RateFitResult accel =
+        config_opt->fit_uplus
+            ? fit_map_parameter_accelerations_uplus(
+                  metric_face, pi_face, phi_face, dt_metric_face,
+                  dt_pi_face, dt_phi_face, gamma2_face, p_state, pdot_state,
+                  coords_face, ylm_transform, *config_opt)
+            : fit_map_parameter_accelerations(
+                  metric_face, pi_face, phi_face, dt_metric_face,
+                  dt_pi_face, dt_phi_face, pdot_state, coords_face,
+                  ylm_transform, *config_opt);
     bool finite = true;
     for (size_t a = 0; a < num_map_parameters; ++a) {
       finite = finite and std::isfinite(gsl::at(accel.pdot, a));

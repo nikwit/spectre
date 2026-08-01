@@ -157,7 +157,9 @@ struct MatcherConfig {
         "channel the ghost BC does not set, so the fit reads a quantity "
         "the closed loop cannot manufacture (the u^- value fit at the "
         "face measures the penalty-driven combination and is "
-        "tautological)."};
+        "tautological). Combined with StepperOde, the acceleration "
+        "sensor targets dt of the u^+ gauge projection instead of the "
+        "all-components d2t g projection."};
   };
   struct SpatialMonopoleWeight {
     using type = double;

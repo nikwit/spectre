@@ -742,4 +742,490 @@ RateFitResult fit_map_parameter_accelerations(
   return project_onto_rate_directions(d2t_metric, spacetime_metric,
                                       inertial_coords, ylm_transform, config);
 }
+
+namespace {
+// Time derivatives of the SphereFrame quantities, from dt of the data
+// metric (chain rule through the identical construction as build_frame).
+struct SphereFrameDot {
+  tnsr::AA<DataVector, 3> dt_inverse_metric;
+  DataVector dt_lapse;
+  std::array<DataVector, 3> dt_normal_up;
+  std::array<DataVector, 4> dt_k_up, dt_l_up;
+  std::array<std::array<DataVector, 4>, 4> dt_proj_ud;
+};
+
+SphereFrameDot build_frame_dot(const tnsr::aa<DataVector, 3>& metric,
+                               const tnsr::aa<DataVector, 3>& dt_metric,
+                               const SphereFrame& fr,
+                               const tnsr::I<DataVector, 3>& coords,
+                               const std::array<double, 3>& center) {
+  SphereFrameDot out{};
+  const size_t n = fr.n_points;
+  const auto& inv = fr.inverse_metric;
+  set_number_of_grid_points(make_not_null(&out.dt_inverse_metric), n);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      out.dt_inverse_metric.get(a, b) = 0.;
+      for (size_t c = 0; c < 4; ++c) {
+        for (size_t d = 0; d < 4; ++d) {
+          out.dt_inverse_metric.get(a, b) -=
+              inv.get(a, c) * dt_metric.get(c, d) * inv.get(d, b);
+        }
+      }
+    }
+  }
+  const auto& dt_inv = out.dt_inverse_metric;
+  const DataVector lapse_sq = square(fr.lapse);
+  const DataVector dt_lapse_sq = square(lapse_sq) * get<0, 0>(dt_inv);
+  out.dt_lapse = 0.5 * dt_lapse_sq / fr.lapse;
+
+  std::array<std::array<DataVector, 3>, 3> spatial_inv{};
+  std::array<std::array<DataVector, 3>, 3> dt_spatial_inv{};
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t j = 0; j < 3; ++j) {
+      gsl::at(gsl::at(spatial_inv, i), j) =
+          inv.get(i + 1, j + 1) +
+          inv.get(0, i + 1) * inv.get(0, j + 1) * lapse_sq;
+      gsl::at(gsl::at(dt_spatial_inv, i), j) =
+          dt_inv.get(i + 1, j + 1) +
+          dt_inv.get(0, i + 1) * inv.get(0, j + 1) * lapse_sq +
+          inv.get(0, i + 1) * dt_inv.get(0, j + 1) * lapse_sq +
+          inv.get(0, i + 1) * inv.get(0, j + 1) * dt_lapse_sq;
+    }
+  }
+
+  std::array<DataVector, 3> direction{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(direction, i) = coords.get(i) - gsl::at(center, i);
+  }
+  DataVector norm_sq(n, 0.);
+  DataVector dt_norm_sq(n, 0.);
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t j = 0; j < 3; ++j) {
+      norm_sq += gsl::at(direction, i) * gsl::at(gsl::at(spatial_inv, i), j) *
+                 gsl::at(direction, j);
+      dt_norm_sq += gsl::at(direction, i) *
+                    gsl::at(gsl::at(dt_spatial_inv, i), j) *
+                    gsl::at(direction, j);
+    }
+  }
+  const DataVector norm = sqrt(norm_sq);
+  const DataVector dt_norm = 0.5 * dt_norm_sq / norm;
+  std::array<DataVector, 3> normal_low{};
+  std::array<DataVector, 3> dt_normal_low{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(normal_low, i) = gsl::at(direction, i) / norm;
+    gsl::at(dt_normal_low, i) =
+        -gsl::at(direction, i) * dt_norm / norm_sq;
+  }
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(out.dt_normal_up, i) = DataVector(n, 0.);
+    for (size_t j = 0; j < 3; ++j) {
+      gsl::at(out.dt_normal_up, i) +=
+          gsl::at(gsl::at(dt_spatial_inv, i), j) * gsl::at(normal_low, j) +
+          gsl::at(gsl::at(spatial_inv, i), j) * gsl::at(dt_normal_low, j);
+    }
+  }
+
+  std::array<DataVector, 4> s_up{};
+  std::array<DataVector, 4> dt_s_up{};
+  s_up[0] = DataVector(n, 0.);
+  dt_s_up[0] = DataVector(n, 0.);
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(s_up, i + 1) = -gsl::at(fr.normal_up, i);
+    gsl::at(dt_s_up, i + 1) = -gsl::at(out.dt_normal_up, i);
+  }
+  std::array<DataVector, 4> s_low{};
+  std::array<DataVector, 4> dt_s_low{};
+  for (size_t a = 0; a < 4; ++a) {
+    gsl::at(s_low, a) = DataVector(n, 0.);
+    gsl::at(dt_s_low, a) = DataVector(n, 0.);
+    for (size_t b = 0; b < 4; ++b) {
+      gsl::at(s_low, a) += metric.get(a, b) * gsl::at(s_up, b);
+      gsl::at(dt_s_low, a) += dt_metric.get(a, b) * gsl::at(s_up, b) +
+                              metric.get(a, b) * gsl::at(dt_s_up, b);
+    }
+  }
+  std::array<DataVector, 4> n_low{};
+  std::array<DataVector, 4> dt_n_low{};
+  n_low[0] = -fr.lapse;
+  dt_n_low[0] = -out.dt_lapse;
+  for (size_t i = 1; i < 4; ++i) {
+    gsl::at(n_low, i) = DataVector(n, 0.);
+    gsl::at(dt_n_low, i) = DataVector(n, 0.);
+  }
+  const double root_half = 1. / std::sqrt(2.);
+  std::array<DataVector, 4> k_low{};
+  std::array<DataVector, 4> l_low{};
+  std::array<DataVector, 4> dt_k_low{};
+  std::array<DataVector, 4> dt_l_low{};
+  for (size_t a = 0; a < 4; ++a) {
+    gsl::at(k_low, a) = root_half * (gsl::at(n_low, a) - gsl::at(s_low, a));
+    gsl::at(l_low, a) = root_half * (gsl::at(n_low, a) + gsl::at(s_low, a));
+    gsl::at(dt_k_low, a) =
+        root_half * (gsl::at(dt_n_low, a) - gsl::at(dt_s_low, a));
+    gsl::at(dt_l_low, a) =
+        root_half * (gsl::at(dt_n_low, a) + gsl::at(dt_s_low, a));
+  }
+  for (size_t a = 0; a < 4; ++a) {
+    gsl::at(out.dt_k_up, a) = DataVector(n, 0.);
+    gsl::at(out.dt_l_up, a) = DataVector(n, 0.);
+    for (size_t b = 0; b < 4; ++b) {
+      gsl::at(out.dt_k_up, a) += dt_inv.get(a, b) * gsl::at(k_low, b) +
+                                 inv.get(a, b) * gsl::at(dt_k_low, b);
+      gsl::at(out.dt_l_up, a) += dt_inv.get(a, b) * gsl::at(l_low, b) +
+                                 inv.get(a, b) * gsl::at(dt_l_low, b);
+    }
+  }
+  for (size_t c = 0; c < 4; ++c) {
+    for (size_t b = 0; b < 4; ++b) {
+      DataVector& entry = gsl::at(gsl::at(out.dt_proj_ud, c), b);
+      entry = DataVector(n, 0.);
+      for (size_t a = 0; a < 4; ++a) {
+        const DataVector p_ab =
+            metric.get(a, b) + gsl::at(k_low, a) * gsl::at(l_low, b) +
+            gsl::at(l_low, a) * gsl::at(k_low, b);
+        const DataVector dt_p_ab =
+            dt_metric.get(a, b) +
+            gsl::at(dt_k_low, a) * gsl::at(l_low, b) +
+            gsl::at(k_low, a) * gsl::at(dt_l_low, b) +
+            gsl::at(dt_l_low, a) * gsl::at(k_low, b) +
+            gsl::at(l_low, a) * gsl::at(dt_k_low, b);
+        entry += dt_inv.get(c, a) * p_ab + inv.get(c, a) * dt_p_ab;
+      }
+    }
+  }
+  return out;
+}
+
+// d/dt of the gauge components {A, C, V} of a tensor u: the dt_u part
+// contracted with the static frame plus the frame-motion terms.
+GaugeComponents dt_gauge_components(const tnsr::aa<DataVector, 3>& u,
+                                    const tnsr::aa<DataVector, 3>& dt_u,
+                                    const SphereFrame& fr,
+                                    const SphereFrameDot& frd) {
+  GaugeComponents out = gauge_components(dt_u, fr);
+  const size_t n = fr.n_points;
+  DataVector u_dtl_l(n, 0.);
+  DataVector u_dtk_l(n, 0.);
+  DataVector u_k_dtl(n, 0.);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = 0; b < 4; ++b) {
+      u_dtl_l += u.get(a, b) * gsl::at(frd.dt_l_up, a) * gsl::at(fr.l_up, b);
+      u_dtk_l += u.get(a, b) * gsl::at(frd.dt_k_up, a) * gsl::at(fr.l_up, b);
+      u_k_dtl += u.get(a, b) * gsl::at(fr.k_up, a) * gsl::at(frd.dt_l_up, b);
+    }
+  }
+  out.a += 2. * u_dtl_l;
+  out.c += u_dtk_l + u_k_dtl;
+  for (size_t b = 0; b < 4; ++b) {
+    for (size_t c = 0; c < 4; ++c) {
+      for (size_t d = 0; d < 4; ++d) {
+        gsl::at(out.v, b) -=
+            gsl::at(gsl::at(frd.dt_proj_ud, c), b) * u.get(c, d) *
+                gsl::at(fr.l_up, d) +
+            gsl::at(gsl::at(fr.proj_ud, c), b) * u.get(c, d) *
+                gsl::at(frd.dt_l_up, d);
+      }
+    }
+  }
+  return out;
+}
+
+// sandwich helper: (g X g)_ab for an upper-index combination X
+tnsr::aa<DataVector, 3> covariant_sandwich(
+    const tnsr::aa<DataVector, 3>& g, const tnsr::AA<DataVector, 3>& x) {
+  const size_t n = get<0, 0>(g).size();
+  tnsr::aa<DataVector, 3> out(n, 0.);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      for (size_t c = 0; c < 4; ++c) {
+        for (size_t d = 0; d < 4; ++d) {
+          out.get(a, b) += g.get(a, c) * x.get(c, d) * g.get(d, b);
+        }
+      }
+    }
+  }
+  return out;
+}
+}  // namespace
+
+RateFitResult fit_map_parameter_accelerations_uplus(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
+    const tnsr::aa<DataVector, 3>& dt_spacetime_metric,
+    const tnsr::aa<DataVector, 3>& dt_pi,
+    const tnsr::iaa<DataVector, 3>& dt_phi,
+    const Scalar<DataVector>& gamma2,
+    const std::array<double, num_map_parameters>& p_state,
+    const std::array<double, num_map_parameters>& pdot_state,
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config) {
+  ASSERT(config.fit_l_max <= ylm_transform.l_max(),
+         "FitLMax " << config.fit_l_max << " exceeds the grid l_max "
+                    << ylm_transform.l_max());
+  const size_t n_points = get<0, 0>(spacetime_metric).size();
+  const ModeSet modes = kept_modes(ylm_transform, config.fit_l_max);
+  const size_t n_modes = modes.indices.size();
+
+  const SphereFrame frame =
+      build_frame(spacetime_metric, gamma2, inertial_coords, config.center);
+  const SphereFrameDot frame_dot = build_frame_dot(
+      spacetime_metric, dt_spacetime_metric, frame, inertial_coords,
+      config.center);
+
+  // ---- data side: u^+ and dt u^+ (dt n from the frame motion; gamma_2
+  // treated as static) ----
+  const tnsr::aa<DataVector, 3> u_data =
+      u_minus_of(spacetime_metric, pi, phi, frame, -1.);
+  tnsr::aa<DataVector, 3> dt_u_data(n_points);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      dt_u_data.get(a, b) = dt_pi.get(a, b) -
+                            frame.gamma2 * dt_spacetime_metric.get(a, b);
+      for (size_t k = 0; k < 3; ++k) {
+        dt_u_data.get(a, b) -=
+            gsl::at(frame.normal_up, k) * dt_phi.get(k, a, b) +
+            gsl::at(frame_dot.dt_normal_up, k) * phi.get(k, a, b);
+      }
+    }
+  }
+  const std::vector<double> data_modes = gauge_modes(
+      dt_gauge_components(u_data, dt_u_data, frame, frame_dot), ylm_transform,
+      modes);
+
+  // ---- model side at the current (p, pdot), data frame throughout ----
+  std::array<DataVector, 3> y{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(y, i) = inertial_coords.get(i) - gsl::at(config.center, i);
+  }
+  tnsr::AA<DataVector, 3> big_g(n_points);
+  gh::Solutions::affine_map_model::inverse_metric_combination(
+      make_not_null(&big_g), y, config.mass, 1., p_state);
+  const tnsr::aa<DataVector, 3> g_m = determinant_and_inverse(big_g).second;
+  tnsr::AA<DataVector, 3> s_resp(n_points);
+  gh::Solutions::affine_map_model::inverse_metric_combination(
+      make_not_null(&s_resp), y, config.mass, 0., pdot_state);
+  const tnsr::aa<DataVector, 3> dtg_m_neg = covariant_sandwich(g_m, s_resp);
+  tnsr::aa<DataVector, 3> dtg_m(n_points);
+  for (size_t st = 0; st < dtg_m.size(); ++st) {
+    dtg_m[st] = -dtg_m_neg[st];
+  }
+
+  // Phi_m and dt Phi_m analytically
+  tnsr::iAA<DataVector, 3> dk_big_g(n_points);
+  gh::Solutions::affine_map_model::
+      spatial_derivative_of_inverse_metric_combination(
+          make_not_null(&dk_big_g), y, config.mass, 1., p_state);
+  tnsr::iAA<DataVector, 3> dk_s(n_points);
+  gh::Solutions::affine_map_model::
+      spatial_derivative_of_inverse_metric_combination(
+          make_not_null(&dk_s), y, config.mass, 0., pdot_state);
+  tnsr::iaa<DataVector, 3> phi_m(n_points, 0.);
+  tnsr::iaa<DataVector, 3> dt_phi_m(n_points, 0.);
+  for (size_t k = 0; k < 3; ++k) {
+    // Phi_k = -(g dk_G g); build per k, completing Phi_k before its dt
+    tnsr::AA<DataVector, 3> slice(n_points);
+    tnsr::AA<DataVector, 3> slice_s(n_points);
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        slice.get(a, b) = dk_big_g.get(k, a, b);
+        slice_s.get(a, b) = dk_s.get(k, a, b);
+      }
+    }
+    const auto phi_k = covariant_sandwich(g_m, slice);
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        phi_m.get(k, a, b) = -phi_k.get(a, b);
+      }
+    }
+    // dt Phi_k = d_k(dt g) = -(Phi_k S g + g dkS g + g S Phi_k)
+    const auto g_dks_g = covariant_sandwich(g_m, slice_s);
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        DataVector term(n_points, 0.);
+        for (size_t c = 0; c < 4; ++c) {
+          for (size_t d = 0; d < 4; ++d) {
+            term += phi_m.get(k, a, c) * s_resp.get(c, d) * g_m.get(d, b) +
+                    g_m.get(a, c) * s_resp.get(c, d) * phi_m.get(k, d, b);
+          }
+        }
+        dt_phi_m.get(k, a, b) = -(term + g_dks_g.get(a, b));
+      }
+    }
+  }
+
+  // model lapse/shift and their rates (dt G^-1_m = S exactly)
+  const DataVector lapse_sq_m = -1. / get<0, 0>(big_g);
+  const DataVector lapse_m = sqrt(lapse_sq_m);
+  const DataVector dt_lapse_m =
+      0.5 * lapse_m * lapse_sq_m * get<0, 0>(s_resp);
+  std::array<DataVector, 3> shift_m{};
+  std::array<DataVector, 3> dt_shift_m{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(shift_m, i) = lapse_sq_m * big_g.get(0, i + 1);
+    gsl::at(dt_shift_m, i) =
+        2. * lapse_m * dt_lapse_m * big_g.get(0, i + 1) +
+        lapse_sq_m * s_resp.get(0, i + 1);
+  }
+
+  // Pi_m and the pddot-independent part of dt Pi_m (the pddot part is the
+  // column response below); d2t g at pddot = 0 is the Hessian term only
+  tnsr::aa<DataVector, 3> pi_m(n_points);
+  tnsr::aa<DataVector, 3> dt_pi_m0(n_points);
+  const auto gsg = covariant_sandwich(g_m, s_resp);  // = -dt g_m
+  tnsr::aa<DataVector, 3> d2tg_m0(n_points, 0.);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      for (size_t c = 0; c < 4; ++c) {
+        for (size_t d = 0; d < 4; ++d) {
+          d2tg_m0.get(a, b) += 2. * gsg.get(a, c) * s_resp.get(c, d) *
+                               g_m.get(d, b);
+        }
+      }
+    }
+  }
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      DataVector beta_phi(n_points, 0.);
+      DataVector dt_beta_phi(n_points, 0.);
+      for (size_t k = 0; k < 3; ++k) {
+        beta_phi += gsl::at(shift_m, k) * phi_m.get(k, a, b);
+        dt_beta_phi += gsl::at(dt_shift_m, k) * phi_m.get(k, a, b) +
+                       gsl::at(shift_m, k) * dt_phi_m.get(k, a, b);
+      }
+      pi_m.get(a, b) = (beta_phi - dtg_m.get(a, b)) / lapse_m;
+      dt_pi_m0.get(a, b) =
+          (dt_beta_phi - d2tg_m0.get(a, b)) / lapse_m -
+          pi_m.get(a, b) * dt_lapse_m / lapse_m;
+    }
+  }
+
+  const auto assemble_u_and_dt =
+      [&](const tnsr::aa<DataVector, 3>& g_t,
+          const tnsr::aa<DataVector, 3>& pi_t,
+          const tnsr::iaa<DataVector, 3>& phi_t,
+          const tnsr::aa<DataVector, 3>& dtg_t,
+          const tnsr::aa<DataVector, 3>& dtpi_t,
+          const tnsr::iaa<DataVector, 3>& dtphi_t) {
+        const tnsr::aa<DataVector, 3> u =
+            u_minus_of(g_t, pi_t, phi_t, frame, -1.);
+        tnsr::aa<DataVector, 3> dt_u(n_points);
+        for (size_t a = 0; a < 4; ++a) {
+          for (size_t b = a; b < 4; ++b) {
+            dt_u.get(a, b) =
+                dtpi_t.get(a, b) - frame.gamma2 * dtg_t.get(a, b);
+            for (size_t k = 0; k < 3; ++k) {
+              dt_u.get(a, b) -=
+                  gsl::at(frame.normal_up, k) * dtphi_t.get(k, a, b) +
+                  gsl::at(frame_dot.dt_normal_up, k) * phi_t.get(k, a, b);
+            }
+          }
+        }
+        return gauge_modes(dt_gauge_components(u, dt_u, frame, frame_dot),
+                           ylm_transform, modes);
+      };
+  const std::vector<double> base_modes =
+      assemble_u_and_dt(g_m, pi_m, phi_m, dtg_m, dt_pi_m0, dt_phi_m);
+
+  // target for the linear solve: data minus the pddot-free model part
+  std::vector<double> target(data_modes.size());
+  for (size_t i = 0; i < target.size(); ++i) {
+    target[i] = data_modes[i] - base_modes[i];
+  }
+
+  // ---- columns: pddot enters only through dt Pi_m -> -d2tg/alpha, so the
+  // column tensor is (g_m R(E_A) g_m)/alpha_m contracted like dt_u (pure
+  // dt-part, no frame-motion terms) ----
+  constexpr size_t n_free = 9;
+  std::vector<std::vector<double>> columns(n_free);
+  for (size_t a = 0; a < n_free; ++a) {
+    std::array<double, num_map_parameters> dir{};
+    if (a == 0) {
+      dir[0] = 1.;
+      for (size_t i = 0; i < 3; ++i) {
+        gsl::at(dir, 4 + i) = gsl::at(config.center_velocity, i);
+      }
+    } else if (a < 4) {
+      gsl::at(dir, a) = 1.;
+    } else {
+      gsl::at(dir, 3 + a) = 1.;
+      if (a == 4 or a == 7) {
+        dir[12] = -1.;
+      }
+    }
+    tnsr::AA<DataVector, 3> r_dir(n_points);
+    gh::Solutions::affine_map_model::inverse_metric_combination(
+        make_not_null(&r_dir), y, config.mass, 0., dir);
+    auto col_tensor = covariant_sandwich(g_m, r_dir);
+    for (size_t st = 0; st < col_tensor.size(); ++st) {
+      col_tensor[st] /= lapse_m;
+    }
+    columns[a] = gauge_modes(gauge_components(col_tensor, frame),
+                             ylm_transform, modes);
+  }
+
+  // plain least squares (isotropy weights are inside the modes)
+  const size_t n_res = target.size();
+  std::vector<std::vector<double>> jtj(n_free, std::vector<double>(n_free, 0.));
+  std::vector<double> jtr(n_free, 0.);
+  for (size_t a = 0; a < n_free; ++a) {
+    for (size_t b = a; b < n_free; ++b) {
+      double sum = 0.;
+      for (size_t i = 0; i < n_res; ++i) {
+        sum += columns[a][i] * columns[b][i];
+      }
+      jtj[a][b] = sum;
+      jtj[b][a] = sum;
+    }
+    double sum = 0.;
+    for (size_t i = 0; i < n_res; ++i) {
+      sum += columns[a][i] * target[i];
+    }
+    jtr[a] = sum;
+  }
+  const auto x = solve_normal_equations(std::move(jtj), std::move(jtr));
+
+  RateFitResult result{};
+  result.residual_initial = norm_of(target);
+  std::vector<double> residual = target;
+  for (size_t a = 0; a < n_free; ++a) {
+    for (size_t i = 0; i < n_res; ++i) {
+      residual[i] -= x[a] * columns[a][i];
+    }
+  }
+  result.residual_final = norm_of(residual);
+
+  // closure per {A, C, V} field class and l (fills the same 15 slots the
+  // metric-channel fit uses for (TT, Ti, ij) x l); spreads not defined here
+  const auto row_class = [&n_modes](const size_t row) -> size_t {
+    const size_t field = row / n_modes;  // A, C, V_0..V_3
+    return field == 0 ? 0 : (field == 1 ? 1 : 2);
+  };
+  for (size_t c = 0; c < 3; ++c) {
+    for (size_t l = 0; l <= 4; ++l) {
+      double rr = 0.;
+      double tt = 0.;
+      for (size_t i = 0; i < n_res; ++i) {
+        if (row_class(i) == c and modes.ells[i % n_modes] == l) {
+          rr += square(residual[i]);
+          tt += square(target[i]);
+        }
+      }
+      gsl::at(result.block_closure, 5 * c + l) =
+          tt > 0. ? std::sqrt(rr / tt) : 0.;
+    }
+  }
+
+  result.pdot[0] = x[0];
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(result.pdot, 1 + i) = x[1 + i];
+    gsl::at(result.pdot, 4 + i) = x[0] * gsl::at(config.center_velocity, i);
+  }
+  for (size_t i = 0; i < 5; ++i) {
+    gsl::at(result.pdot, 7 + i) = x[4 + i];
+  }
+  result.pdot[12] = -x[4] - x[7];
+  return result;
+}
 }  // namespace gh::Worldtube
