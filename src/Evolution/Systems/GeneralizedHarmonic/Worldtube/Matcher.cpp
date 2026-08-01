@@ -238,7 +238,8 @@ std::vector<double> gauge_modes(const GaugeComponents& gc,
 // never a parameter.
 void embed(const gsl::not_null<std::array<double, num_map_parameters>*> p,
            const gsl::not_null<std::array<double, 3>*> center_offset,
-           const std::vector<double>& x, const MatcherConfig& config) {
+           const std::vector<double>& x, const MatcherConfig& config,
+           const double trace_pin) {
   (*p)[0] = x[0];
   for (size_t i = 0; i < 3; ++i) {
     gsl::at(*p, 1 + i) = x[1 + i];
@@ -248,7 +249,7 @@ void embed(const gsl::not_null<std::array<double, num_map_parameters>*> p,
   for (size_t i = 0; i < 5; ++i) {
     gsl::at(*p, 7 + i) = x[4 + i];
   }
-  (*p)[12] = 3. * config.trace_strain_pin - x[4] - x[7];
+  (*p)[12] = 3. * trace_pin - x[4] - x[7];
 }
 
 double norm_of(const std::vector<double>& v) {
@@ -304,7 +305,7 @@ FitResult fit_map_parameters(
     const std::array<double, num_map_parameters>& p_start,
     const std::array<double, 3>& center_offset_start,
     const std::array<double, num_map_parameters>& pdot_estimate,
-    const double normal_sign) {
+    const double normal_sign, const double trace_pin) {
   ASSERT(config.fit_l_max <= ylm_transform.l_max(),
          "FitLMax " << config.fit_l_max << " exceeds the grid l_max "
                     << ylm_transform.l_max());
@@ -323,7 +324,8 @@ FitResult fit_map_parameters(
       [&](const std::vector<double>& x) -> std::vector<double> {
     std::array<double, num_map_parameters> p{};
     std::array<double, 3> center_offset{};
-    embed(make_not_null(&p), make_not_null(&center_offset), x, config);
+    embed(make_not_null(&p), make_not_null(&center_offset), x, config,
+        trace_pin);
     std::array<double, 3> model_center = config.center;
     for (size_t i = 0; i < 3; ++i) {
       gsl::at(model_center, i) += gsl::at(center_offset, i);
@@ -411,7 +413,7 @@ FitResult fit_map_parameters(
   }
   result.residual_final = norm_of(residual);
   embed(make_not_null(&result.p), make_not_null(&result.center_offset), x,
-        config);
+        config, trace_pin);
   return result;
 }
 

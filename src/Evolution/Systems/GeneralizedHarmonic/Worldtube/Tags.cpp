@@ -21,6 +21,7 @@ void MatcherConfig::pup(PUP::er& p) {
   p | gauge_damping;
   p | uplus_anchor;
   p | fit_uplus;
+  p | kretschmann_trace_pin;
   p | spatial_monopole_weight;
   p | fit_radial_index;
 }
@@ -38,6 +39,8 @@ bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
          lhs.gauge_damping == rhs.gauge_damping and
          lhs.uplus_anchor == rhs.uplus_anchor and
          lhs.fit_uplus == rhs.fit_uplus and
+         lhs.kretschmann_trace_pin ==
+             rhs.kretschmann_trace_pin and
          lhs.spatial_monopole_weight ==
              rhs.spatial_monopole_weight and
          lhs.fit_radial_index == rhs.fit_radial_index;

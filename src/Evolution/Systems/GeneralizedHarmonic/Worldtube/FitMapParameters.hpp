@@ -22,6 +22,11 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ConstraintDampingTags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matcher.hpp"
+#include "NumericalAlgorithms/LinearOperators/PartialDerivatives.hpp"
+#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ExtrinsicCurvature.hpp"
+#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/Ricci.hpp"
+#include "PointwiseFunctions/GeneralRelativity/SpacetimeNormalVector.hpp"
+#include "PointwiseFunctions/GeneralRelativity/WeylElectric.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Tags.hpp"
 #include "IO/Observer/ObserverComponent.hpp"
 #include "IO/Observer/ReductionActions.hpp"
@@ -182,6 +187,75 @@ struct FitMapParameters {
     double residual_final = 0.;
     double iterations = 0.;
 
+    // Trace pin: the TraceStrainPin constant, or measured live from the
+    // curvature. In vacuum the Gauss-Bonnet scalar equals the Kretschmann
+    // scalar; the magnetic contribution is quadratic in the perturbation
+    // (B = 0 on the background, |B.B/E.E| ~ 1e-10 here) and is dropped, so
+    // K ~ 8 E.E. The invariant harmonic radius rho = (48 M^2/K)^{1/6} - M
+    // gives tr sigma / 3 = 1 - <rho>/<R> via the l=0 sphere means
+    // (findings 12).
+    double trace_pin = config_opt->trace_strain_pin;
+    if (config_opt->kretschmann_trace_pin) {
+      const auto& inv_jacobian = db::get<domain::Tags::InverseJacobian<
+          Dim, Frame::ElementLogical, Frame::Inertial>>(box);
+      const auto deriv_phi_volume = partial_derivative(
+          db::get<gh::Tags::Phi<DataVector, Dim>>(box), mesh, inv_jacobian);
+      tnsr::ijaa<DataVector, Dim> deriv_phi_face{};
+      slice_tensor(make_not_null(&deriv_phi_face), deriv_phi_volume);
+
+      const auto inv4 = determinant_and_inverse(metric_face).second;
+      const DataVector lapse_sq = -1. / get<0, 0>(inv4);
+      Scalar<DataVector> lapse{sqrt(lapse_sq)};
+      tnsr::I<DataVector, Dim> shift(n_face);
+      for (size_t i = 0; i < 3; ++i) {
+        shift.get(i) = lapse_sq * inv4.get(0, i + 1);
+      }
+      tnsr::II<DataVector, Dim> inv_spatial(n_face);
+      for (size_t i = 0; i < 3; ++i) {
+        for (size_t j = i; j < 3; ++j) {
+          inv_spatial.get(i, j) =
+              inv4.get(i + 1, j + 1) +
+              inv4.get(0, i + 1) * inv4.get(0, j + 1) * lapse_sq;
+        }
+      }
+      const auto normal_vec = gr::spacetime_normal_vector(lapse, shift);
+      const auto kij = gh::extrinsic_curvature(normal_vec, pi_face, phi_face);
+      const auto ricci =
+          gh::spatial_ricci_tensor(phi_face, deriv_phi_face, inv_spatial);
+      const auto weyl_e = gr::weyl_electric(ricci, kij, inv_spatial);
+      const DataVector ee = get(gr::weyl_electric_scalar(weyl_e, inv_spatial));
+      const DataVector gb = 8. * ee;
+      const DataVector rho_gb =
+          pow(48. * square(config_opt->mass) / gb, 1. / 6.) -
+          config_opt->mass;
+      DataVector coord_r(n_face, 0.);
+      for (size_t i = 0; i < 3; ++i) {
+        coord_r += square(coords_face.get(i) -
+                          gsl::at(config_opt->center, i));
+      }
+      coord_r = sqrt(coord_r);
+      // l = 0 sphere means via Spherepack (the collocation grid has no
+      // uniform quadrature weights, so a plain mean is not an area mean)
+      const auto sphere_mean = [&ylm_transform](const DataVector& field) {
+        const DataVector spec = ylm_transform.phys_to_spec(field);
+        DataVector only(spec.size(), 0.);
+        ylm::SpherepackIterator iter(ylm_transform.l_max(),
+                                     ylm_transform.m_max());
+        iter.set(0, 0);
+        only[iter()] = spec[iter()];
+        const DataVector back = ylm_transform.spec_to_phys(only);
+        double sum = 0.;
+        for (size_t k = 0; k < back.size(); ++k) {
+          sum += back[k];
+        }
+        return sum / static_cast<double>(back.size());
+      };
+      trace_pin = 1. - sphere_mean(rho_gb) / sphere_mean(coord_r);
+      if (not std::isfinite(trace_pin)) {
+        trace_pin = config_opt->trace_strain_pin;
+      }
+    }
+
     if (config_opt->stepper_ode) {
       // u^+ anchor: value-fit the map to the gauge projection of the
       // OUTGOING characteristic (normal_sign -1) — the channel the ghost
@@ -197,7 +271,7 @@ struct FitMapParameters {
       const FitResult result = fit_map_parameters(
           metric_face, pi_face, phi_face, gamma2_face, coords_face,
           ylm_transform, *config_opt, p_start, center_offset_start,
-          zero_rates, -1.0);
+          zero_rates, -1.0, trace_pin);
       bool finite = true;
       for (size_t a = 0; a < num_map_parameters; ++a) {
         finite = finite and std::isfinite(gsl::at(result.p, a));
@@ -384,7 +458,7 @@ struct FitMapParameters {
       const FitResult result = fit_map_parameters(
           metric_face, pi_face, phi_face, gamma2_face, coords_face,
           ylm_transform, *config_opt, p_start, center_offset_start,
-          zero_rates, config_opt->fit_uplus ? -1.0 : 1.0);
+          zero_rates, config_opt->fit_uplus ? -1.0 : 1.0, trace_pin);
       residual_initial = result.residual_initial;
       residual_final = result.residual_final;
       iterations = static_cast<double>(result.iterations);
@@ -454,6 +528,7 @@ struct FitMapParameters {
     legend.emplace_back("ResidualInitial");
     legend.emplace_back("ResidualFinal");
     legend.emplace_back("Iterations");
+    legend.emplace_back("TracePin");
     std::vector<double> row;
     row.reserve(3 * num_map_parameters);
     row.push_back(time);
@@ -469,6 +544,7 @@ struct FitMapParameters {
     row.push_back(residual_initial);
     row.push_back(residual_final);
     row.push_back(iterations);
+    row.push_back(trace_pin);
     Parallel::threaded_action<
         observers::ThreadedActions::WriteReductionDataRow>(
         writer[0], std::string{"/WorldtubeMatcher"}, std::move(legend),

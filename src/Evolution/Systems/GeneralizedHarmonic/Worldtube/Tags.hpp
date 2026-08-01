@@ -161,6 +161,17 @@ struct MatcherConfig {
         "sensor targets dt of the u^+ gauge projection instead of the "
         "all-components d2t g projection."};
   };
+  struct KretschmannTracePin {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Set the trace-strain pin from the curvature each fit instead of "
+        "the TraceStrainPin constant: the vacuum Gauss-Bonnet scalar "
+        "(= Kretschmann) gives the invariant harmonic radius rho_GB = "
+        "(48 M^2/K)^{1/6} - M, and tr sigma / 3 = 1 - <rho_GB>/<R> on "
+        "the face (findings 12: the fit-independent measurement of the "
+        "one strain direction the metric fit cannot own). Applies to the "
+        "value-fit modes; the ODE modes keep the constant."};
+  };
   struct SpatialMonopoleWeight {
     using type = double;
     static constexpr Options::String help = {
@@ -186,7 +197,8 @@ struct MatcherConfig {
       tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin, FitLMax,
                  FitInterval, FitCenterOffset, RateOde, SecondOrderOde,
                  StepperOde, GaugeDamping, UPlusAnchor, FitUPlus,
-                 SpatialMonopoleWeight, FitRadialIndex>;
+                 KretschmannTracePin, SpatialMonopoleWeight,
+                 FitRadialIndex>;
   static constexpr Options::String help = {
       "Online worldtube matching: fit the 13 first-order affine-map "
       "parameters from the evolved fields on the excision sphere."};
@@ -198,8 +210,8 @@ struct MatcherConfig {
                 double fit_interval, bool fit_center_offset, bool rate_ode,
                 bool second_order_ode, bool stepper_ode,
                 double gauge_damping, double uplus_anchor,
-                bool fit_uplus, double spatial_monopole_weight,
-                size_t fit_radial_index)
+                bool fit_uplus, bool kretschmann_trace_pin,
+                double spatial_monopole_weight, size_t fit_radial_index)
       : mass(mass),
         center(center),
         center_velocity(center_velocity),
@@ -213,6 +225,7 @@ struct MatcherConfig {
         gauge_damping(gauge_damping),
         uplus_anchor(uplus_anchor),
         fit_uplus(fit_uplus),
+        kretschmann_trace_pin(kretschmann_trace_pin),
         spatial_monopole_weight(spatial_monopole_weight),
         fit_radial_index(fit_radial_index) {}
 
@@ -232,6 +245,7 @@ struct MatcherConfig {
   double gauge_damping = 0.;
   double uplus_anchor = 0.;
   bool fit_uplus = false;
+  bool kretschmann_trace_pin = false;
   double spatial_monopole_weight = 1.;
   size_t fit_radial_index = 0;
 };
