@@ -27,6 +27,7 @@ void MatcherConfig::pup(PUP::er& p) {
   p | fit_velocity;
   p | centre_advection;
   p | spatial_monopole_weight;
+  p | uplus_block_weights;
   p | fit_radial_index;
 }
 
@@ -49,6 +50,7 @@ bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
          lhs.fit_velocity == rhs.fit_velocity and
          lhs.centre_advection == rhs.centre_advection and
          lhs.spatial_monopole_weight == rhs.spatial_monopole_weight and
+         lhs.uplus_block_weights == rhs.uplus_block_weights and
          lhs.fit_radial_index == rhs.fit_radial_index;
 }
 

@@ -150,6 +150,80 @@ void TimeDependentTripleGaussian::apply_call_operator(
   add_gauss_to_value_at_x(amplitude_3_, inverse_width_3_, center_3_);
 }  // namespace gh::ConstraintDamping
 
+template <typename T>
+void TimeDependentTripleGaussian::apply_time_derivative(
+    const gsl::not_null<Scalar<T>*> dt_value_at_x,
+    const tnsr::I<T, 3, Frame::Grid>& x, const double time,
+    const std::unordered_map<
+        std::string,
+        std::unique_ptr<::domain::FunctionsOfTime::FunctionOfTime>>&
+        functions_of_time) const {
+  get(*dt_value_at_x) = 0.;
+  auto centered_coords = make_with_value<tnsr::I<T, 3, Frame::Grid>>(
+      get<0>(x), std::numeric_limits<double>::signaling_NaN());
+
+  if (movement_method_ == MovementMethods::ExpansionFactor) {
+    const auto expansion_and_deriv =
+        functions_of_time.at(function_of_time_for_scaling_)
+            ->func_and_deriv(time);
+    ASSERT(expansion_and_deriv[0].size() == 1 and
+               expansion_and_deriv[1].size() == 1,
+           "FunctionOfTimeForScaling in TimeDependentTripleGaussian must "
+           "be a scalar FunctionOfTime.");
+    const double expansion = expansion_and_deriv[0][0];
+    const double dt_expansion = expansion_and_deriv[1][0];
+    const auto add_expansion_derivative =
+        [&centered_coords, &x, expansion, dt_expansion, dt_value_at_x](
+            const double amplitude, const double inverse_width,
+            const std::array<double, 3>& center) {
+          for (size_t i = 0; i < 3; ++i) {
+            centered_coords.get(i) = x.get(i) - gsl::at(center, i);
+          }
+          Scalar<T> distance_squared{};
+          dot_product(make_not_null(&distance_squared), centered_coords,
+                      centered_coords);
+          const T gaussian = amplitude * exp(-get(distance_squared) *
+                                             square(inverse_width * expansion));
+          get(*dt_value_at_x) += -2. * gaussian * get(distance_squared) *
+                                 square(inverse_width) * expansion *
+                                 dt_expansion;
+        };
+    add_expansion_derivative(amplitude_1_, inverse_width_1_, center_1_.value());
+    add_expansion_derivative(amplitude_2_, inverse_width_2_, center_2_.value());
+    add_expansion_derivative(amplitude_3_, inverse_width_3_, center_3_);
+  } else {
+    const auto centers_and_deriv =
+        functions_of_time.at(function_of_time_for_centers_)
+            ->func_and_deriv(time);
+    ASSERT(
+        centers_and_deriv[0].size() == 6 and centers_and_deriv[1].size() == 6,
+        "FunctionOfTimeForCenters in TimeDependentTripleGaussian must "
+        "have 6 components.");
+    const auto add_center_derivative = [&centered_coords, &x,
+                                        &centers_and_deriv, dt_value_at_x](
+                                           const double amplitude,
+                                           const double inverse_width,
+                                           const size_t offset) {
+      T centered_dot_velocity = make_with_value<T>(get<0>(x), 0.);
+      for (size_t i = 0; i < 3; ++i) {
+        centered_coords.get(i) = x.get(i) - centers_and_deriv[0][offset + i];
+        centered_dot_velocity +=
+            centered_coords.get(i) * centers_and_deriv[1][offset + i];
+      }
+      Scalar<T> distance_squared{};
+      dot_product(make_not_null(&distance_squared), centered_coords,
+                  centered_coords);
+      const T gaussian =
+          amplitude * exp(-get(distance_squared) * square(inverse_width));
+      get(*dt_value_at_x) +=
+          2. * gaussian * square(inverse_width) * centered_dot_velocity;
+    };
+    add_center_derivative(amplitude_1_, inverse_width_1_, 0);
+    add_center_derivative(amplitude_2_, inverse_width_2_, 3);
+    // Gaussian 3 has a fixed grid-frame center in ObjectCenters mode.
+  }
+}
+
 void TimeDependentTripleGaussian::operator()(
     const gsl::not_null<Scalar<double>*> value_at_x,
     const tnsr::I<double, 3, Frame::Grid>& x, const double time,
@@ -158,6 +232,26 @@ void TimeDependentTripleGaussian::operator()(
         std::unique_ptr<::domain::FunctionsOfTime::FunctionOfTime>>&
         functions_of_time) const {
   apply_call_operator(value_at_x, x, time, functions_of_time);
+}
+
+void TimeDependentTripleGaussian::time_derivative(
+    const gsl::not_null<Scalar<double>*> dt_value_at_x,
+    const tnsr::I<double, 3, Frame::Grid>& x, const double time,
+    const std::unordered_map<
+        std::string,
+        std::unique_ptr<::domain::FunctionsOfTime::FunctionOfTime>>&
+        functions_of_time) const {
+  apply_time_derivative(dt_value_at_x, x, time, functions_of_time);
+}
+void TimeDependentTripleGaussian::time_derivative(
+    const gsl::not_null<Scalar<DataVector>*> dt_value_at_x,
+    const tnsr::I<DataVector, 3, Frame::Grid>& x, const double time,
+    const std::unordered_map<
+        std::string,
+        std::unique_ptr<::domain::FunctionsOfTime::FunctionOfTime>>&
+        functions_of_time) const {
+  set_number_of_grid_points(dt_value_at_x, x);
+  apply_time_derivative(dt_value_at_x, x, time, functions_of_time);
 }
 void TimeDependentTripleGaussian::operator()(
     const gsl::not_null<Scalar<DataVector>*> value_at_x,

@@ -47,6 +47,28 @@ void Constant<VolumeDim, Fr>::operator()(
     /*functions_of_time*/) const {
   apply_call_operator(value_at_x);
 }
+
+template <size_t VolumeDim, typename Fr>
+void Constant<VolumeDim, Fr>::time_derivative(
+    const gsl::not_null<Scalar<double>*> dt_value_at_x,
+    const tnsr::I<double, VolumeDim, Fr>& /*x*/, const double /*time*/,
+    const std::unordered_map<
+        std::string,
+        std::unique_ptr<::domain::FunctionsOfTime::FunctionOfTime>>&
+    /*functions_of_time*/) const {
+  get(*dt_value_at_x) = 0.;
+}
+template <size_t VolumeDim, typename Fr>
+void Constant<VolumeDim, Fr>::time_derivative(
+    const gsl::not_null<Scalar<DataVector>*> dt_value_at_x,
+    const tnsr::I<DataVector, VolumeDim, Fr>& x, const double /*time*/,
+    const std::unordered_map<
+        std::string,
+        std::unique_ptr<::domain::FunctionsOfTime::FunctionOfTime>>&
+    /*functions_of_time*/) const {
+  set_number_of_grid_points(dt_value_at_x, x);
+  get(*dt_value_at_x) = 0.;
+}
 template <size_t VolumeDim, typename Fr>
 void Constant<VolumeDim, Fr>::operator()(
     const gsl::not_null<Scalar<DataVector>*> value_at_x,
@@ -94,15 +116,24 @@ GENERATE_INSTANTIATIONS(INSTANTIATE, (1, 2, 3), (Frame::Grid, Frame::Inertial))
 #define FRAME(data) BOOST_PP_TUPLE_ELEM(1, data)
 #define DTYPE(data) BOOST_PP_TUPLE_ELEM(2, data)
 
-#define INSTANTIATE(_, data)                                       \
-  template void                                                    \
-  ConstraintDamping::Constant<DIM(data), FRAME(data)>::operator()( \
-      const gsl::not_null<Scalar<DTYPE(data)>*> value_at_x,        \
-      const tnsr::I<DTYPE(data), DIM(data), FRAME(data)>& /*x*/,   \
-      const double /*time*/,                                       \
-      const std::unordered_map<                                    \
-          std::string,                                             \
-          std::unique_ptr<::domain::FunctionsOfTime::              \
+#define INSTANTIATE(_, data)                                                  \
+  template void                                                               \
+  ConstraintDamping::Constant<DIM(data), FRAME(data)>::operator()(            \
+      const gsl::not_null<Scalar<DTYPE(data)>*> value_at_x,                   \
+      const tnsr::I<DTYPE(data), DIM(data), FRAME(data)>& /*x*/,              \
+      const double /*time*/,                                                  \
+      const std::unordered_map<                                               \
+          std::string,                                                        \
+          std::unique_ptr<::domain::FunctionsOfTime::                         \
+                              FunctionOfTime>>& /*functions_of_time*/) const; \
+  template void                                                               \
+  ConstraintDamping::Constant<DIM(data), FRAME(data)>::time_derivative(       \
+      const gsl::not_null<Scalar<DTYPE(data)>*> dt_value_at_x,                \
+      const tnsr::I<DTYPE(data), DIM(data), FRAME(data)>& /*x*/,              \
+      const double /*time*/,                                                  \
+      const std::unordered_map<                                               \
+          std::string,                                                        \
+          std::unique_ptr<::domain::FunctionsOfTime::                         \
                               FunctionOfTime>>& /*functions_of_time*/) const;
 
 GENERATE_INSTANTIATIONS(INSTANTIATE, (1, 2, 3), (Frame::Grid, Frame::Inertial),

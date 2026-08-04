@@ -59,8 +59,9 @@ namespace gh::Worldtube::Actions {
  * No-op on every other element, when `Tags::Matcher` is `None`, and when the
  * time has not advanced by `FitInterval` since the last fit (this also
  * limits the action to one fit per step under substepping time steppers).
- * Rates are estimated by backward differences of the fit history and held
- * fixed during the fit (the ghost form needs no better, findings §15b).
+ * In the default algebraic mode the result is a strict slow-time first-order
+ * state: coefficient rates are neither fitted nor extrapolated.  The
+ * derivative ODE modes are retained as explicitly higher-order experiments.
  */
 struct FitMapParameters {
   using const_global_cache_tags = tmpl::list<Tags::Matcher>;
@@ -172,20 +173,18 @@ struct FitMapParameters {
 
     const ylm::Spherepack& ylm_transform = ylm::get_spherepack_cache(l_max);
 
-    // The fit runs with zero drives: feeding the backward-difference rate
-    // estimate back into the fit is an unstable loop (the optimal p shifts
-    // to compensate a drive error by more than dt, so the estimate grows
-    // geometrically — measured x1.33 per fit at FitInterval 0.5). Zero
-    // drives in the fit is the offline pass-1, which differs from the
-    // converged offline fit by only ~5% of |p| (findings §15b). The rates
-    // are computed afterwards, purely as an output for the boundary
-    // condition's model Pi.
+    // The value fit is the strict first-order slow-time path. It has no
+    // coefficient-rate input or output: D_t p_(1) changes the metric only at
+    // O(epsilon^2). The zeroth-order center is different: its O(epsilon)
+    // velocity is retained kinematically. The derivative ODE branches below
+    // remain separate, explicitly higher-order experiments.
     std::array<double, num_map_parameters> p_out{};
     std::array<double, num_map_parameters> pdot_out{};
     std::array<double, 3> center_offset_out{};
     double residual_initial = 0.;
     double residual_final = 0.;
     double iterations = 0.;
+    std::optional<FitResult> value_diagnostics{};
 
     // Trace pin: the TraceStrainPin constant, or measured live from the
     // curvature. In vacuum the Gauss-Bonnet scalar equals the Kretschmann
@@ -318,16 +317,15 @@ struct FitMapParameters {
       // BC does not set, i.e. the data the ambient evolution feeds the
       // excision. Consumed by AdvanceMapParameterOde as the weak drive
       // -2 kappa (pdot - pdot_anchor) - kappa^2 (p - p_anchor).
-      const std::array<double, num_map_parameters> zero_rates{};
       std::array<double, num_map_parameters> p_start{};
       const std::array<double, 3> center_offset_start{};
       if (state.anchor_valid) {
         p_start = state.anchor_p;
       }
-      const FitResult result = fit_map_parameters(
-          metric_face, pi_face, phi_face, gamma2_face, coords_face,
-          ylm_transform, *config_opt, p_start, center_offset_start,
-          zero_rates, -1.0, trace_pin);
+      const FitResult result =
+          fit_map_parameters(metric_face, pi_face, phi_face, gamma2_face,
+                             coords_face, ylm_transform, *config_opt, p_start,
+                             center_offset_start, -1.0, trace_pin);
       bool finite = true;
       for (size_t a = 0; a < num_map_parameters; ++a) {
         finite = finite and std::isfinite(gsl::at(result.p, a));
@@ -495,29 +493,33 @@ struct FitMapParameters {
       }
       pdot_out = rate.pdot;
     } else {
-      // Value mode: the fit runs with zero drives — feeding the
-      // backward-difference rate estimate back into the fit is an unstable
-      // loop (the optimal p shifts to compensate a drive error by more than
-      // dt, so the estimate grows geometrically; measured x1.33 per fit at
-      // FitInterval 0.5). Zero drives in the fit is the offline pass-1,
-      // which differs from the converged offline fit by only ~5% of |p|
-      // (findings §15b). The rates are computed afterwards, purely as an
-      // output for the boundary condition's model Pi.
-      const std::array<double, num_map_parameters> zero_rates{};
+      // Strict first-order value mode: determine the instantaneous center and
+      // p_(1) algebraically. Hold p_(1) fixed between fits and set its rates
+      // to zero; both D_t p_(1) and linear extrapolation of epsilon*p_(1)
+      // contribute first at O(epsilon^2). In contrast, q^i is a zeroth-order
+      // placement and must be predicted with dq^i/dt = p_(1)[qdot^i].
       std::array<double, num_map_parameters> p_start{};
       std::array<double, 3> center_offset_start{};
       if (state.valid) {
         p_start = state.p;
         center_offset_start = state.center_offset;
+        if (config_opt->centre_advection) {
+          const double elapsed = time - state.last_fit_time;
+          for (size_t i = 0; i < 3; ++i) {
+            gsl::at(center_offset_start, i) +=
+                elapsed * gsl::at(state.p, 4 + i);
+          }
+        }
       }
 
       const FitResult result = fit_map_parameters(
           metric_face, pi_face, phi_face, gamma2_face, coords_face,
           ylm_transform, *config_opt, p_start, center_offset_start,
-          zero_rates, config_opt->fit_uplus ? -1.0 : 1.0, trace_pin);
+          config_opt->fit_uplus ? -1.0 : 1.0, trace_pin);
       residual_initial = result.residual_initial;
       residual_final = result.residual_final;
       iterations = static_cast<double>(result.iterations);
+      value_diagnostics = result;
 
       bool finite = true;
       for (size_t a = 0; a < num_map_parameters; ++a) {
@@ -528,32 +530,16 @@ struct FitMapParameters {
       }
 
       if (finite) {
-        // the rates fed to the boundary condition's model Pi come from the
-        // evolution equations (dt g = beta Phi - alpha Pi projected on the
-        // rate directions), not from backward differences of the fits:
-        // smooth, and independent of the fit history (feeding fit
-        // differences back was the measured x1.33-per-fit instability)
-        const RateFitResult rate = fit_map_parameter_rates(
-            metric_face, pi_face, phi_face, coords_face, ylm_transform,
-            *config_opt);
-        bool rate_finite = true;
-        for (size_t a = 0; a < num_map_parameters; ++a) {
-          rate_finite =
-              rate_finite and std::isfinite(gsl::at(rate.pdot, a));
-        }
-        if (rate_finite) {
-          pdot_out = rate.pdot;
-        }
         db::mutate<Tags::MapParameters>(
-            [&result, &time, &pdot_out](
-                const gsl::not_null<MapParameterData*> data) {
+            [&result, &time](const gsl::not_null<MapParameterData*> data) {
               if (data->valid and time > data->last_fit_time) {
                 data->previous_fit_time = data->last_fit_time;
                 data->p_previous = data->p;
               }
               data->last_fit_time = time;
               data->p = result.p;
-              data->pdot = pdot_out;
+              data->pdot.fill(0.);
+              data->pddot.fill(0.);
               data->center_offset = result.center_offset;
               data->valid = true;
             },
@@ -593,8 +579,27 @@ struct FitMapParameters {
     for (const std::string& c : {"x", "y", "z"}) {
       legend.push_back("GbDipoleVel_" + c);
     }
+    if (value_diagnostics.has_value()) {
+      legend.emplace_back("BaselineResidual");
+      legend.emplace_back("HeldOutMinusBaselineResidual");
+      legend.emplace_back("HeldOutMinusResidualFinal");
+      legend.emplace_back("WeightedDesignConditionNumber");
+      legend.emplace_back("MetricBaselineResidual");
+      legend.emplace_back("MetricResidualFinal");
+      legend.emplace_back("PhiBaselineResidual");
+      legend.emplace_back("PhiResidualFinal");
+      for (const std::string& prefix :
+           {"Closure_", "TargetRms_", "ResidualRms_", "HeldOutMinusClosure_",
+            "HeldOutMinusTargetRms_", "HeldOutMinusResidualRms_"}) {
+        for (const std::string& field : {"A", "C", "V"}) {
+          for (size_t l = 0; l <= 4; ++l) {
+            legend.push_back(prefix + field + "_l" + std::to_string(l));
+          }
+        }
+      }
+    }
     std::vector<double> row;
-    row.reserve(3 * num_map_parameters);
+    row.reserve(3 * num_map_parameters + 100);
     row.push_back(time);
     for (size_t a = 0; a < num_map_parameters; ++a) {
       row.push_back(gsl::at(p_out, a));
@@ -616,6 +621,26 @@ struct FitMapParameters {
       }
       for (size_t i = 0; i < 3; ++i) {
         row.push_back(gsl::at(fresh.gb_dipole_velocity, i));
+      }
+    }
+    if (value_diagnostics.has_value()) {
+      const auto& diagnostic = value_diagnostics.value();
+      row.push_back(diagnostic.baseline_residual);
+      row.push_back(diagnostic.minus_baseline_residual);
+      row.push_back(diagnostic.minus_residual_final);
+      row.push_back(diagnostic.condition_number);
+      row.push_back(diagnostic.metric_baseline_residual);
+      row.push_back(diagnostic.metric_residual_final);
+      row.push_back(diagnostic.phi_baseline_residual);
+      row.push_back(diagnostic.phi_residual_final);
+      for (const auto* values :
+           {&diagnostic.block_closure, &diagnostic.block_target_rms,
+            &diagnostic.block_residual_rms, &diagnostic.block_minus_closure,
+            &diagnostic.block_minus_target_rms,
+            &diagnostic.block_minus_residual_rms}) {
+        for (const double value : *values) {
+          row.push_back(value);
+        }
       }
     }
     Parallel::threaded_action<

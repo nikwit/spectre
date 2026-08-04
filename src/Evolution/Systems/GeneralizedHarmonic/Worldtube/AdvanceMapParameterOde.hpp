@@ -17,6 +17,7 @@
 #include "DataStructures/DataBox/DataBox.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
+#include "Domain/FunctionsOfTime/Tags.hpp"
 #include "Domain/Structure/Direction.hpp"
 #include "Domain/Structure/Element.hpp"
 #include "Domain/Tags.hpp"
@@ -32,6 +33,7 @@
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "Parallel/Invoke.hpp"
+#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ConstraintDampingTags.hpp"
 #include "Time/History.hpp"
 #include "Time/SelfStart.hpp"
 #include "Time/Tags/HistoryEvolvedVariables.hpp"
@@ -59,14 +61,15 @@ namespace gh::Worldtube::Actions {
  * time stepping) rewinds the history before recording.
  */
 struct AdvanceMapParameterOde {
-  using const_global_cache_tags = tmpl::list<Tags::Matcher>;
+  using const_global_cache_tags =
+      tmpl::list<Tags::Matcher,
+                 gh::Tags::DampingFunctionGamma2<3, Frame::Grid>>;
 
   template <typename DbTags, typename... InboxTags, typename Metavariables,
             typename ArrayIndex, typename ActionList,
             typename ParallelComponent>
   static Parallel::iterable_action_return_t apply(
-      db::DataBox<DbTags>& box,
-      tuples::TaggedTuple<InboxTags...>& /*inboxes*/,
+      db::DataBox<DbTags>& box, tuples::TaggedTuple<InboxTags...>& /*inboxes*/,
       Parallel::GlobalCache<Metavariables>& cache,
       const ArrayIndex& /*array_index*/, const ActionList /*meta*/,
       const ParallelComponent* const /*component*/) {
@@ -83,8 +86,7 @@ struct AdvanceMapParameterOde {
     }
     const auto& element = db::get<domain::Tags::Element<Dim>>(box);
     if (element.id().block_id() != 0 or
-        element.external_boundaries().count(Direction<Dim>::lower_xi()) ==
-            0) {
+        element.external_boundaries().count(Direction<Dim>::lower_xi()) == 0) {
       return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
     const TimeStepId& time_step_id = db::get<::Tags::TimeStepId>(box);
@@ -119,6 +121,7 @@ struct AdvanceMapParameterOde {
     tnsr::aa<DataVector, Dim> pi_face{};
     tnsr::iaa<DataVector, Dim> phi_face{};
     Scalar<DataVector> gamma2_face{};
+    Scalar<DataVector> dt_gamma2_face{};
     tnsr::I<DataVector, Dim> coords_face{};
     tnsr::aa<DataVector, Dim> dt_metric_face{};
     tnsr::aa<DataVector, Dim> dt_pi_face{};
@@ -131,9 +134,16 @@ struct AdvanceMapParameterOde {
                  db::get<gh::Tags::Phi<DataVector, Dim>>(box));
     slice_tensor(make_not_null(&gamma2_face),
                  db::get<gh::Tags::ConstraintGamma2>(box));
-    slice_tensor(
-        make_not_null(&coords_face),
-        db::get<domain::Tags::Coordinates<Dim, Frame::Inertial>>(box));
+    Scalar<DataVector> dt_gamma2_volume{};
+    db::get<gh::Tags::DampingFunctionGamma2<Dim, Frame::Grid>>(box)
+        .time_derivative(
+            make_not_null(&dt_gamma2_volume),
+            db::get<domain::Tags::Coordinates<Dim, Frame::Grid>>(box),
+            time_step_id.substep_time(),
+            db::get<domain::Tags::FunctionsOfTime>(box));
+    slice_tensor(make_not_null(&dt_gamma2_face), dt_gamma2_volume);
+    slice_tensor(make_not_null(&coords_face),
+                 db::get<domain::Tags::Coordinates<Dim, Frame::Inertial>>(box));
     slice_tensor(
         make_not_null(&dt_metric_face),
         db::get<::Tags::dt<gr::Tags::SpacetimeMetric<DataVector, Dim>>>(box));
@@ -148,13 +158,30 @@ struct AdvanceMapParameterOde {
     // for the u^+ sensor
     std::array<double, num_map_parameters> p_state{};
     std::array<double, num_map_parameters> pdot_state{};
+    const double time = time_step_id.substep_time();
+    bool observe_matcher = false;
     {
       const auto& current = db::get<Tags::MapParameters>(box);
+      observe_matcher = time_step_id.substep() == 0 and
+                        time >= current.previous_fit_time + 0.5 - 1.0e-12;
       if (current.ode_state.size() == 2 * num_map_parameters) {
         for (size_t a = 0; a < num_map_parameters; ++a) {
           gsl::at(p_state, a) = current.ode_state[a];
-          gsl::at(pdot_state, a) =
-              current.ode_state[num_map_parameters + a];
+          gsl::at(pdot_state, a) = current.ode_state[num_map_parameters + a];
+        }
+      } else {
+        // The Stepper evolves only the nine free directions.  Initialize the
+        // translational boost at the first-order constant-velocity solution,
+        //   beta_i = qdot^i = CenterVelocity_i.
+        // The three map velocities are subsequently pinned to
+        //   qdot^i = (1 + qdot^0) CenterVelocity^i,
+        // while beta_i remains a free dynamical parameter.  Both nonzero
+        // integration constants must be present before the first acceleration
+        // solve; an all-zero state represents a static hole and makes the
+        // acceleration columns try to absorb the resulting O(v) mismatch.
+        for (size_t i = 0; i < 3; ++i) {
+          gsl::at(p_state, 1 + i) = gsl::at(config_opt->center_velocity, i);
+          gsl::at(p_state, 4 + i) = gsl::at(config_opt->center_velocity, i);
         }
       }
     }
@@ -164,13 +191,13 @@ struct AdvanceMapParameterOde {
     const RateFitResult accel =
         config_opt->fit_uplus
             ? fit_map_parameter_accelerations_uplus(
-                  metric_face, pi_face, phi_face, dt_metric_face,
-                  dt_pi_face, dt_phi_face, gamma2_face, p_state, pdot_state,
-                  coords_face, ylm_transform, *config_opt)
+                  metric_face, pi_face, phi_face, dt_metric_face, dt_pi_face,
+                  dt_phi_face, gamma2_face, dt_gamma2_face, p_state, pdot_state,
+                  coords_face, ylm_transform, *config_opt, observe_matcher)
             : fit_map_parameter_accelerations(
-                  metric_face, pi_face, phi_face, dt_metric_face,
-                  dt_pi_face, dt_phi_face, pdot_state, coords_face,
-                  ylm_transform, *config_opt);
+                  metric_face, pi_face, phi_face, dt_metric_face, dt_pi_face,
+                  dt_phi_face, pdot_state, coords_face, ylm_transform,
+                  *config_opt);
     bool finite = true;
     for (size_t a = 0; a < num_map_parameters; ++a) {
       finite = finite and std::isfinite(gsl::at(accel.pdot, a));
@@ -181,10 +208,9 @@ struct AdvanceMapParameterOde {
 
     const auto& stepper = db::get<::Tags::TimeStepper<TimeStepper>>(box);
     const auto& time_step = db::get<::Tags::TimeStep>(box);
-    const size_t system_order =
-        db::get<::Tags::HistoryEvolvedVariables<
-            typename gh::System<Dim>::variables_tag>>(box)
-            .integration_order();
+    const size_t system_order = db::get<::Tags::HistoryEvolvedVariables<
+        typename gh::System<Dim>::variables_tag>>(box)
+                                    .integration_order();
 
     db::mutate<Tags::MapParameters>(
         [&](const gsl::not_null<MapParameterData*> data) {
@@ -192,14 +218,18 @@ struct AdvanceMapParameterOde {
           auto& y = data->ode_state;
           if (y.size() != 2 * num_map_parameters) {
             y = DataVector(2 * num_map_parameters, 0.);
+            for (size_t i = 0; i < 3; ++i) {
+              y[1 + i] = gsl::at(config_opt->center_velocity, i);
+              y[4 + i] = gsl::at(config_opt->center_velocity, i);
+            }
           }
           // transactional rewind for repeated/regressed TimeStepIds (step
           // rejection under local time stepping)
           while (history.size() > 0 or not history.substeps().empty()) {
-            const TimeStepId& latest = history.at_step_start()
-                                           ? history.back().time_step_id
-                                           : history.substeps().back()
-                                                 .time_step_id;
+            const TimeStepId& latest =
+                history.at_step_start()
+                    ? history.back().time_step_id
+                    : history.substeps().back().time_step_id;
             if (latest < time_step_id) {
               break;
             }
@@ -237,8 +267,8 @@ struct AdvanceMapParameterOde {
           static constexpr std::array<size_t, 9> free_indices{
               {0, 1, 2, 3, 7, 8, 9, 10, 11}};
           const auto add_pin_consistent_drive =
-              [&dt_y, &config_opt](
-                  const std::array<double, num_map_parameters>& raw) {
+              [&dt_y,
+               &config_opt](const std::array<double, num_map_parameters>& raw) {
                 std::array<double, num_map_parameters> drive{};
                 for (const size_t a : free_indices) {
                   gsl::at(drive, a) = gsl::at(raw, a);
@@ -312,15 +342,13 @@ struct AdvanceMapParameterOde {
         make_not_null(&box));
 
     // occasional diagnostic row (same subfile/format as FitMapParameters)
-    const auto& state = db::get<Tags::MapParameters>(box);
-    const double time = time_step_id.substep_time();
-    if (time_step_id.substep() == 0 and
-        time >= state.previous_fit_time + 0.5 - 1.0e-12) {
+    if (observe_matcher) {
       db::mutate<Tags::MapParameters>(
           [&time](const gsl::not_null<MapParameterData*> data) {
             data->previous_fit_time = time;
           },
           make_not_null(&box));
+      const auto& state = db::get<Tags::MapParameters>(box);
       auto& writer = Parallel::get_parallel_component<
           observers::ObserverWriter<Metavariables>>(cache);
       std::vector<std::string> legend{"Time"};
@@ -333,24 +361,43 @@ struct AdvanceMapParameterOde {
       for (const auto& name : names) {
         legend.push_back("dt_" + name);
       }
+      for (const auto& name : names) {
+        legend.push_back("d2t_" + name);
+      }
       legend.emplace_back("q_x");
       legend.emplace_back("q_y");
       legend.emplace_back("q_z");
       legend.emplace_back("ResidualInitial");
       legend.emplace_back("ResidualFinal");
+      legend.emplace_back("HeldOutMinusResidualInitial");
+      legend.emplace_back("HeldOutMinusResidualFinal");
+      legend.emplace_back("WeightedDesignConditionNumber");
+      legend.emplace_back("AccelerationNorm");
       legend.emplace_back("Iterations");
-      static const std::array<std::string, 3> class_names{
-          {"TT", "Ti", "ij"}};
+      const std::array<std::string, 3> class_names =
+          config_opt->fit_uplus
+              ? std::array<std::string, 3>{{"A", "C", "V"}}
+              : std::array<std::string, 3>{{"TT", "Ti", "ij"}};
       for (size_t c = 0; c < 3; ++c) {
         for (size_t l = 0; l <= 4; ++l) {
           legend.push_back("Closure_" + gsl::at(class_names, c) + "_l" +
                            std::to_string(l));
         }
       }
+      for (const std::string& prefix :
+           {"TargetRms_", "ResidualRms_", "HeldOutMinusClosure_",
+            "HeldOutMinusTargetRms_", "HeldOutMinusResidualRms_"}) {
+        for (size_t c = 0; c < 3; ++c) {
+          for (size_t l = 0; l <= 4; ++l) {
+            legend.push_back(prefix + gsl::at(class_names, c) + "_l" +
+                             std::to_string(l));
+          }
+        }
+      }
       legend.emplace_back("SpreadVector");
       legend.emplace_back("SpreadClockStrain");
       std::vector<double> row;
-      row.reserve(3 * num_map_parameters + 20);
+      row.reserve(4 * num_map_parameters + 99);
       row.push_back(time);
       for (size_t a = 0; a < num_map_parameters; ++a) {
         row.push_back(gsl::at(state.p, a));
@@ -358,14 +405,29 @@ struct AdvanceMapParameterOde {
       for (size_t a = 0; a < num_map_parameters; ++a) {
         row.push_back(gsl::at(state.pdot, a));
       }
+      for (size_t a = 0; a < num_map_parameters; ++a) {
+        row.push_back(gsl::at(state.pddot, a));
+      }
       for (size_t i = 0; i < 3; ++i) {
         row.push_back(0.);
       }
       row.push_back(accel.residual_initial);
       row.push_back(accel.residual_final);
+      row.push_back(accel.minus_residual_initial);
+      row.push_back(accel.minus_residual_final);
+      row.push_back(accel.condition_number);
+      row.push_back(accel.parameter_derivative_norm);
       row.push_back(1.);
       for (size_t k = 0; k < 15; ++k) {
         row.push_back(gsl::at(accel.block_closure, k));
+      }
+      for (const auto* block_diagnostic :
+           {&accel.block_target_rms, &accel.block_residual_rms,
+            &accel.block_minus_closure, &accel.block_minus_target_rms,
+            &accel.block_minus_residual_rms}) {
+        for (size_t k = 0; k < 15; ++k) {
+          row.push_back(gsl::at(*block_diagnostic, k));
+        }
       }
       row.push_back(accel.spread_vector);
       row.push_back(accel.spread_clock_strain);

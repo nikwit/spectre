@@ -3,12 +3,19 @@
 
 #include "Framework/TestingFramework.hpp"
 
+#include <array>
 #include <cstddef>
 #include <limits>
+#include <memory>
 #include <random>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/Tensor/Tensor.hpp"
+#include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
+#include "Domain/FunctionsOfTime/PiecewisePolynomial.hpp"
 #include "Framework/SetupLocalPythonEnvironment.hpp"
 #include "Framework/TestCreation.hpp"
 #include "Framework/TestHelpers.hpp"
@@ -19,6 +26,86 @@
 #include "Utilities/Serialization/RegisterDerivedClassesWithCharm.hpp"
 
 namespace {
+using FunctionsOfTime = std::unordered_map<
+    std::string, std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>>;
+
+void check_time_derivative(
+    const ConstraintDamping::TimeDependentTripleGaussian& damping_function,
+    const tnsr::I<DataVector, 3, Frame::Grid>& coordinates,
+    const FunctionsOfTime& functions_of_time, const double time) {
+  constexpr double step = 1.e-5;
+  Scalar<DataVector> analytic_derivative{coordinates.begin()->size()};
+  Scalar<DataVector> value_plus{coordinates.begin()->size()};
+  Scalar<DataVector> value_minus{coordinates.begin()->size()};
+  damping_function.time_derivative(make_not_null(&analytic_derivative),
+                                   coordinates, time, functions_of_time);
+  damping_function(make_not_null(&value_plus), coordinates, time + step,
+                   functions_of_time);
+  damping_function(make_not_null(&value_minus), coordinates, time - step,
+                   functions_of_time);
+  const DataVector finite_difference =
+      (get(value_plus) - get(value_minus)) / (2. * step);
+  CHECK_ITERABLE_CUSTOM_APPROX(get(analytic_derivative), finite_difference,
+                               Approx::custom().epsilon(2.e-9).scale(1.));
+}
+
+void test_time_derivatives() {
+  constexpr double initial_time = 0.;
+  constexpr double expiration_time = 2.;
+  constexpr double time = 0.4;
+  const tnsr::I<DataVector, 3, Frame::Grid> coordinates{
+      {{DataVector{-0.8, -0.1, 0.3, 1.2}, DataVector{0.4, -0.7, 1.1, 0.2},
+        DataVector{-0.2, 0.6, -0.9, 0.5}}}};
+
+  FunctionsOfTime expansion_function{};
+  expansion_function.emplace(
+      "Expansion",
+      std::make_unique<domain::FunctionsOfTime::PiecewisePolynomial<3>>(
+          initial_time,
+          std::array<DataVector, 4>{{DataVector{1.1}, DataVector{-0.08},
+                                     DataVector{0.025}, DataVector{-0.004}}},
+          expiration_time));
+  const ConstraintDamping::TimeDependentTripleGaussian expansion_gaussians{
+      0.7,
+      2.1,
+      0.9,
+      std::array<double, 3>{{0.2, -0.3, 0.1}},
+      -1.3,
+      1.4,
+      std::array<double, 3>{{-0.5, 0.4, 0.2}},
+      0.8,
+      1.1,
+      std::array<double, 3>{{0.1, 0.2, -0.4}},
+      "ExpansionFactor"};
+  check_time_derivative(expansion_gaussians, coordinates, expansion_function,
+                        time);
+
+  FunctionsOfTime center_functions{};
+  center_functions.emplace(
+      "GridCenters",
+      std::make_unique<domain::FunctionsOfTime::PiecewisePolynomial<3>>(
+          initial_time,
+          std::array<DataVector, 4>{
+              {DataVector{0.2, -0.3, 0.1, -0.5, 0.4, 0.2},
+               DataVector{0.06, -0.02, 0.03, -0.04, 0.07, -0.01},
+               DataVector{0.01, -0.015, 0.005, 0.02, -0.01, 0.012},
+               DataVector{-0.002, 0.001, 0.003, -0.001, 0.002, -0.003}}},
+          expiration_time));
+  const ConstraintDamping::TimeDependentTripleGaussian center_gaussians{
+      0.7,
+      2.1,
+      0.9,
+      std::nullopt,
+      -1.3,
+      1.4,
+      std::nullopt,
+      0.8,
+      1.1,
+      std::array<double, 3>{{0.1, 0.2, -0.4}},
+      "ObjectCenters"};
+  check_time_derivative(center_gaussians, coordinates, center_functions, time);
+}
+
 template <typename DataType>
 void test_triple_gaussian_random(const DataType& used_for_size) {
   register_derived_classes_with_charm<
@@ -157,4 +244,10 @@ SPECTRE_TEST_CASE("Unit.PointwiseFunctions.ConstraintDamp.TimeDep3Gauss",
           "  MovementMethod: ExpansionFactor\n");
 
   test_serialization(triple_gauss_3d);
+}
+
+SPECTRE_TEST_CASE(
+    "Unit.PointwiseFunctions.ConstraintDamp.TimeDep3GaussDerivative",
+    "[PointwiseFunctions][Unit]") {
+  test_time_derivatives();
 }

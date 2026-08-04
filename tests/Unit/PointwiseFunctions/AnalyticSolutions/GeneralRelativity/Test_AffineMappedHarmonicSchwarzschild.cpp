@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "DataStructures/DataVector.hpp"
@@ -175,6 +176,103 @@ SPECTRE_TEST_CASE(
   }
 }
 
+// The Dhesi slow-time first-order model must be exactly affine in every
+// retained coefficient after epsilon is set to one.  Any even-in-p remainder
+// here would be an uncontrolled O(epsilon^2) resummation.
+SPECTRE_TEST_CASE(
+    "Unit.PointwiseFunctions.AnalyticSolutions.Gr."
+    "AffineMappedHarmonicSchwarzschild.StrictFirstOrderLinearity",
+    "[PointwiseFunctions][Unit]") {
+  const auto x = sample_points();
+  const std::array<double, 13> p{{2.e-3, -1.e-3, 3.e-3, -2.e-3, 5.e-4, -7.e-4,
+                                  9.e-4, 4.e-4, -3.e-4, 2.e-4, -6.e-4, 8.e-4,
+                                  2.e-4}};
+  std::array<double, 13> minus_p{};
+  for (size_t a = 0; a < p.size(); ++a) {
+    gsl::at(minus_p, a) = -gsl::at(p, a);
+  }
+  const auto variables = [&x](const std::array<double, 13>& parameters) {
+    tnsr::aa<DataVector, 3> metric{};
+    tnsr::aa<DataVector, 3> local_pi{};
+    tnsr::iaa<DataVector, 3> local_phi{};
+    gh::Solutions::affine_map_model::first_order_evolved_variables(
+        make_not_null(&metric), make_not_null(&local_pi),
+        make_not_null(&local_phi), x, mass, centre, parameters);
+    return std::make_tuple(metric, local_pi, local_phi);
+  };
+  const auto [background_metric, background_pi, background_phi] =
+      variables(zero_p);
+  const auto [plus_metric, plus_pi, plus_phi] = variables(p);
+  const auto [minus_metric, minus_pi, minus_phi] = variables(minus_p);
+  Approx custom = Approx::custom().epsilon(2.e-12).scale(1.);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      const DataVector metric_sum =
+          plus_metric.get(a, b) + minus_metric.get(a, b);
+      const DataVector twice_background_metric =
+          2. * background_metric.get(a, b);
+      CHECK_ITERABLE_CUSTOM_APPROX(metric_sum, twice_background_metric, custom);
+      const DataVector pi_sum = plus_pi.get(a, b) + minus_pi.get(a, b);
+      const DataVector twice_background_pi = 2. * background_pi.get(a, b);
+      CHECK_ITERABLE_CUSTOM_APPROX(pi_sum, twice_background_pi, custom);
+      for (size_t k = 0; k < 3; ++k) {
+        const DataVector phi_sum =
+            plus_phi.get(k, a, b) + minus_phi.get(k, a, b);
+        const DataVector twice_background_phi =
+            2. * background_phi.get(k, a, b);
+        CHECK_ITERABLE_CUSTOM_APPROX(phi_sum, twice_background_phi, custom);
+      }
+    }
+  }
+}
+
+// At t=0 an exact constant Lorentz boost has first-order coefficients
+// beta_z=qdot_z=v.  The strict model must differ from it by O(v^2), including
+// Pi and Phi, rather than by an O(v) derivative-ordering error.
+SPECTRE_TEST_CASE(
+    "Unit.PointwiseFunctions.AnalyticSolutions.Gr."
+    "AffineMappedHarmonicSchwarzschild.StrictFirstOrderBoostScaling",
+    "[PointwiseFunctions][Unit]") {
+  const auto x = sample_points();
+  const auto error = [&x](const double velocity) {
+    std::array<double, 13> p{};
+    p[3] = velocity;
+    p[6] = velocity;
+    tnsr::aa<DataVector, 3> first_order_metric{};
+    tnsr::aa<DataVector, 3> first_order_pi{};
+    tnsr::iaa<DataVector, 3> first_order_phi{};
+    gh::Solutions::affine_map_model::first_order_evolved_variables(
+        make_not_null(&first_order_metric), make_not_null(&first_order_pi),
+        make_not_null(&first_order_phi), x, mass, centre, p);
+    tnsr::aa<DataVector, 3> exact_metric{};
+    tnsr::aa<DataVector, 3> exact_pi{};
+    tnsr::iaa<DataVector, 3> exact_phi{};
+    gh::Solutions::affine_map_model::boosted_evolved_variables(
+        make_not_null(&exact_metric), make_not_null(&exact_pi),
+        make_not_null(&exact_phi), x, 0., mass, centre, zero_p, zero_p,
+        {{0., 0., velocity}});
+    double squared_error = 0.;
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        squared_error +=
+            sum(square(first_order_metric.get(a, b) - exact_metric.get(a, b)));
+        squared_error +=
+            sum(square(first_order_pi.get(a, b) - exact_pi.get(a, b)));
+        for (size_t k = 0; k < 3; ++k) {
+          squared_error += sum(
+              square(first_order_phi.get(k, a, b) - exact_phi.get(k, a, b)));
+        }
+      }
+    }
+    return std::sqrt(squared_error);
+  };
+  const double error_at_v = error(1.e-3);
+  const double error_at_half_v = error(5.e-4);
+  CAPTURE(error_at_v, error_at_half_v, error_at_v / error_at_half_v);
+  CHECK(error_at_v > 0.);
+  CHECK(error_at_v / error_at_half_v == Approx::custom().epsilon(5.e-3)(4.));
+}
+
 // Pi and Phi are assembled from transformed derivatives, which is where a
 // sign error would hide. Check them against finite differences of the
 // boosted metric -- the one place a finite difference is the right tool,
@@ -263,9 +361,9 @@ SPECTRE_TEST_CASE(
     tnsr::aa<DataVector, 3> g{};
     tnsr::aa<DataVector, 3> local_pi{};
     tnsr::iaa<DataVector, 3> local_phi{};
-    gh::Solutions::affine_map_model::evolved_variables(
+    gh::Solutions::affine_map_model::first_order_evolved_variables(
         make_not_null(&g), make_not_null(&local_pi), make_not_null(&local_phi),
-        x, mass, centre, p, zero_p);
+        x, mass, centre, p);
     return g;
   };
 

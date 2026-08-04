@@ -218,6 +218,139 @@ void spatial_derivative_of_inverse_metric_combination(
   }
 }
 
+void first_order_evolved_variables(
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+    const gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+    const tnsr::I<DataVector, 3>& x, const double mass,
+    const std::array<double, 3>& center, const std::array<double, 13>& p,
+    const bool centre_advection) {
+  const size_t n_points = get<0>(x).size();
+  std::array<DataVector, 3> y{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(y, i) = x.get(i) - gsl::at(center, i);
+  }
+
+  set_number_of_grid_points(spacetime_metric, n_points);
+  set_number_of_grid_points(pi, n_points);
+  set_number_of_grid_points(phi, n_points);
+
+  // G^{ab} = G_0^{ab} + delta G^{ab} is the object derived directly from
+  // the first-order coordinate transformation.  Invert only G_0 and form
+  // delta g_ab = -(g_0 delta G g_0)_ab instead of exactly inverting the sum,
+  // which would silently retain all powers of the first-order coefficients.
+  const std::array<double, 13> zero_parameters{};
+  tnsr::AA<DataVector, 3> background_inverse(n_points);
+  tnsr::AA<DataVector, 3> delta_inverse(n_points);
+  inverse_metric_combination(make_not_null(&background_inverse), y, mass, 1.,
+                             zero_parameters);
+  inverse_metric_combination(make_not_null(&delta_inverse), y, mass, 0., p);
+  const tnsr::aa<DataVector, 3> background_metric =
+      determinant_and_inverse(background_inverse).second;
+  tnsr::aa<DataVector, 3> delta_metric(n_points, 0.);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      for (size_t c = 0; c < 4; ++c) {
+        for (size_t d = 0; d < 4; ++d) {
+          delta_metric.get(a, b) -= background_metric.get(a, c) *
+                                    delta_inverse.get(c, d) *
+                                    background_metric.get(d, b);
+        }
+      }
+      spacetime_metric->get(a, b) =
+          background_metric.get(a, b) + delta_metric.get(a, b);
+    }
+  }
+
+  // Spatially differentiate the same truncated inverse relation.  The four
+  // terms below are precisely the background derivative and the three terms
+  // linear in (delta g, delta G); no product of two perturbations is kept.
+  tnsr::iAA<DataVector, 3> deriv_background_inverse(n_points);
+  tnsr::iAA<DataVector, 3> deriv_delta_inverse(n_points);
+  spatial_derivative_of_inverse_metric_combination(
+      make_not_null(&deriv_background_inverse), y, mass, 1., zero_parameters);
+  spatial_derivative_of_inverse_metric_combination(
+      make_not_null(&deriv_delta_inverse), y, mass, 0., p);
+  tnsr::iaa<DataVector, 3> background_phi(n_points, 0.);
+  tnsr::iaa<DataVector, 3> delta_phi(n_points, 0.);
+  for (size_t k = 0; k < 3; ++k) {
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        for (size_t c = 0; c < 4; ++c) {
+          for (size_t d = 0; d < 4; ++d) {
+            background_phi.get(k, a, b) -=
+                background_metric.get(a, c) *
+                deriv_background_inverse.get(k, c, d) *
+                background_metric.get(d, b);
+            delta_phi.get(k, a, b) -=
+                delta_metric.get(a, c) * deriv_background_inverse.get(k, c, d) *
+                    background_metric.get(d, b) +
+                background_metric.get(a, c) * deriv_delta_inverse.get(k, c, d) *
+                    background_metric.get(d, b) +
+                background_metric.get(a, c) *
+                    deriv_background_inverse.get(k, c, d) *
+                    delta_metric.get(d, b);
+          }
+        }
+        phi->get(k, a, b) =
+            background_phi.get(k, a, b) + delta_phi.get(k, a, b);
+      }
+    }
+  }
+
+  // Expand the model lapse and shift directly from the already-linear
+  // inverse metric.  Computing them from g_0 + delta g with the full 3+1
+  // algebra would reintroduce quadratic and higher powers of p.
+  const DataVector background_lapse = 1. / sqrt(-get<0, 0>(background_inverse));
+  const DataVector delta_lapse = 0.5 * background_lapse * background_lapse *
+                                 background_lapse * get<0, 0>(delta_inverse);
+  std::array<DataVector, 3> background_shift{};
+  std::array<DataVector, 3> delta_shift{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(background_shift, i) =
+        -background_inverse.get(0, i + 1) / get<0, 0>(background_inverse);
+    gsl::at(delta_shift, i) =
+        -delta_inverse.get(0, i + 1) / get<0, 0>(background_inverse) +
+        background_inverse.get(0, i + 1) * get<0, 0>(delta_inverse) /
+            (get<0, 0>(background_inverse) * get<0, 0>(background_inverse));
+  }
+
+  // Slow-time ordering: D_t p_A contributes only at O(epsilon^2) and is
+  // absent.  The center q^i is a zeroth-order placement, so its physical
+  // velocity is O(epsilon) and advects the background metric at first order.
+  // Use Phi^(0), since qdot^k Phi^(1)_k is O(epsilon^2).
+  tnsr::aa<DataVector, 3> dt_metric_first_order(n_points, 0.);
+  if (centre_advection) {
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        for (size_t k = 0; k < 3; ++k) {
+          dt_metric_first_order.get(a, b) -=
+              gsl::at(p, 4 + k) * background_phi.get(k, a, b);
+        }
+      }
+    }
+  }
+
+  // Pi = (shift^k Phi_k - partial_t g) / lapse, expanded once about the
+  // stationary background.
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      DataVector background_pi(n_points, 0.);
+      DataVector delta_pi = -dt_metric_first_order.get(a, b);
+      for (size_t k = 0; k < 3; ++k) {
+        background_pi +=
+            gsl::at(background_shift, k) * background_phi.get(k, a, b);
+        delta_pi += gsl::at(delta_shift, k) * background_phi.get(k, a, b) +
+                    gsl::at(background_shift, k) * delta_phi.get(k, a, b);
+      }
+      background_pi /= background_lapse;
+      delta_pi = delta_pi / background_lapse -
+                 background_pi * delta_lapse / background_lapse;
+      pi->get(a, b) = background_pi + delta_pi;
+    }
+  }
+}
+
 void evolved_variables(
     const gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
     const gsl::not_null<tnsr::aa<DataVector, 3>*> pi,

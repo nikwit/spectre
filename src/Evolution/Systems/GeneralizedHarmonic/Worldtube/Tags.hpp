@@ -71,8 +71,10 @@ struct MatcherConfig {
     static constexpr Options::String help = {
         "Minimum simulation-time interval between fits. The fit runs at the "
         "first step whose time exceeds the previous fit time by this "
-        "amount; between fits the boundary condition extrapolates linearly "
-        "with the fitted rates."};
+        "amount. In the default strict first-order value mode the fitted "
+        "p_(1) state is held constant while the zeroth-order model center is "
+        "advanced with its fitted O(epsilon) velocity; derivative ODE modes "
+        "retain their higher-order extrapolation."};
     static type lower_bound() { return 0.; }
   };
   struct FitRadialIndex {
@@ -89,7 +91,9 @@ struct MatcherConfig {
   struct RateOde {
     using type = bool;
     static constexpr Options::String help = {
-        "Obtain p(t) by fitting the parameter rates pdot from the "
+        "HIGHER-ORDER EXPERIMENT (not part of the strict Dhesi slow-time "
+        "first-order system): obtain p(t) by fitting the parameter rates "
+        "pdot from the "
         "time-derivative content of the boundary data (dt g = beta.Phi - "
         "alpha.Pi, projected on the covariant response columns, a linear "
         "solve) and integrating the first-order ODE dp/dt = pdot by the "
@@ -102,7 +106,9 @@ struct MatcherConfig {
   struct SecondOrderOde {
     using type = bool;
     static constexpr Options::String help = {
-        "Obtain p(t) by fitting the parameter accelerations pddot from the "
+        "HIGHER-ORDER EXPERIMENT (not part of the strict Dhesi slow-time "
+        "first-order system): obtain p(t) by fitting the parameter "
+        "accelerations pddot from the "
         "evolution equations (d2t g assembled from the GH right-hand sides "
         "stored in the DataBox, projected on the covariant response columns, "
         "a linear solve) and integrating the second-order ODE by velocity "
@@ -114,7 +120,9 @@ struct MatcherConfig {
   struct StepperOde {
     using type = bool;
     static constexpr Options::String help = {
-        "Integrate (p, pdot) through the element's own TimeStepper: the "
+        "HIGHER-ORDER EXPERIMENT (not part of the strict Dhesi slow-time "
+        "first-order system): integrate (p, pdot) through the element's own "
+        "TimeStepper: the "
         "acceleration is measured from the just-computed right-hand sides "
         "at every (sub)step and recorded in a TimeSteppers::History, with "
         "the integration order slaved to the system history, dormancy "
@@ -206,6 +214,16 @@ struct MatcherConfig {
         "still evaluated in the held-out closure diagnostics."};
     static double lower_bound() { return 0.; }
   };
+  struct UPlusBlockWeights {
+    using type = std::array<double, 15>;
+    static constexpr Options::String help = {
+        "Multiplicative residual weights for the FitUPlus value and "
+        "StepperOde acceleration solves, ordered [A_l0..A_l4, "
+        "C_l0..C_l4, V_l0..V_l4]. A zero excludes a block from the solve, "
+        "but its unweighted residual is still evaluated in the diagnostics. "
+        "These weights do not apply to the rate or metric-acceleration "
+        "fits."};
+  };
   struct FitCenterOffset {
     using type = bool;
     static constexpr Options::String help = {
@@ -232,14 +250,14 @@ struct MatcherConfig {
   struct CentreAdvection {
     using type = bool;
     static constexpr Options::String help = {
-        "Include the centre-motion term -qdot^k Phi_kab in the model's "
-        "d_t g, i.e. let the model know its centre moves. This is the "
-        "only channel that puts qdot^i into Pi, where derivative-like "
-        "quantities are well determined; with it off, qdot^i is visible "
-        "only in g and Phi. Physically it should always be on -- off is "
-        "for the A/B that demonstrates the difference. Identically zero "
-        "when qdot^i = 0, so it cannot alter a run whose velocity is "
-        "pinned to a vanishing CenterVelocity."};
+        "Include the strict first-order centre-motion term -qdot^k "
+        "Phi^(0)_kab in the model's d_t g and advance the zeroth-order "
+        "analytic model center between value fits. This does not move the "
+        "mesh. It is the only channel that puts qdot^i into Pi; with it off, "
+        "qdot^i is visible only in g and Phi. Physically it should always be "
+        "on -- off is for the A/B that demonstrates the difference. "
+        "Identically zero when qdot^i = 0, so it cannot alter a run whose "
+        "velocity is pinned to a vanishing CenterVelocity."};
   };
 
   using options =
@@ -248,10 +266,14 @@ struct MatcherConfig {
                  StepperOde, GaugeDamping, UPlusAnchor, FitUPlus,
                  KretschmannTracePin, TracePinInterval, FitTraceStrain,
                  FitVelocity, CentreAdvection, SpatialMonopoleWeight,
-                 FitRadialIndex>;
+                 UPlusBlockWeights, FitRadialIndex>;
   static constexpr Options::String help = {
-      "Online worldtube matching: fit the 13 first-order affine-map "
-      "parameters from the evolved fields on the excision sphere."};
+      "Online worldtube matching. By default, algebraically fit the "
+      "instantaneous center and 13 affine-map coefficients using a strict "
+      "Dhesi slow-time first-order model: no coefficient rates, no "
+      "between-fit extrapolation, and no nonlinear resummation. RateOde, "
+      "SecondOrderOde, and StepperOde select explicitly higher-order "
+      "experimental systems instead."};
 
   MatcherConfig() = default;
   MatcherConfig(double mass, const std::array<double, 3>& center,
@@ -262,7 +284,9 @@ struct MatcherConfig {
                 bool fit_uplus, bool kretschmann_trace_pin,
                 double trace_pin_interval, bool fit_trace_strain,
                 bool fit_velocity, bool centre_advection,
-                double spatial_monopole_weight, size_t fit_radial_index)
+                double spatial_monopole_weight,
+                const std::array<double, 15>& uplus_block_weights,
+                size_t fit_radial_index)
       : mass(mass),
         center(center),
         center_velocity(center_velocity),
@@ -282,6 +306,7 @@ struct MatcherConfig {
         fit_velocity(fit_velocity),
         centre_advection(centre_advection),
         spatial_monopole_weight(spatial_monopole_weight),
+        uplus_block_weights(uplus_block_weights),
         fit_radial_index(fit_radial_index) {
     if (fit_velocity and (rate_ode or second_order_ode or stepper_ode)) {
       ERROR(
@@ -290,6 +315,12 @@ struct MatcherConfig {
           "qddot^0 v_centre) and a fixed nine-column layout, so enabling "
           "both would silently keep the velocity pinned. Set RateOde, "
           "SecondOrderOde and StepperOde false.");
+    }
+    for (const double weight : uplus_block_weights) {
+      if (weight < 0.) {
+        ERROR("UPlusBlockWeights entries must be non-negative, got " << weight
+                                                                     << ".");
+      }
     }
   }
 
@@ -315,6 +346,8 @@ struct MatcherConfig {
   bool fit_velocity = false;
   bool centre_advection = true;
   double spatial_monopole_weight = 1.;
+  std::array<double, 15> uplus_block_weights{
+      {1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.}};
   size_t fit_radial_index = 0;
 };
 

@@ -160,6 +160,21 @@ class TimeDependentTripleGaussian : public DampingFunction<3, Frame::Grid> {
           std::unique_ptr<::domain::FunctionsOfTime::FunctionOfTime>>&
           functions_of_time) const override;
 
+  void time_derivative(
+      gsl::not_null<Scalar<double>*> dt_value_at_x,
+      const tnsr::I<double, 3, Frame::Grid>& x, double time,
+      const std::unordered_map<
+          std::string,
+          std::unique_ptr<::domain::FunctionsOfTime::FunctionOfTime>>&
+          functions_of_time) const override;
+  void time_derivative(
+      gsl::not_null<Scalar<DataVector>*> dt_value_at_x,
+      const tnsr::I<DataVector, 3, Frame::Grid>& x, double time,
+      const std::unordered_map<
+          std::string,
+          std::unique_ptr<::domain::FunctionsOfTime::FunctionOfTime>>&
+          functions_of_time) const override;
+
   auto get_clone() const
       -> std::unique_ptr<DampingFunction<3, Frame::Grid>> override;
 
@@ -188,6 +203,15 @@ class TimeDependentTripleGaussian : public DampingFunction<3, Frame::Grid> {
   void apply_call_operator(
       gsl::not_null<Scalar<T>*> value_at_x, const tnsr::I<T, 3, Frame::Grid>& x,
       double time,
+      const std::unordered_map<
+          std::string,
+          std::unique_ptr<::domain::FunctionsOfTime::FunctionOfTime>>&
+          functions_of_time) const;
+
+  template <typename T>
+  void apply_time_derivative(
+      gsl::not_null<Scalar<T>*> dt_value_at_x,
+      const tnsr::I<T, 3, Frame::Grid>& x, double time,
       const std::unordered_map<
           std::string,
           std::unique_ptr<::domain::FunctionsOfTime::FunctionOfTime>>&

@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <vector>
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
@@ -18,6 +19,64 @@ class Spherepack;
 
 namespace gh::Worldtube {
 
+namespace detail {
+/// Result of a block-weighted linear fit and an unweighted held-out test.
+struct WeightedModeFit {
+  std::vector<double> coefficients{};
+  std::vector<double> fitted_residual{};
+  std::vector<double> held_out_residual{};
+  /// 2-norm condition number of the weighted design matrix.
+  double condition_number = 0.;
+};
+
+/*!
+ * \brief Solve a linear modal fit with per-block residual weights.
+ *
+ * `columns` is stored column-major. `row_blocks` maps every row to one entry
+ * of `block_weights`. The same fitted coefficients are applied to
+ * `held_out_target`, but the held-out rows never enter the solve.
+ */
+WeightedModeFit fit_weighted_modes(
+    const std::vector<double>& target,
+    const std::vector<double>& held_out_target,
+    const std::vector<std::vector<double>>& columns,
+    const std::vector<size_t>& row_blocks,
+    const std::array<double, 15>& block_weights);
+
+/*!
+ * \brief Gauge-mode content of one GH characteristic tensor on a sphere.
+ *
+ * `normal_sign` is -1 for \f$u^+\f$ and +1 for \f$u^-\f$.  This helper is
+ * shared by the matcher and its derivative-convention regression test.
+ */
+std::vector<double> characteristic_gauge_modes(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
+    const Scalar<DataVector>& gamma2,
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const std::array<double, 3>& center, const ylm::Spherepack& ylm_transform,
+    size_t fit_l_max, double normal_sign);
+
+/*!
+ * \brief Fixed-sphere time derivative of the gauge-mode content of a GH
+ * characteristic tensor.
+ *
+ * The inertial coordinates and sphere center are held fixed. `dt_gamma2` is
+ * required because \f$\gamma_2\f$ can depend explicitly on time through its
+ * functions of time even on a fixed grid.
+ */
+std::vector<double> characteristic_gauge_time_derivative_modes(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
+    const tnsr::aa<DataVector, 3>& dt_spacetime_metric,
+    const tnsr::aa<DataVector, 3>& dt_pi,
+    const tnsr::iaa<DataVector, 3>& dt_phi, const Scalar<DataVector>& gamma2,
+    const Scalar<DataVector>& dt_gamma2,
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const std::array<double, 3>& center, const ylm::Spherepack& ylm_transform,
+    size_t fit_l_max, double normal_sign);
+}  // namespace detail
+
 /// Diagnostics and result of one online fit.
 struct FitResult {
   std::array<double, num_map_parameters> p{};
@@ -26,6 +85,25 @@ struct FitResult {
   std::array<double, 3> center_offset{};
   double residual_initial = 0.;
   double residual_final = 0.;
+  /// Correction-relative denominator evaluated at zero free coefficients.
+  double baseline_residual = 0.;
+  /// Held-out opposite-characteristic baseline and final residual norms.
+  double minus_baseline_residual = 0.;
+  double minus_residual_final = 0.;
+  /// Unweighted closure and absolute RMS per {A,C,V} x ell block.
+  std::array<double, 15> block_closure{};
+  std::array<double, 15> block_target_rms{};
+  std::array<double, 15> block_residual_rms{};
+  std::array<double, 15> block_minus_closure{};
+  std::array<double, 15> block_minus_target_rms{};
+  std::array<double, 15> block_minus_residual_rms{};
+  /// Collocation-space covariant metric and Phi residual norms.
+  double metric_baseline_residual = 0.;
+  double metric_residual_final = 0.;
+  double phi_baseline_residual = 0.;
+  double phi_residual_final = 0.;
+  /// 2-norm condition number of the weighted final design matrix.
+  double condition_number = 0.;
   size_t iterations = 0;
 };
 
@@ -35,18 +113,25 @@ struct FitResult {
  *
  * Implements the findings-§15b prescription: the fit target is the
  * spherical-harmonic content (l <= `config.fit_l_max`) of the null-basis
- * gauge components {A, C, V} of the incoming characteristic field
- * \f$u^-_{ab} = \Pi_{ab} + n^k \Phi_{kab} - \gamma_2 g_{ab}\f$, with uniform
- * (absolute) weights. The model side is
- * `gh::Solutions::affine_map_model::evolved_variables` combined with the
+ * gauge components {A, C, V} of the selected characteristic field. The
+ * production value path uses the boundary-uncontrolled outgoing \f$u^+\f$;
+ * \f$u^-\f$ remains available as a diagnostic convention. The model side is
+ * `gh::Solutions::affine_map_model::first_order_evolved_variables` combined
+ * with the
  * *data* normal, frame, and \f$\gamma_2\f$, mirroring what the ghost
- * boundary condition applies. Pins: velocity kinematic to
- * `config.center_velocity`, trace strain to `config.trace_strain_pin`,
- * drives held at `pdot_estimate` (backward differences of the fit history).
- * Nine free parameters, solved by warm-started Gauss-Newton.
+ * boundary condition applies. The velocity can be pinned at strict first
+ * order to `config.center_velocity` or fitted, and the trace strain can
+ * likewise be pinned or fitted. Coefficient rates are absent by slow-time power
+ * counting; center advection is retained through \f$\dot q^i\f$. Depending on
+ * those choices and center fitting, the system has 9--16 free values, solved by
+ * warm-started Gauss--Newton. `config.uplus_block_weights` weights the
+ * {A,C,V} x ell residual blocks in the solve; all reported closures are
+ * unweighted, and the opposite characteristic is never used in the solve.
  *
  * All face tensors must be in the Spherepack collocation order of `ylm`
  * (the natural order of an excision-face slice on the Ylm-basis domain).
+ * `center_offset_start` is the Gauss--Newton initial guess when center fitting
+ * is enabled and the fixed instantaneous center offset when it is disabled.
  */
 FitResult fit_map_parameters(
     const tnsr::aa<DataVector, 3>& spacetime_metric,
@@ -55,9 +140,8 @@ FitResult fit_map_parameters(
     const tnsr::I<DataVector, 3>& inertial_coords,
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
     const std::array<double, num_map_parameters>& p_start,
-    const std::array<double, 3>& center_offset_start,
-    const std::array<double, num_map_parameters>& pdot_estimate,
-    double normal_sign, double trace_pin);
+    const std::array<double, 3>& center_offset_start, double normal_sign,
+    double trace_pin);
 
 /// Result of one linear rate fit (the `RateOde` mode).
 struct RateFitResult {
@@ -68,6 +152,20 @@ struct RateFitResult {
   /// indexed 5*class + l with class 0 = TT, 1 = Ti, 2 = ij and l = 0..4.
   /// Evaluated on the isotropy-weighted rows regardless of solve weights.
   std::array<double, 15> block_closure{};
+  /// Absolute RMS target and residual for the same blocks as `block_closure`.
+  std::array<double, 15> block_target_rms{};
+  std::array<double, 15> block_residual_rms{};
+  /// Held-out D_T u^- closure from a D_T u^+ acceleration fit. These remain
+  /// zero for the metric-component rate and acceleration fits.
+  std::array<double, 15> block_minus_closure{};
+  std::array<double, 15> block_minus_target_rms{};
+  std::array<double, 15> block_minus_residual_rms{};
+  double minus_residual_initial = 0.;
+  double minus_residual_final = 0.;
+  /// 2-norm condition number of the weighted design matrix and norm of the
+  /// unfolded fitted rate/acceleration vector.
+  double condition_number = 0.;
+  double parameter_derivative_norm = 0.;
   /// Largest parameter shift when the boosts are re-solved on the
   /// audit-preferred V1 blocks (TT l=1, Ti l=0) with everything else
   /// frozen at the global solution.
@@ -141,19 +239,23 @@ RateFitResult fit_map_parameter_accelerations(
  * construction. The model side is evaluated at the current
  * (`p_state`, `pdot_state`) with all pieces analytic;
  * \f$\ddot p\f$ enters only through \f$\partial_t\Pi_{\rm model}\f$,
- * linearly. `block_closure` reports {A, C, V} x l in the 15 slots;
- * the estimator-spread members are not defined for this target and stay
- * zero.
+ * linearly. The solve applies `config.uplus_block_weights`; diagnostics are
+ * always evaluated without those weights. `block_closure` reports fitted
+ * \f$D_Tu^+\f$ {A, C, V} x l in the 15 slots, and the `block_minus_*`
+ * members report the held-out \f$D_Tu^-\f$ prediction made with the same
+ * fitted acceleration. The estimator-spread members are not defined for this
+ * target and stay zero.
  */
 RateFitResult fit_map_parameter_accelerations_uplus(
     const tnsr::aa<DataVector, 3>& spacetime_metric,
     const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
     const tnsr::aa<DataVector, 3>& dt_spacetime_metric,
     const tnsr::aa<DataVector, 3>& dt_pi,
-    const tnsr::iaa<DataVector, 3>& dt_phi,
-    const Scalar<DataVector>& gamma2,
+    const tnsr::iaa<DataVector, 3>& dt_phi, const Scalar<DataVector>& gamma2,
+    const Scalar<DataVector>& dt_gamma2,
     const std::array<double, num_map_parameters>& p_state,
     const std::array<double, num_map_parameters>& pdot_state,
     const tnsr::I<DataVector, 3>& inertial_coords,
-    const ylm::Spherepack& ylm_transform, const MatcherConfig& config);
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
+    bool evaluate_held_out_uminus);
 }  // namespace gh::Worldtube

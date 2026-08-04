@@ -48,7 +48,34 @@ void spatial_derivative_of_inverse_metric_combination(
     const std::array<DataVector, 3>& y, double mass,
     double background_weight, const std::array<double, 13>& c);
 
-/// The generalized-harmonic evolved variables of the mapped solution at
+/*!
+ * \brief Strict first-order slow-time GH variables of the affine-map model.
+ *
+ * With \f$\widetilde t=\epsilon t\f$ and
+ * \f$p_A=p_A(\widetilde t)\f$, this function retains exactly the
+ * \f$O(\epsilon)\f$ coefficient of the covariant metric and its spatial
+ * derivative.  It does not resum the inverse metric and it does not include
+ * \f$D_t p_A=O(\epsilon)\f$, whose contribution to the metric derivative is
+ * \f$O(\epsilon^2)\f$.  The one retained time derivative is the kinematic
+ * motion of the zeroth-order center,
+ * \f$\partial_t g^{(0)}_{ab}=-\dot q^k\Phi^{(0)}_{kab}\f$; multiplying the
+ * perturbed \f$\Phi\f$ would again introduce \f$O(\epsilon^2)\f$ terms.
+ *
+ * The returned tensors have the bookkeeping factor \f$\epsilon\f$ set to
+ * one after truncation:
+ * \f$g=g^{(0)}+g^{(1)}\f$,
+ * \f$\Phi=\Phi^{(0)}+\Phi^{(1)}\f$, and
+ * \f$\Pi=\Pi^{(0)}+\Pi^{(1)}\f$.
+ */
+void first_order_evolved_variables(
+    gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+    gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+    gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+    const tnsr::I<DataVector, 3>& x, double mass,
+    const std::array<double, 3>& center, const std::array<double, 13>& p,
+    bool centre_advection = true);
+
+/// A rate-resummed extension of the affine-map variables at
 /// points `x`: the metric is the inverse of the combination above, Phi its
 /// analytic spatial derivative \f$\Phi_{kab} = -(g\, \partial_k G^{-1}\,
 /// g)_{ab}\f$, and \f$\partial_t g\f$ the sum of the coefficient drift
@@ -56,7 +83,9 @@ void spatial_derivative_of_inverse_metric_combination(
 /// false, the motion of the centre \f$-\dot q^k \Phi_{kab}\f$. Pi is formed
 /// with the model's own lapse and shift. Setting `centre_advection` false
 /// recovers the static-centre form used before findings 15w; it changes
-/// nothing when \f$\dot q^i = 0\f$.
+/// nothing when \f$\dot q^i = 0\f$. This routine is useful for higher-order
+/// experiments, but is not the strict Dhesi slow-time first-order model; use
+/// `first_order_evolved_variables` for that system.
 void evolved_variables(gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
                        gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
                        gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
@@ -93,7 +122,7 @@ void evolved_variables(gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
  * rebuilt from the transformed derivatives with the lab lapse and shift.
  *
  * To first order in \f$v\f$ a boost is the map direction
- * \f$\beta_i = \dot q^i = -v_i\f$ with \f$\dot q^0 = \sigma_{ij} = 0\f$;
+ * \f$\beta_i = \dot q^i = +v_i\f$ with \f$\dot q^0 = \sigma_{ij} = 0\f$;
  * at second order it carries the known \f$\gamma - 1 = v^2/2\f$ clock
  * offset and longitudinal contraction, so the residual error of a
  * first-order fit against this data is a *predicted* \f$O(v^2)\f$ rather
@@ -112,9 +141,14 @@ void boosted_evolved_variables(
 }  // namespace affine_map_model
 
 /*!
- * \brief Harmonic Schwarzschild pushed through the first-order affine
- * worldtube-matching map, with the thirteen map parameters supplied as
- * tabulated functions of time.
+ * \brief Rate-resummed affine-map extension of harmonic Schwarzschild, with
+ * the thirteen map parameters supplied as tabulated functions of time.
+ *
+ * This analytic-solution class retains the legacy exact inversion and the
+ * supplied coefficient rates. It is useful for manufactured higher-order
+ * experiments and for the exact-boost ground truth at `p = pdot = 0`, but it
+ * is not the strict Dhesi slow-time first-order model used by the online value
+ * matcher.
  *
  * The model inverse metric in simulation coordinates is
  *
@@ -203,10 +237,10 @@ class AffineMappedHarmonicSchwarzschild
     using type =
         std::vector<std::array<double, number_of_parameters>>;
     static constexpr Options::String help = {
-        "Time derivatives of the map parameters at each tabulated time, in "
-        "the same order. Used for the time derivative of the model metric "
-        "entering Pi. Supply the rates the offline fit used; they are not "
-        "differentiated internally."};
+        "HIGHER-ORDER/RESUMMED extension: time derivatives of the map "
+        "parameters at each tabulated time, in the same order. Used for the "
+        "time derivative of the model metric entering Pi. Supply the rates "
+        "the offline fit used; they are not differentiated internally."};
   };
   struct Velocity {
     using type = std::array<double, volume_dim>;
@@ -217,7 +251,7 @@ class AffineMappedHarmonicSchwarzschild
         "the result is still exactly harmonic and still an exact solution "
         "at every order in v -- which makes it the controlled ground truth "
         "for testing whether the matcher recovers a velocity. Its "
-        "first-order content is beta_i = qdot^i = -v_i; the O(v^2) "
+        "first-order content is beta_i = qdot^i = +v_i; the O(v^2) "
         "remainder (gamma - 1 = v^2/2 and the longitudinal contraction) is "
         "analytically known, so a first-order fit's error against this "
         "data is predicted rather than uncontrolled. Zero for a hole at "
@@ -227,10 +261,10 @@ class AffineMappedHarmonicSchwarzschild
   using options = tmpl::list<Mass, Center, ParameterTimes, ParameterValues,
                              ParameterRates, Velocity>;
   static constexpr Options::String help = {
-      "Harmonic Schwarzschild pushed through the first-order affine "
-      "worldtube-matching map, with the 13 map parameters tabulated in "
-      "time, optionally boosted exactly. With all parameters and the "
-      "velocity zero this is HarmonicSchwarzschild."};
+      "Rate-resummed affine-map extension of harmonic Schwarzschild, with "
+      "the 13 map parameters tabulated in time, optionally boosted exactly. "
+      "This class is not the strict slow-time first-order online model. With "
+      "all parameters and the velocity zero this is HarmonicSchwarzschild."};
 
   AffineMappedHarmonicSchwarzschild() = default;
   AffineMappedHarmonicSchwarzschild(

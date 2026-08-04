@@ -79,6 +79,25 @@ class DampingFunction : public PUP::able {
           functions_of_time) const = 0;
   /// @}
 
+  /// @{
+  /// Returns the partial time derivative at fixed coordinates.  This includes
+  /// all dependence on `functions_of_time`.
+  virtual void time_derivative(
+      gsl::not_null<Scalar<double>*> dt_value_at_x,
+      const tnsr::I<double, VolumeDim, Fr>& x, double time,
+      const std::unordered_map<
+          std::string,
+          std::unique_ptr<::domain::FunctionsOfTime::FunctionOfTime>>&
+          functions_of_time) const = 0;
+  virtual void time_derivative(
+      gsl::not_null<Scalar<DataVector>*> dt_value_at_x,
+      const tnsr::I<DataVector, VolumeDim, Fr>& x, double time,
+      const std::unordered_map<
+          std::string,
+          std::unique_ptr<::domain::FunctionsOfTime::FunctionOfTime>>&
+          functions_of_time) const = 0;
+  /// @}
+
   virtual auto get_clone() const
       -> std::unique_ptr<DampingFunction<VolumeDim, Fr>> = 0;
 };

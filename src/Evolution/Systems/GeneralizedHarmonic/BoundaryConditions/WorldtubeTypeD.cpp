@@ -484,8 +484,13 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
     if (type_ == detail::WorldtubeTypeDType::
                      ConstraintPreservingPhysicalOnlineGhostGauge) {
       // The closed loop: the model comes from the online matcher's latest
-      // fit, extrapolated linearly within the fit interval. While no fit
-      // exists yet the gauge sector simply stays frozen.
+      // fit.  In the algebraic value mode this is the strict slow-time
+      // first-order model, so p_(1) is held fixed between fits; extrapolating
+      // epsilon*p_(1) with D_t p_(1) would add O(epsilon^2) content. The
+      // zeroth-order center is nevertheless advanced with its O(epsilon)
+      // fitted velocity. The ODE modes retain their experimental
+      // rate-resummed behavior. While no fit exists yet the gauge sector
+      // simply stays frozen.
       if constexpr (Dim == 3) {
         if (not matcher_config.has_value()) {
           ERROR(
@@ -493,25 +498,45 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
               "WorldtubeMatcher option to be active, but it is None.");
         }
         if (map_parameters.valid) {
+          const bool first_order_value_mode =
+              not matcher_config->rate_ode and
+              not matcher_config->second_order_ode and
+              not matcher_config->stepper_ode;
           std::array<double, gh::Worldtube::num_map_parameters> p =
               map_parameters.p;
           const double dt_extrapolate = time - map_parameters.last_fit_time;
-          for (size_t a = 0; a < gh::Worldtube::num_map_parameters; ++a) {
-            gsl::at(p, a) += dt_extrapolate * gsl::at(map_parameters.pdot, a);
+          if (not first_order_value_mode) {
+            for (size_t a = 0; a < gh::Worldtube::num_map_parameters; ++a) {
+              gsl::at(p, a) += dt_extrapolate * gsl::at(map_parameters.pdot, a);
+            }
           }
           std::array<double, 3> model_center = matcher_config->center;
           for (size_t i = 0; i < 3; ++i) {
             gsl::at(model_center, i) +=
                 gsl::at(map_parameters.center_offset, i);
+            if (first_order_value_mode and matcher_config->centre_advection) {
+              gsl::at(model_center, i) +=
+                  dt_extrapolate * gsl::at(map_parameters.p, 4 + i);
+            }
           }
           model.emplace();
-          gh::Solutions::affine_map_model::evolved_variables(
-              make_not_null(
-                  &get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(*model)),
-              make_not_null(&get<Tags::Pi<DataVector, Dim>>(*model)),
-              make_not_null(&get<Tags::Phi<DataVector, Dim>>(*model)), coords,
-              matcher_config->mass, model_center, p, map_parameters.pdot,
-              matcher_config->centre_advection);
+          if (first_order_value_mode) {
+            gh::Solutions::affine_map_model::first_order_evolved_variables(
+                make_not_null(
+                    &get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(*model)),
+                make_not_null(&get<Tags::Pi<DataVector, Dim>>(*model)),
+                make_not_null(&get<Tags::Phi<DataVector, Dim>>(*model)), coords,
+                matcher_config->mass, model_center, p,
+                matcher_config->centre_advection);
+          } else {
+            gh::Solutions::affine_map_model::evolved_variables(
+                make_not_null(
+                    &get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(*model)),
+                make_not_null(&get<Tags::Pi<DataVector, Dim>>(*model)),
+                make_not_null(&get<Tags::Phi<DataVector, Dim>>(*model)), coords,
+                matcher_config->mass, model_center, p, map_parameters.pdot,
+                matcher_config->centre_advection);
+          }
         }
       } else {
         ERROR(
@@ -690,25 +715,44 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
       return {};
     }
 
-    // model fields from the online matcher, extrapolated within the fit
-    // interval
+    // Model fields from the online matcher. The algebraic mode is the strict
+    // slow-time first-order system: hold p_(1) fixed within the fit interval,
+    // omit D_t p_(1), and kinematically advance the zeroth-order center. The
+    // derivative ODE modes retain the old resummed extrapolation as
+    // higher-order experiments.
+    const bool first_order_value_mode = not matcher_config->rate_ode and
+                                        not matcher_config->second_order_ode and
+                                        not matcher_config->stepper_ode;
     std::array<double, gh::Worldtube::num_map_parameters> p =
         map_parameters.p;
     const double dt_extrapolate = time - map_parameters.last_fit_time;
-    for (size_t a = 0; a < gh::Worldtube::num_map_parameters; ++a) {
-      gsl::at(p, a) += dt_extrapolate * gsl::at(map_parameters.pdot, a);
+    if (not first_order_value_mode) {
+      for (size_t a = 0; a < gh::Worldtube::num_map_parameters; ++a) {
+        gsl::at(p, a) += dt_extrapolate * gsl::at(map_parameters.pdot, a);
+      }
     }
     std::array<double, 3> model_center = matcher_config->center;
     for (size_t i = 0; i < 3; ++i) {
       gsl::at(model_center, i) += gsl::at(map_parameters.center_offset, i);
+      if (first_order_value_mode and matcher_config->centre_advection) {
+        gsl::at(model_center, i) +=
+            dt_extrapolate * gsl::at(map_parameters.p, 4 + i);
+      }
     }
     tnsr::aa<DataVector, Dim, Frame::Inertial> model_metric{};
     tnsr::aa<DataVector, Dim, Frame::Inertial> model_pi{};
     tnsr::iaa<DataVector, Dim, Frame::Inertial> model_phi{};
-    gh::Solutions::affine_map_model::evolved_variables(
-        make_not_null(&model_metric), make_not_null(&model_pi),
-        make_not_null(&model_phi), coords, matcher_config->mass, model_center,
-        p, map_parameters.pdot, matcher_config->centre_advection);
+    if (first_order_value_mode) {
+      gh::Solutions::affine_map_model::first_order_evolved_variables(
+          make_not_null(&model_metric), make_not_null(&model_pi),
+          make_not_null(&model_phi), coords, matcher_config->mass, model_center,
+          p, matcher_config->centre_advection);
+    } else {
+      gh::Solutions::affine_map_model::evolved_variables(
+          make_not_null(&model_metric), make_not_null(&model_pi),
+          make_not_null(&model_phi), coords, matcher_config->mass, model_center,
+          p, map_parameters.pdot, matcher_config->centre_advection);
+    }
 
     // characteristic fields of the interior and of the model, in the same
     // (interior) frame
