@@ -67,7 +67,7 @@ SphereFields fields_at(const ylm::Spherepack& ylm, const double time) {
 }
 
 SphereFields boosted_fields_at(const ylm::Spherepack& ylm, const double time,
-                               const double velocity) {
+                               const std::array<double, 3>& velocity) {
   const auto& theta_phi = ylm.theta_phi_points();
   const size_t n_points = theta_phi[0].size();
   constexpr double radius = 2.;
@@ -86,8 +86,13 @@ SphereFields boosted_fields_at(const ylm::Spherepack& ylm, const double time,
   gh::Solutions::affine_map_model::boosted_evolved_variables(
       make_not_null(&result.metric), make_not_null(&result.pi),
       make_not_null(&result.phi), result.coords, time, 1., center, zero, zero,
-      {{0., 0., velocity}});
+      velocity);
   return result;
+}
+
+SphereFields boosted_fields_at(const ylm::Spherepack& ylm, const double time,
+                               const double velocity) {
+  return boosted_fields_at(ylm, time, {{0., 0., velocity}});
 }
 
 template <typename TensorType>
@@ -100,6 +105,58 @@ TensorType centered_derivative(const TensorType& upper, const TensorType& lower,
   return result;
 }
 }  // namespace
+
+SPECTRE_TEST_CASE(
+    "Unit.Evolution.Systems.GeneralizedHarmonic.Worldtube.MovingCenter",
+    "[Unit][Evolution]") {
+  const ylm::Spherepack ylm{5, 5};
+  const SphereFields sphere = fields_at(ylm, 0.);
+  CHECK_ITERABLE_APPROX(
+      gh::Worldtube::detail::worldtube_center(sphere.coords, ylm),
+      sphere.center);
+
+  gh::Worldtube::MatcherConfig config{};
+  config.center = {{-8., 7., 6.}};  // ignored once live geometry is available
+  config.centre_advection = true;
+  gh::Worldtube::MapParameterData state{};
+  state.valid = true;
+  state.last_fit_time = 2.;
+  state.p[4] = 0.3;
+  state.p[5] = -0.1;
+  state.p[6] = 0.2;
+  state.center_offset = {{0.01, 0.02, -0.03}};
+  state.worldtube_center_at_last_fit = {{1., 2., 3.}};
+  state.worldtube_center = {{1.4, 1.8, 3.3}};
+  state.worldtube_center_valid = true;
+
+  // q advances with the independently fitted inertial hole velocity and
+  // subtracts the numerical domain-map displacement.
+  const std::array<double, 3> expected_offset{{-0.24, 0.17, -0.23}};
+  CHECK_ITERABLE_APPROX(
+      gh::Worldtube::detail::current_center_offset(config, state, 2.5),
+      expected_offset);
+  // Consequently the absolute model center is independent of how the
+  // excision sphere moved: c_old + q_old + dt V.
+  CHECK_ITERABLE_APPROX(gh::Worldtube::detail::model_center(config, state, 2.5),
+                        (std::array<double, 3>{{1.16, 1.97, 3.07}}));
+
+  config.centre_advection = false;
+  CHECK_ITERABLE_APPROX(
+      gh::Worldtube::detail::current_center_offset(config, state, 2.5),
+      state.center_offset);
+  CHECK_ITERABLE_APPROX(gh::Worldtube::detail::model_center(config, state, 2.5),
+                        (std::array<double, 3>{{1.41, 1.82, 3.27}}));
+
+  // In finite-background mode the exact boost, rather than the epsilon-order
+  // qdot coefficient, owns inertial center advection.
+  config.fit_bulk_boost = true;
+  state.bulk_velocity = {{-0.2, 0.4, 0.1}};
+  CHECK_ITERABLE_APPROX(
+      gh::Worldtube::detail::current_center_offset(config, state, 2.5),
+      (std::array<double, 3>{{-0.49, 0.42, -0.28}}));
+  CHECK_ITERABLE_APPROX(gh::Worldtube::detail::model_center(config, state, 2.5),
+                        (std::array<double, 3>{{0.91, 2.22, 3.02}}));
+}
 
 SPECTRE_TEST_CASE(
     "Unit.Evolution.Systems.GeneralizedHarmonic.Worldtube.WeightedModeFit",
@@ -195,6 +252,40 @@ SPECTRE_TEST_CASE(
         1.e-6);
   CHECK(std::isfinite(no_c1_fit.block_closure[6]));
   CHECK(std::isfinite(no_c1_fit.block_minus_closure[6]));
+}
+
+SPECTRE_TEST_CASE(
+    "Unit.Evolution.Systems.GeneralizedHarmonic.Worldtube."
+    "FiniteBulkBoostFit",
+    "[Unit][Evolution]") {
+  const ylm::Spherepack ylm{5, 5};
+  const std::array<double, 3> expected_velocity{{0.08, -0.04, 0.06}};
+  const SphereFields data = boosted_fields_at(ylm, 0., expected_velocity);
+
+  gh::Worldtube::MatcherConfig config{};
+  config.mass = 1.;
+  config.center = data.center;
+  config.fit_l_max = 4;
+  config.fit_bulk_boost = true;
+  config.fit_velocity = false;
+  config.center_velocity = {{0., 0., 0.}};
+  config.fit_center_offset = false;
+  config.centre_advection = true;
+  const std::array<double, gh::Worldtube::num_map_parameters> p_start{};
+  const std::array<double, 3> center_offset_start{};
+  const auto fit = gh::Worldtube::fit_map_parameters(
+      data.metric, data.pi, data.phi, data.gamma2, data.coords, ylm, config,
+      p_start, center_offset_start, -1., 0.);
+
+  CAPTURE(fit.bulk_velocity, fit.bulk_residual_initial, fit.bulk_residual_final,
+          fit.residual_final, fit.p);
+  CHECK_ITERABLE_APPROX(fit.bulk_velocity, expected_velocity);
+  CHECK(fit.bulk_residual_final < 1.e-10);
+  CHECK(fit.bulk_residual_final < fit.bulk_residual_initial);
+  CHECK(fit.residual_final < 1.e-10);
+  for (const double parameter : fit.p) {
+    CHECK(std::abs(parameter) < 1.e-9);
+  }
 }
 
 SPECTRE_TEST_CASE(

@@ -92,7 +92,7 @@ struct SizeOfElementCompute : db::ComputeTag, SizeOfElement<VolumeDim> {
                  ::Tags::Time, domain::Tags::FunctionsOfTime>;
   using return_type = typename base::type;
 
-  static constexpr void function(
+  static void function(
       gsl::not_null<std::array<double, VolumeDim>*> result,
       const ::Mesh<VolumeDim>& mesh,
       const ::ElementMap<VolumeDim, Frame::Grid>& logical_to_grid_map,
@@ -109,10 +109,8 @@ struct SizeOfElementCompute : db::ComputeTag, SizeOfElement<VolumeDim> {
                                 basis == Spectral::Basis::Legendre or
                                 basis == Spectral::Basis::FiniteDifference;
                        }),
-           "SizeOfElement is not implemented for elements with basis "
-               << mesh.basis()
-               << ". Check if this basis makes sense for computing the size of "
-                  "an element.");
+           "SizeOfElement is not implemented for the provided mesh. Check if "
+           "its basis makes sense for computing the size of an element.");
     *result = size_of_element(logical_to_grid_map, grid_to_inertial_map, time,
                               functions_of_time);
   }

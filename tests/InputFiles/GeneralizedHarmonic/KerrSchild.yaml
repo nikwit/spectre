@@ -282,6 +282,7 @@ InterpolationTargets:
     Center: *Center
     Radius: *InnerRadius
     AngularOrdering: "Strahlkorper"
+  ControlSystemGaussBonnetCenter: *ExBdry
   ControlSystemCharSpeedExcision: *ExBdry
 
 Cce:
@@ -295,3 +296,5 @@ ControlSystems:
   Translation: None
   Shape: None
   Size: None
+
+WorldtubeMatcher: None

@@ -35,7 +35,7 @@ DomainCreator:
       InitialTime: 0.0
       ShapeMap:
         LMax: &LMax 2
-        #CoefficientTruncationLimit: 0.0
+        CoefficientTruncationLimit: 0.0
         #InitialValues:  # for Schwarzschild
         InitialValues:
           Mass: *Mass
@@ -47,13 +47,19 @@ DomainCreator:
         InitialValuesOuterBoundary: [1.0, -1.0e-6, 0.0]
         DecayTimescale: 1.0
         DecayTimescaleOuterBoundary: 1.0
-      TranslationMap: None
+      TranslationMap:
+        InitialValues:
+          - [0.0, 0.0, 0.0]
+          - [0.0, 0.0, 0.0]
+          - [0.0, 0.0, 0.0]
       TransitionRotScaleTrans: false
+      NumberOfRadialShellsWithShapeMap: Auto
     InnerBoundaryCondition:
       DemandOutgoingCharSpeeds:
     OuterBoundaryCondition:
       ConstraintPreservingBjorhus:
         Type: ConstraintPreservingPhysical
+        IncomingWaveProfile: None
 
 Evolution:
   InitialTime: 0.0
@@ -138,17 +144,6 @@ EvolutionSystem:
           Width: 100.0
           Center: *Center
 
-Filtering:
-  ExpFilter0:
-    Alpha: 64.0
-    HalfPower: 210
-    Enable: false
-    BlocksToFilter: All
-  TensorYlmFilter:
-    NumModesToKill: 4
-    HalfPower: None
-    Enable: true
-
 # For details... https://www.icts.res.in/program/gws2023/talks by
 # Geoffrey and Harald
 SpatialDiscretization:
@@ -157,6 +152,17 @@ SpatialDiscretization:
   DiscontinuousGalerkin:
     Formulation: StrongInertial
     Quadrature: GaussLobatto
+    Filtering:
+      - SphericalShell:
+          NumModesToKill: 4
+          AngularHalfPower: None
+          RadialHalfPower: None
+          Enable: true
+          BlocksToFilter: All
+          VolumeFilterOnSubstep: true
+          BoundaryCorrectionFilterOnSubstep: false
+          VolumeFilterEveryNSteps: None
+          BoundaryCorrectionFilterEveryNSteps: None
 
 Observers:
   VolumeFileName: "BlackHoleVolume"
@@ -242,6 +248,7 @@ EventsAndTriggersAtSlabs:
             - PointwiseL2Norm(TwoIndexConstraint)
             - ConstraintEnergy
           InterpolateToMesh: None
+          ProjectToMesh: None
           CoordinatesFloatingPointType: Double
           FloatingPointTypes: [Double]
   #- Trigger:
@@ -285,9 +292,11 @@ ApparentHorizons:
   ApparentHorizon: &Ah
     Criteria:
     InitialGuess:
-      LMax: *LMax
-      Radius: 2.2
-      Center: *Center
+      InitialL: *LMax
+      InitialShape:
+        Sphere:
+          Radius: 2.2
+          Center: *Center
     FastFlow:
       Flow: Fast
       Alpha: 1.0
@@ -314,6 +323,7 @@ InterpolationTargets:
     Center: *Center
     Radius: *InnerRadius
     AngularOrdering: "Strahlkorper"
+  ControlSystemGaussBonnetCenter: *ExBdry
   ControlSystemCharSpeedExcision: *ExBdry
 
 Cce:
@@ -324,7 +334,21 @@ ControlSystems:
   MeasurementsPerUpdate: 4
   DelayUpdate: true
   Verbosity: Silent
-  Translation: None
+  Translation:
+    Averager:
+      AverageTimescaleFraction: 0.25
+      Average0thDeriv: false
+    Controller:
+      UpdateFraction: 0.3
+    TimescaleTuner:
+      InitialTimescales: 0.2
+      MinTimescale: 1.0e-2
+      MaxTimescale: 10.0
+      IncreaseThreshold: 2.5e-4
+      DecreaseThreshold: 1.0e-3
+      IncreaseFactor: 1.01
+      DecreaseFactor: 0.98
+    ControlError:
   Shape: None
     # Averager:
     #   AverageTimescaleFraction: 0.25
@@ -358,6 +382,7 @@ ControlSystems:
     #   MaxNumTimesForZeroCrossingPredictor: 4
     #   SmoothAvgTimescaleFraction: 0.25
     #   DeltaRDriftOutwardOptions: None
+
     #   DeltaRDriftInwardOptions: None
     #   InitialState: DeltaR
     #   SmootherTuner:
@@ -368,6 +393,8 @@ ControlSystems:
     #     DecreaseThreshold: 1.0e-3
     #     IncreaseFactor: 1.01
     #     DecreaseFactor: 0.9
+
+WorldtubeMatcher: None
 
 ResourceInfo:
   AvoidGlobalProc0: false

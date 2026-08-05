@@ -10,6 +10,7 @@
 
 #include "DataStructures/TaggedTuple.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
+#include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/AffineMappedHarmonicSchwarzschild.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/Factory.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Lapse.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Shift.hpp"
@@ -81,9 +82,14 @@ std::optional<std::string> DirichletAnalytic<Dim>::dg_ghost(
   ASSERT(analytic_prescription_.get() != nullptr,
          "The analytic prescription must be set.");
   using evolved_vars_tags = typename System<Dim>::variables_tag::tags_list;
+  using analytic_prescriptions = tmpl::conditional_t<
+      Dim == 3,
+      tmpl::push_back<gh::Solutions::all_solutions<Dim>,
+                      gh::Solutions::AffineMappedHarmonicSchwarzschild>,
+      gh::Solutions::all_solutions<Dim>>;
   auto boundary_values = call_with_dynamic_type<
       tuples::tagged_tuple_from_typelist<evolved_vars_tags>,
-      gh::Solutions::all_solutions<Dim>>(
+      analytic_prescriptions>(
       analytic_prescription_.get(),
       [&coords, &time](const auto* const analytic_solution_or_data) {
         if constexpr (is_analytic_solution_v<

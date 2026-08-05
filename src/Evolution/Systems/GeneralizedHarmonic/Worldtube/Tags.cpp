@@ -25,6 +25,7 @@ void MatcherConfig::pup(PUP::er& p) {
   p | trace_pin_interval;
   p | fit_trace_strain;
   p | fit_velocity;
+  p | fit_bulk_boost;
   p | centre_advection;
   p | spatial_monopole_weight;
   p | uplus_block_weights;
@@ -48,6 +49,7 @@ bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
          lhs.trace_pin_interval == rhs.trace_pin_interval and
          lhs.fit_trace_strain == rhs.fit_trace_strain and
          lhs.fit_velocity == rhs.fit_velocity and
+         lhs.fit_bulk_boost == rhs.fit_bulk_boost and
          lhs.centre_advection == rhs.centre_advection and
          lhs.spatial_monopole_weight == rhs.spatial_monopole_weight and
          lhs.uplus_block_weights == rhs.uplus_block_weights and
@@ -65,6 +67,10 @@ void MapParameterData::pup(PUP::er& pupper) {
   pupper | p_previous;
   pupper | pdot;
   pupper | pddot;
+  pupper | bulk_velocity;
+  pupper | worldtube_center;
+  pupper | worldtube_center_at_last_fit;
+  pupper | worldtube_center_valid;
   pupper | center_offset;
   pupper | ode_state;
   pupper | ode_history;

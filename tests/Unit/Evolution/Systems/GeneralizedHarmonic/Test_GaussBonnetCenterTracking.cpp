@@ -12,7 +12,7 @@
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/SpherepackIterator.hpp"
-#include "NumericalAlgorithms/SphericalHarmonics/Strahlkorper.hpp"
+#include "NumericalAlgorithms/Strahlkorper/Strahlkorper.hpp"
 
 namespace {
 

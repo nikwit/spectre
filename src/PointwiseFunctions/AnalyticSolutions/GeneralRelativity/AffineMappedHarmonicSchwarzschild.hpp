@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/TaggedTuple.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "NumericalAlgorithms/Interpolation/CubicSpline.hpp"
@@ -19,7 +20,6 @@
 #include "PointwiseFunctions/InitialDataUtilities/InitialData.hpp"
 #include "Utilities/Serialization/CharmPupable.hpp"
 #include "Utilities/TMPL.hpp"
-#include "Utilities/TaggedTuple.hpp"
 
 /// \cond
 namespace PUP {
@@ -37,16 +37,16 @@ namespace affine_map_model {
 /// relative to the centre. Transcribes
 /// worldtube_matching/responses.py.
 void inverse_metric_combination(gsl::not_null<tnsr::AA<DataVector, 3>*> out,
-                                const std::array<DataVector, 3>& y,
-                                double mass, double background_weight,
+                                const std::array<DataVector, 3>& y, double mass,
+                                double background_weight,
                                 const std::array<double, 13>& c);
 
 /// The analytic spatial derivative \f$\partial_k\f$ of
 /// `inverse_metric_combination` with respect to the local coordinates y.
 void spatial_derivative_of_inverse_metric_combination(
     gsl::not_null<tnsr::iAA<DataVector, 3>*> out,
-    const std::array<DataVector, 3>& y, double mass,
-    double background_weight, const std::array<double, 13>& c);
+    const std::array<DataVector, 3>& y, double mass, double background_weight,
+    const std::array<double, 13>& c);
 
 /*!
  * \brief Strict first-order slow-time GH variables of the affine-map model.
@@ -74,6 +74,27 @@ void first_order_evolved_variables(
     const tnsr::I<DataVector, 3>& x, double mass,
     const std::array<double, 3>& center, const std::array<double, 13>& p,
     bool centre_advection = true);
+
+/*!
+ * \brief Strict first-order affine-map variables on an exactly Lorentz-
+ * boosted Schwarzschild background.
+ *
+ * `boost_velocity` is not order expanded.  The supplied `center` is the
+ * instantaneous lab-frame center of the hole on the slice being evaluated.
+ * The Schwarzschild background and its derivatives are transformed exactly,
+ * while the affine-map perturbation and the lab-frame 3+1 reconstruction are
+ * expanded once in `p`.  Consequently the result contains all powers of the
+ * bulk velocity but no products of affine-map coefficients.
+ *
+ * A zero boost delegates to `first_order_evolved_variables`.
+ */
+void first_order_boosted_evolved_variables(
+    gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+    gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+    gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+    const tnsr::I<DataVector, 3>& x, double mass,
+    const std::array<double, 3>& center, const std::array<double, 13>& p,
+    const std::array<double, 3>& boost_velocity, bool centre_advection = true);
 
 /// A rate-resummed extension of the affine-map variables at
 /// points `x`: the metric is the inverse of the combination above, Phi its
@@ -226,16 +247,14 @@ class AffineMappedHarmonicSchwarzschild
         "times outside the table are clamped to its ends."};
   };
   struct ParameterValues {
-    using type =
-        std::vector<std::array<double, number_of_parameters>>;
+    using type = std::vector<std::array<double, number_of_parameters>>;
     static constexpr Options::String help = {
         "Map parameters at each tabulated time, ordered (qdot0, beta_x, "
         "beta_y, beta_z, qdot_x, qdot_y, qdot_z, sigma_xx, sigma_xy, "
         "sigma_xz, sigma_yy, sigma_yz, sigma_zz)"};
   };
   struct ParameterRates {
-    using type =
-        std::vector<std::array<double, number_of_parameters>>;
+    using type = std::vector<std::array<double, number_of_parameters>>;
     static constexpr Options::String help = {
         "HIGHER-ORDER/RESUMMED extension: time derivatives of the map "
         "parameters at each tabulated time, in the same order. Used for the "
@@ -301,8 +320,7 @@ class AffineMappedHarmonicSchwarzschild
   using tags =
       tmpl::list<gr::Tags::SpacetimeMetric<DataType, volume_dim>,
                  gh::Tags::Pi<DataType, volume_dim>,
-                 gh::Tags::Phi<DataType, volume_dim>,
-                 gr::Tags::Lapse<DataType>,
+                 gh::Tags::Phi<DataType, volume_dim>, gr::Tags::Lapse<DataType>,
                  gr::Tags::Shift<DataType, volume_dim>,
                  gr::Tags::SpatialMetric<DataType, volume_dim>,
                  gr::Tags::ExtrinsicCurvature<DataType, volume_dim>>;

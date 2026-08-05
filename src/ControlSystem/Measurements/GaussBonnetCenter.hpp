@@ -11,7 +11,7 @@
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/SpherepackIterator.hpp"
-#include "NumericalAlgorithms/SphericalHarmonics/Strahlkorper.hpp"
+#include "NumericalAlgorithms/Strahlkorper/Strahlkorper.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 
 namespace control_system::measurements {

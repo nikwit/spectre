@@ -20,6 +20,39 @@ class Spherepack;
 namespace gh::Worldtube {
 
 namespace detail {
+/*!
+ * \brief Return the inertial center of a spherical collocation surface.
+ *
+ * The center is the l=0 content of each inertial-coordinate component. This
+ * uses the Spherepack transform rather than an unweighted point average.
+ */
+std::array<double, 3> worldtube_center(
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const ylm::Spherepack& ylm_transform);
+
+/*!
+ * \brief Advect the hole--worldtube offset to `time`.
+ *
+ * In strict value mode the analytic hole center moves with the independently
+ * fitted finite bulk velocity (when active), or otherwise with the
+ * first-order map velocity, while the numerical worldtube moves with the
+ * domain map. Therefore
+ * \f$q(t)=q(t_n)+(t-t_n)V-[c(t)-c(t_n)]\f$.
+ */
+std::array<double, 3> current_center_offset(
+    const MatcherConfig& config, const MapParameterData& map_parameters,
+    double time);
+
+/*!
+ * \brief Absolute analytic model center at `time`.
+ *
+ * Uses the measured moving worldtube center when available and falls back to
+ * `config.center` for direct calls or legacy state.
+ */
+std::array<double, 3> model_center(const MatcherConfig& config,
+                                   const MapParameterData& map_parameters,
+                                   double time);
+
 /// Result of a block-weighted linear fit and an unweighted held-out test.
 struct WeightedModeFit {
   std::vector<double> coefficients{};
@@ -80,8 +113,12 @@ std::vector<double> characteristic_gauge_time_derivative_modes(
 /// Diagnostics and result of one online fit.
 struct FitResult {
   std::array<double, num_map_parameters> p{};
-  /// Fitted zeroth-order spatial offset of the map: the model is centred at
-  /// `config.center + center_offset`. Zero unless `FitCenterOffset` is on.
+  /// Separately fitted finite Lorentz velocity of the background. Zero unless
+  /// `FitBulkBoost` is on.
+  std::array<double, 3> bulk_velocity{};
+  /// Fitted zeroth-order hole--worldtube spatial offset: the model is centred
+  /// at the instantaneous worldtube center plus this value. Zero unless
+  /// `FitCenterOffset` is on.
   std::array<double, 3> center_offset{};
   double residual_initial = 0.;
   double residual_final = 0.;
@@ -102,6 +139,9 @@ struct FitResult {
   double metric_residual_final = 0.;
   double phi_baseline_residual = 0.;
   double phi_residual_final = 0.;
+  /// Covariant-metric residual of the separate finite-background boost fit.
+  double bulk_residual_initial = 0.;
+  double bulk_residual_final = 0.;
   /// 2-norm condition number of the weighted final design matrix.
   double condition_number = 0.;
   size_t iterations = 0;
@@ -121,10 +161,13 @@ struct FitResult {
  * *data* normal, frame, and \f$\gamma_2\f$, mirroring what the ghost
  * boundary condition applies. The velocity can be pinned at strict first
  * order to `config.center_velocity` or fitted, and the trace strain can
- * likewise be pinned or fitted. Coefficient rates are absent by slow-time power
- * counting; center advection is retained through \f$\dot q^i\f$. Depending on
- * those choices and center fitting, the system has 9--16 free values, solved by
- * warm-started Gauss--Newton. `config.uplus_block_weights` weights the
+ * likewise be pinned or fitted. With `config.fit_bulk_boost`, a preliminary
+ * nonlinear covariant-metric solve determines a separate finite Lorentz
+ * velocity; that velocity is then held fixed in the first-order residual fit.
+ * Coefficient rates are absent by slow-time power counting; center advection
+ * is retained through \f$\dot q^i\f$. Depending on those choices and center
+ * fitting, the residual system has 9--16 free values, solved by warm-started
+ * Gauss--Newton. `config.uplus_block_weights` weights the
  * {A,C,V} x ell residual blocks in the solve; all reported closures are
  * unweighted, and the opposite characteristic is never used in the solve.
  *
@@ -132,6 +175,7 @@ struct FitResult {
  * (the natural order of an excision-face slice on the Ylm-basis domain).
  * `center_offset_start` is the Gauss--Newton initial guess when center fitting
  * is enabled and the fixed instantaneous center offset when it is disabled.
+ * `bulk_velocity_start` is the warm start for the separate finite boost fit.
  */
 FitResult fit_map_parameters(
     const tnsr::aa<DataVector, 3>& spacetime_metric,
@@ -141,7 +185,8 @@ FitResult fit_map_parameters(
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
     const std::array<double, num_map_parameters>& p_start,
     const std::array<double, 3>& center_offset_start, double normal_sign,
-    double trace_pin);
+    double trace_pin,
+    const std::array<double, 3>& bulk_velocity_start = {{0., 0., 0.}});
 
 /// Result of one linear rate fit (the `RateOde` mode).
 struct RateFitResult {

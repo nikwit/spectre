@@ -44,7 +44,10 @@ struct MatcherConfig {
   struct Center {
     using type = std::array<double, 3>;
     static constexpr Options::String help = {
-        "The worldtube center, fixed in time"};
+        "Fallback inertial center used by direct matcher calls. During an "
+        "online evolution the matcher measures the instantaneous excision-"
+        "sphere center from its inertial collocation coordinates instead, so "
+        "a time-dependent domain map remains independent of the fit."};
   };
   struct CenterVelocity {
     using type = std::array<double, 3>;
@@ -73,20 +76,21 @@ struct MatcherConfig {
         "first step whose time exceeds the previous fit time by this "
         "amount. In the default strict first-order value mode the fitted "
         "p_(1) state is held constant while the zeroth-order model center is "
-        "advanced with its fitted O(epsilon) velocity; derivative ODE modes "
-        "retain their higher-order extrapolation."};
+        "advanced with the fitted finite bulk velocity when FitBulkBoost is "
+        "active, or otherwise its fitted O(epsilon) velocity; derivative ODE "
+        "modes retain their higher-order extrapolation."};
     static type lower_bound() { return 0.; }
   };
   struct FitRadialIndex {
     using type = size_t;
     static constexpr Options::String help = {
         "Radial collocation index of the worldtube element at which the fit "
-        "reads the fields: 0 is the excision face itself. In the closed "
-        "loop the boundary condition clamps the gauge components of u^- at "
-        "index 0 (the fit then sees no signal and the loop settles on the "
-        "trivial frozen fixed point), so fit a few points off the boundary "
-        "(index 4 is r ~ 2.55 for the standard Shell0) and let the BC "
-        "impose the model at the face."};
+        "reads the fields: 0 is the excision face itself. With FitUPlus, "
+        "index 0 is valid because the boundary condition does not prescribe "
+        "u+; this is the direct face-matching configuration. If fitting u- "
+        "instead, index 0 is tautological because the boundary condition "
+        "clamps that gauge characteristic, so an off-face index is then "
+        "required for an independent signal."};
   };
   struct RateOde {
     using type = bool;
@@ -247,6 +251,17 @@ struct MatcherConfig {
         "findings 9 measured qdot^i = (1 + qdot^0) dz/dT offline to 2.3% "
         "-- freeing it tests that relation online."};
   };
+  struct FitBulkBoost {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Before fitting the first-order affine residual, determine a separate "
+        "finite Lorentz-boost velocity from the covariant metric on the "
+        "sampling sphere. The boost is exact in velocity and the residual "
+        "remains strict first order. This is implemented only for the value "
+        "fit and is mutually exclusive with FitVelocity: otherwise the "
+        "tangent of the finite boost would be fitted a second time as beta_i "
+        "and qdot^i."};
+  };
   struct CentreAdvection {
     using type = bool;
     static constexpr Options::String help = {
@@ -265,8 +280,8 @@ struct MatcherConfig {
                  FitInterval, FitCenterOffset, RateOde, SecondOrderOde,
                  StepperOde, GaugeDamping, UPlusAnchor, FitUPlus,
                  KretschmannTracePin, TracePinInterval, FitTraceStrain,
-                 FitVelocity, CentreAdvection, SpatialMonopoleWeight,
-                 UPlusBlockWeights, FitRadialIndex>;
+                 FitVelocity, FitBulkBoost, CentreAdvection,
+                 SpatialMonopoleWeight, UPlusBlockWeights, FitRadialIndex>;
   static constexpr Options::String help = {
       "Online worldtube matching. By default, algebraically fit the "
       "instantaneous center and 13 affine-map coefficients using a strict "
@@ -283,7 +298,7 @@ struct MatcherConfig {
                 bool stepper_ode, double gauge_damping, double uplus_anchor,
                 bool fit_uplus, bool kretschmann_trace_pin,
                 double trace_pin_interval, bool fit_trace_strain,
-                bool fit_velocity, bool centre_advection,
+                bool fit_velocity, bool fit_bulk_boost, bool centre_advection,
                 double spatial_monopole_weight,
                 const std::array<double, 15>& uplus_block_weights,
                 size_t fit_radial_index)
@@ -304,6 +319,7 @@ struct MatcherConfig {
         trace_pin_interval(trace_pin_interval),
         fit_trace_strain(fit_trace_strain),
         fit_velocity(fit_velocity),
+        fit_bulk_boost(fit_bulk_boost),
         centre_advection(centre_advection),
         spatial_monopole_weight(spatial_monopole_weight),
         uplus_block_weights(uplus_block_weights),
@@ -315,6 +331,24 @@ struct MatcherConfig {
           "qddot^0 v_centre) and a fixed nine-column layout, so enabling "
           "both would silently keep the velocity pinned. Set RateOde, "
           "SecondOrderOde and StepperOde false.");
+    }
+    if (fit_bulk_boost and (rate_ode or second_order_ode or stepper_ode)) {
+      ERROR(
+          "FitBulkBoost is implemented for the strict value fit only. Set "
+          "RateOde, SecondOrderOde and StepperOde false.");
+    }
+    if (fit_bulk_boost and fit_velocity) {
+      ERROR(
+          "FitBulkBoost and FitVelocity are mutually exclusive: the latter "
+          "would duplicate the tangent of the finite Lorentz boost in the "
+          "first-order residual.");
+    }
+    if (fit_bulk_boost and
+        center_velocity != std::array<double, 3>{{0., 0., 0.}}) {
+      ERROR(
+          "FitBulkBoost requires CenterVelocity = [0, 0, 0]. The finite "
+          "boost owns the bulk center motion; a separate velocity pin would "
+          "double count it.");
     }
     for (const double weight : uplus_block_weights) {
       if (weight < 0.) {
@@ -344,6 +378,7 @@ struct MatcherConfig {
   double trace_pin_interval = 0.5;
   bool fit_trace_strain = false;
   bool fit_velocity = false;
+  bool fit_bulk_boost = false;
   bool centre_advection = true;
   double spatial_monopole_weight = 1.;
   std::array<double, 15> uplus_block_weights{
@@ -365,6 +400,20 @@ struct MapParameterData {
   std::array<double, num_map_parameters> p_previous{};
   std::array<double, num_map_parameters> pdot{};
   std::array<double, num_map_parameters> pddot{};
+  /// Finite, nonperturbative Lorentz velocity of the Schwarzschild
+  /// background. This is separate from the epsilon-order affine residual.
+  std::array<double, 3> bulk_velocity{};
+  /// Instantaneous inertial center of the worldtube sampling sphere, measured
+  /// from the l=0 modes of its inertial collocation coordinates. This is
+  /// numerical-domain geometry, not a black-hole-center measurement.
+  std::array<double, 3> worldtube_center{};
+  /// Worldtube center at `last_fit_time`. Together with `worldtube_center`,
+  /// this removes the domain-map displacement from the advected fit offset.
+  std::array<double, 3> worldtube_center_at_last_fit{};
+  bool worldtube_center_valid = false;
+  /// Black-hole center minus `worldtube_center_at_last_fit`. Thus this stays
+  /// small when the control system tracks the hole; it is not the absolute
+  /// inertial black-hole position.
   std::array<double, 3> center_offset{};
   /// Stepper-integrated mode: the 26-component state (p, pdot) and its
   /// time-stepper history
@@ -380,8 +429,10 @@ struct MapParameterData {
   double trace_pin_time = std::numeric_limits<double>::lowest();
   /// Open-loop centre measurement from the l = 1 content of the
   /// Kretschmann radius on the excision sphere, with the previous sample so
-  /// its backward difference can be logged as an independent velocity. A
-  /// diagnostic only: never an input to the solve (findings 15t).
+  /// its backward difference can be logged as the hole--worldtube relative
+  /// velocity. Adding the independently logged worldtube-center velocity
+  /// gives an inertial velocity estimate. A diagnostic only: never an input
+  /// to the solve (findings 15t).
   std::array<double, 3> gb_dipole{};
   std::array<double, 3> gb_dipole_previous{};
   std::array<double, 3> gb_dipole_velocity{};

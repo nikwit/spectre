@@ -20,16 +20,11 @@
 #include "Domain/Structure/Element.hpp"
 #include "Domain/Tags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
-#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ConstraintDampingTags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matcher.hpp"
-#include "NumericalAlgorithms/LinearOperators/PartialDerivatives.hpp"
-#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ExtrinsicCurvature.hpp"
-#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/Ricci.hpp"
-#include "PointwiseFunctions/GeneralRelativity/SpacetimeNormalVector.hpp"
-#include "PointwiseFunctions/GeneralRelativity/WeylElectric.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Tags.hpp"
 #include "IO/Observer/ObserverComponent.hpp"
 #include "IO/Observer/ReductionActions.hpp"
+#include "NumericalAlgorithms/LinearOperators/PartialDerivatives.hpp"
 #include "NumericalAlgorithms/Spectral/Basis.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
@@ -37,7 +32,12 @@
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "Parallel/Invoke.hpp"
+#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ConstraintDampingTags.hpp"
+#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ExtrinsicCurvature.hpp"
+#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/Ricci.hpp"
+#include "PointwiseFunctions/GeneralRelativity/SpacetimeNormalVector.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
+#include "PointwiseFunctions/GeneralRelativity/WeylElectric.hpp"
 #include "Time/Tags/Time.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
@@ -70,18 +70,13 @@ struct FitMapParameters {
             typename ArrayIndex, typename ActionList,
             typename ParallelComponent>
   static Parallel::iterable_action_return_t apply(
-      db::DataBox<DbTags>& box,
-      tuples::TaggedTuple<InboxTags...>& /*inboxes*/,
+      db::DataBox<DbTags>& box, tuples::TaggedTuple<InboxTags...>& /*inboxes*/,
       Parallel::GlobalCache<Metavariables>& cache,
       const ArrayIndex& /*array_index*/, const ActionList /*meta*/,
       const ParallelComponent* const /*component*/) {
     static constexpr size_t Dim = 3;
     const auto& config_opt = db::get<Tags::Matcher>(box);
     if (not config_opt.has_value()) {
-      return {Parallel::AlgorithmExecution::Continue, std::nullopt};
-    }
-    if (config_opt->stepper_ode and config_opt->uplus_anchor == 0.) {
-      // handled by Actions::AdvanceMapParameterOde after the RHS computation
       return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
     const auto& element = db::get<domain::Tags::Element<Dim>>(box);
@@ -91,25 +86,6 @@ struct FitMapParameters {
       return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
     const double time = db::get<::Tags::Time>(box);
-    const auto& state = db::get<Tags::MapParameters>(box);
-    // FitInterval 0 means fit at every invocation, with no time
-    // comparison at all: substep times need not be monotone (a stepper
-    // may have equal or decreasing stage times), and a high-water-mark
-    // gate would silently skip fits and hold a p fitted at a LATER time
-    // than the fields it is applied to.
-    if (config_opt->fit_interval > 0.) {
-      if (config_opt->stepper_ode) {
-        if (state.anchor_valid and
-            time < state.anchor_time + config_opt->fit_interval - 1.0e-12) {
-          return {Parallel::AlgorithmExecution::Continue, std::nullopt};
-        }
-      } else if (state.valid and
-                 time < state.last_fit_time + config_opt->fit_interval -
-                            1.0e-12) {
-        return {Parallel::AlgorithmExecution::Continue, std::nullopt};
-      }
-    }
-
     const auto& mesh = db::get<domain::Tags::Mesh<Dim>>(box);
     ASSERT(mesh.basis(0) != Spectral::Basis::SphericalHarmonic and
                mesh.basis(1) == Spectral::Basis::SphericalHarmonic and
@@ -136,9 +112,9 @@ struct FitMapParameters {
     // (0 = the excision face; radial is the fastest-varying index, matching
     // the Ylm filter's storage convention)
     const size_t radial_index = config_opt->fit_radial_index;
-    ASSERT(radial_index < n_radial,
-           "FitRadialIndex " << radial_index << " out of range for "
-                             << n_radial << " radial points");
+    ASSERT(radial_index < n_radial, "FitRadialIndex "
+                                        << radial_index << " out of range for "
+                                        << n_radial << " radial points");
     const auto face_slice = [n_radial, n_face,
                              radial_index](const DataVector& volume) {
       DataVector face(n_face);
@@ -154,11 +130,52 @@ struct FitMapParameters {
       }
     };
 
+    tnsr::I<DataVector, Dim> coords_face{};
+    slice_tensor(make_not_null(&coords_face),
+                 db::get<domain::Tags::Coordinates<Dim, Frame::Inertial>>(box));
+
+    const ylm::Spherepack& ylm_transform = ylm::get_spherepack_cache(l_max);
+    const std::array<double, 3> current_worldtube_center =
+        detail::worldtube_center(coords_face, ylm_transform);
+    db::mutate<Tags::MapParameters>(
+        [&current_worldtube_center](
+            const gsl::not_null<MapParameterData*> data) {
+          data->worldtube_center = current_worldtube_center;
+          data->worldtube_center_valid = true;
+        },
+        make_not_null(&box));
+
+    MatcherConfig fit_config = *config_opt;
+    fit_config.center = current_worldtube_center;
+    const auto& state = db::get<Tags::MapParameters>(box);
+    if (config_opt->stepper_ode and config_opt->uplus_anchor == 0.) {
+      // The center update above is still required by the boundary condition;
+      // the parameter evolution itself is handled after the RHS computation.
+      return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+    }
+    // FitInterval 0 means fit at every invocation, with no time
+    // comparison at all: substep times need not be monotone (a stepper
+    // may have equal or decreasing stage times), and a high-water-mark
+    // gate would silently skip fits and hold a p fitted at a LATER time
+    // than the fields it is applied to. The worldtube center above is updated
+    // even when this gate skips the expensive field fit.
+    if (config_opt->fit_interval > 0.) {
+      if (config_opt->stepper_ode) {
+        if (state.anchor_valid and
+            time < state.anchor_time + config_opt->fit_interval - 1.0e-12) {
+          return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+        }
+      } else if (state.valid and time < state.last_fit_time +
+                                            config_opt->fit_interval -
+                                            1.0e-12) {
+        return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+      }
+    }
+
     tnsr::aa<DataVector, Dim> metric_face{};
     tnsr::aa<DataVector, Dim> pi_face{};
     tnsr::iaa<DataVector, Dim> phi_face{};
     Scalar<DataVector> gamma2_face{};
-    tnsr::I<DataVector, Dim> coords_face{};
     slice_tensor(make_not_null(&metric_face),
                  db::get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(box));
     slice_tensor(make_not_null(&pi_face),
@@ -167,11 +184,6 @@ struct FitMapParameters {
                  db::get<gh::Tags::Phi<DataVector, Dim>>(box));
     slice_tensor(make_not_null(&gamma2_face),
                  db::get<gh::Tags::ConstraintGamma2>(box));
-    slice_tensor(
-        make_not_null(&coords_face),
-        db::get<domain::Tags::Coordinates<Dim, Frame::Inertial>>(box));
-
-    const ylm::Spherepack& ylm_transform = ylm::get_spherepack_cache(l_max);
 
     // The value fit is the strict first-order slow-time path. It has no
     // coefficient-rate input or output: D_t p_(1) changes the metric only at
@@ -181,6 +193,7 @@ struct FitMapParameters {
     std::array<double, num_map_parameters> p_out{};
     std::array<double, num_map_parameters> pdot_out{};
     std::array<double, 3> center_offset_out{};
+    std::array<double, 3> bulk_velocity_out = state.bulk_velocity;
     double residual_initial = 0.;
     double residual_final = 0.;
     double iterations = 0.;
@@ -196,12 +209,13 @@ struct FitMapParameters {
     double trace_pin = config_opt->trace_strain_pin;
     if (config_opt->kretschmann_trace_pin and
         state.trace_pin_time > std::numeric_limits<double>::lowest() and
-        time < state.trace_pin_time + config_opt->trace_pin_interval -
-                   1.0e-12) {
+        time <
+            state.trace_pin_time + config_opt->trace_pin_interval - 1.0e-12) {
       trace_pin = state.trace_pin_value;
     } else if (config_opt->kretschmann_trace_pin) {
-      const auto& inv_jacobian = db::get<domain::Tags::InverseJacobian<
-          Dim, Frame::ElementLogical, Frame::Inertial>>(box);
+      const auto& inv_jacobian =
+          db::get<domain::Tags::InverseJacobian<Dim, Frame::ElementLogical,
+                                                Frame::Inertial>>(box);
       const auto deriv_phi_volume = partial_derivative(
           db::get<gh::Tags::Phi<DataVector, Dim>>(box), mesh, inv_jacobian);
       tnsr::ijaa<DataVector, Dim> deriv_phi_face{};
@@ -230,12 +244,11 @@ struct FitMapParameters {
       const DataVector ee = get(gr::weyl_electric_scalar(weyl_e, inv_spatial));
       const DataVector gb = 8. * ee;
       const DataVector rho_gb =
-          pow(48. * square(config_opt->mass) / gb, 1. / 6.) -
-          config_opt->mass;
+          pow(48. * square(config_opt->mass) / gb, 1. / 6.) - config_opt->mass;
       DataVector coord_r(n_face, 0.);
       for (size_t i = 0; i < 3; ++i) {
-        coord_r += square(coords_face.get(i) -
-                          gsl::at(config_opt->center, i));
+        coord_r +=
+            square(coords_face.get(i) - gsl::at(current_worldtube_center, i));
       }
       coord_r = sqrt(coord_r);
       // l = 0 sphere means via Spherepack (the collocation grid has no
@@ -256,8 +269,7 @@ struct FitMapParameters {
       };
       trace_pin = 1. - sphere_mean(rho_gb) / sphere_mean(coord_r);
       if (not std::isfinite(trace_pin)) {
-        trace_pin = state.trace_pin_time >
-                            std::numeric_limits<double>::lowest()
+        trace_pin = state.trace_pin_time > std::numeric_limits<double>::lowest()
                         ? state.trace_pin_value
                         : config_opt->trace_strain_pin;
       }
@@ -293,8 +305,8 @@ struct FitMapParameters {
             data->trace_pin_value = trace_pin;
             data->trace_pin_time = time;
             // backward difference against the previous sample: an
-            // independent velocity estimate, for comparison with the
-            // fitted qdot^i (findings 15w)
+            // Hole--worldtube relative velocity. Add the finite difference of
+            // WorldtubeCenter_i to compare with fitted inertial qdot^i.
             if (data->gb_dipole_time > std::numeric_limits<double>::lowest() and
                 time > data->gb_dipole_time) {
               const double dt = time - data->gb_dipole_time;
@@ -324,7 +336,7 @@ struct FitMapParameters {
       }
       const FitResult result =
           fit_map_parameters(metric_face, pi_face, phi_face, gamma2_face,
-                             coords_face, ylm_transform, *config_opt, p_start,
+                             coords_face, ylm_transform, fit_config, p_start,
                              center_offset_start, -1.0, trace_pin);
       bool finite = true;
       for (size_t a = 0; a < num_map_parameters; ++a) {
@@ -347,8 +359,8 @@ struct FitMapParameters {
           observers::ObserverWriter<Metavariables>>(cache);
       std::vector<std::string> legend{"Time"};
       static const std::array<std::string, num_map_parameters> names{
-          {"qdot0", "b_x", "b_y", "b_z", "v_x", "v_y", "v_z", "s_xx",
-           "s_xy", "s_xz", "s_yy", "s_yz", "s_zz"}};
+          {"qdot0", "b_x", "b_y", "b_z", "v_x", "v_y", "v_z", "s_xx", "s_xy",
+           "s_xz", "s_yy", "s_yz", "s_zz"}};
       for (const auto& name : names) {
         legend.push_back("anchor_" + name);
       }
@@ -386,8 +398,7 @@ struct FitMapParameters {
       tnsr::iaa<DataVector, Dim> dt_phi_face{};
       slice_tensor(
           make_not_null(&dt_metric_face),
-          db::get<::Tags::dt<gr::Tags::SpacetimeMetric<DataVector, Dim>>>(
-              box));
+          db::get<::Tags::dt<gr::Tags::SpacetimeMetric<DataVector, Dim>>>(box));
       slice_tensor(make_not_null(&dt_pi_face),
                    db::get<::Tags::dt<gh::Tags::Pi<DataVector, Dim>>>(box));
       slice_tensor(make_not_null(&dt_phi_face),
@@ -395,7 +406,7 @@ struct FitMapParameters {
       const RateFitResult accel = fit_map_parameter_accelerations(
           metric_face, pi_face, phi_face, dt_metric_face, dt_pi_face,
           dt_phi_face, db::get<Tags::MapParameters>(box).pdot, coords_face,
-          ylm_transform, *config_opt);
+          ylm_transform, fit_config);
       residual_initial = accel.residual_initial;
       residual_final = accel.residual_final;
       iterations = 1.;
@@ -405,11 +416,11 @@ struct FitMapParameters {
       }
       if (finite) {
         db::mutate<Tags::MapParameters>(
-            [&accel, &time, &p_out, &pdot_out, &config_opt](
+            [&accel, &time, &p_out, &pdot_out, &config_opt,
+             &current_worldtube_center](
                 const gsl::not_null<MapParameterData*> data) {
               std::array<double, num_map_parameters> acc = accel.pdot;
-              if (const double gamma = config_opt->gauge_damping;
-                  gamma > 0.) {
+              if (const double gamma = config_opt->gauge_damping; gamma > 0.) {
                 // damped-oscillator gauge fixing of the free parameters,
                 // unfolded through the pins (see AdvanceMapParameterOde)
                 static constexpr std::array<size_t, 9> free_indices{
@@ -435,15 +446,15 @@ struct FitMapParameters {
                 for (size_t a = 0; a < num_map_parameters; ++a) {
                   // velocity Verlet: advance with the stored acceleration,
                   // then update the rate with the average of old and new
-                  gsl::at(data->p, a) += dt * gsl::at(data->pdot, a) +
-                                         0.5 * dt * dt *
-                                             gsl::at(data->pddot, a);
+                  gsl::at(data->p, a) +=
+                      dt * gsl::at(data->pdot, a) +
+                      0.5 * dt * dt * gsl::at(data->pddot, a);
                   gsl::at(data->pdot, a) +=
-                      0.5 * dt *
-                      (gsl::at(data->pddot, a) + gsl::at(acc, a));
+                      0.5 * dt * (gsl::at(data->pddot, a) + gsl::at(acc, a));
                 }
               }
               data->last_fit_time = time;
+              data->worldtube_center_at_last_fit = current_worldtube_center;
               data->pddot = acc;
               data->valid = true;
               p_out = data->p;
@@ -460,9 +471,9 @@ struct FitMapParameters {
       // Rate mode: fit pdot linearly from the Pi channel and integrate the
       // first-order ODE dp/dt = pdot by the trapezoid rule; p starts at
       // zero (Schwarzschild) at the first fit.
-      const RateFitResult rate = fit_map_parameter_rates(
-          metric_face, pi_face, phi_face, coords_face, ylm_transform,
-          *config_opt);
+      const RateFitResult rate =
+          fit_map_parameter_rates(metric_face, pi_face, phi_face, coords_face,
+                                  ylm_transform, fit_config);
       residual_initial = rate.residual_initial;
       residual_final = rate.residual_final;
       iterations = 1.;
@@ -472,19 +483,20 @@ struct FitMapParameters {
       }
       if (finite) {
         db::mutate<Tags::MapParameters>(
-            [&rate, &time, &p_out](
+            [&rate, &time, &p_out, &current_worldtube_center](
                 const gsl::not_null<MapParameterData*> data) {
               if (data->valid and time > data->last_fit_time) {
                 const double dt = time - data->last_fit_time;
                 data->previous_fit_time = data->last_fit_time;
                 data->p_previous = data->p;
                 for (size_t a = 0; a < num_map_parameters; ++a) {
-                  gsl::at(data->p, a) += 0.5 * dt *
-                                         (gsl::at(data->pdot, a) +
-                                          gsl::at(rate.pdot, a));
+                  gsl::at(data->p, a) +=
+                      0.5 * dt *
+                      (gsl::at(data->pdot, a) + gsl::at(rate.pdot, a));
                 }
               }
               data->last_fit_time = time;
+              data->worldtube_center_at_last_fit = current_worldtube_center;
               data->pdot = rate.pdot;
               data->valid = true;
               p_out = data->p;
@@ -497,25 +509,22 @@ struct FitMapParameters {
       // p_(1) algebraically. Hold p_(1) fixed between fits and set its rates
       // to zero; both D_t p_(1) and linear extrapolation of epsilon*p_(1)
       // contribute first at O(epsilon^2). In contrast, q^i is a zeroth-order
-      // placement and must be predicted with dq^i/dt = p_(1)[qdot^i].
+      // placement and must be predicted with the separate finite bulk
+      // velocity when active, or otherwise dq^i/dt = p_(1)[qdot^i].
       std::array<double, num_map_parameters> p_start{};
       std::array<double, 3> center_offset_start{};
+      std::array<double, 3> bulk_velocity_start{};
       if (state.valid) {
         p_start = state.p;
-        center_offset_start = state.center_offset;
-        if (config_opt->centre_advection) {
-          const double elapsed = time - state.last_fit_time;
-          for (size_t i = 0; i < 3; ++i) {
-            gsl::at(center_offset_start, i) +=
-                elapsed * gsl::at(state.p, 4 + i);
-          }
-        }
+        center_offset_start =
+            detail::current_center_offset(fit_config, state, time);
+        bulk_velocity_start = state.bulk_velocity;
       }
 
       const FitResult result = fit_map_parameters(
           metric_face, pi_face, phi_face, gamma2_face, coords_face,
-          ylm_transform, *config_opt, p_start, center_offset_start,
-          config_opt->fit_uplus ? -1.0 : 1.0, trace_pin);
+          ylm_transform, fit_config, p_start, center_offset_start,
+          config_opt->fit_uplus ? -1.0 : 1.0, trace_pin, bulk_velocity_start);
       residual_initial = result.residual_initial;
       residual_final = result.residual_final;
       iterations = static_cast<double>(result.iterations);
@@ -527,26 +536,31 @@ struct FitMapParameters {
       }
       for (size_t i = 0; i < 3; ++i) {
         finite = finite and std::isfinite(gsl::at(result.center_offset, i));
+        finite = finite and std::isfinite(gsl::at(result.bulk_velocity, i));
       }
 
       if (finite) {
         db::mutate<Tags::MapParameters>(
-            [&result, &time](const gsl::not_null<MapParameterData*> data) {
+            [&result, &time, &current_worldtube_center](
+                const gsl::not_null<MapParameterData*> data) {
               if (data->valid and time > data->last_fit_time) {
                 data->previous_fit_time = data->last_fit_time;
                 data->p_previous = data->p;
               }
               data->last_fit_time = time;
+              data->worldtube_center_at_last_fit = current_worldtube_center;
               data->p = result.p;
               data->pdot.fill(0.);
               data->pddot.fill(0.);
               data->center_offset = result.center_offset;
+              data->bulk_velocity = result.bulk_velocity;
               data->valid = true;
             },
             make_not_null(&box));
       }
       p_out = result.p;
       center_offset_out = result.center_offset;
+      bulk_velocity_out = result.bulk_velocity;
     }
 
     // diagnostic row: time, p (13), pdot (13), residuals, iterations
@@ -567,17 +581,24 @@ struct FitMapParameters {
     legend.emplace_back("q_x");
     legend.emplace_back("q_y");
     legend.emplace_back("q_z");
+    legend.emplace_back("BulkVelocity_x");
+    legend.emplace_back("BulkVelocity_y");
+    legend.emplace_back("BulkVelocity_z");
+    legend.emplace_back("WorldtubeCenter_x");
+    legend.emplace_back("WorldtubeCenter_y");
+    legend.emplace_back("WorldtubeCenter_z");
     legend.emplace_back("ResidualInitial");
     legend.emplace_back("ResidualFinal");
     legend.emplace_back("Iterations");
     legend.emplace_back("TracePin");
-    // open-loop centre measurement from the l = 1 Kretschmann radius and its
-    // backward difference: the independent comparison for a fitted velocity
+    // Open-loop hole--worldtube offset from the l = 1 Kretschmann radius and
+    // its relative velocity. Together with WorldtubeCenter_i this remains an
+    // independent comparison for the fitted inertial velocity.
     for (const std::string& c : {"x", "y", "z"}) {
       legend.push_back("GbDipole_" + c);
     }
     for (const std::string& c : {"x", "y", "z"}) {
-      legend.push_back("GbDipoleVel_" + c);
+      legend.push_back("GbDipoleRelativeVel_" + c);
     }
     if (value_diagnostics.has_value()) {
       legend.emplace_back("BaselineResidual");
@@ -588,6 +609,8 @@ struct FitMapParameters {
       legend.emplace_back("MetricResidualFinal");
       legend.emplace_back("PhiBaselineResidual");
       legend.emplace_back("PhiResidualFinal");
+      legend.emplace_back("BulkMetricResidualInitial");
+      legend.emplace_back("BulkMetricResidualFinal");
       for (const std::string& prefix :
            {"Closure_", "TargetRms_", "ResidualRms_", "HeldOutMinusClosure_",
             "HeldOutMinusTargetRms_", "HeldOutMinusResidualRms_"}) {
@@ -609,6 +632,12 @@ struct FitMapParameters {
     }
     for (size_t i = 0; i < 3; ++i) {
       row.push_back(gsl::at(center_offset_out, i));
+    }
+    for (size_t i = 0; i < 3; ++i) {
+      row.push_back(gsl::at(bulk_velocity_out, i));
+    }
+    for (size_t i = 0; i < 3; ++i) {
+      row.push_back(gsl::at(current_worldtube_center, i));
     }
     row.push_back(residual_initial);
     row.push_back(residual_final);
@@ -633,6 +662,8 @@ struct FitMapParameters {
       row.push_back(diagnostic.metric_residual_final);
       row.push_back(diagnostic.phi_baseline_residual);
       row.push_back(diagnostic.phi_residual_final);
+      row.push_back(diagnostic.bulk_residual_initial);
+      row.push_back(diagnostic.bulk_residual_final);
       for (const auto* values :
            {&diagnostic.block_closure, &diagnostic.block_target_rms,
             &diagnostic.block_residual_rms, &diagnostic.block_minus_closure,

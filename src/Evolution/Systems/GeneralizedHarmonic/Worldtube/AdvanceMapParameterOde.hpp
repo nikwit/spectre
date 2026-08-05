@@ -185,6 +185,11 @@ struct AdvanceMapParameterOde {
         }
       }
     }
+    MatcherConfig fit_config = *config_opt;
+    const auto& geometry_state = db::get<Tags::MapParameters>(box);
+    if (geometry_state.worldtube_center_valid) {
+      fit_config.center = geometry_state.worldtube_center;
+    }
     // sensor: FitUPlus targets dt of the gauge projection of the outgoing
     // characteristic (the channel the ghost BC does not set); otherwise
     // the original all-components d2t g projection
@@ -193,11 +198,11 @@ struct AdvanceMapParameterOde {
             ? fit_map_parameter_accelerations_uplus(
                   metric_face, pi_face, phi_face, dt_metric_face, dt_pi_face,
                   dt_phi_face, gamma2_face, dt_gamma2_face, p_state, pdot_state,
-                  coords_face, ylm_transform, *config_opt, observe_matcher)
+                  coords_face, ylm_transform, fit_config, observe_matcher)
             : fit_map_parameter_accelerations(
                   metric_face, pi_face, phi_face, dt_metric_face, dt_pi_face,
                   dt_phi_face, pdot_state, coords_face, ylm_transform,
-                  *config_opt);
+                  fit_config);
     bool finite = true;
     for (size_t a = 0; a < num_map_parameters; ++a) {
       finite = finite and std::isfinite(gsl::at(accel.pdot, a));
@@ -337,6 +342,7 @@ struct AdvanceMapParameterOde {
             gsl::at(data->pddot, a) = gsl::at(accel.pdot, a);
           }
           data->last_fit_time = time_step_id.substep_time();
+          data->worldtube_center_at_last_fit = data->worldtube_center;
           data->valid = true;
         },
         make_not_null(&box));
@@ -367,6 +373,9 @@ struct AdvanceMapParameterOde {
       legend.emplace_back("q_x");
       legend.emplace_back("q_y");
       legend.emplace_back("q_z");
+      legend.emplace_back("WorldtubeCenter_x");
+      legend.emplace_back("WorldtubeCenter_y");
+      legend.emplace_back("WorldtubeCenter_z");
       legend.emplace_back("ResidualInitial");
       legend.emplace_back("ResidualFinal");
       legend.emplace_back("HeldOutMinusResidualInitial");
@@ -408,8 +417,13 @@ struct AdvanceMapParameterOde {
       for (size_t a = 0; a < num_map_parameters; ++a) {
         row.push_back(gsl::at(state.pddot, a));
       }
+      const std::array<double, 3> current_offset =
+          detail::current_center_offset(fit_config, state, time);
       for (size_t i = 0; i < 3; ++i) {
-        row.push_back(0.);
+        row.push_back(gsl::at(current_offset, i));
+      }
+      for (size_t i = 0; i < 3; ++i) {
+        row.push_back(gsl::at(state.worldtube_center, i));
       }
       row.push_back(accel.residual_initial);
       row.push_back(accel.residual_final);

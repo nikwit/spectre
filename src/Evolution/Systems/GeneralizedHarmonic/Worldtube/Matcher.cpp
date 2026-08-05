@@ -22,6 +22,67 @@
 #include "Utilities/Gsl.hpp"
 
 namespace gh::Worldtube {
+namespace detail {
+
+std::array<double, 3> worldtube_center(
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const ylm::Spherepack& ylm_transform) {
+  std::array<double, 3> result{};
+  ylm::SpherepackIterator iterator(ylm_transform.l_max(),
+                                   ylm_transform.m_max());
+  iterator.set(0, 0);
+  for (size_t i = 0; i < 3; ++i) {
+    const DataVector spectral =
+        ylm_transform.phys_to_spec(inertial_coords.get(i));
+    DataVector monopole(spectral.size(), 0.);
+    monopole[iterator()] = spectral[iterator()];
+    const DataVector constant = ylm_transform.spec_to_phys(monopole);
+    gsl::at(result, i) = constant[0];
+  }
+  return result;
+}
+
+std::array<double, 3> current_center_offset(
+    const MatcherConfig& config, const MapParameterData& map_parameters,
+    const double time) {
+  std::array<double, 3> result = map_parameters.center_offset;
+  const bool first_order_value_mode = not config.rate_ode and
+                                      not config.second_order_ode and
+                                      not config.stepper_ode;
+  if (map_parameters.valid and first_order_value_mode and
+      (config.centre_advection or config.fit_bulk_boost)) {
+    const double elapsed = time - map_parameters.last_fit_time;
+    for (size_t i = 0; i < 3; ++i) {
+      const double inertial_velocity =
+          config.fit_bulk_boost ? gsl::at(map_parameters.bulk_velocity, i)
+                                : gsl::at(map_parameters.p, 4 + i);
+      gsl::at(result, i) += elapsed * inertial_velocity;
+      if (map_parameters.worldtube_center_valid) {
+        gsl::at(result, i) -=
+            gsl::at(map_parameters.worldtube_center, i) -
+            gsl::at(map_parameters.worldtube_center_at_last_fit, i);
+      }
+    }
+  }
+  return result;
+}
+
+std::array<double, 3> model_center(const MatcherConfig& config,
+                                   const MapParameterData& map_parameters,
+                                   const double time) {
+  std::array<double, 3> result = map_parameters.worldtube_center_valid
+                                     ? map_parameters.worldtube_center
+                                     : config.center;
+  const std::array<double, 3> offset =
+      current_center_offset(config, map_parameters, time);
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(result, i) += gsl::at(offset, i);
+  }
+  return result;
+}
+
+}  // namespace detail
+
 namespace {
 
 // Geometry of the data on the sphere that is independent of the model
@@ -438,10 +499,13 @@ FitResult fit_map_parameters(
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
     const std::array<double, num_map_parameters>& p_start,
     const std::array<double, 3>& center_offset_start, const double normal_sign,
-    const double trace_pin) {
+    const double trace_pin, const std::array<double, 3>& bulk_velocity_start) {
   ASSERT(config.fit_l_max <= ylm_transform.l_max(),
          "FitLMax " << config.fit_l_max << " exceeds the grid l_max "
                     << ylm_transform.l_max());
+  ASSERT(not(config.fit_bulk_boost and config.fit_velocity),
+         "FitBulkBoost and FitVelocity duplicate the same velocity tangent "
+         "and must not be enabled together.");
   const ModeSet modes = kept_modes(ylm_transform, config.fit_l_max);
 
   const SphereFrame frame =
@@ -454,6 +518,111 @@ FitResult fit_map_parameters(
       gauge_components(
           u_minus_of(spacetime_metric, pi, phi, frame, -normal_sign), frame),
       ylm_transform, modes);
+
+  FitResult result{};
+  std::array<double, 3> bulk_velocity{};
+  if (config.fit_bulk_boost) {
+    bulk_velocity = bulk_velocity_start;
+    const auto speed_squared = [](const std::array<double, 3>& velocity) {
+      double result = 0.;
+      for (const double component : velocity) {
+        result += square(component);
+      }
+      return result;
+    };
+    if (speed_squared(bulk_velocity) >= square(0.95)) {
+      bulk_velocity.fill(0.);
+    }
+    std::array<double, 3> bulk_center = config.center;
+    for (size_t i = 0; i < 3; ++i) {
+      gsl::at(bulk_center, i) += gsl::at(center_offset_start, i);
+    }
+    const std::array<double, num_map_parameters> zero_parameters{};
+    const auto metric_residual_of = [&](const std::array<double, 3>& velocity) {
+      tnsr::aa<DataVector, 3> model_metric{};
+      tnsr::aa<DataVector, 3> model_pi{};
+      tnsr::iaa<DataVector, 3> model_phi{};
+      gh::Solutions::affine_map_model::first_order_boosted_evolved_variables(
+          make_not_null(&model_metric), make_not_null(&model_pi),
+          make_not_null(&model_phi), inertial_coords, config.mass, bulk_center,
+          zero_parameters, velocity, false);
+      std::vector<double> residual;
+      residual.reserve(spacetime_metric.size() *
+                       get<0, 0>(spacetime_metric).size());
+      for (size_t storage = 0; storage < spacetime_metric.size(); ++storage) {
+        for (size_t point = 0; point < spacetime_metric[storage].size();
+             ++point) {
+          residual.push_back(model_metric[storage][point] -
+                             spacetime_metric[storage][point]);
+        }
+      }
+      return residual;
+    };
+
+    std::vector<double> bulk_residual = metric_residual_of(bulk_velocity);
+    result.bulk_residual_initial = norm_of(bulk_residual);
+    constexpr size_t max_bulk_iterations = 12;
+    constexpr double bulk_fd_step = 1.0e-7;
+    for (size_t iteration = 0; iteration < max_bulk_iterations; ++iteration) {
+      std::array<std::vector<double>, 3> jacobian{};
+      for (size_t i = 0; i < 3; ++i) {
+        auto perturbed_velocity = bulk_velocity;
+        gsl::at(perturbed_velocity, i) += bulk_fd_step;
+        gsl::at(jacobian, i) = metric_residual_of(perturbed_velocity);
+        for (size_t row = 0; row < bulk_residual.size(); ++row) {
+          gsl::at(jacobian, i)[row] =
+              (gsl::at(jacobian, i)[row] - bulk_residual[row]) / bulk_fd_step;
+        }
+      }
+      std::vector<std::vector<double>> jtj(3, std::vector<double>(3, 0.));
+      std::vector<double> jtr(3, 0.);
+      for (size_t i = 0; i < 3; ++i) {
+        for (size_t j = i; j < 3; ++j) {
+          for (size_t row = 0; row < bulk_residual.size(); ++row) {
+            jtj[i][j] += gsl::at(jacobian, i)[row] * gsl::at(jacobian, j)[row];
+          }
+          jtj[j][i] = jtj[i][j];
+        }
+        for (size_t row = 0; row < bulk_residual.size(); ++row) {
+          jtr[i] -= gsl::at(jacobian, i)[row] * bulk_residual[row];
+        }
+      }
+      const auto delta = solve_normal_equations(std::move(jtj), std::move(jtr));
+      const double old_norm = norm_of(bulk_residual);
+      double line_factor = 1.;
+      bool accepted = false;
+      std::vector<double> candidate_residual{};
+      std::array<double, 3> candidate_velocity{};
+      while (line_factor >= 1.0 / 128.) {
+        candidate_velocity = bulk_velocity;
+        for (size_t i = 0; i < 3; ++i) {
+          gsl::at(candidate_velocity, i) += line_factor * delta[i];
+        }
+        if (speed_squared(candidate_velocity) < square(0.95)) {
+          candidate_residual = metric_residual_of(candidate_velocity);
+          if (norm_of(candidate_residual) < old_norm) {
+            accepted = true;
+            break;
+          }
+        }
+        line_factor *= 0.5;
+      }
+      if (not accepted) {
+        break;
+      }
+      bulk_velocity = candidate_velocity;
+      bulk_residual = std::move(candidate_residual);
+      double max_delta = 0.;
+      for (const double component : delta) {
+        max_delta = std::max(max_delta, std::abs(line_factor * component));
+      }
+      if (max_delta < 1.0e-12) {
+        break;
+      }
+    }
+    result.bulk_residual_final = norm_of(bulk_residual);
+  }
+  result.bulk_velocity = bulk_velocity;
 
   const size_t n_strain = config.fit_trace_strain ? 6 : 5;
   const size_t n_base = 4 + n_strain + (config.fit_velocity ? 3 : 0);
@@ -471,9 +640,9 @@ FitResult fit_map_parameters(
         for (size_t i = 0; i < 3; ++i) {
           gsl::at(model_center, i) += gsl::at(center_offset, i);
         }
-        gh::Solutions::affine_map_model::first_order_evolved_variables(
+        gh::Solutions::affine_map_model::first_order_boosted_evolved_variables(
             model_metric, model_pi, model_phi, inertial_coords, config.mass,
-            model_center, p, config.centre_advection);
+            model_center, p, bulk_velocity, config.centre_advection);
       };
   const auto residual_of =
       [&](const std::vector<double>& x, const double sign,
@@ -503,7 +672,6 @@ FitResult fit_map_parameters(
     row_blocks[i] = 5 * row_class(i) + modes.ells[i % n_modes];
   }
 
-  FitResult result{};
   std::vector<double> x(n_free, 0.);
   x[0] = p_start[0];
   for (size_t i = 0; i < 3; ++i) {

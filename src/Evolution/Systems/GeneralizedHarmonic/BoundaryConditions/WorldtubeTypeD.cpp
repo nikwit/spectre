@@ -3,6 +3,7 @@
 
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/WorldtubeTypeD.hpp"
 
+#include "DataStructures/TaggedTuple.hpp"
 #include "DataStructures/Tags/TempTensor.hpp"
 #include "DataStructures/TempBuffer.hpp"
 #include "DataStructures/Tensor/EagerMath/DeterminantAndInverse.hpp"
@@ -14,6 +15,7 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Constraints.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matcher.hpp"
 #include "Options/ParseOptions.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/AffineMappedHarmonicSchwarzschild.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/Factory.hpp"
@@ -30,7 +32,6 @@
 #include "Utilities/ContainerHelpers.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
 #include "Utilities/Gsl.hpp"
-#include "Utilities/TaggedTuple.hpp"
 
 namespace gh::BoundaryConditions {
 namespace {
@@ -62,14 +63,10 @@ WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(
     return WorldtubeTypeDType::ConstraintPreservingPhysical;
   } else if (type_read == "ConstraintPreservingPhysicalFrozenGauge") {
     return WorldtubeTypeDType::ConstraintPreservingPhysicalFrozenGauge;
-  } else if (type_read ==
-             "ConstraintPreservingPhysicalAnalyticGhostGauge") {
-    return WorldtubeTypeDType::
-        ConstraintPreservingPhysicalAnalyticGhostGauge;
-  } else if (type_read ==
-             "ConstraintPreservingPhysicalSommerfeldGhostGauge") {
-    return WorldtubeTypeDType::
-        ConstraintPreservingPhysicalSommerfeldGhostGauge;
+  } else if (type_read == "ConstraintPreservingPhysicalAnalyticGhostGauge") {
+    return WorldtubeTypeDType::ConstraintPreservingPhysicalAnalyticGhostGauge;
+  } else if (type_read == "ConstraintPreservingPhysicalSommerfeldGhostGauge") {
+    return WorldtubeTypeDType::ConstraintPreservingPhysicalSommerfeldGhostGauge;
   } else if (type_read == "ConstraintPreservingPhysicalOnlineGhostGauge") {
     return WorldtubeTypeDType::ConstraintPreservingPhysicalOnlineGhostGauge;
   } else if (type_read == "ConstraintPreservingPhysicalGhostGauge") {
@@ -94,10 +91,9 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
         analytic_gauge_prescription,
     const double gauge_relaxation_rate, const Options::Context& context)
     : type_(type),
-      analytic_gauge_prescription_(
-          analytic_gauge_prescription.has_value()
-              ? std::move(*analytic_gauge_prescription)
-              : nullptr),
+      analytic_gauge_prescription_(analytic_gauge_prescription.has_value()
+                                       ? std::move(*analytic_gauge_prescription)
+                                       : nullptr),
       gauge_relaxation_rate_(gauge_relaxation_rate) {
   if ((type_ == detail::WorldtubeTypeDType::
                     ConstraintPreservingPhysicalAnalyticGhostGauge or
@@ -432,11 +428,10 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
     Bjorhus::
         constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
             make_not_null(&bc_dt_v_minus), gauge_sector_condition, gamma2,
-            coords, normal_covector,
-            unit_interface_normal_vector, spacetime_unit_normal_vector,
-            incoming_null_one_form, outgoing_null_one_form,
-            incoming_null_vector, outgoing_null_vector, projection_ab,
-            projection_Ab, projection_AB, inverse_spatial_metric,
+            coords, normal_covector, unit_interface_normal_vector,
+            spacetime_unit_normal_vector, incoming_null_one_form,
+            outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
+            projection_ab, projection_Ab, projection_AB, inverse_spatial_metric,
             extrinsic_curvature, spacetime_metric, inverse_spacetime_metric,
             three_index_constraint, char_projected_rhs_dt_v_psi,
             char_projected_rhs_dt_v_minus, constraint_char_zero_plus,
@@ -460,9 +455,9 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
     // char_projected_rhs this is exactly + P_gauge(char_projected_rhs).
     const DataVector minus_one_kappa(get_size(get(gamma2)), -1.0);
     Bjorhus::detail::add_gauge_sector_terms_to_dt_v_minus(
-        make_not_null(&bc_dt_v_minus), minus_one_kappa,
-        incoming_null_one_form, outgoing_null_one_form, incoming_null_vector,
-        outgoing_null_vector, projection_Ab, char_projected_rhs_dt_v_minus);
+        make_not_null(&bc_dt_v_minus), minus_one_kappa, incoming_null_one_form,
+        outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
+        projection_Ab, char_projected_rhs_dt_v_minus);
   }
 
   if (type_ == detail::WorldtubeTypeDType::
@@ -510,24 +505,21 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
               gsl::at(p, a) += dt_extrapolate * gsl::at(map_parameters.pdot, a);
             }
           }
-          std::array<double, 3> model_center = matcher_config->center;
-          for (size_t i = 0; i < 3; ++i) {
-            gsl::at(model_center, i) +=
-                gsl::at(map_parameters.center_offset, i);
-            if (first_order_value_mode and matcher_config->centre_advection) {
-              gsl::at(model_center, i) +=
-                  dt_extrapolate * gsl::at(map_parameters.p, 4 + i);
-            }
-          }
+          const std::array<double, 3> model_center =
+              gh::Worldtube::detail::model_center(*matcher_config,
+                                                  map_parameters, time);
           model.emplace();
           if (first_order_value_mode) {
-            gh::Solutions::affine_map_model::first_order_evolved_variables(
-                make_not_null(
-                    &get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(*model)),
-                make_not_null(&get<Tags::Pi<DataVector, Dim>>(*model)),
-                make_not_null(&get<Tags::Phi<DataVector, Dim>>(*model)), coords,
-                matcher_config->mass, model_center, p,
-                matcher_config->centre_advection);
+            gh::Solutions::affine_map_model::
+                first_order_boosted_evolved_variables(
+                    make_not_null(
+                        &get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(
+                            *model)),
+                    make_not_null(&get<Tags::Pi<DataVector, Dim>>(*model)),
+                    make_not_null(&get<Tags::Phi<DataVector, Dim>>(*model)),
+                    coords, matcher_config->mass, model_center, p,
+                    map_parameters.bulk_velocity,
+                    matcher_config->centre_advection);
           } else {
             gh::Solutions::affine_map_model::evolved_variables(
                 make_not_null(
@@ -566,10 +558,9 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
     }
 
     if (model.has_value()) {
-      const auto v_minus_numerical =
-          get<Tags::VMinus<DataVector, Dim>>(characteristic_fields(
-              gamma2, inverse_spatial_metric, spacetime_metric, pi, phi,
-              normal_covector));
+      const auto v_minus_numerical = get<Tags::VMinus<DataVector, Dim>>(
+          characteristic_fields(gamma2, inverse_spatial_metric,
+                                spacetime_metric, pi, phi, normal_covector));
       const auto v_minus_model =
           get<Tags::VMinus<DataVector, Dim>>(characteristic_fields(
               gamma2, inverse_spatial_metric,
@@ -641,13 +632,11 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
     const gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
         spacetime_metric_ghost,
     const gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*> pi_ghost,
-    const gsl::not_null<tnsr::iaa<DataVector, Dim, Frame::Inertial>*>
-        phi_ghost,
+    const gsl::not_null<tnsr::iaa<DataVector, Dim, Frame::Inertial>*> phi_ghost,
     const gsl::not_null<Scalar<DataVector>*> gamma1_ghost,
     const gsl::not_null<Scalar<DataVector>*> gamma2_ghost,
     const gsl::not_null<Scalar<DataVector>*> lapse_ghost,
-    const gsl::not_null<tnsr::I<DataVector, Dim, Frame::Inertial>*>
-        shift_ghost,
+    const gsl::not_null<tnsr::I<DataVector, Dim, Frame::Inertial>*> shift_ghost,
     const gsl::not_null<tnsr::II<DataVector, Dim, Frame::Inertial>*>
         inv_spatial_metric_ghost,
     const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
@@ -723,30 +712,24 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
     const bool first_order_value_mode = not matcher_config->rate_ode and
                                         not matcher_config->second_order_ode and
                                         not matcher_config->stepper_ode;
-    std::array<double, gh::Worldtube::num_map_parameters> p =
-        map_parameters.p;
+    std::array<double, gh::Worldtube::num_map_parameters> p = map_parameters.p;
     const double dt_extrapolate = time - map_parameters.last_fit_time;
     if (not first_order_value_mode) {
       for (size_t a = 0; a < gh::Worldtube::num_map_parameters; ++a) {
         gsl::at(p, a) += dt_extrapolate * gsl::at(map_parameters.pdot, a);
       }
     }
-    std::array<double, 3> model_center = matcher_config->center;
-    for (size_t i = 0; i < 3; ++i) {
-      gsl::at(model_center, i) += gsl::at(map_parameters.center_offset, i);
-      if (first_order_value_mode and matcher_config->centre_advection) {
-        gsl::at(model_center, i) +=
-            dt_extrapolate * gsl::at(map_parameters.p, 4 + i);
-      }
-    }
+    const std::array<double, 3> model_center =
+        gh::Worldtube::detail::model_center(*matcher_config, map_parameters,
+                                            time);
     tnsr::aa<DataVector, Dim, Frame::Inertial> model_metric{};
     tnsr::aa<DataVector, Dim, Frame::Inertial> model_pi{};
     tnsr::iaa<DataVector, Dim, Frame::Inertial> model_phi{};
     if (first_order_value_mode) {
-      gh::Solutions::affine_map_model::first_order_evolved_variables(
+      gh::Solutions::affine_map_model::first_order_boosted_evolved_variables(
           make_not_null(&model_metric), make_not_null(&model_pi),
           make_not_null(&model_phi), coords, matcher_config->mass, model_center,
-          p, matcher_config->centre_advection);
+          p, map_parameters.bulk_velocity, matcher_config->centre_advection);
     } else {
       gh::Solutions::affine_map_model::evolved_variables(
           make_not_null(&model_metric), make_not_null(&model_pi),
@@ -759,10 +742,9 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
     const auto char_fields_interior =
         characteristic_fields(gamma2, *inv_spatial_metric_ghost,
                               spacetime_metric, pi, phi, normal_covector);
-    const auto v_minus_model =
-        get<Tags::VMinus<DataVector, Dim>>(characteristic_fields(
-            gamma2, *inv_spatial_metric_ghost, model_metric, model_pi,
-            model_phi, normal_covector));
+    const auto v_minus_model = get<Tags::VMinus<DataVector, Dim>>(
+        characteristic_fields(gamma2, *inv_spatial_metric_ghost, model_metric,
+                              model_pi, model_phi, normal_covector));
     const auto& v_minus_interior =
         get<Tags::VMinus<DataVector, Dim>>(char_fields_interior);
 
@@ -774,10 +756,8 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
         n_points);
     raise_or_lower_index(make_not_null(&unit_interface_normal_vector),
                          normal_covector, *inv_spatial_metric_ghost);
-    tnsr::a<DataVector, Dim, Frame::Inertial> incoming_null_one_form(
-        n_points);
-    tnsr::a<DataVector, Dim, Frame::Inertial> outgoing_null_one_form(
-        n_points);
+    tnsr::a<DataVector, Dim, Frame::Inertial> incoming_null_one_form(n_points);
+    tnsr::a<DataVector, Dim, Frame::Inertial> outgoing_null_one_form(n_points);
     tnsr::A<DataVector, Dim, Frame::Inertial> incoming_null_vector(n_points);
     tnsr::A<DataVector, Dim, Frame::Inertial> outgoing_null_vector(n_points);
     gr::interface_null_normal(make_not_null(&incoming_null_one_form),
@@ -793,8 +773,7 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
     tnsr::Ab<DataVector, Dim, Frame::Inertial> projection_Ab(n_points);
     gr::transverse_projection_operator(
         make_not_null(&projection_Ab), spacetime_unit_normal_vector,
-        normal_one_form, unit_interface_normal_vector, normal_covector,
-        shift);
+        normal_one_form, unit_interface_normal_vector, normal_covector, shift);
 
     // v^-_ghost = v^-_interior + P_gauge(v^-_model - v^-_interior), using
     // the gauge-sector helper: it adds -kappa * P_gauge(delta), so with
@@ -819,8 +798,8 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
         gamma2,
         get<Tags::VSpacetimeMetric<DataVector, Dim>>(char_fields_interior),
         get<Tags::VZero<DataVector, Dim>>(char_fields_interior),
-        get<Tags::VPlus<DataVector, Dim>>(char_fields_interior),
-        v_minus_ghost, normal_covector);
+        get<Tags::VPlus<DataVector, Dim>>(char_fields_interior), v_minus_ghost,
+        normal_covector);
     *spacetime_metric_ghost =
         get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(ghost_evolved);
     *pi_ghost = get<Tags::Pi<DataVector, Dim>>(ghost_evolved);
@@ -940,23 +919,21 @@ void WorldtubeTypeD<Dim>::compute_intermediate_vars(
   gr::interface_null_normal(outgoing_null_one_form,
                             spacetime_unit_normal_one_form, normal_covector,
                             shift, 1.);
-  gr::interface_null_normal(incoming_null_vector,
-                            spacetime_unit_normal_vector,
+  gr::interface_null_normal(incoming_null_vector, spacetime_unit_normal_vector,
                             *unit_interface_normal_vector, -1.);
-  gr::interface_null_normal(outgoing_null_vector,
-                            spacetime_unit_normal_vector,
+  gr::interface_null_normal(outgoing_null_vector, spacetime_unit_normal_vector,
                             *unit_interface_normal_vector, 1.);
 
-  gr::transverse_projection_operator(
-      projection_ab, spacetime_metric,
-      spacetime_unit_normal_one_form, normal_covector, shift);
+  gr::transverse_projection_operator(projection_ab, spacetime_metric,
+                                     spacetime_unit_normal_one_form,
+                                     normal_covector, shift);
   gr::transverse_projection_operator(
       projection_Ab, spacetime_unit_normal_vector,
       spacetime_unit_normal_one_form, *unit_interface_normal_vector,
       normal_covector, shift);
-  gr::transverse_projection_operator(
-      projection_AB, inverse_spacetime_metric,
-      spacetime_unit_normal_vector, *unit_interface_normal_vector);
+  gr::transverse_projection_operator(projection_AB, inverse_spacetime_metric,
+                                     spacetime_unit_normal_vector,
+                                     *unit_interface_normal_vector);
 
   const auto dt_char_fields = characteristic_fields(
       gamma2, *inverse_spatial_metric, dt_spacetime_metric, dt_pi, dt_phi,

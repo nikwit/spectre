@@ -24,6 +24,7 @@
 #include "Evolution/DiscontinuousGalerkin/EqualRateLts/ChangeFixedLtsRatio.hpp"
 #include "Evolution/DiscontinuousGalerkin/Initialization/ProjectSpectralFilters.hpp"
 #include "Evolution/Executables/GeneralizedHarmonic/Deadlock.hpp"
+#include "Evolution/Executables/GeneralizedHarmonic/GaussBonnetSingleBlackHoleControl.hpp"
 #include "Evolution/Executables/GeneralizedHarmonic/GeneralizedHarmonicBase.hpp"
 #include "Evolution/Systems/Cce/Callbacks/DumpBondiSachsOnWorldtube.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Actions/SetInitialData.hpp"
@@ -32,7 +33,6 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Tags.hpp"
 #include "NumericalAlgorithms/Strahlkorper/IO/InitialShapeFromFile.hpp"
 #include "NumericalAlgorithms/Strahlkorper/InitialShape.hpp"
-#include "ParallelAlgorithms/Actions/InitializeItems.hpp"
 #include "Options/FactoryHelpers.hpp"
 #include "Options/Protocols/FactoryCreation.hpp"
 #include "Options/String.hpp"
@@ -43,6 +43,7 @@
 #include "Parallel/PhaseControl/ExecutePhaseChange.hpp"
 #include "Parallel/Protocols/RegistrationMetavariables.hpp"
 #include "ParallelAlgorithms/Actions/FunctionsOfTimeAreReady.hpp"
+#include "ParallelAlgorithms/Actions/InitializeItems.hpp"
 #include "ParallelAlgorithms/Actions/MutateApply.hpp"
 #include "ParallelAlgorithms/Amr/Events/ObserveAmrCriteria.hpp"
 #include "ParallelAlgorithms/Amr/Events/ObserveAmrStats.hpp"
@@ -73,19 +74,19 @@
 #include "PointwiseFunctions/GeneralRelativity/DetAndInverseSpatialMetric.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Surfaces/Tags.hpp"
 #include "Time/Actions/SelfStartActions.hpp"
-#include "Time/RecordTimeStepperData.hpp"
 #include "Time/AdvanceTime.hpp"
 #include "Time/ChangeSlabSize/Action.hpp"
 #include "Time/ChangeSlabSize/Tags.hpp"
+#include "Time/RecordTimeStepperData.hpp"
 #include "Time/StepChoosers/Factory.hpp"
 #include "Time/Tags/StepperErrors.hpp"
 #include "Time/Tags/Time.hpp"
 #include "Time/Tags/TimeAndPrevious.hpp"
 #include "Utilities/Algorithm.hpp"
-#include "Utilities/TMPL.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/PrettyType.hpp"
 #include "Utilities/ProtocolHelpers.hpp"
+#include "Utilities/TMPL.hpp"
 
 template <bool UseLts>
 struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
@@ -147,11 +148,7 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3, UseLts> {
                      ::domain::ObjectLabel::None, 2,
                      control_system::measurements::SingleHorizon<
                          ::domain::ObjectLabel::None>>,
-                 control_system::Systems::Translation<
-                     2,
-                     control_system::measurements::SingleHorizon<
-                         ::domain::ObjectLabel::None>,
-                     1>,
+                 gh::single_bh_gauss_bonnet::Translation<2>,
                  control_system::Systems::Size<::domain::ObjectLabel::None, 2>>;
 
   static constexpr bool use_control_systems =

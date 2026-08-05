@@ -78,8 +78,8 @@ void inverse_metric_combination(
   }
 
   get<0, 0>(*out) = background_weight * background_tt +
-                    2. * c_qdot0 * background_tt +
-                    2. * h * beta_dot_n - rho * sigma_nn * background_tt_prime;
+                    2. * c_qdot0 * background_tt + 2. * h * beta_dot_n -
+                    rho * sigma_nn * background_tt_prime;
   for (size_t i = 0; i < 3; ++i) {
     out->get(0, i + 1) = (background_weight + c_qdot0) * h * gsl::at(n, i) +
                          g_par * beta_dot_n * gsl::at(n, i) +
@@ -88,9 +88,8 @@ void inverse_metric_combination(
                          sigma_nn * (h - rho * h_prime) * gsl::at(n, i);
     for (size_t j = i; j < 3; ++j) {
       out->get(i + 1, j + 1) =
-          background_weight *
-              (g_par * gsl::at(n, i) * gsl::at(n, j) +
-               (i == j ? 1. : 0.) * g_perp) +
+          background_weight * (g_par * gsl::at(n, i) * gsl::at(n, j) +
+                               (i == j ? 1. : 0.) * g_perp) +
           h * (gsl::at(c_qdot, i) * gsl::at(n, j) +
                gsl::at(c_qdot, j) * gsl::at(n, i)) +
           2. * g_perp * gsl::at(gsl::at(c_sigma, i), j) -
@@ -158,8 +157,7 @@ void spatial_derivative_of_inverse_metric_combination(
     for (size_t j = 0; j < 3; ++j) {
       sigma_nn +=
           gsl::at(gsl::at(c_sigma, i), j) * gsl::at(n, i) * gsl::at(n, j);
-      gsl::at(sigma_n, i) +=
-          gsl::at(gsl::at(c_sigma, i), j) * gsl::at(n, j);
+      gsl::at(sigma_n, i) += gsl::at(gsl::at(c_sigma, i), j) * gsl::at(n, j);
     }
   }
 
@@ -167,8 +165,7 @@ void spatial_derivative_of_inverse_metric_combination(
     const DataVector& nk = gsl::at(n, k);
     // dk of the angular factors
     const DataVector dk_bn = (gsl::at(c_beta, k) - beta_dot_n * nk) / rho;
-    const DataVector dk_snn =
-        2. * (gsl::at(sigma_n, k) - sigma_nn * nk) / rho;
+    const DataVector dk_snn = 2. * (gsl::at(sigma_n, k) - sigma_nn * nk) / rho;
     const auto dk_n = [&n, &rho, &nk, k](const size_t i) -> DataVector {
       return ((i == k ? 1. : 0.) - gsl::at(n, i) * nk) / rho;
     };
@@ -187,20 +184,18 @@ void spatial_derivative_of_inverse_metric_combination(
           g_par_prime * nk * beta_dot_n * gsl::at(n, i) +
           g_par * (dk_bn * gsl::at(n, i) + beta_dot_n * dk_ni) +
           g_perp_prime * nk * gsl::at(c_beta, i) -
-          (big_f_prime * (1. + h) + big_f * h_prime) * nk *
-              gsl::at(c_qdot, i) +
+          (big_f_prime * (1. + h) + big_f * h_prime) * nk * gsl::at(c_qdot, i) +
           (dk_snn * (h - rho * h_prime) - sigma_nn * rho * h_pp * nk) *
               gsl::at(n, i) +
           sigma_nn * (h - rho * h_prime) * dk_ni;
       for (size_t j = i; j < 3; ++j) {
         const DataVector dk_nj = dk_n(j);
-        const DataVector dk_ninj = dk_ni * gsl::at(n, j) +
-                                   gsl::at(n, i) * dk_nj;
+        const DataVector dk_ninj =
+            dk_ni * gsl::at(n, j) + gsl::at(n, i) * dk_nj;
         out->get(k, i + 1, j + 1) =
             background_weight *
                 (g_par_prime * nk * gsl::at(n, i) * gsl::at(n, j) +
-                 g_par * dk_ninj +
-                 (i == j ? 1. : 0.) * g_perp_prime * nk) +
+                 g_par * dk_ninj + (i == j ? 1. : 0.) * g_perp_prime * nk) +
             h_prime * nk *
                 (gsl::at(c_qdot, i) * gsl::at(n, j) +
                  gsl::at(c_qdot, j) * gsl::at(n, i)) +
@@ -351,6 +346,192 @@ void first_order_evolved_variables(
   }
 }
 
+void first_order_boosted_evolved_variables(
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+    const gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+    const tnsr::I<DataVector, 3>& x, const double mass,
+    const std::array<double, 3>& center, const std::array<double, 13>& p,
+    const std::array<double, 3>& boost_velocity, const bool centre_advection) {
+  if (boost_velocity == std::array<double, 3>{{0., 0., 0.}}) {
+    first_order_evolved_variables(spacetime_metric, pi, phi, x, mass, center, p,
+                                  centre_advection);
+    return;
+  }
+  const size_t n_points = get<0>(x).size();
+
+  tnsr::I<double, 3, Frame::NoFrame> minus_v{};
+  for (size_t i = 0; i < 3; ++i) {
+    minus_v.get(i) = -gsl::at(boost_velocity, i);
+  }
+  const auto boost = sr::lorentz_boost_matrix(minus_v);
+
+  // The center is its instantaneous lab position.  Stationarity of the
+  // rest-frame fields lets the time-dependent translation cancel explicitly:
+  // X^ibar = M^ibar_j (x^j - center^j(t)).
+  tnsr::I<DataVector, 3> rest_coords(n_points, 0.);
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t j = 0; j < 3; ++j) {
+      rest_coords.get(i) +=
+          boost.get(i + 1, j + 1) * (x.get(j) - gsl::at(center, j));
+    }
+  }
+
+  const std::array<double, 13> zero{};
+  tnsr::aa<DataVector, 3> rest_background_metric{};
+  tnsr::aa<DataVector, 3> rest_background_pi{};
+  tnsr::iaa<DataVector, 3> rest_background_phi{};
+  first_order_evolved_variables(make_not_null(&rest_background_metric),
+                                make_not_null(&rest_background_pi),
+                                make_not_null(&rest_background_phi),
+                                rest_coords, mass, {{0., 0., 0.}}, zero, false);
+  tnsr::aa<DataVector, 3> rest_full_metric{};
+  tnsr::aa<DataVector, 3> rest_full_pi{};
+  tnsr::iaa<DataVector, 3> rest_full_phi{};
+  first_order_evolved_variables(make_not_null(&rest_full_metric),
+                                make_not_null(&rest_full_pi),
+                                make_not_null(&rest_full_phi), rest_coords,
+                                mass, {{0., 0., 0.}}, p, centre_advection);
+
+  tnsr::aa<DataVector, 3> rest_delta_metric = rest_full_metric;
+  tnsr::iaa<DataVector, 3> rest_delta_phi = rest_full_phi;
+  for (size_t storage = 0; storage < rest_delta_metric.size(); ++storage) {
+    rest_delta_metric[storage] -= rest_background_metric[storage];
+  }
+  for (size_t storage = 0; storage < rest_delta_phi.size(); ++storage) {
+    rest_delta_phi[storage] -= rest_background_phi[storage];
+  }
+
+  // In the strict slow-time model the rest-frame background is stationary
+  // and the only retained time derivative is center advection of g^(0).
+  tnsr::aa<DataVector, 3> rest_delta_dt_metric(n_points, 0.);
+  if (centre_advection) {
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        for (size_t k = 0; k < 3; ++k) {
+          rest_delta_dt_metric.get(a, b) -=
+              gsl::at(p, 4 + k) * rest_background_phi.get(k, a, b);
+        }
+      }
+    }
+  }
+
+  set_number_of_grid_points(spacetime_metric, n_points);
+  set_number_of_grid_points(phi, n_points);
+  set_number_of_grid_points(pi, n_points);
+  tnsr::aa<DataVector, 3> lab_background_metric(n_points, 0.);
+  tnsr::aa<DataVector, 3> lab_delta_metric(n_points, 0.);
+  std::array<std::array<std::array<DataVector, 4>, 4>, 4>
+      lab_background_deriv{};
+  std::array<std::array<std::array<DataVector, 4>, 4>, 4> lab_delta_deriv{};
+
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      for (size_t c = 0; c < 4; ++c) {
+        for (size_t d = 0; d < 4; ++d) {
+          lab_background_metric.get(a, b) += boost.get(c, a) * boost.get(d, b) *
+                                             rest_background_metric.get(c, d);
+          lab_delta_metric.get(a, b) +=
+              boost.get(c, a) * boost.get(d, b) * rest_delta_metric.get(c, d);
+        }
+      }
+      spacetime_metric->get(a, b) =
+          lab_background_metric.get(a, b) + lab_delta_metric.get(a, b);
+    }
+  }
+
+  for (size_t mu = 0; mu < 4; ++mu) {
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        auto& background_entry =
+            gsl::at(gsl::at(gsl::at(lab_background_deriv, mu), a), b);
+        auto& delta_entry =
+            gsl::at(gsl::at(gsl::at(lab_delta_deriv, mu), a), b);
+        background_entry = DataVector(n_points, 0.);
+        delta_entry = DataVector(n_points, 0.);
+        for (size_t e = 0; e < 4; ++e) {
+          for (size_t c = 0; c < 4; ++c) {
+            for (size_t d = 0; d < 4; ++d) {
+              const double weight =
+                  boost.get(e, mu) * boost.get(c, a) * boost.get(d, b);
+              if (e > 0) {
+                background_entry +=
+                    weight * rest_background_phi.get(e - 1, c, d);
+                delta_entry += weight * rest_delta_phi.get(e - 1, c, d);
+              } else {
+                delta_entry += weight * rest_delta_dt_metric.get(c, d);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  for (size_t k = 0; k < 3; ++k) {
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        phi->get(k, a, b) =
+            gsl::at(gsl::at(gsl::at(lab_background_deriv, k + 1), a), b) +
+            gsl::at(gsl::at(gsl::at(lab_delta_deriv, k + 1), a), b);
+      }
+    }
+  }
+
+  // Expand the lab lapse, shift, and Pi once about the finite-boost
+  // background.  This is the step that prevents the 3+1 reconstruction from
+  // reintroducing products of first-order coefficients.
+  const auto background_inverse =
+      determinant_and_inverse(lab_background_metric).second;
+  tnsr::AA<DataVector, 3> delta_inverse(n_points, 0.);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      for (size_t c = 0; c < 4; ++c) {
+        for (size_t d = 0; d < 4; ++d) {
+          delta_inverse.get(a, b) -= background_inverse.get(a, c) *
+                                     lab_delta_metric.get(c, d) *
+                                     background_inverse.get(d, b);
+        }
+      }
+    }
+  }
+  const DataVector background_lapse = 1. / sqrt(-get<0, 0>(background_inverse));
+  const DataVector delta_lapse = 0.5 * background_lapse * background_lapse *
+                                 background_lapse * get<0, 0>(delta_inverse);
+  std::array<DataVector, 3> background_shift{};
+  std::array<DataVector, 3> delta_shift{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(background_shift, i) =
+        -background_inverse.get(0, i + 1) / get<0, 0>(background_inverse);
+    gsl::at(delta_shift, i) =
+        -delta_inverse.get(0, i + 1) / get<0, 0>(background_inverse) +
+        background_inverse.get(0, i + 1) * get<0, 0>(delta_inverse) /
+            square(get<0, 0>(background_inverse));
+  }
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      const DataVector& background_dt =
+          gsl::at(gsl::at(gsl::at(lab_background_deriv, 0), a), b);
+      const DataVector& delta_dt =
+          gsl::at(gsl::at(gsl::at(lab_delta_deriv, 0), a), b);
+      DataVector background_pi = -background_dt;
+      DataVector delta_pi = -delta_dt;
+      for (size_t k = 0; k < 3; ++k) {
+        const DataVector& background_phi =
+            gsl::at(gsl::at(gsl::at(lab_background_deriv, k + 1), a), b);
+        const DataVector& delta_phi =
+            gsl::at(gsl::at(gsl::at(lab_delta_deriv, k + 1), a), b);
+        background_pi += gsl::at(background_shift, k) * background_phi;
+        delta_pi += gsl::at(delta_shift, k) * background_phi +
+                    gsl::at(background_shift, k) * delta_phi;
+      }
+      background_pi /= background_lapse;
+      delta_pi = delta_pi / background_lapse -
+                 background_pi * delta_lapse / background_lapse;
+      pi->get(a, b) = background_pi + delta_pi;
+    }
+  }
+}
+
 void evolved_variables(
     const gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
     const gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
@@ -394,8 +575,7 @@ void evolved_variables(
   // d_t g_ab = -(g S g)_ab with S^{ab} = sum_A pdot_A R_A^{ab}: the
   // coefficient drift of the model at a fixed point
   tnsr::AA<DataVector, 3> rate_direction(n_points);
-  inverse_metric_combination(make_not_null(&rate_direction), y, mass, 0.,
-                             pdot);
+  inverse_metric_combination(make_not_null(&rate_direction), y, mass, 0., pdot);
   tnsr::aa<DataVector, 3> dt_metric(n_points, 0.);
   for (size_t a = 0; a < 4; ++a) {
     for (size_t b = a; b < 4; ++b) {
@@ -652,8 +832,8 @@ void AffineMappedHarmonicSchwarzschild::map_parameters(
     *rates = parameter_rates_[0];
     return;
   }
-  const double clamped = std::clamp(time, parameter_times_.front(),
-                                    parameter_times_.back());
+  const double clamped =
+      std::clamp(time, parameter_times_.front(), parameter_times_.back());
   if (parameter_times_.size() == 2) {
     const double weight = (clamped - parameter_times_[0]) /
                           (parameter_times_[1] - parameter_times_[0]);
