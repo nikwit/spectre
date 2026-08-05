@@ -18,6 +18,7 @@
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ExtrinsicCurvature.hpp"
 #include "PointwiseFunctions/SpecialRelativity/LorentzBoostMatrix.hpp"
 #include "Utilities/ConstantExpressions.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/SetNumberOfGridPoints.hpp"
 
@@ -754,6 +755,366 @@ void boosted_evolved_variables(
   }
 }
 }  // namespace affine_map_model
+
+namespace exact_frame {
+namespace {
+// The six independent symmetric-strain components in parameter order.
+constexpr std::array<std::array<size_t, 2>, 6> symmetric_pairs{
+    {{{0, 0}}, {{0, 1}}, {{0, 2}}, {{1, 1}}, {{1, 2}}, {{2, 2}}}};
+
+// Local spatial source coordinates x^i = (L^{-1})^i_A (time, x - center)^A.
+// The rest metric is stationary, so its time source component is not needed,
+// but the event time still transports the spatial source point.
+std::array<DataVector, 3> local_source_coordinates(
+    const tnsr::I<DataVector, 3>& x, const double time,
+    const std::array<double, 3>& center, const FrameMatrix& inverse_map) {
+  const size_t n_points = get<0>(x).size();
+  std::array<DataVector, 3> y{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(y, i) =
+        DataVector(n_points, gsl::at(gsl::at(inverse_map, i + 1), 0) * time);
+    for (size_t j = 0; j < 3; ++j) {
+      gsl::at(y, i) += gsl::at(gsl::at(inverse_map, i + 1), j + 1) *
+                       (x.get(j) - gsl::at(center, j));
+    }
+  }
+  return y;
+}
+
+FrameMatrix matrix_product(const FrameMatrix& left, const FrameMatrix& right) {
+  FrameMatrix result{};
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = 0; b < 4; ++b) {
+      for (size_t c = 0; c < 4; ++c) {
+        gsl::at(gsl::at(result, a), b) +=
+            gsl::at(gsl::at(left, a), c) * gsl::at(gsl::at(right, c), b);
+      }
+    }
+  }
+  return result;
+}
+}  // namespace
+
+FrameMatrix boost_matrix_from_rapidity(const std::array<double, 3>& rapidity) {
+  FrameMatrix boost{};
+  for (size_t a = 0; a < 4; ++a) {
+    gsl::at(gsl::at(boost, a), a) = 1.;
+  }
+  const double magnitude = std::sqrt(square(rapidity[0]) + square(rapidity[1]) +
+                                     square(rapidity[2]));
+  if (magnitude < 1.e-14) {
+    // cosh - 1 ~ magnitude^2 / 2 is below double precision here
+    for (size_t i = 0; i < 3; ++i) {
+      gsl::at(gsl::at(boost, 0), i + 1) = gsl::at(rapidity, i);
+      gsl::at(gsl::at(boost, i + 1), 0) = gsl::at(rapidity, i);
+    }
+    return boost;
+  }
+  const double gamma = std::cosh(magnitude);
+  const double sinh_magnitude = std::sinh(magnitude);
+  std::array<double, 3> direction{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(direction, i) = gsl::at(rapidity, i) / magnitude;
+  }
+  gsl::at(gsl::at(boost, 0), 0) = gamma;
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(gsl::at(boost, 0), i + 1) = sinh_magnitude * gsl::at(direction, i);
+    gsl::at(gsl::at(boost, i + 1), 0) = sinh_magnitude * gsl::at(direction, i);
+    for (size_t j = 0; j < 3; ++j) {
+      gsl::at(gsl::at(boost, i + 1), j + 1) +=
+          (gamma - 1.) * gsl::at(direction, i) * gsl::at(direction, j);
+    }
+  }
+  return boost;
+}
+
+std::array<double, 3> velocity_from_rapidity(
+    const std::array<double, 3>& rapidity) {
+  const double magnitude = std::sqrt(square(rapidity[0]) + square(rapidity[1]) +
+                                     square(rapidity[2]));
+  if (magnitude < 1.e-14) {
+    return rapidity;
+  }
+  std::array<double, 3> velocity{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(velocity, i) =
+        std::tanh(magnitude) * gsl::at(rapidity, i) / magnitude;
+  }
+  return velocity;
+}
+
+std::array<double, 3> rapidity_from_velocity(
+    const std::array<double, 3>& velocity) {
+  const double speed = std::sqrt(square(velocity[0]) + square(velocity[1]) +
+                                 square(velocity[2]));
+  if (speed < 1.e-14) {
+    return velocity;
+  }
+  if (speed >= 1.) {
+    ERROR("The boost velocity must be subluminal, but |V| = " << speed << ".");
+  }
+  std::array<double, 3> rapidity{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(rapidity, i) = std::atanh(speed) * gsl::at(velocity, i) / speed;
+  }
+  return rapidity;
+}
+
+FrameMatrix symmetric_factor(const double s0,
+                             const std::array<double, 3>& sigma,
+                             const std::array<double, 6>& s_sym) {
+  FrameMatrix result{};
+  for (size_t a = 0; a < 4; ++a) {
+    gsl::at(gsl::at(result, a), a) = 1.;
+  }
+  gsl::at(gsl::at(result, 0), 0) += s0;
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(gsl::at(result, 0), i + 1) = gsl::at(sigma, i);
+    gsl::at(gsl::at(result, i + 1), 0) = -gsl::at(sigma, i);
+  }
+  for (size_t pair = 0; pair < 6; ++pair) {
+    const auto [i, j] = gsl::at(symmetric_pairs, pair);
+    gsl::at(gsl::at(result, i + 1), j + 1) += gsl::at(s_sym, pair);
+    if (i != j) {
+      gsl::at(gsl::at(result, j + 1), i + 1) += gsl::at(s_sym, pair);
+    }
+  }
+  return result;
+}
+
+FrameMatrix frame_map(const std::array<double, num_parameters>& theta) {
+  const std::array<double, 3> rapidity{{theta[0], theta[1], theta[2]}};
+  const std::array<double, 3> sigma{{theta[4], theta[5], theta[6]}};
+  std::array<double, 6> s_sym{};
+  for (size_t pair = 0; pair < 6; ++pair) {
+    gsl::at(s_sym, pair) = gsl::at(theta, 7 + pair);
+  }
+  return matrix_product(boost_matrix_from_rapidity(rapidity),
+                        symmetric_factor(theta[3], sigma, s_sym));
+}
+
+FrameMatrix inverse(const FrameMatrix& matrix) {
+  std::array<std::array<double, 8>, 4> augmented{};
+  for (size_t row = 0; row < 4; ++row) {
+    for (size_t col = 0; col < 4; ++col) {
+      gsl::at(gsl::at(augmented, row), col) =
+          gsl::at(gsl::at(matrix, row), col);
+    }
+    gsl::at(gsl::at(augmented, row), 4 + row) = 1.;
+  }
+  for (size_t col = 0; col < 4; ++col) {
+    size_t pivot = col;
+    for (size_t row = col + 1; row < 4; ++row) {
+      if (std::abs(gsl::at(gsl::at(augmented, row), col)) >
+          std::abs(gsl::at(gsl::at(augmented, pivot), col))) {
+        pivot = row;
+      }
+    }
+    std::swap(gsl::at(augmented, col), gsl::at(augmented, pivot));
+    const double pivot_value = gsl::at(gsl::at(augmented, col), col);
+    if (std::abs(pivot_value) < 1.e-14) {
+      ERROR("The frame map is singular: Gauss-Jordan pivot in column "
+            << col << " is " << pivot_value
+            << ". A fit step that degenerates the map must be rejected before "
+               "evaluating the model.");
+    }
+    for (size_t k = col; k < 8; ++k) {
+      gsl::at(gsl::at(augmented, col), k) /= pivot_value;
+    }
+    for (size_t row = 0; row < 4; ++row) {
+      if (row == col) {
+        continue;
+      }
+      const double factor = gsl::at(gsl::at(augmented, row), col);
+      for (size_t k = col; k < 8; ++k) {
+        gsl::at(gsl::at(augmented, row), k) -=
+            factor * gsl::at(gsl::at(augmented, col), k);
+      }
+    }
+  }
+  FrameMatrix result{};
+  for (size_t row = 0; row < 4; ++row) {
+    for (size_t col = 0; col < 4; ++col) {
+      gsl::at(gsl::at(result, row), col) =
+          gsl::at(gsl::at(augmented, row), 4 + col);
+    }
+  }
+  return result;
+}
+
+std::array<double, 3> center_velocity(const FrameMatrix& frame_map_matrix) {
+  std::array<double, 3> result{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(result, i) = gsl::at(gsl::at(frame_map_matrix, i + 1), 0) /
+                         gsl::at(gsl::at(frame_map_matrix, 0), 0);
+  }
+  return result;
+}
+
+std::array<double, num_parameters> old13_dictionary(
+    const std::array<double, num_parameters>& theta) {
+  FrameMatrix delta = frame_map(theta);
+  for (size_t a = 0; a < 4; ++a) {
+    gsl::at(gsl::at(delta, a), a) -= 1.;
+  }
+  std::array<double, num_parameters> old13{};
+  old13[0] = delta[0][0];
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(old13, 1 + i) = gsl::at(gsl::at(delta, 0), i + 1);
+    gsl::at(old13, 4 + i) = gsl::at(gsl::at(delta, i + 1), 0);
+  }
+  for (size_t pair = 0; pair < 6; ++pair) {
+    const auto [i, j] = gsl::at(symmetric_pairs, pair);
+    gsl::at(old13, 7 + pair) = 0.5 * (gsl::at(gsl::at(delta, i + 1), j + 1) +
+                                      gsl::at(gsl::at(delta, j + 1), i + 1));
+  }
+  return old13;
+}
+
+void inverse_metric(const gsl::not_null<tnsr::AA<DataVector, 3>*> result,
+                    const tnsr::I<DataVector, 3>& x, const double time,
+                    const double mass, const std::array<double, 3>& center,
+                    const FrameMatrix& frame_map_matrix) {
+  const size_t n_points = get<0>(x).size();
+  const FrameMatrix inverse_map = inverse(frame_map_matrix);
+  const auto y = local_source_coordinates(x, time, center, inverse_map);
+  tnsr::AA<DataVector, 3> local_inverse(n_points);
+  affine_map_model::inverse_metric_combination(make_not_null(&local_inverse), y,
+                                               mass, 1., {});
+  set_number_of_grid_points(result, n_points);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      result->get(a, b) = 0.;
+      for (size_t mu = 0; mu < 4; ++mu) {
+        for (size_t nu = 0; nu < 4; ++nu) {
+          result->get(a, b) += gsl::at(gsl::at(frame_map_matrix, a), mu) *
+                               gsl::at(gsl::at(frame_map_matrix, b), nu) *
+                               local_inverse.get(mu, nu);
+        }
+      }
+    }
+  }
+}
+
+void evolved_variables(
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+    const gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+    const tnsr::I<DataVector, 3>& x, const double time, const double mass,
+    const std::array<double, 3>& center, const FrameMatrix& frame_map_matrix) {
+  const size_t n_points = get<0>(x).size();
+  const FrameMatrix inverse_map = inverse(frame_map_matrix);
+  const auto y = local_source_coordinates(x, time, center, inverse_map);
+
+  set_number_of_grid_points(spacetime_metric, n_points);
+  set_number_of_grid_points(pi, n_points);
+  set_number_of_grid_points(phi, n_points);
+
+  // G^{AB} = L^A_mu L^B_nu g0^{mu nu}(x(X)), inverted exactly
+  tnsr::AA<DataVector, 3> local_inverse(n_points);
+  affine_map_model::inverse_metric_combination(make_not_null(&local_inverse), y,
+                                               mass, 1., {});
+  tnsr::AA<DataVector, 3> inertial_inverse(n_points, 0.);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      for (size_t mu = 0; mu < 4; ++mu) {
+        for (size_t nu = 0; nu < 4; ++nu) {
+          inertial_inverse.get(a, b) +=
+              gsl::at(gsl::at(frame_map_matrix, a), mu) *
+              gsl::at(gsl::at(frame_map_matrix, b), nu) *
+              local_inverse.get(mu, nu);
+        }
+      }
+    }
+  }
+  *spacetime_metric = determinant_and_inverse(inertial_inverse).second;
+
+  // Local gradient of the stationary rest metric, pushed forward on the
+  // tensor indices only: E_i^{AB} = L^A_mu L^B_nu d_i g0^{mu nu}
+  tnsr::iAA<DataVector, 3> local_deriv(n_points);
+  affine_map_model::spatial_derivative_of_inverse_metric_combination(
+      make_not_null(&local_deriv), y, mass, 1., {});
+  tnsr::iAA<DataVector, 3> pushed_deriv(n_points, 0.);
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        for (size_t mu = 0; mu < 4; ++mu) {
+          for (size_t nu = 0; nu < 4; ++nu) {
+            pushed_deriv.get(i, a, b) +=
+                gsl::at(gsl::at(frame_map_matrix, a), mu) *
+                gsl::at(gsl::at(frame_map_matrix, b), nu) *
+                local_deriv.get(i, mu, nu);
+          }
+        }
+      }
+    }
+  }
+
+  // d_A G^{BC} = (L^{-1})^i_A E_i^{BC} by the chain rule (only the spatial
+  // source components move); direction 0 is the inertial time derivative,
+  // exact for the frozen map, and directions k+1 build Phi_k. Sandwich each
+  // with the exact metric: d_A g_BC = -(g d_A G g)_BC.
+  tnsr::AA<DataVector, 3> derivative_inverse(n_points);
+  tnsr::aa<DataVector, 3> dt_metric(n_points, 0.);
+  for (size_t direction = 0; direction < 4; ++direction) {
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        derivative_inverse.get(a, b) = 0.;
+        for (size_t i = 0; i < 3; ++i) {
+          derivative_inverse.get(a, b) +=
+              gsl::at(gsl::at(inverse_map, i + 1), direction) *
+              pushed_deriv.get(i, a, b);
+        }
+      }
+    }
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        DataVector entry(n_points, 0.);
+        for (size_t c = 0; c < 4; ++c) {
+          for (size_t d = 0; d < 4; ++d) {
+            entry -= spacetime_metric->get(a, c) *
+                     derivative_inverse.get(c, d) * spacetime_metric->get(d, b);
+          }
+        }
+        if (direction == 0) {
+          dt_metric.get(a, b) = entry;
+        } else {
+          phi->get(direction - 1, a, b) = entry;
+        }
+      }
+    }
+  }
+
+  // lapse and shift of the exact model metric;
+  // Pi_AB = (beta^k Phi_kAB - d_t g_AB) / alpha
+  const DataVector lapse = 1. / sqrt(-get<0, 0>(inertial_inverse));
+  std::array<DataVector, 3> shift{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(shift, i) =
+        -inertial_inverse.get(0, i + 1) / get<0, 0>(inertial_inverse);
+  }
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      pi->get(a, b) = -dt_metric.get(a, b);
+      for (size_t k = 0; k < 3; ++k) {
+        pi->get(a, b) += gsl::at(shift, k) * phi->get(k, a, b);
+      }
+      pi->get(a, b) /= lapse;
+    }
+  }
+}
+
+void evolved_variables(
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+    const gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+    const tnsr::I<DataVector, 3>& x, const double time, const double mass,
+    const std::array<double, 3>& center,
+    const std::array<double, num_parameters>& theta) {
+  evolved_variables(spacetime_metric, pi, phi, x, time, mass, center,
+                    frame_map(theta));
+}
+}  // namespace exact_frame
 
 AffineMappedHarmonicSchwarzschild::AffineMappedHarmonicSchwarzschild(
     const double mass, const std::array<double, volume_dim>& center,

@@ -14,6 +14,7 @@
 #include "DataStructures/Tensor/EagerMath/DeterminantAndInverse.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "Helpers/DataStructures/MakeWithRandomValues.hpp"
+#include "Helpers/PointwiseFunctions/AnalyticSolutions/GeneralRelativity/ExactFrameFixtures.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/AffineMappedHarmonicSchwarzschild.hpp"
 #include "PointwiseFunctions/SpecialRelativity/LorentzBoostMatrix.hpp"
 #include "Utilities/ConstantExpressions.hpp"
@@ -533,4 +534,380 @@ SPECTRE_TEST_CASE(
        std::to_string(relative));
   CHECK(relative < 2. * v);
   CHECK(relative > 0.1 * v);
+}
+
+namespace {
+namespace exact_frame = gh::Solutions::exact_frame;
+
+exact_frame::FrameMatrix frame_product(const exact_frame::FrameMatrix& left,
+                                       const exact_frame::FrameMatrix& right) {
+  exact_frame::FrameMatrix result{};
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = 0; b < 4; ++b) {
+      for (size_t c = 0; c < 4; ++c) {
+        gsl::at(gsl::at(result, a), b) +=
+            gsl::at(gsl::at(left, a), c) * gsl::at(gsl::at(right, c), b);
+      }
+    }
+  }
+  return result;
+}
+
+std::tuple<tnsr::aa<DataVector, 3>, tnsr::aa<DataVector, 3>,
+           tnsr::iaa<DataVector, 3>>
+exact_frame_variables(const tnsr::I<DataVector, 3>& x, const double time,
+                      const double local_mass,
+                      const std::array<double, 3>& center,
+                      const exact_frame::FrameMatrix& frame_map_matrix) {
+  tnsr::aa<DataVector, 3> metric{};
+  tnsr::aa<DataVector, 3> pi{};
+  tnsr::iaa<DataVector, 3> phi{};
+  exact_frame::evolved_variables(make_not_null(&metric), make_not_null(&pi),
+                                 make_not_null(&phi), x, time, local_mass,
+                                 center, frame_map_matrix);
+  return {metric, pi, phi};
+}
+}  // namespace
+
+// Contract C1 of the zeroth-order implementation brief: reproduce every case
+// of the validated offline oracle (frame map, center velocity, old-13
+// dictionary, inverse metric at events, lapse, shift) to 1e-12. The fixture
+// values are golden numbers; a mismatch is a bug in the C++ evaluator, never
+// in the fixture. The pure_small_boost_sign_check case pins the forward-map
+// sign convention beta_z = qdot_z = +v_z.
+SPECTRE_TEST_CASE(
+    "Unit.PointwiseFunctions.AnalyticSolutions.Gr."
+    "AffineMappedHarmonicSchwarzschild.ExactFrameFixtures",
+    "[PointwiseFunctions][Unit]") {
+  Approx fixture_approx = Approx::custom().epsilon(1.e-12).scale(1.);
+  for (const auto& fixture :
+       TestHelpers::gh_solutions::exact_frame_fixtures::cases()) {
+    INFO(fixture.name);
+    const auto frame_map = exact_frame::frame_map(fixture.theta);
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t mu = 0; mu < 4; ++mu) {
+        CHECK(gsl::at(gsl::at(frame_map, a), mu) ==
+              fixture_approx(gsl::at(gsl::at(fixture.frame_map, a), mu)));
+      }
+    }
+    const std::array<double, 3> rapidity{
+        {fixture.theta[0], fixture.theta[1], fixture.theta[2]}};
+    const auto velocity = exact_frame::velocity_from_rapidity(rapidity);
+    const auto vc = exact_frame::center_velocity(frame_map);
+    for (size_t i = 0; i < 3; ++i) {
+      CHECK(gsl::at(velocity, i) ==
+            fixture_approx(gsl::at(fixture.velocity, i)));
+      CHECK(gsl::at(vc, i) ==
+            fixture_approx(gsl::at(fixture.center_velocity, i)));
+    }
+    const auto old13 = exact_frame::old13_dictionary(fixture.theta);
+    for (size_t a = 0; a < 13; ++a) {
+      CHECK(gsl::at(old13, a) == fixture_approx(gsl::at(fixture.old13, a)));
+    }
+    // the exact inverse actually inverts the map
+    const auto inverse_map = exact_frame::inverse(frame_map);
+    const auto identity = frame_product(frame_map, inverse_map);
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = 0; b < 4; ++b) {
+        CHECK(gsl::at(gsl::at(identity, a), b) ==
+              fixture_approx(a == b ? 1. : 0.));
+      }
+    }
+    for (size_t event = 0; event < fixture.events.size(); ++event) {
+      CAPTURE(event);
+      const auto& event_coords = gsl::at(fixture.events, event);
+      tnsr::I<DataVector, 3> point(1_st);
+      for (size_t i = 0; i < 3; ++i) {
+        point.get(i) = gsl::at(event_coords, i + 1);
+      }
+      tnsr::AA<DataVector, 3> model_inverse{};
+      exact_frame::inverse_metric(make_not_null(&model_inverse), point,
+                                  event_coords[0], fixture.mass,
+                                  fixture.center_offset, frame_map);
+      const auto& expected_inverse = gsl::at(fixture.inverse_metric, event);
+      size_t component = 0;
+      for (size_t a = 0; a < 4; ++a) {
+        for (size_t b = a; b < 4; ++b) {
+          CHECK(model_inverse.get(a, b)[0] ==
+                fixture_approx(gsl::at(expected_inverse, component)));
+          ++component;
+        }
+      }
+      const double lapse = 1. / std::sqrt(-get<0, 0>(model_inverse)[0]);
+      CHECK(lapse == fixture_approx(gsl::at(fixture.lapse, event)));
+      for (size_t i = 0; i < 3; ++i) {
+        const double shift =
+            -model_inverse.get(0, i + 1)[0] / get<0, 0>(model_inverse)[0];
+        CHECK(shift ==
+              fixture_approx(gsl::at(gsl::at(fixture.shift, event), i)));
+      }
+      // the evolved-variables metric inverts the same G exactly
+      const auto metric = std::get<0>(
+          exact_frame_variables(point, event_coords[0], fixture.mass,
+                                fixture.center_offset, frame_map));
+      const auto round_trip = determinant_and_inverse(metric).second;
+      for (size_t a = 0; a < 4; ++a) {
+        for (size_t b = a; b < 4; ++b) {
+          CHECK(round_trip.get(a, b)[0] ==
+                fixture_approx(model_inverse.get(a, b)[0]));
+        }
+      }
+    }
+  }
+}
+
+// Contract C2: the zero-point linearization of the exact evaluator equals
+// the thirteen audited analytic response columns of the first-order model,
+// direction by direction, through the Z8 tangent dictionary
+// (rapidity_i -> beta_i + qdot_i, s0 -> qdot0, sigma_i -> beta_i - qdot_i,
+// s_ij -> sigma_ij). This makes the response columns usable as the
+// Gauss-Newton Jacobian of the nonlinear fit.
+SPECTRE_TEST_CASE(
+    "Unit.PointwiseFunctions.AnalyticSolutions.Gr."
+    "AffineMappedHarmonicSchwarzschild.ExactFrameLinearization",
+    "[PointwiseFunctions][Unit]") {
+  const auto x = sample_points();
+  const auto first_order = [&x](const std::array<double, 13>& p) {
+    tnsr::aa<DataVector, 3> metric{};
+    tnsr::aa<DataVector, 3> pi{};
+    tnsr::iaa<DataVector, 3> phi{};
+    gh::Solutions::affine_map_model::first_order_evolved_variables(
+        make_not_null(&metric), make_not_null(&pi), make_not_null(&phi), x,
+        mass, centre, p);
+    return std::make_tuple(metric, pi, phi);
+  };
+  const auto [base_metric, base_pi, base_phi] = first_order(zero_p);
+  constexpr double eps = 3.e-6;
+  Approx custom = Approx::custom().epsilon(1.e-9).scale(1.);
+  for (size_t direction = 0; direction < 13; ++direction) {
+    CAPTURE(direction);
+    std::array<double, 13> tangent{};
+    if (direction < 3) {
+      gsl::at(tangent, 1 + direction) = 1.;
+      gsl::at(tangent, 4 + direction) = 1.;
+    } else if (direction == 3) {
+      tangent[0] = 1.;
+    } else if (direction < 7) {
+      gsl::at(tangent, 1 + direction - 4) = 1.;
+      gsl::at(tangent, 4 + direction - 4) = -1.;
+    } else {
+      gsl::at(tangent, direction) = 1.;
+    }
+    const auto [column_metric, column_pi, column_phi] = first_order(tangent);
+
+    std::array<double, 13> theta{};
+    gsl::at(theta, direction) = eps;
+    const auto [plus_metric, plus_pi, plus_phi] = exact_frame_variables(
+        x, 0., mass, centre, exact_frame::frame_map(theta));
+    gsl::at(theta, direction) = -eps;
+    const auto [minus_metric, minus_pi, minus_phi] = exact_frame_variables(
+        x, 0., mass, centre, exact_frame::frame_map(theta));
+
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        const DataVector metric_derivative =
+            (plus_metric.get(a, b) - minus_metric.get(a, b)) / (2. * eps);
+        const DataVector metric_column =
+            column_metric.get(a, b) - base_metric.get(a, b);
+        CHECK_ITERABLE_CUSTOM_APPROX(metric_derivative, metric_column, custom);
+        const DataVector pi_derivative =
+            (plus_pi.get(a, b) - minus_pi.get(a, b)) / (2. * eps);
+        const DataVector pi_column = column_pi.get(a, b) - base_pi.get(a, b);
+        CHECK_ITERABLE_CUSTOM_APPROX(pi_derivative, pi_column, custom);
+        for (size_t k = 0; k < 3; ++k) {
+          const DataVector phi_derivative =
+              (plus_phi.get(k, a, b) - minus_phi.get(k, a, b)) / (2. * eps);
+          const DataVector phi_column =
+              column_phi.get(k, a, b) - base_phi.get(k, a, b);
+          CHECK_ITERABLE_CUSTOM_APPROX(phi_derivative, phi_column, custom);
+        }
+      }
+    }
+  }
+}
+
+// Contract C3: composing the frame map with a constant rotation of the
+// *local* chart leaves every output unchanged to roundoff -- the absent
+// antisymmetric spatial part of S is a gauge choice, not a missing feature.
+SPECTRE_TEST_CASE(
+    "Unit.PointwiseFunctions.AnalyticSolutions.Gr."
+    "AffineMappedHarmonicSchwarzschild.ExactFrameRotationGauge",
+    "[PointwiseFunctions][Unit]") {
+  const auto x = sample_points();
+  const auto& fixture =
+      TestHelpers::gh_solutions::exact_frame_fixtures::cases()[0];
+  const auto frame_map = exact_frame::frame_map(fixture.theta);
+
+  // Rodrigues rotation about a generic axis
+  const double angle = 0.7;
+  std::array<double, 3> axis{{1., 2., 3.}};
+  const double norm =
+      std::sqrt(square(axis[0]) + square(axis[1]) + square(axis[2]));
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(axis, i) /= norm;
+  }
+  exact_frame::FrameMatrix rotation{};
+  rotation[0][0] = 1.;
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t j = 0; j < 3; ++j) {
+      gsl::at(gsl::at(rotation, i + 1), j + 1) =
+          (i == j ? std::cos(angle) : 0.) +
+          (1. - std::cos(angle)) * gsl::at(axis, i) * gsl::at(axis, j);
+    }
+  }
+  const std::array<std::array<size_t, 3>, 3> levi_civita_even{
+      {{{0, 1, 2}}, {{1, 2, 0}}, {{2, 0, 1}}}};
+  for (const auto& [i, j, k] : levi_civita_even) {
+    gsl::at(gsl::at(rotation, i + 1), j + 1) -=
+        std::sin(angle) * gsl::at(axis, k);
+    gsl::at(gsl::at(rotation, j + 1), i + 1) +=
+        std::sin(angle) * gsl::at(axis, k);
+  }
+  const auto rotated_map = frame_product(frame_map, rotation);
+
+  const double time = 0.4;
+  const auto [metric, pi, phi] =
+      exact_frame_variables(x, time, mass, centre, frame_map);
+  const auto [rotated_metric, rotated_pi, rotated_phi] =
+      exact_frame_variables(x, time, mass, centre, rotated_map);
+  Approx custom = Approx::custom().epsilon(1.e-12).scale(1.);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      CHECK_ITERABLE_CUSTOM_APPROX(metric.get(a, b), rotated_metric.get(a, b),
+                                   custom);
+      CHECK_ITERABLE_CUSTOM_APPROX(pi.get(a, b), rotated_pi.get(a, b), custom);
+      for (size_t k = 0; k < 3; ++k) {
+        CHECK_ITERABLE_CUSTOM_APPROX(phi.get(k, a, b), rotated_phi.get(k, a, b),
+                                     custom);
+      }
+    }
+  }
+}
+
+// The analytic Phi and Pi of the exact-frame evaluator against finite
+// differences of its own metric: validates the chain-rule assembly of the
+// derivatives (the fixtures pin only the metric, lapse, and shift).
+SPECTRE_TEST_CASE(
+    "Unit.PointwiseFunctions.AnalyticSolutions.Gr."
+    "AffineMappedHarmonicSchwarzschild.ExactFrameDerivatives",
+    "[PointwiseFunctions][Unit]") {
+  const auto x = sample_points();
+  const size_t n_points = get<0>(x).size();
+  const auto& fixture =
+      TestHelpers::gh_solutions::exact_frame_fixtures::cases()[0];
+  const auto frame_map = exact_frame::frame_map(fixture.theta);
+  const double time = 0.9;
+  const double step = 1.e-6;
+
+  const auto metric_at = [&x, &frame_map](const double t,
+                                          const size_t direction,
+                                          const double shift) {
+    auto shifted = x;
+    if (direction < 3) {
+      shifted.get(direction) += shift;
+    }
+    return std::get<0>(
+        exact_frame_variables(shifted, t, mass, centre, frame_map));
+  };
+
+  const auto [metric, pi, phi] =
+      exact_frame_variables(x, time, mass, centre, frame_map);
+  const auto inverse_metric = determinant_and_inverse(metric).second;
+  const DataVector lapse = 1. / sqrt(-get<0, 0>(inverse_metric));
+
+  Approx custom = Approx::custom().epsilon(1.e-6).scale(1.e-3);
+  for (size_t k = 0; k < 3; ++k) {
+    const auto plus = metric_at(time, k, step);
+    const auto minus = metric_at(time, k, -step);
+    for (size_t a = 0; a < 4; ++a) {
+      for (size_t b = a; b < 4; ++b) {
+        const DataVector fd = (plus.get(a, b) - minus.get(a, b)) / (2. * step);
+        CHECK_ITERABLE_CUSTOM_APPROX(phi.get(k, a, b), fd, custom);
+      }
+    }
+  }
+  const auto later = metric_at(time + step, 3, 0.);
+  const auto earlier = metric_at(time - step, 3, 0.);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      const DataVector dt_metric =
+          (later.get(a, b) - earlier.get(a, b)) / (2. * step);
+      DataVector expected(n_points, 0.);
+      for (size_t k = 0; k < 3; ++k) {
+        const DataVector shift_k =
+            -inverse_metric.get(0, k + 1) / get<0, 0>(inverse_metric);
+        expected += shift_k * phi.get(k, a, b);
+      }
+      expected = (expected - dt_metric) / lapse;
+      CHECK_ITERABLE_CUSTOM_APPROX(pi.get(a, b), expected, custom);
+    }
+  }
+}
+
+// With S = 1 the exact-frame evaluator must agree with the audited exact
+// Lorentz boost of the legacy path (independent construction through
+// sr::lorentz_boost_matrix), and a converged fit on a purely boosted hole
+// must return S = 1: gamma - 1 and the longitudinal contraction belong to
+// B, not S. With theta = 0 it must reduce to the static solution.
+SPECTRE_TEST_CASE(
+    "Unit.PointwiseFunctions.AnalyticSolutions.Gr."
+    "AffineMappedHarmonicSchwarzschild.ExactFramePureBoost",
+    "[PointwiseFunctions][Unit]") {
+  const auto x = sample_points();
+  const std::array<double, 3> velocity{{0.1, 0.2, -0.15}};
+  const auto rapidity = exact_frame::rapidity_from_velocity(velocity);
+  const auto velocity_round_trip =
+      exact_frame::velocity_from_rapidity(rapidity);
+  Approx tight = Approx::custom().epsilon(1.e-14).scale(1.);
+  for (size_t i = 0; i < 3; ++i) {
+    CHECK(gsl::at(velocity_round_trip, i) == tight(gsl::at(velocity, i)));
+  }
+
+  const double time = 1.7;
+  std::array<double, 13> theta{};
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(theta, i) = gsl::at(rapidity, i);
+  }
+  const auto [metric, pi, phi] = exact_frame_variables(
+      x, time, mass, centre, exact_frame::frame_map(theta));
+  tnsr::aa<DataVector, 3> expected_metric{};
+  tnsr::aa<DataVector, 3> expected_pi{};
+  tnsr::iaa<DataVector, 3> expected_phi{};
+  gh::Solutions::affine_map_model::boosted_evolved_variables(
+      make_not_null(&expected_metric), make_not_null(&expected_pi),
+      make_not_null(&expected_phi), x, time, mass, centre, zero_p, zero_p,
+      velocity);
+  Approx custom = Approx::custom().epsilon(1.e-11).scale(1.);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      CHECK_ITERABLE_CUSTOM_APPROX(metric.get(a, b), expected_metric.get(a, b),
+                                   custom);
+      CHECK_ITERABLE_CUSTOM_APPROX(pi.get(a, b), expected_pi.get(a, b), custom);
+      for (size_t k = 0; k < 3; ++k) {
+        CHECK_ITERABLE_CUSTOM_APPROX(phi.get(k, a, b),
+                                     expected_phi.get(k, a, b), custom);
+      }
+    }
+  }
+
+  const auto [static_metric, static_pi, static_phi] =
+      exact_frame_variables(x, time, mass, centre, exact_frame::frame_map({}));
+  tnsr::aa<DataVector, 3> unmapped_metric{};
+  tnsr::aa<DataVector, 3> unmapped_pi{};
+  tnsr::iaa<DataVector, 3> unmapped_phi{};
+  gh::Solutions::affine_map_model::evolved_variables(
+      make_not_null(&unmapped_metric), make_not_null(&unmapped_pi),
+      make_not_null(&unmapped_phi), x, mass, centre, zero_p, zero_p);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      CHECK_ITERABLE_CUSTOM_APPROX(static_metric.get(a, b),
+                                   unmapped_metric.get(a, b), custom);
+      CHECK_ITERABLE_CUSTOM_APPROX(static_pi.get(a, b), unmapped_pi.get(a, b),
+                                   custom);
+      for (size_t k = 0; k < 3; ++k) {
+        CHECK_ITERABLE_CUSTOM_APPROX(static_phi.get(k, a, b),
+                                     unmapped_phi.get(k, a, b), custom);
+      }
+    }
+  }
 }

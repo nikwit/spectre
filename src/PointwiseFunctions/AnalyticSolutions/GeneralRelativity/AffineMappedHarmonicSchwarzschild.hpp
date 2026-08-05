@@ -162,6 +162,140 @@ void boosted_evolved_variables(
 }  // namespace affine_map_model
 
 /*!
+ * \brief The zeroth-order exact-frame model: harmonic Schwarzschild pushed
+ * through the finite affine frame map \f$X^A = z^A + L^A{}_\mu x^\mu\f$ with
+ * \f$L = \mathcal B(V)\, S\f$.
+ *
+ * \f$\mathcal B\f$ is an exact Lorentz boost parametrized by rapidity and
+ * \f$S\f$ the \f$\eta\f$-symmetric frame factor
+ *
+ * \f{align}{
+ * S^0{}_0 = 1 + s_0, \qquad S^0{}_j = +\sigma_j, \qquad
+ * S^i{}_0 = -\sigma^i, \qquad S^i{}_j = \delta^i{}_j + s^i{}_j
+ * \f}
+ *
+ * with \f$s_{ij}\f$ symmetric (spec Eqs. Z1--Z2 of the zeroth-order
+ * exact-frame model). The absent antisymmetric spatial part of \f$S\f$ is the
+ * local-rotation gauge choice, not a missing feature. Nothing in this
+ * namespace is expanded in any small parameter: metrics are composed and
+ * inverted exactly, so there is no strict-truncation bookkeeping. The 13
+ * frame parameters are ordered
+ *
+ * \f{align}{
+ * \theta = (\eta_x, \eta_y, \eta_z,\; s_0,\; \sigma_x, \sigma_y, \sigma_z,\;
+ *           s_{xx}, s_{xy}, s_{xz}, s_{yy}, s_{yz}, s_{zz}),
+ * \f}
+ *
+ * with \f$\eta\f$ the boost rapidity, \f$V = \tanh(|\eta|)\hat\eta\f$.
+ */
+namespace exact_frame {
+
+/// Number of zeroth-order frame parameters
+/// (rapidity[3], s0, sigma[3], s_(ij)[6]).
+static constexpr size_t num_parameters = 13;
+
+/// A 4x4 frame-map matrix \f$L^A{}_\mu\f$: the first (row) index is
+/// inertial, the second (column) index local.
+using FrameMatrix = std::array<std::array<double, 4>, 4>;
+
+/// The exact Lorentz boost \f$\mathcal B(\eta)\f$ from a rapidity vector:
+/// \f$\mathcal B^0{}_0 = \cosh|\eta|\f$,
+/// \f$\mathcal B^0{}_i = \mathcal B^i{}_0 = \sinh(|\eta|)\hat\eta_i\f$,
+/// \f$\mathcal B^i{}_j = \delta^i{}_j
+/// + (\cosh|\eta| - 1)\hat\eta^i\hat\eta_j\f$. Forward-map sign convention:
+/// to first order \f$T = t + v_i x^i\f$, \f$X^i = x^i + v^i t\f$.
+FrameMatrix boost_matrix_from_rapidity(const std::array<double, 3>& rapidity);
+
+/// The boost velocity \f$V = \tanh(|\eta|)\hat\eta\f$ of a rapidity vector.
+std::array<double, 3> velocity_from_rapidity(
+    const std::array<double, 3>& rapidity);
+
+/// The rapidity vector \f$\eta = \mathrm{artanh}(|V|)\hat V\f$ of a
+/// subluminal velocity.
+std::array<double, 3> rapidity_from_velocity(
+    const std::array<double, 3>& velocity);
+
+/// The \f$\eta\f$-symmetric frame factor \f$S(s_0, \sigma, s_{ij})\f$ of
+/// spec Eq. (Z2). `s_sym` is ordered (xx, xy, xz, yy, yz, zz).
+FrameMatrix symmetric_factor(double s0, const std::array<double, 3>& sigma,
+                             const std::array<double, 6>& s_sym);
+
+/// The full frame map \f$L = \mathcal B(\eta) S\f$ from the 13 zeroth-order
+/// parameters, boost outermost.
+FrameMatrix frame_map(const std::array<double, num_parameters>& theta);
+
+/// Exact inverse of a frame-map matrix (Gauss--Jordan with partial
+/// pivoting). Errors on a singular matrix.
+FrameMatrix inverse(const FrameMatrix& matrix);
+
+/// The inertial coordinate velocity of the mapped worldline,
+/// \f$V_c^i = L^i{}_0 / L^0{}_0 = V^i - \sigma^i + O(2)\f$ (spec Eq. Z3).
+/// All kinematic consistency checks compare \f$dz/dT\f$ against this, never
+/// against the boost parameter \f$V\f$.
+std::array<double, 3> center_velocity(const FrameMatrix& frame_map_matrix);
+
+/*!
+ * \brief The finite dictionary to the old 13-parameter affine state
+ * (spec Eq. Z8): the components of \f$\Delta = L - \mathbb 1\f$ in the old
+ * ordering \f$(\dot q^0, \beta_i, \dot q^i, \sigma_{(ij)})\f$, with the
+ * spatial block symmetrized.
+ *
+ * Linearized this is \f$\dot q^0 = s_0\f$, \f$\beta_i = v_i + \sigma_i\f$,
+ * \f$\dot q^i = v^i - \sigma^i\f$, \f$\Lambda_{(ij)} = s_{ij}\f$; the finite
+ * form also carries the boost's own \f$\gamma - 1\f$ clock offset and
+ * longitudinal contraction. Used for warm starts and diagnostics only.
+ */
+std::array<double, num_parameters> old13_dictionary(
+    const std::array<double, num_parameters>& theta);
+
+/*!
+ * \brief The exact model inverse metric \f$G^{AB}(X)
+ * = L^A{}_\mu L^B{}_\nu\, g_{(0)}^{\mu\nu}(x(X))\f$ (spec Eq. Z5) at the
+ * inertial points `x` on the slice `time`.
+ *
+ * The source point is \f$x^\mu = (L^{-1})^\mu{}_A (X - z)^A\f$ with
+ * \f$(X - z)^A = (\texttt{time}, \texttt{x} - \texttt{center})\f$, i.e.
+ * `time` is the inertial time relative to the worldline time offset
+ * \f$z^0\f$ (zero by convention at a fit instant). Both occurrences of
+ * \f$L\f$ are essential: tensor response and source-point transport. The
+ * rest metric is stationary, so only the spatial source components enter
+ * it, but the time component of the event is kept in the solve -- it
+ * carries the exact advection and the relativity of simultaneity.
+ */
+void inverse_metric(gsl::not_null<tnsr::AA<DataVector, 3>*> result,
+                    const tnsr::I<DataVector, 3>& x, double time, double mass,
+                    const std::array<double, 3>& center,
+                    const FrameMatrix& frame_map_matrix);
+
+/*!
+ * \brief The exact GH evolved variables of the zeroth-order frame model:
+ * \f$g_{AB}\f$ by exact \f$4\times4\f$ inversion of Eq. (Z5),
+ * \f$\Phi_{kAB}\f$ by pushing the closed-form local gradient through
+ * \f$L\f$, and \f$\Pi_{AB}\f$ from the model's own lapse and shift with the
+ * exact frozen-map advection \f$\partial_T g_{AB}|_X = -V_c^k \Phi_{kAB}\f$.
+ *
+ * `time` and `center` are as in `inverse_metric`. For a frozen \f$(L, z)\f$
+ * every output is exact: no expansion, no finite differences, no
+ * resummation bookkeeping. The deliberate omission is the time dependence
+ * of \f$(V, S)\f$, which is first-order content.
+ */
+void evolved_variables(gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+                       gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+                       gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+                       const tnsr::I<DataVector, 3>& x, double time,
+                       double mass, const std::array<double, 3>& center,
+                       const FrameMatrix& frame_map_matrix);
+
+/// Convenience overload building the frame map from the 13 parameters.
+void evolved_variables(gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+                       gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+                       gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+                       const tnsr::I<DataVector, 3>& x, double time,
+                       double mass, const std::array<double, 3>& center,
+                       const std::array<double, num_parameters>& theta);
+}  // namespace exact_frame
+
+/*!
  * \brief Rate-resummed affine-map extension of harmonic Schwarzschild, with
  * the thirteen map parameters supplied as tabulated functions of time.
  *
