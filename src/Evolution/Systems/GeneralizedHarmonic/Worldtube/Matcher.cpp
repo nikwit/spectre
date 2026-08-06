@@ -50,12 +50,19 @@ std::array<double, 3> current_center_offset(
                                       not config.second_order_ode and
                                       not config.stepper_ode;
   if (map_parameters.valid and first_order_value_mode and
-      (config.centre_advection or config.fit_bulk_boost)) {
+      (config.centre_advection or config.fit_bulk_boost or
+       config.fit_exact_frame)) {
     const double elapsed = time - map_parameters.last_fit_time;
     for (size_t i = 0; i < 3; ++i) {
+      // In the exact-frame mode the centre moves along the mapped time axis
+      // with V_c = L^i_0/L^0_0 (spec Eq. Z4), which differs from the boost
+      // parameter V at O(sigma).
       const double inertial_velocity =
-          config.fit_bulk_boost ? gsl::at(map_parameters.bulk_velocity, i)
-                                : gsl::at(map_parameters.p, 4 + i);
+          config.fit_exact_frame
+              ? gsl::at(map_parameters.exact_frame_center_velocity, i)
+              : (config.fit_bulk_boost
+                     ? gsl::at(map_parameters.bulk_velocity, i)
+                     : gsl::at(map_parameters.p, 4 + i));
       gsl::at(result, i) += elapsed * inertial_velocity;
       if (map_parameters.worldtube_center_valid) {
         gsl::at(result, i) -=
@@ -432,6 +439,72 @@ double design_matrix_condition_number(
   }
   return std::sqrt(largest / smallest);
 }
+
+// component class of a gauge-mode row: 0 = A, 1 = C, 2 = V
+size_t gauge_row_class(const size_t row, const size_t n_modes) {
+  const size_t field = row / n_modes;
+  return field == 0 ? 0 : (field == 1 ? 1 : 2);
+}
+
+// Unweighted per-{A, C, V} x ell closure and RMS diagnostics, shared by the
+// linear and exact-frame value fits. Closures are relative to the baseline
+// (background-only) residual.
+void fill_block_diagnostics(
+    const gsl::not_null<FitResult*> result, const ModeSet& modes,
+    const std::vector<double>& residual,
+    const std::vector<double>& baseline_residual,
+    const std::vector<double>& minus_residual,
+    const std::vector<double>& minus_baseline_residual) {
+  const size_t n_modes = modes.indices.size();
+  for (size_t c = 0; c < 3; ++c) {
+    for (size_t l = 0; l <= 4; ++l) {
+      double target_squared = 0.;
+      double residual_squared = 0.;
+      double minus_target_squared = 0.;
+      double minus_residual_squared = 0.;
+      size_t count = 0;
+      for (size_t i = 0; i < residual.size(); ++i) {
+        if (gauge_row_class(i, n_modes) == c and modes.ells[i % n_modes] == l) {
+          target_squared += square(baseline_residual[i]);
+          residual_squared += square(residual[i]);
+          minus_target_squared += square(minus_baseline_residual[i]);
+          minus_residual_squared += square(minus_residual[i]);
+          ++count;
+        }
+      }
+      const size_t block = 5 * c + l;
+      gsl::at(result->block_closure, block) =
+          target_squared > 0. ? std::sqrt(residual_squared / target_squared)
+                              : 0.;
+      gsl::at(result->block_target_rms, block) =
+          count > 0 ? std::sqrt(target_squared / count) : 0.;
+      gsl::at(result->block_residual_rms, block) =
+          count > 0 ? std::sqrt(residual_squared / count) : 0.;
+      gsl::at(result->block_minus_closure, block) =
+          minus_target_squared > 0.
+              ? std::sqrt(minus_residual_squared / minus_target_squared)
+              : 0.;
+      gsl::at(result->block_minus_target_rms, block) =
+          count > 0 ? std::sqrt(minus_target_squared / count) : 0.;
+      gsl::at(result->block_minus_residual_rms, block) =
+          count > 0 ? std::sqrt(minus_residual_squared / count) : 0.;
+    }
+  }
+}
+
+// Frobenius norm of the collocation-space difference of two like tensors
+template <typename TensorType>
+double collocation_difference_norm(const TensorType& lhs,
+                                   const TensorType& rhs) {
+  double norm_squared = 0.;
+  for (size_t storage = 0; storage < lhs.size(); ++storage) {
+    const DataVector difference = lhs[storage] - rhs[storage];
+    for (size_t point = 0; point < difference.size(); ++point) {
+      norm_squared += square(difference[point]);
+    }
+  }
+  return std::sqrt(norm_squared);
+}
 }  // namespace
 
 namespace detail {
@@ -663,13 +736,9 @@ FitResult fit_map_parameters(
   };
 
   const size_t n_modes = modes.indices.size();
-  const auto row_class = [&n_modes](const size_t row) -> size_t {
-    const size_t field = row / n_modes;  // A, C, V_0..V_3
-    return field == 0 ? 0 : (field == 1 ? 1 : 2);
-  };
   std::vector<size_t> row_blocks(data_modes.size());
   for (size_t i = 0; i < row_blocks.size(); ++i) {
-    row_blocks[i] = 5 * row_class(i) + modes.ells[i % n_modes];
+    row_blocks[i] = 5 * gauge_row_class(i, n_modes) + modes.ells[i % n_modes];
   }
 
   std::vector<double> x(n_free, 0.);
@@ -756,40 +825,9 @@ FitResult fit_map_parameters(
       residual_of(x, -normal_sign, minus_data_modes);
   result.minus_residual_final = norm_of(minus_residual);
 
-  for (size_t c = 0; c < 3; ++c) {
-    for (size_t l = 0; l <= 4; ++l) {
-      double target_squared = 0.;
-      double residual_squared = 0.;
-      double minus_target_squared = 0.;
-      double minus_residual_squared = 0.;
-      size_t count = 0;
-      for (size_t i = 0; i < residual.size(); ++i) {
-        if (row_class(i) == c and modes.ells[i % n_modes] == l) {
-          target_squared += square(baseline_residual[i]);
-          residual_squared += square(residual[i]);
-          minus_target_squared += square(minus_baseline_residual[i]);
-          minus_residual_squared += square(minus_residual[i]);
-          ++count;
-        }
-      }
-      const size_t block = 5 * c + l;
-      gsl::at(result.block_closure, block) =
-          target_squared > 0. ? std::sqrt(residual_squared / target_squared)
-                              : 0.;
-      gsl::at(result.block_target_rms, block) =
-          count > 0 ? std::sqrt(target_squared / count) : 0.;
-      gsl::at(result.block_residual_rms, block) =
-          count > 0 ? std::sqrt(residual_squared / count) : 0.;
-      gsl::at(result.block_minus_closure, block) =
-          minus_target_squared > 0.
-              ? std::sqrt(minus_residual_squared / minus_target_squared)
-              : 0.;
-      gsl::at(result.block_minus_target_rms, block) =
-          count > 0 ? std::sqrt(minus_target_squared / count) : 0.;
-      gsl::at(result.block_minus_residual_rms, block) =
-          count > 0 ? std::sqrt(minus_residual_squared / count) : 0.;
-    }
-  }
+  fill_block_diagnostics(make_not_null(&result), modes, residual,
+                         baseline_residual, minus_residual,
+                         minus_baseline_residual);
 
   tnsr::aa<DataVector, 3> baseline_metric{};
   tnsr::aa<DataVector, 3> baseline_pi{};
@@ -801,24 +839,249 @@ FitResult fit_map_parameters(
   tnsr::iaa<DataVector, 3> final_phi{};
   model_at(make_not_null(&final_metric), make_not_null(&final_pi),
            make_not_null(&final_phi), x);
-  const auto tensor_difference_norm = [](const auto& lhs, const auto& rhs) {
-    double norm_squared = 0.;
-    for (size_t storage = 0; storage < lhs.size(); ++storage) {
-      const DataVector difference = lhs[storage] - rhs[storage];
-      for (size_t point = 0; point < difference.size(); ++point) {
-        norm_squared += square(difference[point]);
-      }
-    }
-    return std::sqrt(norm_squared);
-  };
   result.metric_baseline_residual =
-      tensor_difference_norm(baseline_metric, spacetime_metric);
+      collocation_difference_norm(baseline_metric, spacetime_metric);
   result.metric_residual_final =
-      tensor_difference_norm(final_metric, spacetime_metric);
-  result.phi_baseline_residual = tensor_difference_norm(baseline_phi, phi);
-  result.phi_residual_final = tensor_difference_norm(final_phi, phi);
+      collocation_difference_norm(final_metric, spacetime_metric);
+  result.phi_baseline_residual = collocation_difference_norm(baseline_phi, phi);
+  result.phi_residual_final = collocation_difference_norm(final_phi, phi);
   embed(make_not_null(&result.p), make_not_null(&result.center_offset), x,
         config, trace_pin, center_offset_start);
+  return result;
+}
+
+FitResult fit_exact_frame_parameters(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
+    const Scalar<DataVector>& gamma2,
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
+    const std::array<double, num_map_parameters>& theta_start,
+    const std::array<double, 3>& center_offset) {
+  namespace exact_frame = gh::Solutions::exact_frame;
+  ASSERT(config.fit_l_max <= ylm_transform.l_max(),
+         "FitLMax " << config.fit_l_max << " exceeds the grid l_max "
+                    << ylm_transform.l_max());
+  const ModeSet modes = kept_modes(ylm_transform, config.fit_l_max);
+  const SphereFrame frame =
+      build_frame(spacetime_metric, gamma2, inertial_coords, config.center);
+
+  // The fit target is the outgoing characteristic u^+ (normal_sign -1), the
+  // one channel the ghost boundary condition does not set; the incoming u^-
+  // is evaluated held-out and never enters the solve.
+  const std::vector<double> data_modes =
+      gauge_modes(gauge_components(
+                      u_minus_of(spacetime_metric, pi, phi, frame, -1.), frame),
+                  ylm_transform, modes);
+  const std::vector<double> minus_data_modes = gauge_modes(
+      gauge_components(u_minus_of(spacetime_metric, pi, phi, frame, 1.), frame),
+      ylm_transform, modes);
+
+  std::array<double, 3> model_center = config.center;
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(model_center, i) += gsl::at(center_offset, i);
+  }
+
+  // det L > 0 and a timelike mapped time axis; the rapidity parametrization
+  // keeps |V| < 1 by itself
+  const auto admissible =
+      [](const std::array<double, num_map_parameters>& theta) {
+        const auto frame_map_matrix = exact_frame::frame_map(theta);
+        if (exact_frame::determinant(frame_map_matrix) <= 0.) {
+          return false;
+        }
+        double time_axis_norm = -square(frame_map_matrix[0][0]);
+        for (size_t i = 0; i < 3; ++i) {
+          time_axis_norm += square(gsl::at(frame_map_matrix, i + 1)[0]);
+        }
+        return time_axis_norm < 0.;
+      };
+
+  const auto model_at =
+      [&](const gsl::not_null<tnsr::aa<DataVector, 3>*> model_metric,
+          const gsl::not_null<tnsr::aa<DataVector, 3>*> model_pi,
+          const gsl::not_null<tnsr::iaa<DataVector, 3>*> model_phi,
+          const std::array<double, num_map_parameters>& theta) {
+        exact_frame::evolved_variables(model_metric, model_pi, model_phi,
+                                       inertial_coords, 0., config.mass,
+                                       model_center, theta);
+      };
+  const auto residual_of =
+      [&](const std::array<double, num_map_parameters>& theta,
+          const double sign,
+          const std::vector<double>& data) -> std::vector<double> {
+    tnsr::aa<DataVector, 3> model_metric{};
+    tnsr::aa<DataVector, 3> model_pi{};
+    tnsr::iaa<DataVector, 3> model_phi{};
+    model_at(make_not_null(&model_metric), make_not_null(&model_pi),
+             make_not_null(&model_phi), theta);
+    std::vector<double> model_modes = gauge_modes(
+        gauge_components(
+            u_minus_of(model_metric, model_pi, model_phi, frame, sign), frame),
+        ylm_transform, modes);
+    for (size_t i = 0; i < model_modes.size(); ++i) {
+      model_modes[i] -= data[i];
+    }
+    return model_modes;
+  };
+
+  const size_t n_modes = modes.indices.size();
+  std::vector<size_t> row_blocks(data_modes.size());
+  for (size_t i = 0; i < row_blocks.size(); ++i) {
+    row_blocks[i] = 5 * gauge_row_class(i, n_modes) + modes.ells[i % n_modes];
+  }
+  const auto weighted_norm = [&](const std::vector<double>& residual) {
+    double out = 0.;
+    for (size_t i = 0; i < residual.size(); ++i) {
+      out += square(gsl::at(config.uplus_block_weights, row_blocks[i]) *
+                    residual[i]);
+    }
+    return std::sqrt(out);
+  };
+
+  FitResult result{};
+  std::array<double, num_map_parameters> theta = theta_start;
+  if (not admissible(theta)) {
+    theta.fill(0.);
+  }
+  const std::array<double, num_map_parameters> zero_theta{};
+  const std::vector<double> baseline_residual =
+      residual_of(zero_theta, -1., data_modes);
+  const std::vector<double> minus_baseline_residual =
+      residual_of(zero_theta, 1., minus_data_modes);
+  std::vector<double> residual = residual_of(theta, -1., data_modes);
+  result.residual_initial = norm_of(residual);
+  result.baseline_residual = norm_of(baseline_residual);
+  result.minus_baseline_residual = norm_of(minus_baseline_residual);
+
+  // Gauss-Newton over all 13 frame parameters. The finite-difference columns
+  // agree with the analytic response tensors at the zero point (the audited
+  // linearization identity), so this is the response-column Jacobian
+  // evaluated about the current frame without a second analytic code path.
+  constexpr size_t max_iterations = 24;
+  constexpr double fd_step = 1.0e-7;
+  const size_t n_res = residual.size();
+  for (size_t iteration = 0; iteration < max_iterations; ++iteration) {
+    std::array<std::vector<double>, num_map_parameters> jacobian{};
+    for (size_t a = 0; a < num_map_parameters; ++a) {
+      auto theta_plus = theta;
+      gsl::at(theta_plus, a) += fd_step;
+      gsl::at(jacobian, a) = residual_of(theta_plus, -1., data_modes);
+      for (size_t i = 0; i < n_res; ++i) {
+        gsl::at(jacobian, a)[i] =
+            (gsl::at(jacobian, a)[i] - residual[i]) / fd_step;
+      }
+    }
+    std::vector<std::vector<double>> jtj(
+        num_map_parameters, std::vector<double>(num_map_parameters, 0.));
+    std::vector<double> jtr(num_map_parameters, 0.);
+    for (size_t a = 0; a < num_map_parameters; ++a) {
+      for (size_t b = a; b < num_map_parameters; ++b) {
+        double sum = 0.;
+        for (size_t i = 0; i < n_res; ++i) {
+          const double weight =
+              gsl::at(config.uplus_block_weights, row_blocks[i]);
+          sum += square(weight) * gsl::at(jacobian, a)[i] *
+                 gsl::at(jacobian, b)[i];
+        }
+        jtj[a][b] = sum;
+        jtj[b][a] = sum;
+      }
+      double sum = 0.;
+      for (size_t i = 0; i < n_res; ++i) {
+        const double weight =
+            gsl::at(config.uplus_block_weights, row_blocks[i]);
+        sum += square(weight) * gsl::at(jacobian, a)[i] * residual[i];
+      }
+      jtr[a] = -sum;
+    }
+    result.condition_number = design_matrix_condition_number(jtj);
+    ASSERT(std::isfinite(result.condition_number),
+           "UPlusBlockWeights make the exact-frame fit rank deficient.");
+    const auto delta = solve_normal_equations(std::move(jtj), std::move(jtr));
+
+    // backtracking line search on the weighted objective, rejecting steps
+    // that leave the admissible frame-map domain
+    const double old_norm = weighted_norm(residual);
+    double line_factor = 1.;
+    bool accepted = false;
+    std::array<double, num_map_parameters> candidate_theta{};
+    std::vector<double> candidate_residual{};
+    while (line_factor >= 1.0 / 128.) {
+      candidate_theta = theta;
+      for (size_t a = 0; a < num_map_parameters; ++a) {
+        gsl::at(candidate_theta, a) += line_factor * delta[a];
+      }
+      if (admissible(candidate_theta)) {
+        candidate_residual = residual_of(candidate_theta, -1., data_modes);
+        if (weighted_norm(candidate_residual) < old_norm) {
+          accepted = true;
+          break;
+        }
+      }
+      line_factor *= 0.5;
+    }
+    if (not accepted) {
+      break;
+    }
+    theta = candidate_theta;
+    residual = std::move(candidate_residual);
+    result.iterations = iteration + 1;
+    double max_delta = 0.;
+    double max_theta = 0.;
+    for (size_t a = 0; a < num_map_parameters; ++a) {
+      max_delta = std::max(max_delta, std::abs(line_factor * delta[a]));
+      max_theta = std::max(max_theta, std::abs(gsl::at(theta, a)));
+    }
+    if (max_delta < std::max(1.0e-13, 1.0e-8 * max_theta)) {
+      break;
+    }
+  }
+  result.residual_final = norm_of(residual);
+  const std::vector<double> minus_residual =
+      residual_of(theta, 1., minus_data_modes);
+  result.minus_residual_final = norm_of(minus_residual);
+  fill_block_diagnostics(make_not_null(&result), modes, residual,
+                         baseline_residual, minus_residual,
+                         minus_baseline_residual);
+
+  tnsr::aa<DataVector, 3> baseline_metric{};
+  tnsr::aa<DataVector, 3> baseline_pi{};
+  tnsr::iaa<DataVector, 3> baseline_phi{};
+  model_at(make_not_null(&baseline_metric), make_not_null(&baseline_pi),
+           make_not_null(&baseline_phi), zero_theta);
+  tnsr::aa<DataVector, 3> final_metric{};
+  tnsr::aa<DataVector, 3> final_pi{};
+  tnsr::iaa<DataVector, 3> final_phi{};
+  model_at(make_not_null(&final_metric), make_not_null(&final_pi),
+           make_not_null(&final_phi), theta);
+  result.metric_baseline_residual =
+      collocation_difference_norm(baseline_metric, spacetime_metric);
+  result.metric_residual_final =
+      collocation_difference_norm(final_metric, spacetime_metric);
+  result.phi_baseline_residual = collocation_difference_norm(baseline_phi, phi);
+  result.phi_residual_final = collocation_difference_norm(final_phi, phi);
+
+  result.exact_frame_theta = theta;
+  const std::array<double, 3> rapidity{{theta[0], theta[1], theta[2]}};
+  result.exact_frame_velocity = exact_frame::velocity_from_rapidity(rapidity);
+  result.exact_frame_center_velocity =
+      exact_frame::center_velocity(exact_frame::frame_map(theta));
+  // Old-path bridge: the boost factor goes to bulk_velocity and the exactly
+  // affine eta-symmetric factor S - 1 to the old-13 layout (s0; sigma as
+  // beta; -sigma as qdot; s_ij), so the existing exact-boost x first-order
+  // ghost prescription reproduces the fitted frame to O(S - 1)^2 until the
+  // exact ghost model replaces it.
+  result.bulk_velocity = result.exact_frame_velocity;
+  result.p[0] = theta[3];
+  for (size_t i = 0; i < 3; ++i) {
+    gsl::at(result.p, 1 + i) = gsl::at(theta, 4 + i);
+    gsl::at(result.p, 4 + i) = -gsl::at(theta, 4 + i);
+  }
+  for (size_t pair = 0; pair < 6; ++pair) {
+    gsl::at(result.p, 7 + pair) = gsl::at(theta, 7 + pair);
+  }
+  result.center_offset = center_offset;
   return result;
 }
 

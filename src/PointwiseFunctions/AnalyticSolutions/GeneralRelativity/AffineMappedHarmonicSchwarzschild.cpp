@@ -942,6 +942,37 @@ FrameMatrix inverse(const FrameMatrix& matrix) {
   return result;
 }
 
+double determinant(const FrameMatrix& matrix) {
+  FrameMatrix reduced = matrix;
+  double result = 1.;
+  for (size_t col = 0; col < 4; ++col) {
+    size_t pivot = col;
+    for (size_t row = col + 1; row < 4; ++row) {
+      if (std::abs(gsl::at(gsl::at(reduced, row), col)) >
+          std::abs(gsl::at(gsl::at(reduced, pivot), col))) {
+        pivot = row;
+      }
+    }
+    if (pivot != col) {
+      std::swap(gsl::at(reduced, col), gsl::at(reduced, pivot));
+      result = -result;
+    }
+    const double pivot_value = gsl::at(gsl::at(reduced, col), col);
+    if (pivot_value == 0.) {
+      return 0.;
+    }
+    result *= pivot_value;
+    for (size_t row = col + 1; row < 4; ++row) {
+      const double factor = gsl::at(gsl::at(reduced, row), col) / pivot_value;
+      for (size_t k = col; k < 4; ++k) {
+        gsl::at(gsl::at(reduced, row), k) -=
+            factor * gsl::at(gsl::at(reduced, col), k);
+      }
+    }
+  }
+  return result;
+}
+
 std::array<double, 3> center_velocity(const FrameMatrix& frame_map_matrix) {
   std::array<double, 3> result{};
   for (size_t i = 0; i < 3; ++i) {
@@ -1125,10 +1156,10 @@ AffineMappedHarmonicSchwarzschild::AffineMappedHarmonicSchwarzschild(
     const Options::Context& context)
     : mass_(mass),
       center_(center),
+      velocity_(velocity),
       parameter_times_(std::move(parameter_times)),
       parameter_values_(std::move(parameter_values)),
-      parameter_rates_(std::move(parameter_rates)),
-      velocity_(velocity) {
+      parameter_rates_(std::move(parameter_rates)) {
   if (parameter_times_.empty()) {
     PARSE_ERROR(context, "ParameterTimes must not be empty.");
   }

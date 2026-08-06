@@ -145,6 +145,16 @@ struct FitResult {
   /// 2-norm condition number of the weighted final design matrix.
   double condition_number = 0.;
   size_t iterations = 0;
+  /// Zeroth-order exact-frame fit (`fit_exact_frame_parameters` only): the
+  /// fitted frame parameters ordered (rapidity[3], s0, sigma[3], s_(ij)[6]),
+  /// the boost velocity V, and the coordinate centre velocity
+  /// V_c = L^i_0/L^0_0. In that mode `p` holds the linearized old-13
+  /// dictionary of the symmetric factor S and `bulk_velocity` holds V, so
+  /// the existing boundary-condition path reproduces the fitted frame to
+  /// O(S - 1)^2 until the exact ghost prescription lands.
+  std::array<double, num_map_parameters> exact_frame_theta{};
+  std::array<double, 3> exact_frame_velocity{};
+  std::array<double, 3> exact_frame_center_velocity{};
 };
 
 /*!
@@ -187,6 +197,40 @@ FitResult fit_map_parameters(
     const std::array<double, 3>& center_offset_start, double normal_sign,
     double trace_pin,
     const std::array<double, 3>& bulk_velocity_start = {{0., 0., 0.}});
+
+/*!
+ * \brief Fit the 13 zeroth-order exact-frame parameters
+ * \f$\theta = (\eta, s_0, \sigma, s_{(ij)})\f$ of the finite map
+ * \f$L = \mathcal B(\eta) S\f$ from the evolved fields on the excision
+ * sphere (the `FitExactFrame` mode).
+ *
+ * The single fit target is the spherical-harmonic content
+ * (l <= `config.fit_l_max`) of the null-basis gauge components {A, C, V} of
+ * the *outgoing* characteristic \f$u^+\f$ — the same data channel, gauge
+ * split, mode weighting, and `config.uplus_block_weights` block weighting as
+ * the linear value fit — but the model side is the exact pushforward
+ * `gh::Solutions::exact_frame::evolved_variables` and there is no linear
+ * residual stage: the solve is a warm-started Gauss--Newton iteration over
+ * all 13 frame parameters with a finite-difference Jacobian, a backtracking
+ * line search, and admissibility guards (det L > 0, timelike mapped time
+ * axis; the rapidity parametrization keeps |V| < 1 automatically). No
+ * frame-orthogonality projection exists because there is no linear stage to
+ * be degenerate with.
+ *
+ * The model is centred at `config.center` plus the fixed `center_offset`
+ * (the centre comes from the tracked worldtube, not from the fit). All
+ * reported closures are unweighted; the opposite characteristic \f$u^-\f$
+ * is evaluated held-out and never enters the solve. The returned `p` and
+ * `bulk_velocity` hold the old-path bridge described at `FitResult`.
+ */
+FitResult fit_exact_frame_parameters(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
+    const Scalar<DataVector>& gamma2,
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
+    const std::array<double, num_map_parameters>& theta_start,
+    const std::array<double, 3>& center_offset);
 
 /// Result of one linear rate fit (the `RateOde` mode).
 struct RateFitResult {

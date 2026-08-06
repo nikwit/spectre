@@ -32,6 +32,7 @@
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "Parallel/Invoke.hpp"
+#include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/AffineMappedHarmonicSchwarzschild.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ConstraintDampingTags.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ExtrinsicCurvature.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/Ricci.hpp"
@@ -198,6 +199,8 @@ struct FitMapParameters {
     double residual_final = 0.;
     double iterations = 0.;
     std::optional<FitResult> value_diagnostics{};
+    std::array<double, 3> track_velocity{};
+    bool track_velocity_valid = false;
 
     // Trace pin: the TraceStrainPin constant, or measured live from the
     // curvature. In vacuum the Gauss-Bonnet scalar equals the Kretschmann
@@ -521,10 +524,52 @@ struct FitMapParameters {
         bulk_velocity_start = state.bulk_velocity;
       }
 
-      const FitResult result = fit_map_parameters(
-          metric_face, pi_face, phi_face, gamma2_face, coords_face,
-          ylm_transform, fit_config, p_start, center_offset_start,
-          config_opt->fit_uplus ? -1.0 : 1.0, trace_pin, bulk_velocity_start);
+      // Track velocity for the V_c consistency diagnostic of the exact-frame
+      // mode: the worldtube-center motion (the domain map, GB-tracked) plus
+      // the hole--worldtube relative motion from the GB dipole when measured.
+      if (config_opt->fit_exact_frame and state.valid and
+          time > state.last_fit_time and state.worldtube_center_valid) {
+        const double elapsed = time - state.last_fit_time;
+        for (size_t i = 0; i < 3; ++i) {
+          gsl::at(track_velocity, i) =
+              (gsl::at(current_worldtube_center, i) -
+               gsl::at(state.worldtube_center_at_last_fit, i)) /
+                  elapsed +
+              gsl::at(state.gb_dipole_velocity, i);
+        }
+        track_velocity_valid = true;
+      }
+
+      FitResult result{};
+      if (config_opt->fit_exact_frame) {
+        std::array<double, num_map_parameters> theta_start{};
+        if (state.exact_frame_valid) {
+          theta_start = state.exact_frame_theta;
+        } else {
+          // Cold start at the physical priors (spec Eq. Z7): the boost from
+          // the configured trajectory velocity, s0 = -pin, s_ij = pin
+          // delta_ij, sigma = 0. Priors initialize the solve only; they are
+          // never constraints.
+          const std::array<double, 3> prior_rapidity =
+              gh::Solutions::exact_frame::rapidity_from_velocity(
+                  config_opt->center_velocity);
+          for (size_t i = 0; i < 3; ++i) {
+            gsl::at(theta_start, i) = gsl::at(prior_rapidity, i);
+          }
+          theta_start[3] = -trace_pin;
+          theta_start[7] = trace_pin;
+          theta_start[10] = trace_pin;
+          theta_start[12] = trace_pin;
+        }
+        result = fit_exact_frame_parameters(
+            metric_face, pi_face, phi_face, gamma2_face, coords_face,
+            ylm_transform, fit_config, theta_start, center_offset_start);
+      } else {
+        result = fit_map_parameters(
+            metric_face, pi_face, phi_face, gamma2_face, coords_face,
+            ylm_transform, fit_config, p_start, center_offset_start,
+            config_opt->fit_uplus ? -1.0 : 1.0, trace_pin, bulk_velocity_start);
+      }
       residual_initial = result.residual_initial;
       residual_final = result.residual_final;
       iterations = static_cast<double>(result.iterations);
@@ -533,16 +578,20 @@ struct FitMapParameters {
       bool finite = true;
       for (size_t a = 0; a < num_map_parameters; ++a) {
         finite = finite and std::isfinite(gsl::at(result.p, a));
+        finite = finite and std::isfinite(gsl::at(result.exact_frame_theta, a));
       }
       for (size_t i = 0; i < 3; ++i) {
         finite = finite and std::isfinite(gsl::at(result.center_offset, i));
         finite = finite and std::isfinite(gsl::at(result.bulk_velocity, i));
+        finite = finite and
+                 std::isfinite(gsl::at(result.exact_frame_center_velocity, i));
       }
 
       if (finite) {
+        const bool exact_frame_mode = config_opt->fit_exact_frame;
         db::mutate<Tags::MapParameters>(
-            [&result, &time, &current_worldtube_center](
-                const gsl::not_null<MapParameterData*> data) {
+            [&result, &time, &current_worldtube_center,
+             &exact_frame_mode](const gsl::not_null<MapParameterData*> data) {
               if (data->valid and time > data->last_fit_time) {
                 data->previous_fit_time = data->last_fit_time;
                 data->p_previous = data->p;
@@ -554,6 +603,12 @@ struct FitMapParameters {
               data->pddot.fill(0.);
               data->center_offset = result.center_offset;
               data->bulk_velocity = result.bulk_velocity;
+              if (exact_frame_mode) {
+                data->exact_frame_theta = result.exact_frame_theta;
+                data->exact_frame_center_velocity =
+                    result.exact_frame_center_velocity;
+                data->exact_frame_valid = true;
+              }
               data->valid = true;
             },
             make_not_null(&box));
@@ -621,6 +676,22 @@ struct FitMapParameters {
         }
       }
     }
+    if (config_opt->fit_exact_frame) {
+      for (const std::string& c : {"x", "y", "z"}) {
+        legend.push_back("ExactFrameV_" + c);
+      }
+      for (const std::string& c : {"x", "y", "z"}) {
+        legend.push_back("ExactFrameVc_" + c);
+      }
+      legend.emplace_back("ExactFrameS0");
+      for (const std::string& c : {"x", "y", "z"}) {
+        legend.push_back("ExactFrameSigma_" + c);
+      }
+      for (const std::string& c : {"xx", "xy", "xz", "yy", "yz", "zz"}) {
+        legend.push_back("ExactFrameStrain_" + c);
+      }
+      legend.emplace_back("ExactFrameVcTrackError");
+    }
     std::vector<double> row;
     row.reserve(3 * num_map_parameters + 100);
     row.push_back(time);
@@ -673,6 +744,32 @@ struct FitMapParameters {
           row.push_back(value);
         }
       }
+    }
+    if (config_opt->fit_exact_frame) {
+      const auto& diagnostic = value_diagnostics.value();
+      for (size_t i = 0; i < 3; ++i) {
+        row.push_back(gsl::at(diagnostic.exact_frame_velocity, i));
+      }
+      for (size_t i = 0; i < 3; ++i) {
+        row.push_back(gsl::at(diagnostic.exact_frame_center_velocity, i));
+      }
+      row.push_back(diagnostic.exact_frame_theta[3]);
+      for (size_t i = 0; i < 3; ++i) {
+        row.push_back(gsl::at(diagnostic.exact_frame_theta, 4 + i));
+      }
+      for (size_t pair = 0; pair < 6; ++pair) {
+        row.push_back(gsl::at(diagnostic.exact_frame_theta, 7 + pair));
+      }
+      double vc_track_error = 0.;
+      if (track_velocity_valid) {
+        for (size_t i = 0; i < 3; ++i) {
+          vc_track_error +=
+              square(gsl::at(diagnostic.exact_frame_center_velocity, i) -
+                     gsl::at(track_velocity, i));
+        }
+        vc_track_error = std::sqrt(vc_track_error);
+      }
+      row.push_back(vc_track_error);
     }
     Parallel::threaded_action<
         observers::ThreadedActions::WriteReductionDataRow>(

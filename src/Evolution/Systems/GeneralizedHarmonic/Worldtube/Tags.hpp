@@ -262,6 +262,23 @@ struct MatcherConfig {
         "tangent of the finite boost would be fitted a second time as beta_i "
         "and qdot^i."};
   };
+  struct FitExactFrame {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Replace the linear 13-parameter value fit with the zeroth-order "
+        "exact-frame model: one nonlinear Gauss-Newton fit of the finite "
+        "frame map L = B(rapidity) S(s0, sigma, s_ij) -- the exact "
+        "pushforward of harmonic Schwarzschild, no linear residual stage -- "
+        "to the l <= FitLMax gauge projection of u+. All 13 frame parameters "
+        "are free. CenterVelocity and the trace pin act only as cold-start "
+        "priors (V ~ CenterVelocity, s0 ~ -pin, s_ij ~ pin delta_ij), never "
+        "as constraints. Requires FitUPlus; mutually exclusive with "
+        "FitBulkBoost, FitVelocity, FitTraceStrain, FitCenterOffset, and the "
+        "ODE modes. Between fits the model centre advances with the exact "
+        "coordinate centre velocity V_c = L^i_0/L^0_0 regardless of "
+        "CentreAdvection (the exact model contains its advection by "
+        "construction, so that A/B switch does not apply)."};
+  };
   struct CentreAdvection {
     using type = bool;
     static constexpr Options::String help = {
@@ -280,7 +297,7 @@ struct MatcherConfig {
                  FitInterval, FitCenterOffset, RateOde, SecondOrderOde,
                  StepperOde, GaugeDamping, UPlusAnchor, FitUPlus,
                  KretschmannTracePin, TracePinInterval, FitTraceStrain,
-                 FitVelocity, FitBulkBoost, CentreAdvection,
+                 FitVelocity, FitBulkBoost, FitExactFrame, CentreAdvection,
                  SpatialMonopoleWeight, UPlusBlockWeights, FitRadialIndex>;
   static constexpr Options::String help = {
       "Online worldtube matching. By default, algebraically fit the "
@@ -298,8 +315,8 @@ struct MatcherConfig {
                 bool stepper_ode, double gauge_damping, double uplus_anchor,
                 bool fit_uplus, bool kretschmann_trace_pin,
                 double trace_pin_interval, bool fit_trace_strain,
-                bool fit_velocity, bool fit_bulk_boost, bool centre_advection,
-                double spatial_monopole_weight,
+                bool fit_velocity, bool fit_bulk_boost, bool fit_exact_frame,
+                bool centre_advection, double spatial_monopole_weight,
                 const std::array<double, 15>& uplus_block_weights,
                 size_t fit_radial_index)
       : mass(mass),
@@ -320,6 +337,7 @@ struct MatcherConfig {
         fit_trace_strain(fit_trace_strain),
         fit_velocity(fit_velocity),
         fit_bulk_boost(fit_bulk_boost),
+        fit_exact_frame(fit_exact_frame),
         centre_advection(centre_advection),
         spatial_monopole_weight(spatial_monopole_weight),
         uplus_block_weights(uplus_block_weights),
@@ -350,6 +368,34 @@ struct MatcherConfig {
           "boost owns the bulk center motion; a separate velocity pin would "
           "double count it.");
     }
+    if (fit_exact_frame and (rate_ode or second_order_ode or stepper_ode)) {
+      ERROR(
+          "FitExactFrame is a value fit. Set RateOde, SecondOrderOde and "
+          "StepperOde false.");
+    }
+    if (fit_exact_frame and (fit_bulk_boost or fit_velocity)) {
+      ERROR(
+          "FitExactFrame owns the full frame including the boost, so "
+          "FitBulkBoost and FitVelocity would fit the same velocity a second "
+          "time. Set both false.");
+    }
+    if (fit_exact_frame and not fit_uplus) {
+      ERROR(
+          "FitExactFrame fits the gauge projection of the outgoing "
+          "characteristic; set FitUPlus true.");
+    }
+    if (fit_exact_frame and fit_center_offset) {
+      ERROR(
+          "FitExactFrame takes the centre from the tracked worldtube (the "
+          "Gauss-Bonnet track); a fitted centre offset is not part of the "
+          "zeroth-order model. Set FitCenterOffset false.");
+    }
+    if (fit_exact_frame and fit_trace_strain) {
+      ERROR(
+          "FitExactFrame always fits the full symmetric strain including its "
+          "trace; FitTraceStrain configures the linear path only. Set it "
+          "false.");
+    }
     for (const double weight : uplus_block_weights) {
       if (weight < 0.) {
         ERROR("UPlusBlockWeights entries must be non-negative, got " << weight
@@ -379,6 +425,7 @@ struct MatcherConfig {
   bool fit_trace_strain = false;
   bool fit_velocity = false;
   bool fit_bulk_boost = false;
+  bool fit_exact_frame = false;
   bool centre_advection = true;
   double spatial_monopole_weight = 1.;
   std::array<double, 15> uplus_block_weights{
@@ -415,6 +462,13 @@ struct MapParameterData {
   /// small when the control system tracks the hole; it is not the absolute
   /// inertial black-hole position.
   std::array<double, 3> center_offset{};
+  /// Zeroth-order exact-frame state (FitExactFrame mode): the fitted frame
+  /// parameters ordered (rapidity[3], s0, sigma[3], s_(ij)[6]) and the
+  /// derived coordinate centre velocity V_c = L^i_0/L^0_0, which advects the
+  /// model centre between fits (spec Eq. Z4).
+  std::array<double, num_map_parameters> exact_frame_theta{};
+  std::array<double, 3> exact_frame_center_velocity{};
+  bool exact_frame_valid = false;
   /// Stepper-integrated mode: the 26-component state (p, pdot) and its
   /// time-stepper history
   DataVector ode_state{};

@@ -95,6 +95,42 @@ SphereFields boosted_fields_at(const ylm::Spherepack& ylm, const double time,
   return boosted_fields_at(ylm, time, {{0., 0., velocity}});
 }
 
+// Manufactured data: the exact pushforward of harmonic Schwarzschild through
+// the finite frame map L = B(rapidity) S, evaluated on a sphere.
+SphereFields exact_frame_fields_at(
+    const ylm::Spherepack& ylm,
+    const std::array<double, gh::Worldtube::num_map_parameters>& theta) {
+  const auto& theta_phi = ylm.theta_phi_points();
+  const size_t n_points = theta_phi[0].size();
+  constexpr double radius = 2.;
+  const std::array<double, 3> center{{0., 0., 0.}};
+  SphereFields result{tnsr::aa<DataVector, 3>{},
+                      tnsr::aa<DataVector, 3>{},
+                      tnsr::iaa<DataVector, 3>{},
+                      Scalar<DataVector>{DataVector(n_points, 0.1)},
+                      tnsr::I<DataVector, 3>{n_points},
+                      center};
+  get<0>(result.coords) = radius * sin(theta_phi[0]) * cos(theta_phi[1]);
+  get<1>(result.coords) = radius * sin(theta_phi[0]) * sin(theta_phi[1]);
+  get<2>(result.coords) = radius * cos(theta_phi[0]);
+
+  gh::Solutions::exact_frame::evolved_variables(
+      make_not_null(&result.metric), make_not_null(&result.pi),
+      make_not_null(&result.phi), result.coords, 0., 1., center, theta);
+  return result;
+}
+
+gh::Worldtube::MatcherConfig exact_frame_config(
+    const std::array<double, 3>& center) {
+  gh::Worldtube::MatcherConfig config{};
+  config.mass = 1.;
+  config.center = center;
+  config.fit_l_max = 4;
+  config.fit_uplus = true;
+  config.fit_exact_frame = true;
+  return config;
+}
+
 template <typename TensorType>
 TensorType centered_derivative(const TensorType& upper, const TensorType& lower,
                                const double step) {
@@ -156,6 +192,16 @@ SPECTRE_TEST_CASE(
       (std::array<double, 3>{{-0.49, 0.42, -0.28}}));
   CHECK_ITERABLE_APPROX(gh::Worldtube::detail::model_center(config, state, 2.5),
                         (std::array<double, 3>{{0.91, 2.22, 3.02}}));
+
+  // The exact-frame mode advects with the fitted coordinate centre velocity
+  // V_c = L^i_0/L^0_0 (spec Eq. Z4), never with the boost parameter V.
+  config.fit_bulk_boost = false;
+  config.fit_exact_frame = true;
+  state.exact_frame_valid = true;
+  state.exact_frame_center_velocity = {{0.1, -0.2, 0.3}};
+  CHECK_ITERABLE_APPROX(
+      gh::Worldtube::detail::current_center_offset(config, state, 2.5),
+      (std::array<double, 3>{{-0.34, 0.12, -0.18}}));
 }
 
 SPECTRE_TEST_CASE(
@@ -414,4 +460,127 @@ SPECTRE_TEST_CASE(
            std::isfinite(excluded.minus_residual_final) and
            std::isfinite(excluded.condition_number)));
   }
+}
+
+// Contract C4 of the zeroth-order brief (spec test Z-1, exact recovery):
+// manufactured data = the exact pushforward with generic theta; the
+// exact-frame fit recovers every parameter family, separately and jointly,
+// to fit precision from a cold start, and drives both characteristics --
+// including the held-out one -- to roundoff.
+SPECTRE_TEST_CASE(
+    "Unit.Evolution.Systems.GeneralizedHarmonic.Worldtube.ExactFrameRecovery",
+    "[Unit][Evolution]") {
+  const ylm::Spherepack ylm{5, 5};
+  using ThetaArray = std::array<double, gh::Worldtube::num_map_parameters>;
+  // the generic frame of the oracle fixtures
+  const ThetaArray generic{{0.08031150429463316, -0.04015575214731658,
+                            0.06023362822097486, 0.05, 0.004, -0.002, 0.003,
+                            -0.05, 0.012, -0.007, -0.04, 0.009, -0.055}};
+  ThetaArray boost_only{};
+  ThetaArray clock_only{};
+  ThetaArray simultaneity_only{};
+  ThetaArray strain_only{};
+  for (size_t a = 0; a < 3; ++a) {
+    gsl::at(boost_only, a) = gsl::at(generic, a);
+  }
+  clock_only[3] = generic[3];
+  for (size_t a = 4; a < 7; ++a) {
+    gsl::at(simultaneity_only, a) = gsl::at(generic, a);
+  }
+  for (size_t a = 7; a < 13; ++a) {
+    gsl::at(strain_only, a) = gsl::at(generic, a);
+  }
+
+  for (const auto& expected :
+       {boost_only, clock_only, simultaneity_only, strain_only, generic}) {
+    const SphereFields data = exact_frame_fields_at(ylm, expected);
+    const auto config = exact_frame_config(data.center);
+    const ThetaArray cold_start{};
+    const auto fit = gh::Worldtube::fit_exact_frame_parameters(
+        data.metric, data.pi, data.phi, data.gamma2, data.coords, ylm, config,
+        cold_start, {{0., 0., 0.}});
+    CAPTURE(expected, fit.exact_frame_theta, fit.residual_initial,
+            fit.residual_final, fit.baseline_residual, fit.iterations);
+    CHECK(fit.residual_final < 1.e-10);
+    for (size_t a = 0; a < gh::Worldtube::num_map_parameters; ++a) {
+      CHECK(std::abs(gsl::at(fit.exact_frame_theta, a) - gsl::at(expected, a)) <
+            1.e-7);
+    }
+    // one frame closes the held-out channel too: nothing was traded
+    CHECK(fit.minus_residual_final < 1.e-8);
+    CHECK(std::isfinite(fit.condition_number));
+  }
+}
+
+// Contract C5 (spec test Z-2, the strain ladder at fixed physical
+// amplitude): data with s_ij = -Phi delta_ij, s0 = +Phi. The old linear
+// matcher floors at the quadratic remainder ~Phi^2 -- doubling Phi
+// quadruples its converged residual -- while the exact-frame fit sits at
+// roundoff across the ladder. This is the decisive test of the bookkeeping
+// claim, the symmetric-sector twin of the boost ladder.
+SPECTRE_TEST_CASE(
+    "Unit.Evolution.Systems.GeneralizedHarmonic.Worldtube."
+    "ExactFrameStrainLadder",
+    "[Unit][Evolution]") {
+  const ylm::Spherepack ylm{5, 5};
+  const std::array<double, 3> amplitudes{{0.0125, 0.025, 0.05}};
+  std::array<double, 3> linear_residuals{};
+  std::array<double, 3> linear_baselines{};
+  for (size_t rung = 0; rung < 3; ++rung) {
+    const double amplitude = gsl::at(amplitudes, rung);
+    std::array<double, gh::Worldtube::num_map_parameters> theta{};
+    theta[3] = amplitude;
+    theta[7] = -amplitude;
+    theta[10] = -amplitude;
+    theta[12] = -amplitude;
+    const SphereFields data = exact_frame_fields_at(ylm, theta);
+
+    const auto config = exact_frame_config(data.center);
+    const auto fit = gh::Worldtube::fit_exact_frame_parameters(
+        data.metric, data.pi, data.phi, data.gamma2, data.coords, ylm, config,
+        {}, {{0., 0., 0.}});
+    CAPTURE(amplitude, fit.residual_final, fit.baseline_residual,
+            fit.iterations, fit.exact_frame_theta);
+    CHECK(fit.residual_final < 1.e-10);
+    CHECK(std::abs(fit.exact_frame_theta[3] - amplitude) < 1.e-8);
+    CHECK(std::abs(fit.exact_frame_theta[12] + amplitude) < 1.e-8);
+
+    // The old linear matcher on the same data and channel, all 13 free. On
+    // this spherically symmetric single-sphere data the sampled u+ gauge
+    // modes have fewer independent rows than the 13 coefficients, so the
+    // linear fit can zero its own fitted channel exactly -- the strain
+    // aliasing the exact-frame model removes. The quadratic floor therefore
+    // shows where no coefficient choice can hide it: the full-field
+    // collocation metric closure.
+    gh::Worldtube::MatcherConfig linear_config{};
+    linear_config.mass = 1.;
+    linear_config.center = data.center;
+    linear_config.fit_l_max = 4;
+    linear_config.fit_uplus = true;
+    linear_config.fit_trace_strain = true;
+    linear_config.fit_velocity = true;
+    const std::array<double, gh::Worldtube::num_map_parameters> p_start{};
+    const auto linear_fit = gh::Worldtube::fit_map_parameters(
+        data.metric, data.pi, data.phi, data.gamma2, data.coords, ylm,
+        linear_config, p_start, {{0., 0., 0.}}, -1., 0.);
+    CAPTURE(linear_fit.residual_final, linear_fit.baseline_residual,
+            linear_fit.metric_residual_final,
+            linear_fit.metric_baseline_residual, linear_fit.p);
+    gsl::at(linear_residuals, rung) = linear_fit.metric_residual_final;
+    gsl::at(linear_baselines, rung) = linear_fit.metric_baseline_residual;
+    CHECK(fit.metric_residual_final < 1.e-10);
+    CHECK(linear_fit.metric_residual_final >
+          1.e3 * std::max(fit.metric_residual_final, 1.e-14));
+  }
+  // the linear metric floor is quadratic in the amplitude ...
+  const double first_ratio = linear_residuals[1] / linear_residuals[0];
+  const double second_ratio = linear_residuals[2] / linear_residuals[1];
+  CAPTURE(linear_residuals, linear_baselines, first_ratio, second_ratio);
+  CHECK(first_ratio > 3.);
+  CHECK(first_ratio < 5.5);
+  CHECK(second_ratio > 3.);
+  CHECK(second_ratio < 5.5);
+  // ... while the physical content itself only doubles
+  CHECK(linear_baselines[1] / linear_baselines[0] < 2.5);
+  CHECK(linear_baselines[2] / linear_baselines[1] < 2.5);
 }

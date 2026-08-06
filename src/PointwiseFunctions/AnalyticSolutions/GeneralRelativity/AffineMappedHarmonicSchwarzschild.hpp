@@ -228,6 +228,11 @@ FrameMatrix frame_map(const std::array<double, num_parameters>& theta);
 /// pivoting). Errors on a singular matrix.
 FrameMatrix inverse(const FrameMatrix& matrix);
 
+/// Determinant of a frame-map matrix (LU with partial pivoting). Used to
+/// guard fit steps: an admissible frame map has det L > 0 and a timelike
+/// mapped time axis \f$L^A{}_0\f$.
+double determinant(const FrameMatrix& matrix);
+
 /// The inertial coordinate velocity of the mapped worldline,
 /// \f$V_c^i = L^i{}_0 / L^0{}_0 = V^i - \sigma^i + O(2)\f$ (spec Eq. Z3).
 /// All kinematic consistency checks compare \f$dz/dT\f$ against this, never
