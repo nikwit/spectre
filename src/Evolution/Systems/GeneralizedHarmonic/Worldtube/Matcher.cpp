@@ -1067,20 +1067,13 @@ FitResult fit_exact_frame_parameters(
   result.exact_frame_velocity = exact_frame::velocity_from_rapidity(rapidity);
   result.exact_frame_center_velocity =
       exact_frame::center_velocity(exact_frame::frame_map(theta));
-  // Old-path bridge: the boost factor goes to bulk_velocity and the exactly
-  // affine eta-symmetric factor S - 1 to the old-13 layout (s0; sigma as
-  // beta; -sigma as qdot; s_ij), so the existing exact-boost x first-order
-  // ghost prescription reproduces the fitted frame to O(S - 1)^2 until the
-  // exact ghost model replaces it.
+  // Diagnostics only: nothing in this mode consumes p or bulk_velocity (the
+  // ghost boundary condition evaluates the exact frame from theta and the
+  // centre advection uses V_c). p reports the finite old-13 dictionary of
+  // the fitted L (spec Eq. Z8), directly comparable with linear-mode runs,
+  // and bulk_velocity reports the boost parameter V.
   result.bulk_velocity = result.exact_frame_velocity;
-  result.p[0] = theta[3];
-  for (size_t i = 0; i < 3; ++i) {
-    gsl::at(result.p, 1 + i) = gsl::at(theta, 4 + i);
-    gsl::at(result.p, 4 + i) = -gsl::at(theta, 4 + i);
-  }
-  for (size_t pair = 0; pair < 6; ++pair) {
-    gsl::at(result.p, 7 + pair) = gsl::at(theta, 7 + pair);
-  }
+  result.p = exact_frame::old13_dictionary(theta);
   result.center_offset = center_offset;
   return result;
 }

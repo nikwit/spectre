@@ -509,7 +509,20 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
               gh::Worldtube::detail::model_center(*matcher_config,
                                                   map_parameters, time);
           model.emplace();
-          if (first_order_value_mode) {
+          if (matcher_config->fit_exact_frame) {
+            // Zeroth-order exact-frame model: the fitted finite frame map
+            // L = B(V) S, evaluated exactly. The model centre was already
+            // advanced along the mapped time axis (spec Eq. Z4) by
+            // model_center, so the frozen-frame evaluation time relative to
+            // the worldline time offset z^0 is zero.
+            gh::Solutions::exact_frame::evolved_variables(
+                make_not_null(
+                    &get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(*model)),
+                make_not_null(&get<Tags::Pi<DataVector, Dim>>(*model)),
+                make_not_null(&get<Tags::Phi<DataVector, Dim>>(*model)), coords,
+                0., matcher_config->mass, model_center,
+                map_parameters.exact_frame_theta);
+          } else if (first_order_value_mode) {
             gh::Solutions::affine_map_model::
                 first_order_boosted_evolved_variables(
                     make_not_null(
@@ -725,7 +738,14 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
     tnsr::aa<DataVector, Dim, Frame::Inertial> model_metric{};
     tnsr::aa<DataVector, Dim, Frame::Inertial> model_pi{};
     tnsr::iaa<DataVector, Dim, Frame::Inertial> model_phi{};
-    if (first_order_value_mode) {
+    if (matcher_config->fit_exact_frame) {
+      // Zeroth-order exact-frame model, as in the Bjorhus path above: the
+      // fitted finite frame map evaluated exactly at the Z4-advanced centre.
+      gh::Solutions::exact_frame::evolved_variables(
+          make_not_null(&model_metric), make_not_null(&model_pi),
+          make_not_null(&model_phi), coords, 0., matcher_config->mass,
+          model_center, map_parameters.exact_frame_theta);
+    } else if (first_order_value_mode) {
       gh::Solutions::affine_map_model::first_order_boosted_evolved_variables(
           make_not_null(&model_metric), make_not_null(&model_pi),
           make_not_null(&model_phi), coords, matcher_config->mass, model_center,

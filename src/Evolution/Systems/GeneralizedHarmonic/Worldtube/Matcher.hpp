@@ -148,10 +148,10 @@ struct FitResult {
   /// Zeroth-order exact-frame fit (`fit_exact_frame_parameters` only): the
   /// fitted frame parameters ordered (rapidity[3], s0, sigma[3], s_(ij)[6]),
   /// the boost velocity V, and the coordinate centre velocity
-  /// V_c = L^i_0/L^0_0. In that mode `p` holds the linearized old-13
-  /// dictionary of the symmetric factor S and `bulk_velocity` holds V, so
-  /// the existing boundary-condition path reproduces the fitted frame to
-  /// O(S - 1)^2 until the exact ghost prescription lands.
+  /// V_c = L^i_0/L^0_0. In that mode the ghost boundary condition evaluates
+  /// the exact frame from theta directly; `p` merely reports the finite
+  /// old-13 dictionary of the fitted L (spec Eq. Z8) and `bulk_velocity`
+  /// the boost parameter V, as diagnostics comparable with linear-mode runs.
   std::array<double, num_map_parameters> exact_frame_theta{};
   std::array<double, 3> exact_frame_velocity{};
   std::array<double, 3> exact_frame_center_velocity{};
@@ -221,7 +221,7 @@ FitResult fit_map_parameters(
  * (the centre comes from the tracked worldtube, not from the fit). All
  * reported closures are unweighted; the opposite characteristic \f$u^-\f$
  * is evaluated held-out and never enters the solve. The returned `p` and
- * `bulk_velocity` hold the old-path bridge described at `FitResult`.
+ * `bulk_velocity` are diagnostics only, described at `FitResult`.
  */
 FitResult fit_exact_frame_parameters(
     const tnsr::aa<DataVector, 3>& spacetime_metric,
