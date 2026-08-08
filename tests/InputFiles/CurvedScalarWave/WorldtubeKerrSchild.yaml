@@ -48,6 +48,7 @@ DomainCreator:
       Interior:
         ExciseWithBoundaryCondition: DemandOutgoingCharSpeeds
       UseLogarithmicMap: false
+      UseSphericalHarmonics: false
     ObjectA:
       InnerRadius: 1.6
       OuterRadius: 2.
@@ -55,6 +56,7 @@ DomainCreator:
       Interior:
         ExciseWithBoundaryCondition: Worldtube
       UseLogarithmicMap: false
+      UseSphericalHarmonics: false
     CenterOfMassOffset: [0., 0.]
     CubeScale: 1.0
     Envelope:
