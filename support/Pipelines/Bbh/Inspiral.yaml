@@ -89,6 +89,7 @@ DomainCreator:
         ExciseWithBoundaryCondition:
           DemandOutgoingCharSpeeds:
       UseLogarithmicMap: true
+      UseSphericalHarmonics: false
     ObjectB:
       InnerRadius: &ExcisionRadiusB {{ ExcisionRadiusB }}
       # Found that the max allowable value for the OuterRadius is 6.0. Higher
@@ -99,6 +100,7 @@ DomainCreator:
         ExciseWithBoundaryCondition:
           DemandOutgoingCharSpeeds:
       UseLogarithmicMap: true
+      UseSphericalHarmonics: false
     CenterOfMassOffset:
       - &YOffset {{ CenterOfMassOffset_y }}
       - &ZOffset {{ CenterOfMassOffset_z }}
@@ -159,6 +161,9 @@ DomainCreator:
         SubfileName: "{{ IdSubfile }}"
         LMax: Auto
         TransitionEndsAtCube: True
+      # Object B is tracked by its Gauss-Bonnet dipole, which requires a
+      # spherical (undistorted) excision.
+      ShapeMapB: None
       GridCenters: None
 {% else %}
     TimeDependentMaps:
@@ -187,8 +192,17 @@ DomainCreator:
   {% endif %}
         SizeInitialValues: [0.0, 0.0, 0.0]
         TransitionEndsAtCube: true
+      # Object B is tracked by its Gauss-Bonnet dipole, which requires a
+      # spherical (undistorted) excision.
+      ShapeMapB: None
       GridCenters: None
 {% endif %}
+
+# Online worldtube matching is off for standard inspirals. Set this group to
+# fit the analytic frame parameters on an excision sphere (see
+# gh::Worldtube::MatcherConfig), which requires a worldtube boundary
+# condition on that excision.
+WorldtubeMatcher: None
 
 Evolution:
   InitialTime: *InitialTime
@@ -390,6 +404,7 @@ EventsAndTriggersAtSlabs:
           Offset: 0
     Events:
       - ObservationAhA
+      - ObservationAhB
       - ObservationExcisionBoundaryA
       - ObservationExcisionBoundaryB
   # Observe volume data for visualization and debugging
@@ -529,6 +544,21 @@ ApparentHorizons:
     Verbosity: Quiet
     MaxComputeCoordsRetries: 3
     BlocksForHorizonFind: ["ObjectAShell", "ObjectACube"]
+  # Observation-only: Object B is tracked by its Gauss-Bonnet dipole, so no
+  # control system reads this horizon. Found in the inertial frame because
+  # Object B carries no shape map and hence has no distorted frame.
+  ObservationAhB:
+    Criteria:
+    InitialGuess:
+      InitialL: *ObsLMax
+      InitialShape:
+        Sphere:
+          Radius: {{ ExcisionRadiusB * 1.5 }}
+          Center: [*XCoordB, *YOffset, *ZOffset]
+    FastFlow: *DefaultFastFlow
+    Verbosity: Quiet
+    MaxComputeCoordsRetries: 3
+    BlocksForHorizonFind: ["ObjectBShell", "ObjectBCube"]
   ObservationAhC:
     Criteria:
     InitialGuess:
@@ -546,7 +576,11 @@ ApparentHorizons:
       - "ObjectBShell"
       - "ObjectBCube"
       - "Envelope"
-  ControlSystemAhA: *AhA
+  # The kinematic control systems measure AhA jointly with the Gauss-Bonnet
+  # dipole of Object B, hence 'FromMixedCenters'; ShapeA and SizeA keep their
+  # own single-horizon and char-speed measurements.
+  ControlSystemAhAFromMixedCenters: *AhA
+  ControlSystemSingleAhA: *AhA
   ControlSystemCharSpeedAhA: *AhA
 
 InterpolationTargets:
