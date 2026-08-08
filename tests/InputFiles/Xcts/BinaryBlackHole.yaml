@@ -115,6 +115,7 @@ DomainCreator:
             Lapse: *kerr_right
             NegativeExpansion: *kerr_right
       UseLogarithmicMap: True
+      UseSphericalHarmonics: false
     ObjectB:
       InnerRadius: 0.8
       OuterRadius: 4.
@@ -127,6 +128,7 @@ DomainCreator:
             Lapse: *kerr_left
             NegativeExpansion: *kerr_left
       UseLogarithmicMap: True
+      UseSphericalHarmonics: false
     CenterOfMassOffset: [*y_offset, *z_offset]
     Envelope:
       Radius: &outer_shell_inner_radius 60.
