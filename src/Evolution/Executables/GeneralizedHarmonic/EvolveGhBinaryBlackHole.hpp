@@ -247,7 +247,25 @@ struct EvolutionMetavars {
   static constexpr bool use_damped_harmonic_rollon = false;
   using system = gh::System<volume_dim>;
   using temporal_id = Tags::TimeStepId;
-  using TimeStepperBase = LtsTimeStepper;
+  // GLOBAL time stepping (was `LtsTimeStepper`).  With this,
+  // `local_time_stepping` is false and `Tags::LtsMode` resolves to
+  // `LtsMode::Off`, which is what lets `ChangeSlabSize` accept the
+  // `ErrorControl`/`PreventRapidIncrease` step choosers -- they are
+  // rejected as slab choosers whenever LTS is active.  The result is one
+  // globally-shared adaptive step instead of per-region LTS ratios, which
+  // removes the need to equalize step rates across nonconforming
+  // shell<->cube mortars: both sides of such a mortar must advance
+  // together, and a single global step gives that by construction.
+  //
+  // Restoring LTS means putting `LtsTimeStepper` back here.  The two modes
+  // need different input files: `LtsStepChoosers`, `InitialSlabSize`,
+  // `VariableOrderAlgorithm` and the whole `EventsAndTriggersAtSteps` block
+  // (so also `ChangeFixedLtsRatio`) exist only under LTS, because the
+  // actions owning them drop out of the action lists below when
+  // `local_time_stepping` is false.  The input files under
+  // support/Pipelines/Bbh and tests/InputFiles are written for LTS and so
+  // do not parse against this build.
+  using TimeStepperBase = TimeStepper;
 
   static constexpr bool local_time_stepping =
       TimeStepperBase::local_time_stepping;
