@@ -11,9 +11,15 @@
 
 #include <complex>
 
-#ifndef SPECTRE_DEBUG
+// libxsmm is also skipped on Apple Silicon: in Release builds its kernel
+// registry can be torn down mid-run, after which every lookup faults with
+// EXC_BAD_ACCESS inside internal_find_code and the process spins forever at
+// full CPU with no output. This extends the existing ARM-Mac workaround
+// (see the Debug note below and src/Utilities/CMakeLists.txt) to Release.
+#if not defined(SPECTRE_DEBUG) and \
+    not(defined(__APPLE__) and defined(__aarch64__))
 #include <libxsmm.h>
-#endif  // ifndef SPECTRE_DEBUG
+#endif
 #include <gsl/gsl_cblas.h>
 
 #include "Utilities/ErrorHandling/Assert.hpp"
@@ -198,8 +204,11 @@ inline void zgemm_(const char& TRANSA, const char& TRANSB, const size_t& M,
 }
 
 // libxsmm is disabled in DEBUG builds because backtraces (from, for
-// example, FPEs) do not work when the error occurs in libxsmm code.
-#ifndef SPECTRE_DEBUG
+// example, FPEs) do not work when the error occurs in libxsmm code, and on
+// Apple Silicon in all builds (see the note at the include above). Without
+// this specialization the generic BLAS implementation is used.
+#if not defined(SPECTRE_DEBUG) and \
+    not(defined(__APPLE__) and defined(__aarch64__))
 template <>
 inline void dgemm_<true>(const char& TRANSA, const char& TRANSB,
                          const size_t& M, const size_t& N, const size_t& K,
@@ -231,7 +240,7 @@ inline void dgemm_<true>(const char& TRANSA, const char& TRANSB,
   libxsmm_dgemm(&TRANSA, &TRANSB, &m, &n, &k, &ALPHA, A, &lda, B, &ldb, &BETA,
                 C, &ldc);
 }
-#endif  // ifndef SPECTRE_DEBUG
+#endif
 /// @}
 
 /// @{
