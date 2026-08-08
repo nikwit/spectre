@@ -708,6 +708,8 @@ class GaussBonnetBinaryCompactObject final : public BinaryCompactObject {
  public:
   static std::string name() { return "BinaryCompactObject"; }
 
+  GaussBonnetBinaryCompactObject() = default;
+
   GaussBonnetBinaryCompactObject(
       typename ObjectA::type object_A, typename ObjectB::type object_B,
       std::array<double, 2> center_of_mass_offset, double envelope_radius,

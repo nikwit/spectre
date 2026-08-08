@@ -81,6 +81,9 @@
 #include "Evolution/Systems/GeneralizedHarmonic/SpectralFilter.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/AdvanceMapParameterOde.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/FitMapParameters.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Tags.hpp"
 #include "Evolution/Triggers/SeparationLessThan.hpp"
 #include "Evolution/TypeTraits.hpp"
 #include "IO/Importers/Actions/RegisterWithElementDataReader.hpp"
@@ -728,6 +731,10 @@ struct EvolutionMetavars {
   };
 
   using AhA = Ah<::domain::ObjectLabel::A, ::Frame::Distorted>;
+  // Object B is tracked by its Gauss-Bonnet dipole and carries no shape map,
+  // so it has no distorted frame: its horizon is found in the inertial frame.
+  // This finder is observation-only; no control system reads it.
+  using AhB = Ah<::domain::ObjectLabel::B, ::Frame::Inertial>;
   using AhC = Ah<::domain::ObjectLabel::C, ::Frame::Inertial>;
 
   template <::domain::ObjectLabel Excision>
@@ -936,11 +943,11 @@ struct EvolutionMetavars {
                        DenseTriggers::standard_dense_triggers>>>,
         tmpl::pair<
             DomainCreator<volume_dim>,
-            tmpl::list<
-                ::domain::creators::GaussBonnetBinaryCompactObject>>,
+            tmpl::list<::domain::creators::GaussBonnetBinaryCompactObject>>,
         tmpl::pair<Event,
                    tmpl::flatten<tmpl::list<
                        ah::Events::FindApparentHorizon<AhA>,
+                       ah::Events::FindApparentHorizon<AhB>,
                        ah::Events::FindCommonHorizon<AhC, observe_fields,
                                                      non_tensor_compute_tags>,
                        gh::bbh::Events::CheckConstraintThresholds,
@@ -972,7 +979,8 @@ struct EvolutionMetavars {
             tmpl::list<
                 gh::BoundaryConditions::ConstraintPreservingBjorhus<volume_dim>,
                 gh::BoundaryConditions::DirichletMinkowski<volume_dim>,
-                gh::BoundaryConditions::DemandOutgoingCharSpeeds<volume_dim>>>,
+                gh::BoundaryConditions::DemandOutgoingCharSpeeds<volume_dim>,
+                gh::BoundaryConditions::WorldtubeTypeD<volume_dim>>>,
         tmpl::pair<
             gh::gauges::GaugeCondition,
             tmpl::list<gh::gauges::DampedHarmonic, gh::gauges::Harmonic>>,
@@ -1032,11 +1040,18 @@ struct EvolutionMetavars {
                  Parallel::Phase::Evolve,
                  Parallel::Phase::Exit};
 
+  // The online worldtube matcher: FitMapParameters at the top of the step
+  // fits the frame-map parameters from the excision-sphere data (no-op when
+  // the WorldtubeMatcher option is None); AdvanceMapParameterOde sits right
+  // before the system history is recorded, as in the single-black-hole
+  // executable.
   using step_actions = tmpl::list<
+      gh::Worldtube::Actions::FitMapParameters,
       evolution::dg::Actions::ComputeTimeDerivative<
           volume_dim, system, AllStepChoosers, use_dg_element_collection>,
       evolution::dg::Actions::ApplyBoundaryCorrectionsToTimeDerivative<
           volume_dim, use_dg_element_collection>,
+      gh::Worldtube::Actions::AdvanceMapParameterOde,
       Actions::MutateApply<RecordTimeStepperData<system>>,
       evolution::Actions::RunEventsAndDenseTriggers<tmpl::list<
           ::domain::CheckFunctionsOfTimeAreReadyPostprocessor<volume_dim>,
@@ -1079,6 +1094,8 @@ struct EvolutionMetavars {
       Initialization::Actions::InitializeItems<
           evolution::dg::Initialization::SpectralFilters<
               volume_dim, typename system::variables_tag::tags_list>>,
+      Initialization::Actions::InitializeItems<
+          gh::Worldtube::Initialization::InitializeMapParameters>,
       Parallel::Actions::TerminatePhase>;
 
   using gh_dg_element_array = DgElementArray<
@@ -1167,6 +1184,7 @@ struct EvolutionMetavars {
         evolution::dg::Initialization::ProjectSpectralFilters<
             volume_dim, typename system::variables_tag::tags_list>,
         ::amr::projectors::DefaultInitialize<
+            gh::Worldtube::Tags::MapParameters,
             Initialization::Tags::InitialTimeDelta,
             Initialization::Tags::InitialSlabSize,
             ::domain::Tags::InitialExtents<volume_dim>,
@@ -1205,6 +1223,7 @@ struct EvolutionMetavars {
       mem_monitor::MemoryMonitor<EvolutionMetavars>,
       gh::bbh::CompletionSingleton<EvolutionMetavars>,
       ah::Component<EvolutionMetavars, AhA>,
+      ah::Component<EvolutionMetavars, AhB>,
       ah::Component<EvolutionMetavars, AhC>,
       tmpl::transform<
           control_system_horizon_metavars,
