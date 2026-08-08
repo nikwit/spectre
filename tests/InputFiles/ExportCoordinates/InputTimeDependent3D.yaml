@@ -44,12 +44,14 @@ DomainCreator:
       XCoord: 7.683
       ExciseInterior: true
       UseLogarithmicMap: true
+      UseSphericalHarmonics: false
     ObjectB:
       InnerRadius: 0.45825
       OuterRadius: 6.0
       XCoord: -7.683
       ExciseInterior: true
       UseLogarithmicMap: true
+      UseSphericalHarmonics: false
     CenterOfMassOffset: [0., 0.]
     Envelope:
       Radius: 100.0
