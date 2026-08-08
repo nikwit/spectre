@@ -507,9 +507,14 @@ TimeDependentMapOptions<IsCylindrical>::distorted_to_inertial_map(
                          transition_ends_at_cube_from_shape_options(
                              shape_options_B_.value())
                    : false);
+    // Index 12 is the spherical-harmonic object-shell sentinel. Block::
+    // has_distorted_frame() requires BOTH the grid->distorted and the
+    // distorted->inertial map, so this gate must admit 12 as well or the
+    // shell block still ends up without a distorted frame.
     block_has_shape_map =
         include_distorted_map.has_value() and
-        (transition_ends_at_cube or include_distorted_map.value() < 6);
+        (transition_ends_at_cube or include_distorted_map.value() < 6 or
+         include_distorted_map.value() == 12);
   }
 
   const auto& rot_scale_trans = rot_scale_trans_map_.has_value()
@@ -563,9 +568,14 @@ TimeDependentMapOptions<IsCylindrical>::grid_to_distorted_map(
             : time_dependent_options::
                   transition_ends_at_cube_from_shape_options(
                       shape_options_B_.value());
+    // Index 12 is the sentinel for the single spherical-harmonic
+    // object-shell block, whose transition necessarily ends at the
+    // sphere; it must survive this gate or the block silently gets no
+    // distorted map and the horizon finder null-derefs on it.
     block_has_shape_map =
         block_has_shape_map and include_distorted_map.has_value() and
-        (transition_ends_at_cube or include_distorted_map.value() < 6);
+        (transition_ends_at_cube or include_distorted_map.value() < 6 or
+         include_distorted_map.value() == 12);
   }
 
   if (block_has_shape_map) {
@@ -574,10 +584,12 @@ TimeDependentMapOptions<IsCylindrical>::grid_to_distorted_map(
     if constexpr (IsCylindrical) {
       shape = &gsl::at(shape_maps_, index);
     } else {
-      if (include_distorted_map.value() >= 12) {
+      // 12 is the spherical-harmonic object-shell sentinel; 13 is reserved
+      // for the excision map and is never requested through this argument.
+      if (include_distorted_map.value() > 12) {
         ERROR(
             "Invalid 'include_distorted_map' argument. Max value allowed is "
-            "11, but it is "
+            "12, but it is "
             << include_distorted_map.value());
       }
       shape =
@@ -624,10 +636,14 @@ TimeDependentMapOptions<IsCylindrical>::grid_to_inertial_map(
             : time_dependent_options::
                   transition_ends_at_cube_from_shape_options(
                       shape_options_B_.value());
+    // Index 12 is the sentinel for the single spherical-harmonic
+    // object-shell block, whose transition necessarily ends at the
+    // sphere; it must survive this gate or the block silently gets no
+    // distorted map and the horizon finder null-derefs on it.
     block_has_shape_map =
         block_has_shape_map and include_distorted_map.has_value() and
         (transition_ends_at_cube or include_distorted_map.value() < 6 or
-         return_excision_map);
+         include_distorted_map.value() == 12 or return_excision_map);
   }
 
   const auto& rot_scale_trans = rot_scale_trans_map_.has_value()
@@ -644,10 +660,12 @@ TimeDependentMapOptions<IsCylindrical>::grid_to_inertial_map(
                                         ? shape_maps_.size() - 2 + index
                                         : index);
     } else {
-      if (include_distorted_map.value() >= 12) {
+      // 12 is the spherical-harmonic object-shell sentinel; 13 is reserved
+      // for the excision map and is never requested through this argument.
+      if (include_distorted_map.value() > 12) {
         ERROR(
             "Invalid 'include_distorted_map' argument. Max value allowed is "
-            "11, but it is "
+            "12, but it is "
             << include_distorted_map.value());
       }
       shape =

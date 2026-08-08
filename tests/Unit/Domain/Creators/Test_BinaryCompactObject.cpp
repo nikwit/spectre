@@ -475,13 +475,17 @@ std::string create_option_string(
                          "      SizeInitialValues: [0.0, -0.1, 0.01]\n"
                          "      TransitionEndsAtCube: false\n"s
                        : "    ShapeMapA: None\n"s) +
-             (excise_B ? "    ShapeMapB:\n"
-                         "      LMax: 8\n"
-                         "      CoefficientTruncationLimit: 0.\n"
-                         "      InitialValues: Spherical\n"
-                         "      SizeInitialValues: [0.0, -0.2, 0.02]\n"
-                         "      TransitionEndsAtCube: true"s
-                       : "    ShapeMapB: None"s))
+             (excise_B
+                  ? "    ShapeMapB:\n"
+                    "      LMax: 8\n"
+                    "      CoefficientTruncationLimit: 0.\n"
+                    "      InitialValues: Spherical\n"
+                    "      SizeInitialValues: [0.0, -0.2, 0.02]\n"
+                    // a spherical-harmonic object shell needs the shape
+                    // transition to end at the sphere
+                    "      TransitionEndsAtCube: "s +
+                        (use_spherical_harmonics_shell_b ? "false"s : "true"s)
+                  : "    ShapeMapB: None"s))
           : "  TimeDependentMaps: None"};
   const std::string interior_A{
       add_boundary_condition
@@ -1559,6 +1563,19 @@ void test_spherical_harmonics_object_shells() {
   REQUIRE(sh_time_dep_creator != nullptr);
   CHECK_NOTHROW(sh_time_dep_creator->create_domain());
   CHECK(not sh_time_dep_creator->functions_of_time().empty());
+
+  // Both objects with a spherical-harmonic shell AND a shape map each. This
+  // is the configuration used to evolve a binary with one Ylm shell per
+  // object, so both shape maps must transition to the sphere.
+  const auto sh_both_time_dep_creator =
+      TestHelpers::test_option_tag<domain::OptionTags::DomainCreator<3>,
+                                   Metavariables<3, true>>(create_option_string(
+          true, true, true, false, true, 0, 0, 0, 120.0, true, true, true));
+  REQUIRE(sh_both_time_dep_creator != nullptr);
+  CHECK_NOTHROW(sh_both_time_dep_creator->create_domain());
+  check_two_sided_neighbor_consistency(
+      sh_both_time_dep_creator->create_domain());
+  CHECK(not sh_both_time_dep_creator->functions_of_time().empty());
 }
 
 void test_object_b_gauss_bonnet_enforcement() {
