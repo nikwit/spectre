@@ -279,6 +279,49 @@ struct MatcherConfig {
         "CentreAdvection (the exact model contains its advection by "
         "construction, so that A/B switch does not apply)."};
   };
+  struct FitVelocitySeparately {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Exact-frame mode only: split the 13-parameter Gauss-Newton solve "
+        "into two stages per fit instant -- first the boost rapidity alone "
+        "with the symmetric factor S frozen at its warm start, then the ten "
+        "S parameters with the rapidity frozen. Each stage sees only its own "
+        "residual response, so the near-degenerate combined direction "
+        "delta V = delta sigma (which leaves the coordinate centre velocity "
+        "V_c unchanged) cannot be traversed within a single fit cycle. "
+        "Requires FitExactFrame."};
+  };
+  struct PinSymmetricFactor {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Exact-frame mode only: pin the eta-symmetric frame factor to the "
+        "identity, S = 1 (s0 = sigma_i = s_ij = 0), and fit only the three "
+        "boost rapidity components. Physically exact for an isolated "
+        "(companion-free) hole, where the symmetric sector carries no "
+        "content; removes the near-degenerate delta V = delta sigma "
+        "direction by construction. Do not use with a companion present: "
+        "S = 1 then discards the O(m1/a) uniform-potential sector. Requires "
+        "FitExactFrame; mutually exclusive with FitVelocitySeparately."};
+  };
+  struct FitRadialDerivative {
+    using type = bool;
+    static constexpr Options::String help = {
+        "Exact-frame mode only: append the radial derivative of u^+ at the "
+        "fit shell to the residual, formed on both the data and model side "
+        "with the same Lagrange differentiation row over all radial "
+        "collocation shells of the boundary element. The derivative rows "
+        "carry the first-order radial-profile information that "
+        "distinguishes the boost from the simultaneity mixing sigma, which "
+        "the single-shell values only separate at second order. Requires "
+        "FitExactFrame."};
+  };
+  struct RadialDerivativeWeight {
+    using type = double;
+    static constexpr Options::String help = {
+        "Overall weight multiplying the radial-derivative rows relative to "
+        "the value rows (dimensionally a length scale; 1.0 weights d_r u^+ "
+        "in units of the mass). Only used with FitRadialDerivative."};
+  };
   struct CentreAdvection {
     using type = bool;
     static constexpr Options::String help = {
@@ -292,13 +335,26 @@ struct MatcherConfig {
         "velocity is pinned to a vanishing CenterVelocity."};
   };
 
+  struct ExcisionSphereName {
+    using type = std::string;
+    static constexpr Options::String help = {
+        "Name of the excision sphere in the domain whose abutting block "
+        "hosts the worldtube boundary element the matcher reads. "
+        "'ExcisionSphere' for the single-hole Sphere/SphericalShells "
+        "domains; 'ExcisionSphereB' for the small hole in a "
+        "BinaryCompactObject domain."};
+    static type suggested_value() { return "ExcisionSphere"; }
+  };
+
   using options =
       tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin, FitLMax,
                  FitInterval, FitCenterOffset, RateOde, SecondOrderOde,
                  StepperOde, GaugeDamping, UPlusAnchor, FitUPlus,
                  KretschmannTracePin, TracePinInterval, FitTraceStrain,
-                 FitVelocity, FitBulkBoost, FitExactFrame, CentreAdvection,
-                 SpatialMonopoleWeight, UPlusBlockWeights, FitRadialIndex>;
+                 FitVelocity, FitBulkBoost, FitExactFrame,
+                 FitVelocitySeparately, PinSymmetricFactor, FitRadialDerivative,
+                 RadialDerivativeWeight, CentreAdvection, SpatialMonopoleWeight,
+                 UPlusBlockWeights, FitRadialIndex, ExcisionSphereName>;
   static constexpr Options::String help = {
       "Online worldtube matching. By default, algebraically fit the "
       "instantaneous center and 13 affine-map coefficients using a strict "
@@ -316,9 +372,12 @@ struct MatcherConfig {
                 bool fit_uplus, bool kretschmann_trace_pin,
                 double trace_pin_interval, bool fit_trace_strain,
                 bool fit_velocity, bool fit_bulk_boost, bool fit_exact_frame,
+                bool fit_velocity_separately, bool pin_symmetric_factor,
+                bool fit_radial_derivative, double radial_derivative_weight,
                 bool centre_advection, double spatial_monopole_weight,
                 const std::array<double, 15>& uplus_block_weights,
-                size_t fit_radial_index)
+                size_t fit_radial_index,
+                std::string excision_sphere_name = "ExcisionSphere")
       : mass(mass),
         center(center),
         center_velocity(center_velocity),
@@ -338,10 +397,15 @@ struct MatcherConfig {
         fit_velocity(fit_velocity),
         fit_bulk_boost(fit_bulk_boost),
         fit_exact_frame(fit_exact_frame),
+        fit_velocity_separately(fit_velocity_separately),
+        pin_symmetric_factor(pin_symmetric_factor),
+        fit_radial_derivative(fit_radial_derivative),
+        radial_derivative_weight(radial_derivative_weight),
         centre_advection(centre_advection),
         spatial_monopole_weight(spatial_monopole_weight),
         uplus_block_weights(uplus_block_weights),
-        fit_radial_index(fit_radial_index) {
+        fit_radial_index(fit_radial_index),
+        excision_sphere_name(std::move(excision_sphere_name)) {
     if (fit_velocity and (rate_ode or second_order_ode or stepper_ode)) {
       ERROR(
           "FitVelocity is implemented for the value fit only: the rate and "
@@ -396,6 +460,31 @@ struct MatcherConfig {
           "trace; FitTraceStrain configures the linear path only. Set it "
           "false.");
     }
+    if (fit_velocity_separately and not fit_exact_frame) {
+      ERROR(
+          "FitVelocitySeparately splits the exact-frame Gauss-Newton solve "
+          "and requires FitExactFrame.");
+    }
+    if (pin_symmetric_factor and not fit_exact_frame) {
+      ERROR(
+          "PinSymmetricFactor pins the exact-frame symmetric factor and "
+          "requires FitExactFrame.");
+    }
+    if (pin_symmetric_factor and fit_velocity_separately) {
+      ERROR(
+          "PinSymmetricFactor leaves only the boost stage, so "
+          "FitVelocitySeparately has nothing to split. Set one of them "
+          "false.");
+    }
+    if (fit_radial_derivative and not fit_exact_frame) {
+      ERROR(
+          "FitRadialDerivative extends the exact-frame fit and requires "
+          "FitExactFrame.");
+    }
+    if (fit_radial_derivative and radial_derivative_weight <= 0.) {
+      ERROR("RadialDerivativeWeight must be positive, got "
+            << radial_derivative_weight << ".");
+    }
     for (const double weight : uplus_block_weights) {
       if (weight < 0.) {
         ERROR("UPlusBlockWeights entries must be non-negative, got " << weight
@@ -426,11 +515,16 @@ struct MatcherConfig {
   bool fit_velocity = false;
   bool fit_bulk_boost = false;
   bool fit_exact_frame = false;
+  bool fit_velocity_separately = false;
+  bool pin_symmetric_factor = false;
+  bool fit_radial_derivative = false;
+  double radial_derivative_weight = 1.0;
   bool centre_advection = true;
   double spatial_monopole_weight = 1.;
   std::array<double, 15> uplus_block_weights{
       {1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.}};
   size_t fit_radial_index = 0;
+  std::string excision_sphere_name{"ExcisionSphere"};
 };
 
 bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs);

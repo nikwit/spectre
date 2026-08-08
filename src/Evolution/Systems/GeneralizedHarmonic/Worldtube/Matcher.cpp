@@ -442,8 +442,38 @@ double design_matrix_condition_number(
 
 // component class of a gauge-mode row: 0 = A, 1 = C, 2 = V
 size_t gauge_row_class(const size_t row, const size_t n_modes) {
-  const size_t field = row / n_modes;
+  // Fields 0-5 are the value rows (A, C, V_0..V_3); with radial-derivative
+  // rows active, fields 6-11 repeat the same pattern for d_r u^+, sharing
+  // the per-{A, C, V} x ell block weights with the value rows.
+  const size_t field = (row / n_modes) % 6;
   return field == 0 ? 0 : (field == 1 ? 1 : 2);
+}
+
+// Row of the Lagrange differentiation matrix on arbitrary nodes, evaluated
+// at node i0: d/dr of the interpolant at nodes[i0] in terms of the nodal
+// values. Barycentric form; exact for the element's own polynomial radial
+// representation.
+std::vector<double> lagrange_derivative_row(const std::vector<double>& nodes,
+                                            const size_t i0) {
+  const size_t n = nodes.size();
+  std::vector<double> bary(n, 1.);
+  for (size_t k = 0; k < n; ++k) {
+    for (size_t j = 0; j < n; ++j) {
+      if (j != k) {
+        bary[k] /= (nodes[k] - nodes[j]);
+      }
+    }
+  }
+  std::vector<double> row(n, 0.);
+  double diagonal = 0.;
+  for (size_t j = 0; j < n; ++j) {
+    if (j != i0) {
+      row[j] = (bary[j] / bary[i0]) / (nodes[i0] - nodes[j]);
+      diagonal -= row[j];
+    }
+  }
+  row[i0] = diagonal;
+  return row;
 }
 
 // Unweighted per-{A, C, V} x ell closure and RMS diagnostics, shared by the
@@ -857,7 +887,8 @@ FitResult fit_exact_frame_parameters(
     const tnsr::I<DataVector, 3>& inertial_coords,
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
     const std::array<double, num_map_parameters>& theta_start,
-    const std::array<double, 3>& center_offset) {
+    const std::array<double, 3>& center_offset,
+    const std::optional<RadialDerivativeStencil>& radial_stencil) {
   namespace exact_frame = gh::Solutions::exact_frame;
   ASSERT(config.fit_l_max <= ylm_transform.l_max(),
          "FitLMax " << config.fit_l_max << " exceeds the grid l_max "
@@ -925,8 +956,95 @@ FitResult fit_exact_frame_parameters(
     return model_modes;
   };
 
+  // Optional radial-derivative rows: d_r u^+ at the fit shell, formed from
+  // the per-shell u^+ with the same Lagrange differentiation row on both
+  // the data and model side, projected with the fit-shell frame (frame held
+  // fixed under the derivative), and appended to the residual with an
+  // overall weight.
+  std::vector<SphereFrame> shell_frames{};
+  std::vector<double> deriv_row{};
+  std::vector<double> deriv_data_modes{};
+  const auto radial_derivative_of =
+      [&](const std::vector<tnsr::aa<DataVector, 3>>& u_shells)
+      -> tnsr::aa<DataVector, 3> {
+    tnsr::aa<DataVector, 3> du(frame.n_points, 0.);
+    for (size_t k = 0; k < u_shells.size(); ++k) {
+      for (size_t storage = 0; storage < du.size(); ++storage) {
+        du[storage] += deriv_row[k] * u_shells[k][storage];
+      }
+    }
+    return du;
+  };
+  if (radial_stencil.has_value()) {
+    const auto& st = *radial_stencil;
+    const size_t n_shells = st.metric.size();
+    std::vector<double> radii(n_shells, 0.);
+    std::vector<tnsr::aa<DataVector, 3>> u_data_shells{};
+    for (size_t k = 0; k < n_shells; ++k) {
+      shell_frames.push_back(
+          build_frame(st.metric[k], st.gamma2[k], st.coords[k], config.center));
+      DataVector r_sq(frame.n_points, 0.);
+      for (size_t i = 0; i < 3; ++i) {
+        r_sq += square(st.coords[k].get(i) - gsl::at(config.center, i));
+      }
+      double mean_r = 0.;
+      for (size_t p = 0; p < r_sq.size(); ++p) {
+        mean_r += std::sqrt(r_sq[p]);
+      }
+      radii[k] = mean_r / static_cast<double>(r_sq.size());
+      u_data_shells.push_back(
+          u_minus_of(st.metric[k], st.pi[k], st.phi[k], shell_frames[k], -1.));
+    }
+    deriv_row = lagrange_derivative_row(radii, st.fit_shell);
+    deriv_data_modes = gauge_modes(
+        gauge_components(radial_derivative_of(u_data_shells), frame),
+        ylm_transform, modes);
+    for (double& entry : deriv_data_modes) {
+      entry *= config.radial_derivative_weight;
+    }
+  }
+  const auto deriv_model_modes =
+      [&](const std::array<double, num_map_parameters>& theta)
+      -> std::vector<double> {
+    const auto& st = *radial_stencil;
+    std::vector<tnsr::aa<DataVector, 3>> u_model_shells{};
+    tnsr::aa<DataVector, 3> model_metric{};
+    tnsr::aa<DataVector, 3> model_pi{};
+    tnsr::iaa<DataVector, 3> model_phi{};
+    for (size_t k = 0; k < st.coords.size(); ++k) {
+      exact_frame::evolved_variables(make_not_null(&model_metric),
+                                     make_not_null(&model_pi),
+                                     make_not_null(&model_phi), st.coords[k],
+                                     0., config.mass, model_center, theta);
+      u_model_shells.push_back(
+          u_minus_of(model_metric, model_pi, model_phi, shell_frames[k], -1.));
+    }
+    std::vector<double> out = gauge_modes(
+        gauge_components(radial_derivative_of(u_model_shells), frame),
+        ylm_transform, modes);
+    for (double& entry : out) {
+      entry *= config.radial_derivative_weight;
+    }
+    return out;
+  };
+  // The full residual minimized by the solve: the u^+ value rows, plus the
+  // radial-derivative rows when the stencil is active.
+  const auto residual_full =
+      [&](const std::array<double, num_map_parameters>& theta)
+      -> std::vector<double> {
+    std::vector<double> out = residual_of(theta, -1., data_modes);
+    if (radial_stencil.has_value()) {
+      const std::vector<double> model_deriv = deriv_model_modes(theta);
+      out.reserve(out.size() + model_deriv.size());
+      for (size_t i = 0; i < model_deriv.size(); ++i) {
+        out.push_back(model_deriv[i] - deriv_data_modes[i]);
+      }
+    }
+    return out;
+  };
+
   const size_t n_modes = modes.indices.size();
-  std::vector<size_t> row_blocks(data_modes.size());
+  std::vector<size_t> row_blocks(data_modes.size() + deriv_data_modes.size());
   for (size_t i = 0; i < row_blocks.size(); ++i) {
     row_blocks[i] = 5 * gauge_row_class(i, n_modes) + modes.ells[i % n_modes];
   }
@@ -949,99 +1067,138 @@ FitResult fit_exact_frame_parameters(
       residual_of(zero_theta, -1., data_modes);
   const std::vector<double> minus_baseline_residual =
       residual_of(zero_theta, 1., minus_data_modes);
-  std::vector<double> residual = residual_of(theta, -1., data_modes);
-  result.residual_initial = norm_of(residual);
+  std::vector<double> residual = residual_full(theta);
+  // Reported residual norms are over the u^+ value rows only, keeping the
+  // diagnostics comparable across runs with and without derivative rows;
+  // the solve itself minimizes the full weighted vector.
+  const size_t n_value_rows = data_modes.size();
+  const auto value_norm = [n_value_rows](const std::vector<double>& r_full) {
+    double out = 0.;
+    for (size_t i = 0; i < n_value_rows; ++i) {
+      out += square(r_full[i]);
+    }
+    return std::sqrt(out);
+  };
+  result.residual_initial = value_norm(residual);
   result.baseline_residual = norm_of(baseline_residual);
   result.minus_baseline_residual = norm_of(minus_baseline_residual);
 
-  // Gauss-Newton over all 13 frame parameters. The finite-difference columns
-  // agree with the analytic response tensors at the zero point (the audited
-  // linearization identity), so this is the response-column Jacobian
-  // evaluated about the current frame without a second analytic code path.
+  // Gauss-Newton over a subset of the 13 frame parameters (all of them in
+  // the default joint solve). The finite-difference columns agree with the
+  // analytic response tensors at the zero point (the audited linearization
+  // identity), so this is the response-column Jacobian evaluated about the
+  // current frame without a second analytic code path.
   constexpr size_t max_iterations = 24;
   constexpr double fd_step = 1.0e-7;
   const size_t n_res = residual.size();
-  for (size_t iteration = 0; iteration < max_iterations; ++iteration) {
-    std::array<std::vector<double>, num_map_parameters> jacobian{};
-    for (size_t a = 0; a < num_map_parameters; ++a) {
-      auto theta_plus = theta;
-      gsl::at(theta_plus, a) += fd_step;
-      gsl::at(jacobian, a) = residual_of(theta_plus, -1., data_modes);
-      for (size_t i = 0; i < n_res; ++i) {
-        gsl::at(jacobian, a)[i] =
-            (gsl::at(jacobian, a)[i] - residual[i]) / fd_step;
+  const auto gauss_newton_over = [&](const std::vector<size_t>& active) {
+    const size_t n_active = active.size();
+    for (size_t iteration = 0; iteration < max_iterations; ++iteration) {
+      std::vector<std::vector<double>> jacobian(n_active);
+      for (size_t a = 0; a < n_active; ++a) {
+        auto theta_plus = theta;
+        gsl::at(theta_plus, active[a]) += fd_step;
+        jacobian[a] = residual_full(theta_plus);
+        for (size_t i = 0; i < n_res; ++i) {
+          jacobian[a][i] = (jacobian[a][i] - residual[i]) / fd_step;
+        }
       }
-    }
-    std::vector<std::vector<double>> jtj(
-        num_map_parameters, std::vector<double>(num_map_parameters, 0.));
-    std::vector<double> jtr(num_map_parameters, 0.);
-    for (size_t a = 0; a < num_map_parameters; ++a) {
-      for (size_t b = a; b < num_map_parameters; ++b) {
+      std::vector<std::vector<double>> jtj(n_active,
+                                           std::vector<double>(n_active, 0.));
+      std::vector<double> jtr(n_active, 0.);
+      for (size_t a = 0; a < n_active; ++a) {
+        for (size_t b = a; b < n_active; ++b) {
+          double sum = 0.;
+          for (size_t i = 0; i < n_res; ++i) {
+            const double weight =
+                gsl::at(config.uplus_block_weights, row_blocks[i]);
+            sum += square(weight) * jacobian[a][i] * jacobian[b][i];
+          }
+          jtj[a][b] = sum;
+          jtj[b][a] = sum;
+        }
         double sum = 0.;
         for (size_t i = 0; i < n_res; ++i) {
           const double weight =
               gsl::at(config.uplus_block_weights, row_blocks[i]);
-          sum += square(weight) * gsl::at(jacobian, a)[i] *
-                 gsl::at(jacobian, b)[i];
+          sum += square(weight) * jacobian[a][i] * residual[i];
         }
-        jtj[a][b] = sum;
-        jtj[b][a] = sum;
+        jtr[a] = -sum;
       }
-      double sum = 0.;
-      for (size_t i = 0; i < n_res; ++i) {
-        const double weight =
-            gsl::at(config.uplus_block_weights, row_blocks[i]);
-        sum += square(weight) * gsl::at(jacobian, a)[i] * residual[i];
-      }
-      jtr[a] = -sum;
-    }
-    result.condition_number = design_matrix_condition_number(jtj);
-    ASSERT(std::isfinite(result.condition_number),
-           "UPlusBlockWeights make the exact-frame fit rank deficient.");
-    const auto delta = solve_normal_equations(std::move(jtj), std::move(jtr));
+      // In the split solve the recorded condition number is that of the
+      // last stage solved (the S stage), the larger of the two in practice.
+      result.condition_number = design_matrix_condition_number(jtj);
+      ASSERT(std::isfinite(result.condition_number),
+             "UPlusBlockWeights make the exact-frame fit rank deficient.");
+      const auto delta = solve_normal_equations(std::move(jtj), std::move(jtr));
 
-    // backtracking line search on the weighted objective, rejecting steps
-    // that leave the admissible frame-map domain
-    const double old_norm = weighted_norm(residual);
-    double line_factor = 1.;
-    bool accepted = false;
-    std::array<double, num_map_parameters> candidate_theta{};
-    std::vector<double> candidate_residual{};
-    while (line_factor >= 1.0 / 128.) {
-      candidate_theta = theta;
-      for (size_t a = 0; a < num_map_parameters; ++a) {
-        gsl::at(candidate_theta, a) += line_factor * delta[a];
-      }
-      if (admissible(candidate_theta)) {
-        candidate_residual = residual_of(candidate_theta, -1., data_modes);
-        if (weighted_norm(candidate_residual) < old_norm) {
-          accepted = true;
-          break;
+      // backtracking line search on the weighted objective, rejecting steps
+      // that leave the admissible frame-map domain
+      const double old_norm = weighted_norm(residual);
+      double line_factor = 1.;
+      bool accepted = false;
+      std::array<double, num_map_parameters> candidate_theta{};
+      std::vector<double> candidate_residual{};
+      while (line_factor >= 1.0 / 128.) {
+        candidate_theta = theta;
+        for (size_t a = 0; a < n_active; ++a) {
+          gsl::at(candidate_theta, active[a]) += line_factor * delta[a];
         }
+        if (admissible(candidate_theta)) {
+          candidate_residual = residual_full(candidate_theta);
+          if (weighted_norm(candidate_residual) < old_norm) {
+            accepted = true;
+            break;
+          }
+        }
+        line_factor *= 0.5;
       }
-      line_factor *= 0.5;
+      if (not accepted) {
+        break;
+      }
+      theta = candidate_theta;
+      residual = std::move(candidate_residual);
+      ++result.iterations;
+      double max_delta = 0.;
+      double max_theta = 0.;
+      for (size_t a = 0; a < n_active; ++a) {
+        max_delta = std::max(max_delta, std::abs(line_factor * delta[a]));
+        max_theta = std::max(max_theta, std::abs(gsl::at(theta, active[a])));
+      }
+      if (max_delta < std::max(1.0e-13, 1.0e-8 * max_theta)) {
+        break;
+      }
     }
-    if (not accepted) {
-      break;
+  };
+
+  if (config.pin_symmetric_factor) {
+    // S = 1 pinned: zero the symmetric-factor entries (also in the warm
+    // start) and fit only the boost rapidity. Exact for a companion-free
+    // hole; removes the delta V = delta sigma direction by construction.
+    for (size_t a = 3; a < num_map_parameters; ++a) {
+      gsl::at(theta, a) = 0.;
     }
-    theta = candidate_theta;
-    residual = std::move(candidate_residual);
-    result.iterations = iteration + 1;
-    double max_delta = 0.;
-    double max_theta = 0.;
-    for (size_t a = 0; a < num_map_parameters; ++a) {
-      max_delta = std::max(max_delta, std::abs(line_factor * delta[a]));
-      max_theta = std::max(max_theta, std::abs(gsl::at(theta, a)));
-    }
-    if (max_delta < std::max(1.0e-13, 1.0e-8 * max_theta)) {
-      break;
-    }
+    residual = residual_of(theta, -1., data_modes);
+    gauss_newton_over(std::vector<size_t>{0, 1, 2});
+  } else if (config.fit_velocity_separately) {
+    // Two-stage solve: the boost rapidity with S frozen at its warm start,
+    // then S with the rapidity frozen. Each stage sees only its own residual
+    // response, so the near-null joint direction delta V = delta sigma
+    // (constant V_c) cannot be traversed within one fit cycle.
+    gauss_newton_over(std::vector<size_t>{0, 1, 2});
+    gauss_newton_over(std::vector<size_t>{3, 4, 5, 6, 7, 8, 9, 10, 11, 12});
+  } else {
+    std::vector<size_t> all(num_map_parameters);
+    std::iota(all.begin(), all.end(), 0);
+    gauss_newton_over(all);
   }
-  result.residual_final = norm_of(residual);
+  result.residual_final = value_norm(residual);
   const std::vector<double> minus_residual =
       residual_of(theta, 1., minus_data_modes);
   result.minus_residual_final = norm_of(minus_residual);
-  fill_block_diagnostics(make_not_null(&result), modes, residual,
+  const std::vector<double> value_residual(residual.begin(),
+                                           residual.begin() + n_value_rows);
+  fill_block_diagnostics(make_not_null(&result), modes, value_residual,
                          baseline_residual, minus_residual,
                          minus_baseline_residual);
 

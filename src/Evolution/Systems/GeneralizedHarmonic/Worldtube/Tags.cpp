@@ -27,10 +27,15 @@ void MatcherConfig::pup(PUP::er& p) {
   p | fit_velocity;
   p | fit_bulk_boost;
   p | fit_exact_frame;
+  p | fit_velocity_separately;
+  p | pin_symmetric_factor;
+  p | fit_radial_derivative;
+  p | radial_derivative_weight;
   p | centre_advection;
   p | spatial_monopole_weight;
   p | uplus_block_weights;
   p | fit_radial_index;
+  p | excision_sphere_name;
 }
 
 bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
@@ -52,10 +57,15 @@ bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
          lhs.fit_velocity == rhs.fit_velocity and
          lhs.fit_bulk_boost == rhs.fit_bulk_boost and
          lhs.fit_exact_frame == rhs.fit_exact_frame and
+         lhs.fit_velocity_separately == rhs.fit_velocity_separately and
+         lhs.pin_symmetric_factor == rhs.pin_symmetric_factor and
+         lhs.fit_radial_derivative == rhs.fit_radial_derivative and
+         lhs.radial_derivative_weight == rhs.radial_derivative_weight and
          lhs.centre_advection == rhs.centre_advection and
          lhs.spatial_monopole_weight == rhs.spatial_monopole_weight and
          lhs.uplus_block_weights == rhs.uplus_block_weights and
-         lhs.fit_radial_index == rhs.fit_radial_index;
+         lhs.fit_radial_index == rhs.fit_radial_index and
+         lhs.excision_sphere_name == rhs.excision_sphere_name;
 }
 
 bool operator!=(const MatcherConfig& lhs, const MatcherConfig& rhs) {

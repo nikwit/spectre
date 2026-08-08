@@ -16,6 +16,8 @@
 #include "DataStructures/DataBox/DataBox.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
+#include "Domain/Domain.hpp"
+#include "Domain/ExcisionSphere.hpp"
 #include "Domain/Structure/Direction.hpp"
 #include "Domain/Structure/Element.hpp"
 #include "Domain/Tags.hpp"
@@ -50,8 +52,9 @@ namespace gh::Worldtube::Actions {
  * \brief Element-local online worldtube matching (runs in the step loop).
  *
  * On the element owning the excision face — with the spherical-harmonic
- * angular basis there is exactly one, self-identified as the block-0 element
- * with an external lower-radial boundary — this action slices the evolved
+ * angular basis there is exactly one, self-identified as the element whose
+ * block abuts the configured excision sphere and that owns the abutting
+ * external boundary — this action slices the evolved
  * fields to the excision face, fits the 13 first-order affine-map parameters
  * per `gh::Worldtube::fit_map_parameters`, stores the result in
  * `Tags::MapParameters`, and writes a diagnostic row to
@@ -81,11 +84,33 @@ struct FitMapParameters {
       return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
     const auto& element = db::get<domain::Tags::Element<Dim>>(box);
-    const auto inner_face = Direction<Dim>::lower_xi();
-    if (element.id().block_id() != 0 or
-        element.external_boundaries().count(inner_face) == 0) {
+    // The worldtube boundary element is the one whose block abuts the
+    // configured excision sphere and that owns the abutting external
+    // boundary (with the spherical-harmonic angular basis there is exactly
+    // one such element per radial refinement level, and only the innermost
+    // owns the external face).
+    const auto& domain = db::get<domain::Tags::Domain<Dim>>(box);
+    const auto& excision_spheres = domain.excision_spheres();
+    const auto excision_sphere_it =
+        excision_spheres.find(config_opt->excision_sphere_name);
+    if (excision_sphere_it == excision_spheres.end()) {
+      ERROR("The worldtube matcher's ExcisionSphereName '"
+            << config_opt->excision_sphere_name
+            << "' is not an excision sphere of the domain. The domain has "
+            << excision_spheres.size() << " excision sphere(s).");
+    }
+    const std::optional<Direction<Dim>> abutting_direction =
+        excision_sphere_it->second.abutting_direction(element.id());
+    if (not abutting_direction.has_value() or
+        element.external_boundaries().count(*abutting_direction) == 0) {
       return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
+    ASSERT(*abutting_direction == Direction<Dim>::lower_xi(),
+           "The online worldtube matcher requires the excision face to be "
+           "the lower boundary of the radial logical direction 0 "
+           "(spherical-harmonic shell block convention), but the excision "
+           "sphere abuts in direction "
+               << *abutting_direction);
     const double time = db::get<::Tags::Time>(box);
     const auto& mesh = db::get<domain::Tags::Mesh<Dim>>(box);
     ASSERT(mesh.basis(0) != Spectral::Basis::SphericalHarmonic and
@@ -116,18 +141,29 @@ struct FitMapParameters {
     ASSERT(radial_index < n_radial, "FitRadialIndex "
                                         << radial_index << " out of range for "
                                         << n_radial << " radial points");
-    const auto face_slice = [n_radial, n_face,
-                             radial_index](const DataVector& volume) {
+    const auto shell_slice = [n_radial, n_face](const DataVector& volume,
+                                                const size_t shell) {
       DataVector face(n_face);
       for (size_t k = 0; k < n_face; ++k) {
-        face[k] = volume[k * n_radial + radial_index];
+        face[k] = volume[k * n_radial + shell];
       }
       return face;
+    };
+    const auto face_slice = [&shell_slice,
+                             radial_index](const DataVector& volume) {
+      return shell_slice(volume, radial_index);
     };
     const auto slice_tensor = [&face_slice](auto face_tensor,
                                             const auto& volume_tensor) {
       for (size_t storage = 0; storage < volume_tensor.size(); ++storage) {
         (*face_tensor)[storage] = face_slice(volume_tensor[storage]);
+      }
+    };
+    const auto slice_tensor_at = [&shell_slice](auto face_tensor,
+                                                const auto& volume_tensor,
+                                                const size_t shell) {
+      for (size_t storage = 0; storage < volume_tensor.size(); ++storage) {
+        (*face_tensor)[storage] = shell_slice(volume_tensor[storage], shell);
       }
     };
 
@@ -561,9 +597,39 @@ struct FitMapParameters {
           theta_start[10] = trace_pin;
           theta_start[12] = trace_pin;
         }
+        std::optional<RadialDerivativeStencil> radial_stencil{};
+        if (fit_config.fit_radial_derivative) {
+          radial_stencil.emplace();
+          radial_stencil->fit_shell = radial_index;
+          const auto& metric_volume =
+              db::get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(box);
+          const auto& pi_volume = db::get<gh::Tags::Pi<DataVector, Dim>>(box);
+          const auto& phi_volume = db::get<gh::Tags::Phi<DataVector, Dim>>(box);
+          const auto& gamma2_volume = db::get<gh::Tags::ConstraintGamma2>(box);
+          const auto& coords_volume =
+              db::get<domain::Tags::Coordinates<Dim, Frame::Inertial>>(box);
+          for (size_t shell = 0; shell < n_radial; ++shell) {
+            tnsr::aa<DataVector, Dim> metric_shell{};
+            tnsr::aa<DataVector, Dim> pi_shell{};
+            tnsr::iaa<DataVector, Dim> phi_shell{};
+            Scalar<DataVector> gamma2_shell{};
+            tnsr::I<DataVector, Dim> coords_shell{};
+            slice_tensor_at(make_not_null(&metric_shell), metric_volume, shell);
+            slice_tensor_at(make_not_null(&pi_shell), pi_volume, shell);
+            slice_tensor_at(make_not_null(&phi_shell), phi_volume, shell);
+            slice_tensor_at(make_not_null(&gamma2_shell), gamma2_volume, shell);
+            slice_tensor_at(make_not_null(&coords_shell), coords_volume, shell);
+            radial_stencil->metric.push_back(std::move(metric_shell));
+            radial_stencil->pi.push_back(std::move(pi_shell));
+            radial_stencil->phi.push_back(std::move(phi_shell));
+            radial_stencil->gamma2.push_back(std::move(gamma2_shell));
+            radial_stencil->coords.push_back(std::move(coords_shell));
+          }
+        }
         result = fit_exact_frame_parameters(
             metric_face, pi_face, phi_face, gamma2_face, coords_face,
-            ylm_transform, fit_config, theta_start, center_offset_start);
+            ylm_transform, fit_config, theta_start, center_offset_start,
+            radial_stencil);
       } else {
         result = fit_map_parameters(
             metric_face, pi_face, phi_face, gamma2_face, coords_face,

@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 #include "DataStructures/DataVector.hpp"
@@ -223,6 +224,22 @@ FitResult fit_map_parameters(
  * is evaluated held-out and never enters the solve. The returned `p` and
  * `bulk_velocity` are diagnostics only, described at `FitResult`.
  */
+/// Per-shell inputs for the optional radial-derivative rows of the
+/// exact-frame fit (`FitRadialDerivative`): the evolved fields, gamma2, and
+/// inertial coordinates sliced on every radial collocation shell of the
+/// boundary element, plus the index of the fit shell. Both the data-side
+/// and the model-side radial derivative of u^+ at the fit shell are formed
+/// with the same Lagrange differentiation row on the shell radii, so
+/// differentiation error cancels in the residual instead of biasing it.
+struct RadialDerivativeStencil {
+  std::vector<tnsr::aa<DataVector, 3>> metric{};
+  std::vector<tnsr::aa<DataVector, 3>> pi{};
+  std::vector<tnsr::iaa<DataVector, 3>> phi{};
+  std::vector<Scalar<DataVector>> gamma2{};
+  std::vector<tnsr::I<DataVector, 3>> coords{};
+  size_t fit_shell = 0;
+};
+
 FitResult fit_exact_frame_parameters(
     const tnsr::aa<DataVector, 3>& spacetime_metric,
     const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
@@ -230,7 +247,9 @@ FitResult fit_exact_frame_parameters(
     const tnsr::I<DataVector, 3>& inertial_coords,
     const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
     const std::array<double, num_map_parameters>& theta_start,
-    const std::array<double, 3>& center_offset);
+    const std::array<double, 3>& center_offset,
+    const std::optional<RadialDerivativeStencil>& radial_stencil =
+        std::nullopt);
 
 /// Result of one linear rate fit (the `RateOde` mode).
 struct RateFitResult {
