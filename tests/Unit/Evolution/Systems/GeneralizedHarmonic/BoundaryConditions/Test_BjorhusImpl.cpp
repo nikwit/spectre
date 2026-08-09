@@ -8,8 +8,12 @@
 #include <cstddef>
 #include <limits>
 #include <memory>
+#include <random>
+#include <string>
 
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/Tensor/EagerMath/DeterminantAndInverse.hpp"
+#include "DataStructures/Tensor/EagerMath/RaiseOrLowerIndex.hpp"
 #include "DataStructures/Tensor/IndexType.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "Domain/Structure/Direction.hpp"
@@ -18,7 +22,15 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Constraints.hpp"
 #include "Framework/CheckWithRandomValues.hpp"
 #include "Framework/SetupLocalPythonEnvironment.hpp"
+#include "Framework/TestHelpers.hpp"
+#include "Helpers/DataStructures/MakeWithRandomValues.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "PointwiseFunctions/GeneralRelativity/InterfaceNullNormal.hpp"
+#include "PointwiseFunctions/GeneralRelativity/InverseSpacetimeMetric.hpp"
+#include "PointwiseFunctions/GeneralRelativity/ProjectionOperators.hpp"
+#include "PointwiseFunctions/GeneralRelativity/SpacetimeMetric.hpp"
+#include "PointwiseFunctions/GeneralRelativity/SpacetimeNormalOneForm.hpp"
+#include "PointwiseFunctions/GeneralRelativity/SpacetimeNormalVector.hpp"
 #include "PointwiseFunctions/MathFunctions/Sinusoid.hpp"
 #include "Utilities/ContainerHelpers.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
@@ -1583,7 +1595,169 @@ void test_constraint_preserving_gauge_physical_corrections_dt_v_minus(
       "constraint_preserving_gauge_physical_corrections_dt_v_minus",
       {{{-1., 1.}}}, DataVector(grid_size_each_dimension));
 }
+
+// The constraint-preserving, physical and gauge projections must partition the
+// identity on symmetric tensors. That is what makes "freeze every sector, then
+// let each sector add its own projection back" reproduce the free evolution,
+// and it is what lets a boundary condition impose the sectors independently.
+void test_sector_projections_partition_the_identity() {
+  MAKE_GENERATOR(generator);
+  std::uniform_real_distribution<> distribution(-0.1, 0.1);
+  const size_t num_points = 5;
+  const DataVector used_for_size(num_points);
+
+  // A valid boundary: a perturbation of flat space with a generic unit normal.
+  auto spatial_metric = make_with_value<tnsr::ii<DataVector, VolumeDim, frame>>(
+      used_for_size, 0.);
+  for (size_t i = 0; i < VolumeDim; ++i) {
+    for (size_t j = i; j < VolumeDim; ++j) {
+      spatial_metric.get(i, j) = make_with_random_values<DataVector>(
+          make_not_null(&generator), make_not_null(&distribution),
+          used_for_size);
+    }
+    spatial_metric.get(i, i) += 1.;
+  }
+  const auto det_and_inverse = determinant_and_inverse(spatial_metric);
+  const auto& inverse_spatial_metric = det_and_inverse.second;
+  auto lapse = make_with_value<Scalar<DataVector>>(used_for_size, 1.);
+  get(lapse) += make_with_random_values<DataVector>(
+      make_not_null(&generator), make_not_null(&distribution), used_for_size);
+  const auto shift =
+      make_with_random_values<tnsr::I<DataVector, VolumeDim, frame>>(
+          make_not_null(&generator), make_not_null(&distribution),
+          used_for_size);
+
+  // Unit normal to the interface, normalised in the spatial metric.
+  auto normal_covector =
+      make_with_value<tnsr::i<DataVector, VolumeDim, frame>>(used_for_size, 0.);
+  get<0>(normal_covector) = 1.;
+  get<1>(normal_covector) = 0.3;
+  get<2>(normal_covector) = -0.2;
+  DataVector normal_norm(num_points, 0.);
+  for (size_t i = 0; i < VolumeDim; ++i) {
+    for (size_t j = 0; j < VolumeDim; ++j) {
+      normal_norm += inverse_spatial_metric.get(i, j) * normal_covector.get(i) *
+                     normal_covector.get(j);
+    }
+  }
+  normal_norm = sqrt(normal_norm);
+  for (size_t i = 0; i < VolumeDim; ++i) {
+    normal_covector.get(i) /= normal_norm;
+  }
+  auto normal_vector =
+      make_with_value<tnsr::I<DataVector, VolumeDim, frame>>(used_for_size, 0.);
+  raise_or_lower_index(make_not_null(&normal_vector), normal_covector,
+                       inverse_spatial_metric);
+
+  const auto spacetime_metric =
+      gr::spacetime_metric(lapse, shift, spatial_metric);
+  const auto inverse_spacetime_metric =
+      gr::inverse_spacetime_metric(lapse, shift, inverse_spatial_metric);
+  const auto spacetime_normal_one_form =
+      gr::spacetime_normal_one_form<DataVector, VolumeDim, frame>(lapse);
+  const auto spacetime_normal_vector =
+      gr::spacetime_normal_vector(lapse, shift);
+
+  auto projection_ab = make_with_value<tnsr::aa<DataVector, VolumeDim, frame>>(
+      used_for_size, 0.);
+  auto projection_Ab = make_with_value<tnsr::Ab<DataVector, VolumeDim, frame>>(
+      used_for_size, 0.);
+  auto projection_AB = make_with_value<tnsr::AA<DataVector, VolumeDim, frame>>(
+      used_for_size, 0.);
+  gr::transverse_projection_operator(
+      make_not_null(&projection_ab), spacetime_metric,
+      spacetime_normal_one_form, normal_covector, shift);
+  gr::transverse_projection_operator(
+      make_not_null(&projection_Ab), spacetime_normal_vector,
+      spacetime_normal_one_form, normal_vector, normal_covector, shift);
+  gr::transverse_projection_operator(make_not_null(&projection_AB),
+                                     inverse_spacetime_metric,
+                                     spacetime_normal_vector, normal_vector);
+
+  auto incoming_null_one_form =
+      make_with_value<tnsr::a<DataVector, VolumeDim, frame>>(used_for_size, 0.);
+  auto outgoing_null_one_form =
+      make_with_value<tnsr::a<DataVector, VolumeDim, frame>>(used_for_size, 0.);
+  auto incoming_null_vector =
+      make_with_value<tnsr::A<DataVector, VolumeDim, frame>>(used_for_size, 0.);
+  auto outgoing_null_vector =
+      make_with_value<tnsr::A<DataVector, VolumeDim, frame>>(used_for_size, 0.);
+  gr::interface_null_normal(make_not_null(&incoming_null_one_form),
+                            spacetime_normal_one_form, normal_covector, shift,
+                            -1.);
+  gr::interface_null_normal(make_not_null(&outgoing_null_one_form),
+                            spacetime_normal_one_form, normal_covector, shift,
+                            1.);
+  gr::interface_null_normal(make_not_null(&incoming_null_vector),
+                            spacetime_normal_vector, normal_vector, -1.);
+  gr::interface_null_normal(make_not_null(&outgoing_null_vector),
+                            spacetime_normal_vector, normal_vector, 1.);
+
+  const DataVector unit_coefficient(num_points, 1.);
+
+  const auto project = [&](const std::string& sector,
+                           const tnsr::aa<DataVector, VolumeDim, frame>&
+                               source) {
+    auto result = make_with_value<tnsr::aa<DataVector, VolumeDim, frame>>(
+        used_for_size, 0.);
+    if (sector == "constraint") {
+      gh::BoundaryConditions::Bjorhus::detail::add_constraint_sector_projection(
+          make_not_null(&result), unit_coefficient, outgoing_null_one_form,
+          incoming_null_vector, projection_ab, projection_Ab, projection_AB,
+          source);
+    } else if (sector == "physical") {
+      gh::BoundaryConditions::Bjorhus::detail::add_physical_sector_projection(
+          make_not_null(&result), unit_coefficient, projection_ab,
+          projection_Ab, projection_AB, source);
+    } else {
+      gh::BoundaryConditions::Bjorhus::detail::add_gauge_sector_projection(
+          make_not_null(&result), unit_coefficient, incoming_null_one_form,
+          outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
+          projection_Ab, source);
+    }
+    return result;
+  };
+
+  const auto source =
+      make_with_random_values<tnsr::aa<DataVector, VolumeDim, frame>>(
+          make_not_null(&generator), make_not_null(&distribution),
+          used_for_size);
+  const std::array<std::string, 3> sectors{{"constraint", "physical", "gauge"}};
+
+  auto sum = make_with_value<tnsr::aa<DataVector, VolumeDim, frame>>(
+      used_for_size, 0.);
+  for (const auto& sector : sectors) {
+    const auto piece = project(sector, source);
+    for (size_t a = 0; a <= VolumeDim; ++a) {
+      for (size_t b = a; b <= VolumeDim; ++b) {
+        sum.get(a, b) += piece.get(a, b);
+      }
+    }
+  }
+  CHECK_ITERABLE_APPROX(sum, source);
+
+  const auto zero = make_with_value<tnsr::aa<DataVector, VolumeDim, frame>>(
+      used_for_size, 0.);
+  for (const auto& sector : sectors) {
+    const auto piece = project(sector, source);
+    CHECK_ITERABLE_APPROX(project(sector, piece), piece);
+    for (const auto& other : sectors) {
+      if (other != sector) {
+        CHECK_ITERABLE_APPROX(project(other, piece), zero);
+      }
+    }
+  }
+}
 }  // namespace
+
+// Its own case rather than a call from the VMinus one: this is pure algebra
+// with no python dependency, so it stays runnable when the pypp comparisons
+// cannot run.
+SPECTRE_TEST_CASE(
+    "Unit.Evolution.Systems.GeneralizedHarmonic.BCBjorhus.SectorProjections",
+    "[Unit][Evolution]") {
+  test_sector_projections_partition_the_identity();
+}
 
 SPECTRE_TEST_CASE("Unit.Evolution.Systems.GeneralizedHarmonic.BCBjorhus.VPsi",
                   "[Unit][Evolution]") {

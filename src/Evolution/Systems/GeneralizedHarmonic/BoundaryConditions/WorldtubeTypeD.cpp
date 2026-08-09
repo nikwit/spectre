@@ -54,74 +54,60 @@ void set_bc_corr_zero_when_char_speed_is_positive(
 }  // namespace
 
 namespace detail {
-WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(
+SectorImposition convert_sector_imposition_from_yaml(
     const Options::Option& options) {
-  const auto type_read = options.parse_as<std::string>();
-  if (type_read == "ConstraintPreserving") {
-    return WorldtubeTypeDType::ConstraintPreserving;
-  } else if (type_read == "ConstraintPreservingPhysical") {
-    return WorldtubeTypeDType::ConstraintPreservingPhysical;
-  } else if (type_read == "ConstraintPreservingPhysicalFrozenGauge") {
-    return WorldtubeTypeDType::ConstraintPreservingPhysicalFrozenGauge;
-  } else if (type_read == "ConstraintPreservingPhysicalAnalyticGhostGauge") {
-    return WorldtubeTypeDType::ConstraintPreservingPhysicalAnalyticGhostGauge;
-  } else if (type_read == "ConstraintPreservingPhysicalSommerfeldGhostGauge") {
-    return WorldtubeTypeDType::ConstraintPreservingPhysicalSommerfeldGhostGauge;
-  } else if (type_read == "ConstraintPreservingPhysicalOnlineGhostGauge") {
-    return WorldtubeTypeDType::ConstraintPreservingPhysicalOnlineGhostGauge;
-  } else if (type_read == "ConstraintPreservingPhysicalGhostGauge") {
-    return WorldtubeTypeDType::ConstraintPreservingPhysicalGhostGauge;
+  const auto read = options.parse_as<std::string>();
+  if (read == "Ghost") {
+    return SectorImposition::Ghost;
+  } else if (read == "Bjorhus") {
+    return SectorImposition::Bjorhus;
+  } else if (read == "Frozen") {
+    return SectorImposition::Frozen;
   }
   PARSE_ERROR(options.context(),
-              "Failed to convert input option to "
-              "WorldtubeTypeDType::Type. Must "
-              "be one of ConstraintPreserving, ConstraintPreservingPhysical, "
-              "ConstraintPreservingPhysicalFrozenGauge, "
-              "ConstraintPreservingPhysicalAnalyticGhostGauge, "
-              "ConstraintPreservingPhysicalSommerfeldGhostGauge, "
-              "ConstraintPreservingPhysicalOnlineGhostGauge or "
-              "ConstraintPreservingPhysicalGhostGauge");
+              "Failed to convert input option to a sector imposition. Must be "
+              "one of Ghost, Bjorhus or Frozen.");
 }
 }  // namespace detail
 
 template <size_t Dim>
 WorldtubeTypeD<Dim>::WorldtubeTypeD(
-    const detail::WorldtubeTypeDType type,
-    std::optional<std::unique_ptr<evolution::initial_data::InitialData>>
-        analytic_gauge_prescription,
-    const double gauge_relaxation_rate, const Options::Context& context)
-    : type_(type),
-      analytic_gauge_prescription_(analytic_gauge_prescription.has_value()
-                                       ? std::move(*analytic_gauge_prescription)
-                                       : nullptr),
-      gauge_relaxation_rate_(gauge_relaxation_rate) {
-  if ((type_ == detail::WorldtubeTypeDType::
-                    ConstraintPreservingPhysicalAnalyticGhostGauge or
-       type_ == detail::WorldtubeTypeDType::
-                    ConstraintPreservingPhysicalSommerfeldGhostGauge) and
-      analytic_gauge_prescription_ == nullptr) {
+    const detail::SectorImposition constraint_preserving_sector,
+    const detail::SectorImposition physical_sector,
+    const detail::SectorImposition gauge_sector,
+    const Options::Context& context)
+    : constraint_preserving_sector_(constraint_preserving_sector),
+      physical_sector_(physical_sector),
+      gauge_sector_(gauge_sector) {
+  if (gauge_sector_ == detail::SectorImposition::Bjorhus) {
     PARSE_ERROR(context,
-                "This Type requires an AnalyticGaugePrescription, but None "
-                "was given.");
+                "GaugeSector: Bjorhus is not implemented. A time-derivative "
+                "condition on the gauge sector needs dt of the model's u^-, "
+                "hence a second time derivative of the model, which the "
+                "worldtube matcher does not supply. Use Ghost to drive the "
+                "gauge sector weakly from the model, or Frozen for the "
+                "no-model control.");
   }
-  if (gauge_relaxation_rate_ < 0.) {
+  if (constraint_preserving_sector_ == detail::SectorImposition::Frozen) {
     PARSE_ERROR(context,
-                "GaugeRelaxationRate must be non-negative, but got "
-                    << gauge_relaxation_rate_
-                    << ". A negative rate drives the gauge sector away from "
-                       "the model value.");
+                "ConstraintPreservingSector: Frozen is not offered. Freezing "
+                "the constraint sector defeats the purpose of the boundary "
+                "condition, which exists to stop constraint violations "
+                "entering. Use Ghost or Bjorhus.");
+  }
+  if (physical_sector_ == detail::SectorImposition::Frozen) {
+    PARSE_ERROR(context,
+                "PhysicalSector: Frozen is not offered. Use Ghost or "
+                "Bjorhus.");
   }
 }
 
 template <size_t Dim>
 WorldtubeTypeD<Dim>::WorldtubeTypeD(const WorldtubeTypeD& rhs)
     : BoundaryCondition<Dim>(rhs),
-      type_(rhs.type_),
-      analytic_gauge_prescription_(
-          rhs.analytic_gauge_prescription_ == nullptr
-              ? nullptr
-              : rhs.analytic_gauge_prescription_->get_clone()),
-      gauge_relaxation_rate_(rhs.gauge_relaxation_rate_) {}
+      constraint_preserving_sector_(rhs.constraint_preserving_sector_),
+      physical_sector_(rhs.physical_sector_),
+      gauge_sector_(rhs.gauge_sector_) {}
 
 template <size_t Dim>
 WorldtubeTypeD<Dim>& WorldtubeTypeD<Dim>::operator=(const WorldtubeTypeD& rhs) {
@@ -129,12 +115,9 @@ WorldtubeTypeD<Dim>& WorldtubeTypeD<Dim>::operator=(const WorldtubeTypeD& rhs) {
     return *this;
   }
   BoundaryCondition<Dim>::operator=(rhs);
-  type_ = rhs.type_;
-  analytic_gauge_prescription_ =
-      rhs.analytic_gauge_prescription_ == nullptr
-          ? nullptr
-          : rhs.analytic_gauge_prescription_->get_clone();
-  gauge_relaxation_rate_ = rhs.gauge_relaxation_rate_;
+  constraint_preserving_sector_ = rhs.constraint_preserving_sector_;
+  physical_sector_ = rhs.physical_sector_;
+  gauge_sector_ = rhs.gauge_sector_;
   return *this;
 }
 
@@ -151,9 +134,9 @@ WorldtubeTypeD<Dim>::get_clone() const {
 template <size_t Dim>
 void WorldtubeTypeD<Dim>::pup(PUP::er& p) {
   BoundaryCondition<Dim>::pup(p);
-  p | type_;
-  p | analytic_gauge_prescription_;
-  p | gauge_relaxation_rate_;
+  p | constraint_preserving_sector_;
+  p | physical_sector_;
+  p | gauge_sector_;
 }
 
 template <size_t Dim>
@@ -373,13 +356,38 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
     return {};
   }
 
-  Bjorhus::constraint_preserving_corrections_dt_v_psi(
-      make_not_null(&bc_dt_v_psi), unit_interface_normal_vector,
-      three_index_constraint, char_speeds);
+  // Each sector is imposed independently. Using the partition
+  // P_const + P_phys + P_gauge = 1 (see BjorhusImpl), the total correction to
+  // dt v^- splits cleanly by sector:
+  //
+  //   Bjorhus  -> that sector's condition terms alone. The `add_*_terms`
+  //               helpers add P_X(char_projected_rhs) + condition, and the
+  //               P_X(char_projected_rhs) piece is exactly what unfreezes the
+  //               sector, so subtracting it leaves the condition.
+  //   Frozen   -> -P_X(char_projected_rhs), i.e. dt u^-|X = 0.
+  //   Ghost    -> nothing. The sector's volume dynamics stays free and the
+  //               ghost data drives it through the upwind penalty (dg_ghost).
+  //
+  // With ConstraintPreserving: Bjorhus, Physical: Bjorhus, Gauge: Frozen this
+  // reproduces the old ConstraintPreservingPhysicalFrozenGauge exactly, and
+  // with Gauge: Ghost the old ConstraintPreservingPhysicalGhostGauge.
+  const DataVector minus_one(get_size(get(gamma2)), -1.0);
 
-  Bjorhus::constraint_preserving_corrections_dt_v_zero(
-      make_not_null(&bc_dt_v_zero), unit_interface_normal_vector,
-      four_index_constraint, char_speeds);
+  // The constraint-preserving sector moves as a unit: it owns v_psi and
+  // v_zero as well as the constraint projection of v_minus.
+  if (constraint_preserving_sector_ == detail::SectorImposition::Bjorhus) {
+    Bjorhus::constraint_preserving_corrections_dt_v_psi(
+        make_not_null(&bc_dt_v_psi), unit_interface_normal_vector,
+        three_index_constraint, char_speeds);
+    Bjorhus::constraint_preserving_corrections_dt_v_zero(
+        make_not_null(&bc_dt_v_zero), unit_interface_normal_vector,
+        four_index_constraint, char_speeds);
+  } else {
+    // Ghost: no correction, so v_psi and v_zero evolve freely and are driven
+    // by the ghost state.
+    std::fill(bc_dt_v_psi.begin(), bc_dt_v_psi.end(), 0.);
+    std::fill(bc_dt_v_zero.begin(), bc_dt_v_zero.end(), 0.);
+  }
 
   // In order to set dt<V+> = 0, the correction term returned here must be
   // b_correction = -1*existing(dt<V+>), such that
@@ -387,212 +395,41 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
   for (size_t a = 0; a <= Dim; ++a) {
     for (size_t b = a; b <= Dim; ++b) {
       bc_dt_v_plus.get(a, b) = -char_projected_rhs_dt_v_plus.get(a, b);
-      // bc_dt_v_minus.get(a, b) = -char_projected_rhs_dt_v_minus.get(a, b);
-      // bc_dt_v_psi.get(a, b) = -char_projected_rhs_dt_v_psi.get(a, b);
-      for (size_t c = 0; c <= Dim; ++c) {
-        // bc_dt_v_zero.get(a, b, c) = -char_projected_rhs_dt_v_zero.get(a, b,
-        // c);
-      }
     }
   }
 
-  if (type_ == detail::WorldtubeTypeDType::ConstraintPreserving) {
-    ERROR("wrong path");
-    Bjorhus::constraint_preserving_gauge_corrections_dt_v_minus(
-        make_not_null(&bc_dt_v_minus), gamma2, coords, incoming_null_one_form,
-        outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
-        projection_ab, projection_Ab, projection_AB,
-        char_projected_rhs_dt_v_psi, char_projected_rhs_dt_v_minus,
-        constraint_char_zero_plus, constraint_char_zero_minus, char_speeds);
-  } else if (type_ ==
-                 detail::WorldtubeTypeDType::ConstraintPreservingPhysical or
-             type_ == detail::WorldtubeTypeDType::
-                          ConstraintPreservingPhysicalFrozenGauge or
-             type_ == detail::WorldtubeTypeDType::
-                          ConstraintPreservingPhysicalAnalyticGhostGauge or
-             type_ == detail::WorldtubeTypeDType::
-                          ConstraintPreservingPhysicalSommerfeldGhostGauge or
-             type_ == detail::WorldtubeTypeDType::
-                          ConstraintPreservingPhysicalOnlineGhostGauge or
-             type_ == detail::WorldtubeTypeDType::
-                          ConstraintPreservingPhysicalGhostGauge) {
-    // AnalyticGhostGauge leaves the gauge sector frozen here and adds only the
-    // relaxation below; SommerfeldGhostGauge keeps the Sommerfeld radiation
-    // term and adds the relaxation on top of it.
-    const auto gauge_sector_condition =
-        (type_ == detail::WorldtubeTypeDType::ConstraintPreservingPhysical or
-         type_ == detail::WorldtubeTypeDType::
-                      ConstraintPreservingPhysicalSommerfeldGhostGauge)
-            ? Bjorhus::GaugeSectorCondition::Sommerfeld
-            : Bjorhus::GaugeSectorCondition::Frozen;
-    Bjorhus::
-        constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
-            make_not_null(&bc_dt_v_minus), gauge_sector_condition, gamma2,
-            coords, normal_covector, unit_interface_normal_vector,
-            spacetime_unit_normal_vector, incoming_null_one_form,
-            outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
-            projection_ab, projection_Ab, projection_AB, inverse_spatial_metric,
-            extrinsic_curvature, spacetime_metric, inverse_spacetime_metric,
-            three_index_constraint, char_projected_rhs_dt_v_psi,
-            char_projected_rhs_dt_v_minus, constraint_char_zero_plus,
-            constraint_char_zero_minus, phi, d_phi, d_pi, char_speeds);
-  } else {
-    ERROR(
-        "Failed to set dtVMinus. Input option must be one of "
-        "ConstraintPreserving, ConstraintPreservingPhysical, "
-        "ConstraintPreservingPhysicalFrozenGauge or "
-        "ConstraintPreservingPhysicalAnalyticGhostGauge");
+  std::fill(bc_dt_v_minus.begin(), bc_dt_v_minus.end(), 0.);
+
+  if (constraint_preserving_sector_ == detail::SectorImposition::Bjorhus) {
+    Bjorhus::detail::add_constraint_dependent_terms_to_dt_v_minus(
+        make_not_null(&bc_dt_v_minus), outgoing_null_one_form,
+        incoming_null_vector, outgoing_null_vector, projection_ab,
+        projection_Ab, projection_AB, constraint_char_zero_plus,
+        constraint_char_zero_minus, char_projected_rhs_dt_v_minus, char_speeds);
+    Bjorhus::detail::add_constraint_sector_projection(
+        make_not_null(&bc_dt_v_minus), minus_one, outgoing_null_one_form,
+        incoming_null_vector, projection_ab, projection_Ab, projection_AB,
+        char_projected_rhs_dt_v_minus);
   }
 
-  if (type_ ==
-      detail::WorldtubeTypeDType::ConstraintPreservingPhysicalGhostGauge) {
-    // The gauge sector is imposed weakly through the ghost data and the
-    // upwind penalty (see dg_ghost), so it must receive no Bjorhus
-    // correction at all: the corrections above start every sector frozen
-    // (bc_dt_v_minus = -char_projected_rhs), so add back the gauge
-    // projection of the projected volume RHS. The helper adds
-    // -kappa * P_gauge(source); with kappa = -1 and source =
-    // char_projected_rhs this is exactly + P_gauge(char_projected_rhs).
-    const DataVector minus_one_kappa(get_size(get(gamma2)), -1.0);
-    Bjorhus::detail::add_gauge_sector_terms_to_dt_v_minus(
-        make_not_null(&bc_dt_v_minus), minus_one_kappa, incoming_null_one_form,
+  if (physical_sector_ == detail::SectorImposition::Bjorhus) {
+    Bjorhus::detail::add_physical_terms_to_dt_v_minus_worldtube(
+        make_not_null(&bc_dt_v_minus), gamma2, normal_covector,
+        unit_interface_normal_vector, spacetime_unit_normal_vector,
+        projection_ab, projection_Ab, projection_AB, inverse_spatial_metric,
+        extrinsic_curvature, spacetime_metric, inverse_spacetime_metric,
+        three_index_constraint, char_projected_rhs_dt_v_minus, phi, d_phi, d_pi,
+        char_speeds);
+    Bjorhus::detail::add_physical_sector_projection(
+        make_not_null(&bc_dt_v_minus), minus_one, projection_ab, projection_Ab,
+        projection_AB, char_projected_rhs_dt_v_minus);
+  }
+
+  if (gauge_sector_ == detail::SectorImposition::Frozen) {
+    Bjorhus::detail::add_gauge_sector_projection(
+        make_not_null(&bc_dt_v_minus), minus_one, incoming_null_one_form,
         outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
         projection_Ab, char_projected_rhs_dt_v_minus);
-  }
-
-  if (type_ == detail::WorldtubeTypeDType::
-                   ConstraintPreservingPhysicalAnalyticGhostGauge or
-      type_ == detail::WorldtubeTypeDType::
-                   ConstraintPreservingPhysicalSommerfeldGhostGauge or
-      type_ == detail::WorldtubeTypeDType::
-                   ConstraintPreservingPhysicalOnlineGhostGauge) {
-    // Relax the gauge sector towards the model value,
-    //   dt u^-_ab|gauge = -kappa (u^-_ab - u^-_model,ab)|gauge.
-    // The gauge sector was left frozen above, i.e. the correction there is
-    // -dt u^-_ab|gauge, so the term added here is the whole gauge condition.
-    // Only u^-_model is needed, never its time derivative: that is the point of
-    // the ghost form, since a Bjorhus form would need a second time derivative
-    // of the model.
-    using evolved_vars_tags = typename System<Dim>::variables_tag::tags_list;
-    using EvolvedVars = tuples::tagged_tuple_from_typelist<evolved_vars_tags>;
-    std::optional<EvolvedVars> model{};
-    if (type_ == detail::WorldtubeTypeDType::
-                     ConstraintPreservingPhysicalOnlineGhostGauge) {
-      // The closed loop: the model comes from the online matcher's latest
-      // fit.  In the algebraic value mode this is the strict slow-time
-      // first-order model, so p_(1) is held fixed between fits; extrapolating
-      // epsilon*p_(1) with D_t p_(1) would add O(epsilon^2) content. The
-      // zeroth-order center is nevertheless advanced with its O(epsilon)
-      // fitted velocity. The ODE modes retain their experimental
-      // rate-resummed behavior. While no fit exists yet the gauge sector
-      // simply stays frozen.
-      if constexpr (Dim == 3) {
-        if (not matcher_config.has_value()) {
-          ERROR(
-              "ConstraintPreservingPhysicalOnlineGhostGauge requires the "
-              "WorldtubeMatcher option to be active, but it is None.");
-        }
-        if (map_parameters.valid) {
-          const bool first_order_value_mode =
-              not matcher_config->rate_ode and
-              not matcher_config->second_order_ode and
-              not matcher_config->stepper_ode;
-          std::array<double, gh::Worldtube::num_map_parameters> p =
-              map_parameters.p;
-          const double dt_extrapolate = time - map_parameters.last_fit_time;
-          if (not first_order_value_mode) {
-            for (size_t a = 0; a < gh::Worldtube::num_map_parameters; ++a) {
-              gsl::at(p, a) += dt_extrapolate * gsl::at(map_parameters.pdot, a);
-            }
-          }
-          const std::array<double, 3> model_center =
-              gh::Worldtube::detail::model_center(*matcher_config,
-                                                  map_parameters, time);
-          model.emplace();
-          if (matcher_config->fit_exact_frame) {
-            // Zeroth-order exact-frame model: the fitted finite frame map
-            // L = B(V) S, evaluated exactly. The model centre was already
-            // advanced along the mapped time axis (spec Eq. Z4) by
-            // model_center, so the frozen-frame evaluation time relative to
-            // the worldline time offset z^0 is zero.
-            gh::Solutions::exact_frame::evolved_variables(
-                make_not_null(
-                    &get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(*model)),
-                make_not_null(&get<Tags::Pi<DataVector, Dim>>(*model)),
-                make_not_null(&get<Tags::Phi<DataVector, Dim>>(*model)), coords,
-                0., matcher_config->mass, model_center,
-                map_parameters.exact_frame_theta);
-          } else if (first_order_value_mode) {
-            gh::Solutions::affine_map_model::
-                first_order_boosted_evolved_variables(
-                    make_not_null(
-                        &get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(
-                            *model)),
-                    make_not_null(&get<Tags::Pi<DataVector, Dim>>(*model)),
-                    make_not_null(&get<Tags::Phi<DataVector, Dim>>(*model)),
-                    coords, matcher_config->mass, model_center, p,
-                    map_parameters.bulk_velocity,
-                    matcher_config->centre_advection);
-          } else {
-            gh::Solutions::affine_map_model::evolved_variables(
-                make_not_null(
-                    &get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(*model)),
-                make_not_null(&get<Tags::Pi<DataVector, Dim>>(*model)),
-                make_not_null(&get<Tags::Phi<DataVector, Dim>>(*model)), coords,
-                matcher_config->mass, model_center, p, map_parameters.pdot,
-                matcher_config->centre_advection);
-          }
-        }
-      } else {
-        ERROR(
-            "ConstraintPreservingPhysicalOnlineGhostGauge is only "
-            "implemented in 3 dimensions.");
-      }
-    } else {
-      // all_solutions plus the affine-map model; keep in sync with the
-      // executable's initial_data_list or the dispatch ERRORs at runtime
-      using gauge_prescriptions = tmpl::conditional_t<
-          Dim == 3,
-          tmpl::push_back<gh::Solutions::all_solutions<Dim>,
-                          gh::Solutions::AffineMappedHarmonicSchwarzschild>,
-          gh::Solutions::all_solutions<Dim>>;
-      model = call_with_dynamic_type<EvolvedVars, gauge_prescriptions>(
-          analytic_gauge_prescription_.get(),
-          [&coords, &time](const auto* const solution_or_data) {
-            if constexpr (is_analytic_solution_v<
-                              std::decay_t<decltype(*solution_or_data)>>) {
-              return solution_or_data->variables(coords, time,
-                                                 evolved_vars_tags{});
-            } else {
-              (void)time;
-              return solution_or_data->variables(coords, evolved_vars_tags{});
-            }
-          });
-    }
-
-    if (model.has_value()) {
-      const auto v_minus_numerical = get<Tags::VMinus<DataVector, Dim>>(
-          characteristic_fields(gamma2, inverse_spatial_metric,
-                                spacetime_metric, pi, phi, normal_covector));
-      const auto v_minus_model =
-          get<Tags::VMinus<DataVector, Dim>>(characteristic_fields(
-              gamma2, inverse_spatial_metric,
-              get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(*model),
-              get<Tags::Pi<DataVector, Dim>>(*model),
-              get<Tags::Phi<DataVector, Dim>>(*model), normal_covector));
-
-      auto delta_v_minus = v_minus_numerical;
-      for (size_t a = 0; a <= Dim; ++a) {
-        for (size_t b = a; b <= Dim; ++b) {
-          delta_v_minus.get(a, b) -= v_minus_model.get(a, b);
-        }
-      }
-      const DataVector kappa(get_size(get(gamma2)), gauge_relaxation_rate_);
-      Bjorhus::detail::add_gauge_sector_terms_to_dt_v_minus(
-          make_not_null(&bc_dt_v_minus), kappa, incoming_null_one_form,
-          outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
-          projection_Ab, delta_v_minus);
-    }
   }
 
   // Only add corrections at grid points where the char speeds are negative
@@ -701,15 +538,21 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
     }
   }
 
-  if (type_ !=
-      detail::WorldtubeTypeDType::ConstraintPreservingPhysicalGhostGauge) {
+  const bool any_ghost_sector =
+      constraint_preserving_sector_ == detail::SectorImposition::Ghost or
+      physical_sector_ == detail::SectorImposition::Ghost or
+      gauge_sector_ == detail::SectorImposition::Ghost;
+  if (not any_ghost_sector) {
+    // Every sector is imposed by a time-derivative correction, so the ghost
+    // state equals the interior, the upwind flux is consistent and the penalty
+    // contributes exactly zero.
     return {};
   }
 
   if constexpr (Dim == 3) {
     if (not matcher_config.has_value()) {
       ERROR(
-          "ConstraintPreservingPhysicalGhostGauge requires the "
+          "Ghost imposition of any sector requires the "
           "WorldtubeMatcher option to be active, but it is None.");
     }
     if (not map_parameters.valid) {
@@ -762,9 +605,11 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
     const auto char_fields_interior =
         characteristic_fields(gamma2, *inv_spatial_metric_ghost,
                               spacetime_metric, pi, phi, normal_covector);
-    const auto v_minus_model = get<Tags::VMinus<DataVector, Dim>>(
+    const auto char_fields_model =
         characteristic_fields(gamma2, *inv_spatial_metric_ghost, model_metric,
-                              model_pi, model_phi, normal_covector));
+                              model_pi, model_phi, normal_covector);
+    const auto& v_minus_model =
+        get<Tags::VMinus<DataVector, Dim>>(char_fields_model);
     const auto& v_minus_interior =
         get<Tags::VMinus<DataVector, Dim>>(char_fields_interior);
 
@@ -790,34 +635,61 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
     gr::interface_null_normal(make_not_null(&outgoing_null_vector),
                               spacetime_unit_normal_vector,
                               unit_interface_normal_vector, 1.);
+    tnsr::aa<DataVector, Dim, Frame::Inertial> projection_ab(n_points);
     tnsr::Ab<DataVector, Dim, Frame::Inertial> projection_Ab(n_points);
+    tnsr::AA<DataVector, Dim, Frame::Inertial> projection_AB(n_points);
+    gr::transverse_projection_operator(make_not_null(&projection_ab),
+                                       spacetime_metric, normal_one_form,
+                                       normal_covector, shift);
     gr::transverse_projection_operator(
         make_not_null(&projection_Ab), spacetime_unit_normal_vector,
         normal_one_form, unit_interface_normal_vector, normal_covector, shift);
+    gr::transverse_projection_operator(
+        make_not_null(&projection_AB), inverse_spacetime_metric,
+        spacetime_unit_normal_vector, unit_interface_normal_vector);
 
-    // v^-_ghost = v^-_interior + P_gauge(v^-_model - v^-_interior), using
-    // the gauge-sector helper: it adds -kappa * P_gauge(delta), so with
-    // kappa = 1 and delta = (v^-_interior - v^-_model) it adds exactly the
-    // required replacement term.
+    // v^-_ghost = v^-_interior + sum over the Ghost sectors of
+    // P_X(v^-_model - v^-_interior): each Ghost sector takes its projection
+    // from the model and the rest keep the interior value, so the jump the
+    // upwind penalty sees is exactly the Ghost sectors and nothing else.
     auto v_minus_ghost = v_minus_interior;
-    auto delta_v_minus = v_minus_interior;
+    auto delta_v_minus = v_minus_model;
     for (size_t a = 0; a <= Dim; ++a) {
       for (size_t b = a; b <= Dim; ++b) {
-        delta_v_minus.get(a, b) -= v_minus_model.get(a, b);
+        delta_v_minus.get(a, b) -= v_minus_interior.get(a, b);
       }
     }
-    const DataVector unit_kappa(n_points, 1.0);
-    Bjorhus::detail::add_gauge_sector_terms_to_dt_v_minus(
-        make_not_null(&v_minus_ghost), unit_kappa, incoming_null_one_form,
-        outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
-        projection_Ab, delta_v_minus);
+    const DataVector unit_coefficient(n_points, 1.0);
+    if (constraint_preserving_sector_ == detail::SectorImposition::Ghost) {
+      Bjorhus::detail::add_constraint_sector_projection(
+          make_not_null(&v_minus_ghost), unit_coefficient,
+          outgoing_null_one_form, incoming_null_vector, projection_ab,
+          projection_Ab, projection_AB, delta_v_minus);
+    }
+    if (physical_sector_ == detail::SectorImposition::Ghost) {
+      Bjorhus::detail::add_physical_sector_projection(
+          make_not_null(&v_minus_ghost), unit_coefficient, projection_ab,
+          projection_Ab, projection_AB, delta_v_minus);
+    }
+    if (gauge_sector_ == detail::SectorImposition::Ghost) {
+      Bjorhus::detail::add_gauge_sector_projection(
+          make_not_null(&v_minus_ghost), unit_coefficient,
+          incoming_null_one_form, outgoing_null_one_form, incoming_null_vector,
+          outgoing_null_vector, projection_Ab, delta_v_minus);
+    }
 
-    // reassemble the ghost evolved fields; only Pi and the normal part of
-    // Phi change (the metric is the v_psi characteristic)
+    // The constraint-preserving sector owns v_psi and v_zero as well as its
+    // projection of v^-, so under Ghost imposition it moves as a unit and all
+    // three come from the model.
+    const bool constraint_sector_is_ghost =
+        constraint_preserving_sector_ == detail::SectorImposition::Ghost;
+    const auto& v_psi_ghost = get<Tags::VSpacetimeMetric<DataVector, Dim>>(
+        constraint_sector_is_ghost ? char_fields_model : char_fields_interior);
+    const auto& v_zero_ghost = get<Tags::VZero<DataVector, Dim>>(
+        constraint_sector_is_ghost ? char_fields_model : char_fields_interior);
+
     const auto ghost_evolved = evolved_fields_from_characteristic_fields(
-        gamma2,
-        get<Tags::VSpacetimeMetric<DataVector, Dim>>(char_fields_interior),
-        get<Tags::VZero<DataVector, Dim>>(char_fields_interior),
+        gamma2, v_psi_ghost, v_zero_ghost,
         get<Tags::VPlus<DataVector, Dim>>(char_fields_interior), v_minus_ghost,
         normal_covector);
     *spacetime_metric_ghost =
@@ -826,9 +698,7 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
     *phi_ghost = get<Tags::Phi<DataVector, Dim>>(ghost_evolved);
     return {};
   } else {
-    ERROR(
-        "ConstraintPreservingPhysicalGhostGauge is only implemented in 3 "
-        "dimensions.");
+    ERROR("Ghost imposition of a sector is only implemented in 3 dimensions.");
   }
 }
 

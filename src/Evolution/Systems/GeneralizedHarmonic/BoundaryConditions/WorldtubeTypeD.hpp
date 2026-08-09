@@ -40,67 +40,22 @@ struct Coordinates;
 /// \endcond
 
 namespace gh::BoundaryConditions::detail {
-enum class WorldtubeTypeDType {
-  ConstraintPreserving,
-  /// Constraint-preserving, physical (inferred \f$\Psi_0\f$), and the
-  /// Bayliss-Turkel Sommerfeld gauge condition.
-  ConstraintPreservingPhysical,
-  /// As `ConstraintPreservingPhysical`, but with the gauge sector frozen,
-  /// \f$\partial_t u^-_{ab}|_{\rm gauge} = 0\f$, instead of the Sommerfeld
-  /// condition. The Sommerfeld condition is an outer-boundary prescription
-  /// whose \f$1/r\f$ is measured from the origin of the inertial coordinates,
-  /// so it is correct at a worldtube only when the worldtube is centred on that
-  /// origin; freezing needs no model input and isolates the effect of the gauge
-  /// condition.
-  ConstraintPreservingPhysicalFrozenGauge,
-  /// As `ConstraintPreservingPhysical`, but the gauge sector relaxes towards
-  /// the value of \f$u^-_{ab}\f$ computed from an analytic prescription:
-  /// \f$\partial_t u^-_{ab}|_{\rm gauge}
-  ///    = -\kappa\,(u^-_{ab} - u^{-,\rm model}_{ab})|_{\rm gauge}\f$.
-  ///
-  /// This is the "ghost" form of the gauge condition: it needs only
-  /// \f$u^{-,\rm model}\f$ and not its time derivative, which would require a
-  /// second time derivative of the model. Requires
-  /// `AnalyticGaugePrescription`.
-  ConstraintPreservingPhysicalAnalyticGhostGauge,
-  /// Both gauge terms together:
-  /// \f$\partial_t u^-_{ab}|_{\rm gauge}
-  ///    = -(\gamma_2 - 1/r)(\partial_t u^g_{ab})|_{\rm gauge}
-  ///      - \kappa\,(u^-_{ab} - u^{-,\rm model}_{ab})|_{\rm gauge}\f$.
-  ///
-  /// The two terms do different jobs and are not alternatives. The Sommerfeld
-  /// term is a *radiation* condition: it lets whatever gauge dynamics the
-  /// interior generates leave without strong reflection, and it is the term
-  /// that matters when \f$\partial_t g\f$ at the boundary is large. The
-  /// relaxation is *Dirichlet-like*: it supplies the gauge information that
-  /// flows in from the excised region, and carries content when the
-  /// configuration is nearly stationary and \f$\partial_t g \to 0\f$ makes the
-  /// Sommerfeld term vanish.
-  ///
-  /// Requires `AnalyticGaugePrescription`.
-  ConstraintPreservingPhysicalSommerfeldGhostGauge,
-  /// As `ConstraintPreservingPhysicalAnalyticGhostGauge`, but the model
-  /// \f$u^{-,\rm model}\f$ is built from the *online* worldtube matcher's
-  /// latest fitted map parameters (`gh::Worldtube::Tags::MapParameters`,
-  /// extrapolated linearly within the fit interval with the fitted rates)
-  /// instead of an input-file prescription — the closed loop. Requires the
-  /// `WorldtubeMatcher` option to be active; while no fit exists yet the
-  /// gauge sector stays frozen. 3D only.
-  ConstraintPreservingPhysicalOnlineGhostGauge,
-  /// Constraint-preserving and physical sectors by Bjorhus time-derivative
-  /// corrections as in `ConstraintPreservingPhysical*`; the **gauge sector
-  /// is imposed weakly through ghost data**: the exterior state equals the
-  /// interior except that the gauge projection of \f$u^-\f$ is replaced by
-  /// the online matcher's model, and the upwind penalty drives the jump. No
-  /// relaxation rate: the driving strength is set by the characteristic
-  /// speed and the DG lifting. The gauge sector receives no Bjorhus
-  /// correction (its volume dynamics stays free). Requires the
-  /// `WorldtubeMatcher` option; while no fit exists the ghost state equals
-  /// the interior (no driving). 3D only.
-  ConstraintPreservingPhysicalGhostGauge
+/// How one characteristic sector of the boundary condition is imposed.
+enum class SectorImposition {
+  /// Weakly, through ghost data: the exterior state carries the model's value
+  /// for this sector and the upwind penalty drives the jump. The sector
+  /// receives no time-derivative correction, so its volume dynamics stays
+  /// free. There is no relaxation rate; the driving strength is set by the
+  /// characteristic speed and the DG lifting.
+  Ghost,
+  /// Strongly, through a Bjorhus time-derivative correction on this sector.
+  Bjorhus,
+  /// Not at all: the sector is frozen, \f$\partial_t u^-|_{\rm sector} = 0\f$.
+  /// Needs no model, so it is the control against which a Ghost run is read.
+  Frozen
 };
 
-WorldtubeTypeDType convert_worldtube_type_d_type_from_yaml(
+SectorImposition convert_sector_imposition_from_yaml(
     const Options::Option& options);
 }  // namespace gh::BoundaryConditions::detail
 
@@ -165,56 +120,61 @@ namespace gh::BoundaryConditions {
 template <size_t Dim>
 class WorldtubeTypeD final : public BoundaryCondition<Dim> {
  public:
-  struct TypeOptionTag {
-    using type = detail::WorldtubeTypeDType;
-    static std::string name() { return "Type"; }
-    static constexpr Options::String help{
-        "Whether to impose ConstraintPreserving, with or without physical "
-        "terms for VMinus."};
-  };
-
-  /// \brief Analytic prescription supplying the model value of
-  /// \f$u^-_{ab}|_{\rm gauge}\f$.
+  /// \brief How the constraint-preserving sector is imposed.
   ///
-  /// Required for `Type: ConstraintPreservingPhysicalAnalyticGhostGauge`, and
-  /// `None` otherwise. In the worldtube matching scheme this is where the
-  /// fitted tidally-perturbed metric would enter instead; an analytic solution
-  /// is used here because it makes the model exactly known, so any deviation is
-  /// attributable to the boundary condition.
-  struct AnalyticGaugePrescription {
-    using type = Options::Auto<
-        std::unique_ptr<evolution::initial_data::InitialData>,
-        Options::AutoLabel::None>;
-    static std::string name() { return "AnalyticGaugePrescription"; }
+  /// `Bjorhus` applies the constraint-preserving time-derivative condition to
+  /// \f$\partial_t u^-\f$ and to \f$\partial_t v_\psi\f$ and
+  /// \f$\partial_t v_0\f$, which belong to this sector too. `Ghost` instead
+  /// takes all three from the model in the ghost state and lets the upwind
+  /// penalty drive them, leaving their volume dynamics free.
+  struct ConstraintPreservingSector {
+    using type = detail::SectorImposition;
     static constexpr Options::String help{
-        "Analytic solution supplying the model value of u^-|gauge. Required "
-        "for Type: ConstraintPreservingPhysicalAnalyticGhostGauge, else None."};
+        "Ghost or Bjorhus imposition of the constraint-preserving sector, "
+        "which comprises v_psi, v_zero and the constraint projection of "
+        "v_minus."};
   };
 
-  /// \brief Relaxation rate \f$\kappa\f$, in inverse mass units, towards the
-  /// model value of the gauge sector.
-  struct GaugeRelaxationRate {
-    using type = double;
-    static std::string name() { return "GaugeRelaxationRate"; }
+  /// \brief How the physical sector -- the transverse-traceless projection of
+  /// \f$u^-\f$ carrying the incoming gravitational radiation -- is imposed.
+  struct PhysicalSector {
+    using type = detail::SectorImposition;
     static constexpr Options::String help{
-        "Relaxation rate kappa towards the model gauge sector. Only used for "
-        "Type: ConstraintPreservingPhysicalAnalyticGhostGauge. kappa = 0 "
-        "reduces to freezing the gauge sector."};
+        "Ghost or Bjorhus imposition of the physical sector of v_minus."};
   };
 
-  using options = tmpl::list<TypeOptionTag, AnalyticGaugePrescription,
-                             GaugeRelaxationRate>;
+  /// \brief How the gauge sector of \f$u^-\f$ is imposed.
+  ///
+  /// `Ghost` replaces the gauge projection of \f$u^-\f$ in the ghost state
+  /// with the online matcher's model and lets the upwind penalty drive the
+  /// jump. `Frozen` imposes \f$\partial_t u^-|_{\rm gauge} = 0\f$ and needs no
+  /// model at all, which makes it the control for the Ghost case. `Bjorhus` is
+  /// rejected: a genuine time-derivative condition here needs
+  /// \f$\partial_t u^{-,\rm model}\f$, hence a second time derivative of the
+  /// model, which the matcher does not supply.
+  struct GaugeSector {
+    using type = detail::SectorImposition;
+    static constexpr Options::String help{
+        "Ghost or Frozen imposition of the gauge sector of v_minus. Bjorhus "
+        "is not implemented."};
+  };
+
+  using options =
+      tmpl::list<ConstraintPreservingSector, PhysicalSector, GaugeSector>;
   static constexpr Options::String help{
       "WorldtubeTypeD boundary conditions setting the value of the time "
       "derivatives of the spacetime metric, Phi and Pi to expressions that "
-      "prevent the influx of constraint violations and reflections."};
+      "prevent the influx of constraint violations and reflections.\n\n"
+      "Each of the three characteristic sectors is imposed independently, "
+      "either weakly through ghost data driven by the upwind penalty or "
+      "strongly through a Bjorhus time-derivative correction. The sectors "
+      "partition v_minus exactly, so the choices are independent."};
   static std::string name() { return "WorldtubeTypeD"; }
 
-  WorldtubeTypeD(
-      detail::WorldtubeTypeDType type,
-      std::optional<std::unique_ptr<evolution::initial_data::InitialData>>
-          analytic_gauge_prescription,
-      double gauge_relaxation_rate, const Options::Context& context = {});
+  WorldtubeTypeD(detail::SectorImposition constraint_preserving_sector,
+                 detail::SectorImposition physical_sector,
+                 detail::SectorImposition gauge_sector,
+                 const Options::Context& context = {});
 
   WorldtubeTypeD() = default;
   /// \cond
@@ -426,21 +386,20 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
       const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_spacetime_metric)
       const;
 
-  detail::WorldtubeTypeDType type_{
-      detail::WorldtubeTypeDType::ConstraintPreservingPhysical};
-  std::unique_ptr<evolution::initial_data::InitialData>
-      analytic_gauge_prescription_{nullptr};
-  double gauge_relaxation_rate_{0.};
+  detail::SectorImposition constraint_preserving_sector_{
+      detail::SectorImposition::Bjorhus};
+  detail::SectorImposition physical_sector_{detail::SectorImposition::Bjorhus};
+  detail::SectorImposition gauge_sector_{detail::SectorImposition::Ghost};
 };
 }  // namespace gh::BoundaryConditions
 
 template <>
 struct Options::create_from_yaml<
-    gh::BoundaryConditions::detail::WorldtubeTypeDType> {
+    gh::BoundaryConditions::detail::SectorImposition> {
   template <typename Metavariables>
-  static typename gh::BoundaryConditions::detail::WorldtubeTypeDType create(
+  static typename gh::BoundaryConditions::detail::SectorImposition create(
       const Options::Option& options) {
-    return gh::BoundaryConditions::detail::
-        convert_worldtube_type_d_type_from_yaml(options);
+    return gh::BoundaryConditions::detail::convert_sector_imposition_from_yaml(
+        options);
   }
 };

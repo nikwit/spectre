@@ -111,10 +111,82 @@ void constraint_preserving_corrections_dt_v_zero(
 }
 
 namespace detail {
+// The three sector projections below are the canonical definitions of the
+// constraint-preserving, physical and gauge sectors of a symmetric tensor at
+// the boundary. Each is the coefficient of `char_projected_rhs_dt_v_minus` in
+// the corresponding condition: those functions initialise the correction to
+// `-char_projected_rhs_dt_v_minus` (freezing every sector) and then add their
+// own projection of it back, so a sector's projection is precisely what
+// "unfreezes" that sector. Consequently the three sum to the identity on
+// symmetric tensors, are idempotent, and annihilate one another;
+// `Test_BjorhusImpl` asserts all of that.
+//
+// They are factored out so that a boundary condition can impose each sector
+// independently -- see `gh::BoundaryConditions::WorldtubeTypeD`, which selects
+// Ghost or Bjorhus imposition per sector and needs the projections to split
+// `u^-` between the two paths.
 template <size_t VolumeDim, typename DataType>
-void add_gauge_sector_terms_to_dt_v_minus(
-    const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
-        bc_dt_v_minus,
+void add_constraint_sector_projection(
+    const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*> result,
+    const DataType& scalar_coefficient,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& outgoing_null_one_form,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& incoming_null_vector,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& projection_ab,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>& projection_AB,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& source) {
+  for (size_t a = 0; a <= VolumeDim; ++a) {
+    for (size_t b = a; b <= VolumeDim; ++b) {
+      for (size_t c = 0; c <= VolumeDim; ++c) {
+        for (size_t d = 0; d <= VolumeDim; ++d) {
+          result->get(a, b) +=
+              0.5 * scalar_coefficient *
+              (2. * incoming_null_vector.get(c) * incoming_null_vector.get(d) *
+                   outgoing_null_one_form.get(a) *
+                   outgoing_null_one_form.get(b) -
+               incoming_null_vector.get(c) * projection_Ab.get(d, a) *
+                   outgoing_null_one_form.get(b) -
+               incoming_null_vector.get(c) * projection_Ab.get(d, b) *
+                   outgoing_null_one_form.get(a) -
+               incoming_null_vector.get(d) * projection_Ab.get(c, a) *
+                   outgoing_null_one_form.get(b) -
+               incoming_null_vector.get(d) * projection_Ab.get(c, b) *
+                   outgoing_null_one_form.get(a) +
+               projection_AB.get(c, d) * projection_ab.get(a, b)) *
+              source.get(c, d);
+        }
+      }
+    }
+  }
+}
+
+template <size_t VolumeDim, typename DataType>
+void add_physical_sector_projection(
+    const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*> result,
+    const DataType& scalar_coefficient,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& projection_ab,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>& projection_AB,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& source) {
+  // The transverse-traceless projection with respect to the two-surface.
+  for (size_t a = 0; a <= VolumeDim; ++a) {
+    for (size_t b = a; b <= VolumeDim; ++b) {
+      for (size_t c = 0; c <= VolumeDim; ++c) {
+        for (size_t d = 0; d <= VolumeDim; ++d) {
+          result->get(a, b) +=
+              scalar_coefficient *
+              (projection_Ab.get(c, a) * projection_Ab.get(d, b) -
+               0.5 * projection_ab.get(a, b) * projection_AB.get(c, d)) *
+              source.get(c, d);
+        }
+      }
+    }
+  }
+}
+
+template <size_t VolumeDim, typename DataType>
+void add_gauge_sector_projection(
+    const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*> result,
     const DataType& scalar_coefficient,
     const tnsr::a<DataType, VolumeDim, Frame::Inertial>& incoming_null_one_form,
     const tnsr::a<DataType, VolumeDim, Frame::Inertial>& outgoing_null_one_form,
@@ -122,11 +194,15 @@ void add_gauge_sector_terms_to_dt_v_minus(
     const tnsr::A<DataType, VolumeDim, Frame::Inertial>& outgoing_null_vector,
     const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
     const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& source) {
+  // Note the overall sign relative to `add_gauge_sector_terms_to_dt_v_minus`,
+  // which applies the negative of this projection so that a positive
+  // coefficient there reads as the rate in `dt u^- = -kappa (u^- - u^-_model)`.
   for (size_t a = 0; a <= VolumeDim; ++a) {
     for (size_t b = a; b <= VolumeDim; ++b) {
       for (size_t c = 0; c <= VolumeDim; ++c) {
         for (size_t d = 0; d <= VolumeDim; ++d) {
-          bc_dt_v_minus->get(a, b) +=
+          result->get(a, b) -=
+              scalar_coefficient *
               (incoming_null_one_form.get(a) * projection_Ab.get(c, b) *
                    outgoing_null_vector.get(d) +
                incoming_null_one_form.get(b) * projection_Ab.get(c, a) *
@@ -138,11 +214,31 @@ void add_gauge_sector_terms_to_dt_v_minus(
                 incoming_null_one_form.get(a) * incoming_null_one_form.get(b) *
                     outgoing_null_vector.get(c) *
                     outgoing_null_vector.get(d))) *
-              scalar_coefficient * source.get(c, d);
+              source.get(c, d);
         }
       }
     }
   }
+}
+
+template <size_t VolumeDim, typename DataType>
+void add_gauge_sector_terms_to_dt_v_minus(
+    const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
+        bc_dt_v_minus,
+    const DataType& scalar_coefficient,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& incoming_null_one_form,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& outgoing_null_one_form,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& incoming_null_vector,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& outgoing_null_vector,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& source) {
+  // -P_gauge(source): the sign is what makes a positive `scalar_coefficient`
+  // read as kappa in `dt u^-|gauge = -kappa (u^- - u^-_model)|gauge`.
+  const DataType minus_coefficient = -scalar_coefficient;
+  add_gauge_sector_projection(bc_dt_v_minus, minus_coefficient,
+                              incoming_null_one_form, outgoing_null_one_form,
+                              incoming_null_vector, outgoing_null_vector,
+                              projection_Ab, source);
 }
 
 template <size_t VolumeDim, typename DataType>
@@ -195,28 +291,18 @@ void add_constraint_dependent_terms_to_dt_v_minus(
   constexpr double mu = 0.;  // hard-coded value from SpEC Bbh input file Mu = 0
   const double one_by_sqrt_2 = 1. / sqrt(2.);
 
-  // Add corrections c.f. Eq (64) of gr-qc/0512093
+  // Add corrections c.f. Eq (64) of gr-qc/0512093. The first piece is the
+  // constraint-sector projection of the frozen volume RHS, which unfreezes
+  // that sector; what follows is the constraint condition proper.
+  const DataType unit_coefficient =
+      make_with_value<DataType>(get<0>(outgoing_null_one_form), 1.0);
+  add_constraint_sector_projection(bc_dt_v_minus, unit_coefficient,
+                                   outgoing_null_one_form, incoming_null_vector,
+                                   projection_ab, projection_Ab, projection_AB,
+                                   char_projected_rhs_dt_v_minus);
+
   for (size_t a = 0; a <= VolumeDim; ++a) {
     for (size_t b = a; b <= VolumeDim; ++b) {
-      for (size_t c = 0; c <= VolumeDim; ++c) {
-        for (size_t d = 0; d <= VolumeDim; ++d) {
-          bc_dt_v_minus->get(a, b) +=
-              0.5 *
-              (2. * incoming_null_vector.get(c) * incoming_null_vector.get(d) *
-                   outgoing_null_one_form.get(a) *
-                   outgoing_null_one_form.get(b) -
-               incoming_null_vector.get(c) * projection_Ab.get(d, a) *
-                   outgoing_null_one_form.get(b) -
-               incoming_null_vector.get(c) * projection_Ab.get(d, b) *
-                   outgoing_null_one_form.get(a) -
-               incoming_null_vector.get(d) * projection_Ab.get(c, a) *
-                   outgoing_null_one_form.get(b) -
-               incoming_null_vector.get(d) * projection_Ab.get(c, b) *
-                   outgoing_null_one_form.get(a) +
-               projection_AB.get(c, d) * projection_ab.get(a, b)) *
-              char_projected_rhs_dt_v_minus.get(c, d);
-        }
-      }
       if constexpr (mu == 0.) {
         for (size_t c = 0; c <= VolumeDim; ++c) {
           bc_dt_v_minus->get(a, b) +=
@@ -767,37 +853,38 @@ void add_physical_terms_to_dt_v_minus_worldtube(
     }
   }
 
-  // Add physical boundary corrections
+  // Add physical boundary corrections. The physical sector is the
+  // transverse-traceless projection of the frozen volume RHS plus the
+  // Weyl-mode condition; projecting the sum unfreezes that sector and imposes
+  // the condition in one step.
   if (gamma2_in_phys) {
     auto& normal_dot_three_index_constraint_gamma2 =
         get(get<::Tags::TempScalar<0, DataType>>(u3_buffer));
 
-    for (size_t a = 0; a <= VolumeDim; ++a) {
-      for (size_t b = a; b <= VolumeDim; ++b) {
-        for (size_t c = 0; c <= VolumeDim; ++c) {
-          for (size_t d = 0; d <= VolumeDim; ++d) {
-            normal_dot_three_index_constraint_gamma2 =
-                get<0>(unit_interface_normal_vector) *
-                three_index_constraint.get(0, c, d);
-            for (size_t i = 1; i < VolumeDim; ++i) {
-              normal_dot_three_index_constraint_gamma2 +=
-                  unit_interface_normal_vector.get(i) *
-                  three_index_constraint.get(i, c, d);
-            }
-            normal_dot_three_index_constraint_gamma2 *= get(gamma2);
-
-            if constexpr (mu_phys == 0.) {
-              bc_dt_v_minus->get(a, b) +=
-                  (projection_Ab.get(c, a) * projection_Ab.get(d, b) -
-                   0.5 * projection_ab.get(a, b) * projection_AB.get(c, d)) *
-                  (char_projected_rhs_dt_v_minus.get(c, d) +
-                   char_speeds[3] * (U3m.get(c, d) -
-                                     normal_dot_three_index_constraint_gamma2 -
-                                     U3p.get(c, d)));
-            }
+    if constexpr (mu_phys == 0.) {
+      auto physical_source = char_projected_rhs_dt_v_minus;
+      for (size_t c = 0; c <= VolumeDim; ++c) {
+        for (size_t d = c; d <= VolumeDim; ++d) {
+          normal_dot_three_index_constraint_gamma2 =
+              get<0>(unit_interface_normal_vector) *
+              three_index_constraint.get(0, c, d);
+          for (size_t i = 1; i < VolumeDim; ++i) {
+            normal_dot_three_index_constraint_gamma2 +=
+                unit_interface_normal_vector.get(i) *
+                three_index_constraint.get(i, c, d);
           }
+          normal_dot_three_index_constraint_gamma2 *= get(gamma2);
+          physical_source.get(c, d) +=
+              char_speeds[3] *
+              (U3m.get(c, d) - normal_dot_three_index_constraint_gamma2 -
+               U3p.get(c, d));
         }
       }
+      const DataType unit_coefficient =
+          make_with_value<DataType>(get(gamma2), 1.0);
+      add_physical_sector_projection(bc_dt_v_minus, unit_coefficient,
+                                     projection_ab, projection_Ab,
+                                     projection_AB, physical_source);
     }
   }
 }
@@ -1061,6 +1148,43 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
               projection_Ab,                                                   \
           const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>&             \
               char_projected_rhs_dt_v_psi);                                    \
+  template void                                                                \
+  gh::BoundaryConditions::Bjorhus::detail::add_constraint_sector_projection(   \
+      const gsl::not_null<tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>*>  \
+          result,                                                              \
+      const DTYPE(data) & scalar_coefficient,                                  \
+      const tnsr::a<DTYPE(data), DIM(data), Frame::Inertial>&                  \
+          outgoing_null_one_form,                                              \
+      const tnsr::A<DTYPE(data), DIM(data), Frame::Inertial>&                  \
+          incoming_null_vector,                                                \
+      const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>& projection_ab,  \
+      const tnsr::Ab<DTYPE(data), DIM(data), Frame::Inertial>& projection_Ab,  \
+      const tnsr::AA<DTYPE(data), DIM(data), Frame::Inertial>& projection_AB,  \
+      const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>& source);        \
+  template void                                                                \
+  gh::BoundaryConditions::Bjorhus::detail::add_physical_sector_projection(     \
+      const gsl::not_null<tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>*>  \
+          result,                                                              \
+      const DTYPE(data) & scalar_coefficient,                                  \
+      const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>& projection_ab,  \
+      const tnsr::Ab<DTYPE(data), DIM(data), Frame::Inertial>& projection_Ab,  \
+      const tnsr::AA<DTYPE(data), DIM(data), Frame::Inertial>& projection_AB,  \
+      const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>& source);        \
+  template void                                                                \
+  gh::BoundaryConditions::Bjorhus::detail::add_gauge_sector_projection(        \
+      const gsl::not_null<tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>*>  \
+          result,                                                              \
+      const DTYPE(data) & scalar_coefficient,                                  \
+      const tnsr::a<DTYPE(data), DIM(data), Frame::Inertial>&                  \
+          incoming_null_one_form,                                              \
+      const tnsr::a<DTYPE(data), DIM(data), Frame::Inertial>&                  \
+          outgoing_null_one_form,                                              \
+      const tnsr::A<DTYPE(data), DIM(data), Frame::Inertial>&                  \
+          incoming_null_vector,                                                \
+      const tnsr::A<DTYPE(data), DIM(data), Frame::Inertial>&                  \
+          outgoing_null_vector,                                                \
+      const tnsr::Ab<DTYPE(data), DIM(data), Frame::Inertial>& projection_Ab,  \
+      const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>& source);        \
   template void gh::BoundaryConditions::Bjorhus::detail::                      \
       add_gauge_sector_terms_to_dt_v_minus(                                    \
           const gsl::not_null<                                                 \
@@ -1078,6 +1202,40 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
           const tnsr::Ab<DTYPE(data), DIM(data), Frame::Inertial>&             \
               projection_Ab,                                                   \
           const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>& source);    \
+  template void gh::BoundaryConditions::Bjorhus::detail::                      \
+      add_physical_terms_to_dt_v_minus_worldtube(                              \
+          const gsl::not_null<                                                 \
+              tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>*>              \
+              bc_dt_v_minus,                                                   \
+          const Scalar<DTYPE(data)>& gamma2,                                   \
+          const tnsr::i<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              unit_interface_normal_one_form,                                  \
+          const tnsr::I<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              unit_interface_normal_vector,                                    \
+          const tnsr::A<DTYPE(data), DIM(data), Frame::Inertial>&              \
+              spacetime_unit_normal_vector,                                    \
+          const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              projection_ab,                                                   \
+          const tnsr::Ab<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              projection_Ab,                                                   \
+          const tnsr::AA<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              projection_AB,                                                   \
+          const tnsr::II<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              inverse_spatial_metric,                                          \
+          const tnsr::ii<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              extrinsic_curvature,                                             \
+          const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              spacetime_metric,                                                \
+          const tnsr::AA<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              inverse_spacetime_metric,                                        \
+          const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>&            \
+              three_index_constraint,                                          \
+          const tnsr::aa<DTYPE(data), DIM(data), Frame::Inertial>&             \
+              char_projected_rhs_dt_v_minus,                                   \
+          const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>& phi,       \
+          const tnsr::ijaa<DTYPE(data), DIM(data), Frame::Inertial>& d_phi,    \
+          const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>& d_pi,      \
+          const std::array<DTYPE(data), 4>& char_speeds);                      \
   template void gh::BoundaryConditions::Bjorhus::detail::                      \
       add_constraint_dependent_terms_to_dt_v_minus(                            \
           const gsl::not_null<                                                 \

@@ -334,6 +334,67 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
 /// @}
 
 namespace detail {
+/// @{
+/*!
+ * \brief Add \f$c\,P^{\rm X}(S)_{ab}\f$ to `result`, where \f$P^{\rm X}\f$
+ * projects a symmetric tensor onto the constraint-preserving, physical or
+ * gauge sector at the boundary.
+ *
+ * \details These three projections are the canonical definitions of the
+ * sectors. Each appears in the corresponding boundary condition as the
+ * coefficient of `char_projected_rhs_dt_v_minus`: the conditions initialise
+ * the correction to \f$-\partial_t u^-_{ab}\f$, freezing every sector, and
+ * then add their own projection of it back, so a sector's projection is
+ * exactly what restores that sector's free evolution.
+ *
+ * They therefore form a partition of the identity on symmetric tensors,
+ *
+ * \f{align*}{
+ * P^{\rm const} + P^{\rm phys} + P^{\rm gauge} = 1,
+ * \f}
+ *
+ * with each projection idempotent and annihilating the other two.
+ * `Test_BjorhusImpl` asserts these properties directly.
+ *
+ * The physical sector is the transverse-traceless part with respect to the
+ * two-surface, \f$P^c{}_aP^d{}_b - \frac{1}{2}P_{ab}P^{cd}\f$.
+ *
+ * A boundary condition that imposes sectors independently needs these to split
+ * \f$u^-\f$ between imposition paths; see
+ * `gh::BoundaryConditions::WorldtubeTypeD`.
+ */
+template <size_t VolumeDim, typename DataType>
+void add_constraint_sector_projection(
+    gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*> result,
+    const DataType& scalar_coefficient,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& outgoing_null_one_form,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& incoming_null_vector,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& projection_ab,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>& projection_AB,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& source);
+
+template <size_t VolumeDim, typename DataType>
+void add_physical_sector_projection(
+    gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*> result,
+    const DataType& scalar_coefficient,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& projection_ab,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>& projection_AB,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& source);
+
+template <size_t VolumeDim, typename DataType>
+void add_gauge_sector_projection(
+    gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*> result,
+    const DataType& scalar_coefficient,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& incoming_null_one_form,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& outgoing_null_one_form,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& incoming_null_vector,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& outgoing_null_vector,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& source);
+/// @}
+
 /*!
  * \brief Add \f$-c\,X^{\rm gauge}_{ab}\f$ to the correction for
  * \f$\partial_t u^-_{ab}\f$, for a scalar coefficient \f$c\f$ and a symmetric
@@ -385,6 +446,45 @@ void add_gauge_sommerfeld_terms_to_dt_v_minus(
     const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
     const tnsr::aa<DataType, VolumeDim, Frame::Inertial>&
         char_projected_rhs_dt_v_psi);
+
+/*!
+ * \brief The physical (transverse-traceless) sector condition for
+ * \f$\partial_t u^-\f$ at a worldtube boundary.
+ *
+ * \details Adds \f$P^{\rm phys}\f$ applied to the frozen volume RHS plus the
+ * incoming Weyl mode, so it both unfreezes the physical sector and imposes the
+ * condition on it. Declared here because a boundary condition that imposes
+ * sectors independently calls it directly rather than through
+ * `constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube`.
+ */
+template <size_t VolumeDim, typename DataType>
+void add_physical_terms_to_dt_v_minus_worldtube(
+    gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
+        bc_dt_v_minus,
+    const Scalar<DataType>& gamma2,
+    const tnsr::i<DataType, VolumeDim, Frame::Inertial>&
+        unit_interface_normal_one_form,
+    const tnsr::I<DataType, VolumeDim, Frame::Inertial>&
+        unit_interface_normal_vector,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>&
+        spacetime_unit_normal_vector,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& projection_ab,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>& projection_AB,
+    const tnsr::II<DataType, VolumeDim, Frame::Inertial>&
+        inverse_spatial_metric,
+    const tnsr::ii<DataType, VolumeDim, Frame::Inertial>& extrinsic_curvature,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& spacetime_metric,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>&
+        inverse_spacetime_metric,
+    const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>&
+        three_index_constraint,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>&
+        char_projected_rhs_dt_v_minus,
+    const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& phi,
+    const tnsr::ijaa<DataType, VolumeDim, Frame::Inertial>& d_phi,
+    const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& d_pi,
+    const std::array<DataType, 4>& char_speeds);
 
 template <size_t VolumeDim, typename DataType>
 void add_constraint_dependent_terms_to_dt_v_minus(
