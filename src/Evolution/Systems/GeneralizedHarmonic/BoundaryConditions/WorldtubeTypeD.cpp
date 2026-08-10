@@ -3,6 +3,8 @@
 
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/WorldtubeTypeD.hpp"
 
+#include <variant>
+
 #include "DataStructures/TaggedTuple.hpp"
 #include "DataStructures/Tags/TempTensor.hpp"
 #include "DataStructures/TempBuffer.hpp"
@@ -68,15 +70,40 @@ SectorImposition convert_sector_imposition_from_yaml(
               "Failed to convert input option to a sector imposition. Must be "
               "one of Ghost, Bjorhus or Frozen.");
 }
+
+PerFieldConstraintSectors::PerFieldConstraintSectors(
+    const SectorImposition v_psi_in, const SectorImposition v_zero_in,
+    const SectorImposition v_minus_in)
+    : v_psi(v_psi_in), v_zero(v_zero_in), v_minus(v_minus_in) {}
 }  // namespace detail
+
+namespace {
+// Resolve the aggregate-or-per-field option into one imposition per field.
+detail::PerFieldConstraintSectors resolve_constraint_sectors(
+    const std::variant<detail::SectorImposition,
+                       detail::PerFieldConstraintSectors>& sector) {
+  if (std::holds_alternative<detail::SectorImposition>(sector)) {
+    const auto imposition = std::get<detail::SectorImposition>(sector);
+    return {imposition, imposition, imposition};
+  }
+  return std::get<detail::PerFieldConstraintSectors>(sector);
+}
+}  // namespace
 
 template <size_t Dim>
 WorldtubeTypeD<Dim>::WorldtubeTypeD(
-    const detail::SectorImposition constraint_preserving_sector,
+    const std::variant<detail::SectorImposition,
+                       detail::PerFieldConstraintSectors>
+        constraint_preserving_sector,
     const detail::SectorImposition physical_sector,
     const detail::SectorImposition gauge_sector,
     const Options::Context& context)
-    : constraint_preserving_sector_(constraint_preserving_sector),
+    : constraint_v_psi_(
+          resolve_constraint_sectors(constraint_preserving_sector).v_psi),
+      constraint_v_zero_(
+          resolve_constraint_sectors(constraint_preserving_sector).v_zero),
+      constraint_v_minus_(
+          resolve_constraint_sectors(constraint_preserving_sector).v_minus),
       physical_sector_(physical_sector),
       gauge_sector_(gauge_sector) {
   if (gauge_sector_ == detail::SectorImposition::Bjorhus) {
@@ -93,7 +120,9 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
 template <size_t Dim>
 WorldtubeTypeD<Dim>::WorldtubeTypeD(const WorldtubeTypeD& rhs)
     : BoundaryCondition<Dim>(rhs),
-      constraint_preserving_sector_(rhs.constraint_preserving_sector_),
+      constraint_v_psi_(rhs.constraint_v_psi_),
+      constraint_v_zero_(rhs.constraint_v_zero_),
+      constraint_v_minus_(rhs.constraint_v_minus_),
       physical_sector_(rhs.physical_sector_),
       gauge_sector_(rhs.gauge_sector_) {}
 
@@ -103,7 +132,9 @@ WorldtubeTypeD<Dim>& WorldtubeTypeD<Dim>::operator=(const WorldtubeTypeD& rhs) {
     return *this;
   }
   BoundaryCondition<Dim>::operator=(rhs);
-  constraint_preserving_sector_ = rhs.constraint_preserving_sector_;
+  constraint_v_psi_ = rhs.constraint_v_psi_;
+  constraint_v_zero_ = rhs.constraint_v_zero_;
+  constraint_v_minus_ = rhs.constraint_v_minus_;
   physical_sector_ = rhs.physical_sector_;
   gauge_sector_ = rhs.gauge_sector_;
   return *this;
@@ -122,7 +153,9 @@ WorldtubeTypeD<Dim>::get_clone() const {
 template <size_t Dim>
 void WorldtubeTypeD<Dim>::pup(PUP::er& p) {
   BoundaryCondition<Dim>::pup(p);
-  p | constraint_preserving_sector_;
+  p | constraint_v_psi_;
+  p | constraint_v_zero_;
+  p | constraint_v_minus_;
   p | physical_sector_;
   p | gauge_sector_;
 }
@@ -361,23 +394,38 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
   // with Gauge: Ghost the old ConstraintPreservingPhysicalGhostGauge.
   const DataVector minus_one(get_size(get(gamma2)), -1.0);
 
-  // The constraint-preserving sector moves as a unit: it owns v_psi and
-  // v_zero as well as the constraint projection of v_minus.
-  if (constraint_preserving_sector_ == detail::SectorImposition::Bjorhus) {
+  // The constraint-preserving sector owns three structurally different terms:
+  // the three-index-constraint term on v_psi, the four-index-constraint term on
+  // v_zero, and the constraint projection of v_minus. They are imposed
+  // independently so that a constraint influx can be attributed to one term
+  // rather than to the sector as a whole.
+  if (constraint_v_psi_ == detail::SectorImposition::Bjorhus) {
     Bjorhus::constraint_preserving_corrections_dt_v_psi(
         make_not_null(&bc_dt_v_psi), unit_interface_normal_vector,
         three_index_constraint, char_speeds);
-    Bjorhus::constraint_preserving_corrections_dt_v_zero(
-        make_not_null(&bc_dt_v_zero), unit_interface_normal_vector,
-        four_index_constraint, char_speeds);
-  } else if (constraint_preserving_sector_ ==
-             detail::SectorImposition::Frozen) {
-    // Frozen: dt v_psi = dt v_zero = 0, so the correction cancels whatever the
-    // volume right-hand side supplied.  Diagnostic only -- this deliberately
-    // lets constraint violations enter, which is the point of the test.
+  } else if (constraint_v_psi_ == detail::SectorImposition::Frozen) {
+    // Frozen: dt v_psi = 0, so the correction cancels whatever the volume
+    // right-hand side supplied.  Diagnostic only, and note that because
+    // v_psi = psi_ab and C_iab = d_i psi_ab - Phi_iab, this makes the
+    // three-index constraint grow at the face by construction.
     for (size_t a = 0; a <= Dim; ++a) {
       for (size_t b = a; b <= Dim; ++b) {
         bc_dt_v_psi.get(a, b) = -char_projected_rhs_dt_v_psi.get(a, b);
+      }
+    }
+  } else {
+    // Ghost: no correction, so v_psi evolves freely and is driven by the ghost
+    // state.
+    std::fill(bc_dt_v_psi.begin(), bc_dt_v_psi.end(), 0.);
+  }
+
+  if (constraint_v_zero_ == detail::SectorImposition::Bjorhus) {
+    Bjorhus::constraint_preserving_corrections_dt_v_zero(
+        make_not_null(&bc_dt_v_zero), unit_interface_normal_vector,
+        four_index_constraint, char_speeds);
+  } else if (constraint_v_zero_ == detail::SectorImposition::Frozen) {
+    for (size_t a = 0; a <= Dim; ++a) {
+      for (size_t b = a; b <= Dim; ++b) {
         for (size_t i = 0; i < Dim; ++i) {
           bc_dt_v_zero.get(i, a, b) =
               -char_projected_rhs_dt_v_zero.get(i, a, b);
@@ -385,9 +433,6 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
       }
     }
   } else {
-    // Ghost: no correction, so v_psi and v_zero evolve freely and are driven
-    // by the ghost state.
-    std::fill(bc_dt_v_psi.begin(), bc_dt_v_psi.end(), 0.);
     std::fill(bc_dt_v_zero.begin(), bc_dt_v_zero.end(), 0.);
   }
 
@@ -402,14 +447,14 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
 
   std::fill(bc_dt_v_minus.begin(), bc_dt_v_minus.end(), 0.);
 
-  if (constraint_preserving_sector_ == detail::SectorImposition::Bjorhus) {
+  if (constraint_v_minus_ == detail::SectorImposition::Bjorhus) {
     Bjorhus::detail::add_constraint_dependent_terms_to_dt_v_minus(
         make_not_null(&bc_dt_v_minus), outgoing_null_one_form,
         incoming_null_vector, outgoing_null_vector, projection_ab,
         projection_Ab, projection_AB, constraint_char_zero_plus,
         constraint_char_zero_minus, char_projected_rhs_dt_v_minus, char_speeds);
   }
-  if (constraint_preserving_sector_ != detail::SectorImposition::Ghost) {
+  if (constraint_v_minus_ != detail::SectorImposition::Ghost) {
     Bjorhus::detail::add_constraint_sector_projection(
         make_not_null(&bc_dt_v_minus), minus_one, outgoing_null_one_form,
         incoming_null_vector, projection_ab, projection_Ab, projection_AB,
@@ -545,7 +590,9 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
   }
 
   const bool any_ghost_sector =
-      constraint_preserving_sector_ == detail::SectorImposition::Ghost or
+      constraint_v_psi_ == detail::SectorImposition::Ghost or
+      constraint_v_zero_ == detail::SectorImposition::Ghost or
+      constraint_v_minus_ == detail::SectorImposition::Ghost or
       physical_sector_ == detail::SectorImposition::Ghost or
       gauge_sector_ == detail::SectorImposition::Ghost;
   if (not any_ghost_sector) {
@@ -666,7 +713,7 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
       }
     }
     const DataVector unit_coefficient(n_points, 1.0);
-    if (constraint_preserving_sector_ == detail::SectorImposition::Ghost) {
+    if (constraint_v_minus_ == detail::SectorImposition::Ghost) {
       Bjorhus::detail::add_constraint_sector_projection(
           make_not_null(&v_minus_ghost), unit_coefficient,
           outgoing_null_one_form, incoming_null_vector, projection_ab,
@@ -684,15 +731,17 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
           outgoing_null_vector, projection_Ab, delta_v_minus);
     }
 
-    // The constraint-preserving sector owns v_psi and v_zero as well as its
-    // projection of v^-, so under Ghost imposition it moves as a unit and all
-    // three come from the model.
-    const bool constraint_sector_is_ghost =
-        constraint_preserving_sector_ == detail::SectorImposition::Ghost;
+    // v_psi and v_zero each come from the model only if that field is imposed
+    // through the ghost state; otherwise they keep the interior value so the
+    // upwind penalty sees no jump in them.
     const auto& v_psi_ghost = get<Tags::VSpacetimeMetric<DataVector, Dim>>(
-        constraint_sector_is_ghost ? char_fields_model : char_fields_interior);
+        constraint_v_psi_ == detail::SectorImposition::Ghost
+            ? char_fields_model
+            : char_fields_interior);
     const auto& v_zero_ghost = get<Tags::VZero<DataVector, Dim>>(
-        constraint_sector_is_ghost ? char_fields_model : char_fields_interior);
+        constraint_v_zero_ == detail::SectorImposition::Ghost
+            ? char_fields_model
+            : char_fields_interior);
 
     const auto ghost_evolved = evolved_fields_from_characteristic_fields(
         gamma2, v_psi_ghost, v_zero_ghost,

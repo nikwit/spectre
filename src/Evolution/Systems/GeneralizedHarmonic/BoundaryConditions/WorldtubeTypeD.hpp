@@ -10,6 +10,7 @@
 #include <pup.h>
 #include <string>
 #include <type_traits>
+#include <variant>
 
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/DataVector.hpp"
@@ -57,6 +58,51 @@ enum class SectorImposition {
 
 SectorImposition convert_sector_imposition_from_yaml(
     const Options::Option& options);
+
+/// \brief Per-field imposition of the constraint-preserving sector.
+///
+/// The sector bundles three structurally different corrections -- the
+/// three-index-constraint term on \f$\partial_t v_\psi\f$, the
+/// four-index-constraint term on \f$\partial_t v_0\f$, and the constraint
+/// projection of \f$\partial_t u^-\f$ -- and this imposes each of them
+/// separately, so that a constraint influx can be attributed to one term
+/// rather than to the sector as a whole.
+struct PerFieldConstraintSectors {
+  struct VPsi {
+    using type = SectorImposition;
+    static constexpr Options::String help{
+        "Imposition of the three-index-constraint term on dt v_psi. NOTE that "
+        "Frozen here raises the three-index constraint by construction, "
+        "because v_psi = psi_ab and C_iab = d_i psi_ab - Phi_iab: holding "
+        "psi_ab fixed while Phi_iab evolves makes C_iab grow at the face, and "
+        "the Bjorhus term being replaced is the term that damps it there."};
+  };
+  struct VZero {
+    using type = SectorImposition;
+    static constexpr Options::String help{
+        "Imposition of the four-index-constraint term on dt v_zero."};
+  };
+  struct VMinus {
+    using type = SectorImposition;
+    static constexpr Options::String help{
+        "Imposition of the constraint projection of v_minus, which is the "
+        "block the fitted model data enters through."};
+  };
+
+  using options = tmpl::list<VPsi, VZero, VMinus>;
+  static constexpr Options::String help{
+      "Impose the three terms of the constraint-preserving sector separately. "
+      "Diagnostic form of ConstraintPreservingSector."};
+
+  PerFieldConstraintSectors() = default;
+  PerFieldConstraintSectors(SectorImposition v_psi_in,
+                            SectorImposition v_zero_in,
+                            SectorImposition v_minus_in);
+
+  SectorImposition v_psi{SectorImposition::Bjorhus};
+  SectorImposition v_zero{SectorImposition::Bjorhus};
+  SectorImposition v_minus{SectorImposition::Bjorhus};
+};
 }  // namespace gh::BoundaryConditions::detail
 
 namespace gh::BoundaryConditions {
@@ -127,15 +173,20 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   /// \f$\partial_t v_0\f$, which belong to this sector too. `Ghost` instead
   /// takes all three from the model in the ghost state and lets the upwind
   /// penalty drive them, leaving their volume dynamics free.
+  /// Either one imposition for the whole sector, or a
+  /// `detail::PerFieldConstraintSectors` map imposing its three terms
+  /// separately.
   struct ConstraintPreservingSector {
-    using type = detail::SectorImposition;
+    using type = std::variant<detail::SectorImposition,
+                              detail::PerFieldConstraintSectors>;
     static constexpr Options::String help{
-        "Ghost, Bjorhus or Frozen imposition of the constraint-preserving "
-        "sector, which comprises v_psi, v_zero and the constraint projection "
-        "of v_minus. Frozen sets their time derivatives to zero and is a "
-        "DIAGNOSTIC ONLY: it deliberately lets constraint violations enter, "
-        "which is what makes it useful for isolating where an influx comes "
-        "from."};
+        "Imposition of the constraint-preserving sector, which comprises "
+        "v_psi, v_zero and the constraint projection of v_minus. Either "
+        "Ghost/Bjorhus/Frozen for all three at once, or a map with the keys "
+        "VPsi, VZero and VMinus to impose them separately. Frozen sets time "
+        "derivatives to zero and is a DIAGNOSTIC ONLY: it deliberately lets "
+        "constraint violations enter, which is what makes it useful for "
+        "isolating where an influx comes from."};
   };
 
   /// \brief How the physical sector -- the transverse-traceless projection of
@@ -177,10 +228,12 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
       "partition v_minus exactly, so the choices are independent."};
   static std::string name() { return "WorldtubeTypeD"; }
 
-  WorldtubeTypeD(detail::SectorImposition constraint_preserving_sector,
-                 detail::SectorImposition physical_sector,
-                 detail::SectorImposition gauge_sector,
-                 const Options::Context& context = {});
+  WorldtubeTypeD(
+      std::variant<detail::SectorImposition, detail::PerFieldConstraintSectors>
+          constraint_preserving_sector,
+      detail::SectorImposition physical_sector,
+      detail::SectorImposition gauge_sector,
+      const Options::Context& context = {});
 
   WorldtubeTypeD() = default;
   /// \cond
@@ -194,8 +247,7 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   explicit WorldtubeTypeD(CkMigrateMessage* msg);
 
   WRAPPED_PUPable_decl_base_template(
-      domain::BoundaryConditions::BoundaryCondition,
-      WorldtubeTypeD);
+      domain::BoundaryConditions::BoundaryCondition, WorldtubeTypeD);
 
   auto get_clone() const -> std::unique_ptr<
       domain::BoundaryConditions::BoundaryCondition> override;
@@ -392,7 +444,13 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
       const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_spacetime_metric)
       const;
 
-  detail::SectorImposition constraint_preserving_sector_{
+  // The constraint-preserving sector, resolved per field: the aggregate
+  // ConstraintPreservingSector option sets all three unless a per-field option
+  // overrides it.
+  detail::SectorImposition constraint_v_psi_{detail::SectorImposition::Bjorhus};
+  detail::SectorImposition constraint_v_zero_{
+      detail::SectorImposition::Bjorhus};
+  detail::SectorImposition constraint_v_minus_{
       detail::SectorImposition::Bjorhus};
   detail::SectorImposition physical_sector_{detail::SectorImposition::Bjorhus};
   detail::SectorImposition gauge_sector_{detail::SectorImposition::Ghost};
