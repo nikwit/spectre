@@ -17,6 +17,7 @@
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Variables.hpp"
 #include "Evolution/BoundaryConditions/Type.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/BjorhusImpl.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/BoundaryCondition.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Options/Auto.hpp"
@@ -91,18 +92,40 @@ namespace gh::BoundaryConditions {
  * An optional injected incoming-wave contribution can be specified through
  * `IncomingWaveProfile`. The injected strain-rate tensor is
  * \f[
- *   \dot{h}_{ab} = \dot{f}(t)
- *   \left(\hat{x}_a \hat{x}_b + \hat{y}_a \hat{y}_b - 2 \hat{z}_a
- * \hat{z}_b\right),
+ *   \dot{h}_{ij} = f'(t)\, h_{ij},
  * \f]
- * where the configured profile is interpreted directly as \f$\dot{f}(t)\f$ and
- * \f$\hat{x}_a\f$, \f$\hat{y}_a\f$ and \f$\hat{z}_a\f$ are the components of
- * the coordinate basis vectors. This formula is taken from
- * \cite Lindblom2005qh.  It should be considered an approximate perturbation
- * rather than an exact gravitational wave which would have to be constructed at
- * null-infinity. Note that the profile of the injected wave is specified at the
- * outer boundary and its amplitude should be adjusted according to the usual
- * 1/r scaling.
+ * where the configured profile is the envelope \f$f(t)\f$ and the injection
+ * uses its *derivative*. With a Gaussian envelope
+ * \f$f(t) = A \exp[-(t - t_p)^2 / w^2]\f$ this makes the pulse bipolar, so the
+ * strain returns to zero once the pulse has passed; injecting \f$f\f$ itself
+ * would leave a permanent offset, a step rather than a pulse. Choose
+ * \f$t_p \gtrsim 4 w\f$ so the profile is negligible at the initial time.
+ * \f$h_{ij}\f$ is the constant symmetric spatial tensor given componentwise by
+ * `IncomingWaveComponents` in the order \f$(xx, xy, xz, yy, yz, zz)\f$. Only
+ * the spatial block is set; the correction enters \f$\partial_t u^-_{ab}\f$
+ * through the transverse-traceless projection
+ * \f$P^c{}_a P^d{}_b - \frac{1}{2} P_{ab} P^{cd}\f$, so \f$h_{ij}\f$ need be
+ * neither transverse nor trace free -- whatever is not transverse and trace
+ * free with respect to the boundary normal is projected away.
+ *
+ * A *constant* Cartesian tensor can only excite \f$\ell = 2\f$; reaching
+ * higher \f$\ell\f$ would need an angle-dependent amplitude on the sphere. The
+ * default \f$\mathrm{diag}(1, 1, -2)\f$ is proportional to the \f$(2, 0)\f$
+ * tensor of \cite Lindblom2005qh and so reaches essentially only \f$m = 0\f$,
+ * while populating all five independent components spans the whole
+ * \f$\ell = 2\f$ multiplet -- the better choice when the point is to probe a
+ * boundary condition rather than to reproduce that reference.
+ *
+ * When comparing pulse *shapes*, note that the peak of \f$\dot{f}\f$ scales as
+ * \f$A/w\f$ for a Gaussian of amplitude \f$A\f$ and width \f$w\f$: hold
+ * \f$A/w\f$ and the Frobenius norm of \f$h_{ij}\f$ fixed, or the comparison
+ * confounds strength with shape.
+ *
+ * It should be considered an approximate perturbation rather than an exact
+ * gravitational wave, which would have to be constructed at null infinity.
+ * Note that the profile of the injected wave is specified at the outer
+ * boundary and its amplitude should be adjusted according to the usual 1/r
+ * scaling.
  *
  * This class provides two choices of combinations of the above corrections:
  *  - `ConstraintPreserving` : this imposes the constraint-preserving and
@@ -136,16 +159,38 @@ class ConstraintPreservingBjorhus final : public BoundaryCondition<Dim> {
                       Options::AutoLabel::None>;
     static std::string name() { return "IncomingWaveProfile"; }
     static constexpr Options::String help{
-        "Optional incoming-wave profile interpreted as the first time "
-        "derivative for the injected physical wave. See the "
+        "Optional envelope f(t) for the injected physical wave. The injected "
+        "strain rate is its DERIVATIVE, f'(t), so a Gaussian envelope gives a "
+        "bipolar pulse whose strain returns to zero; injecting f itself would "
+        "leave a permanent offset. Choose the peak time >= 4 widths so the "
+        "profile is negligible at the initial time. See the "
         "ConstraintPreservingBjorhus class documentation for the injected-wave "
         "formula. Specify `None` to disable injection. This option is only "
         "supported in 3D."};
   };
 
+  struct IncomingWaveComponentsOptionTag {
+    using type = std::array<double, 6>;
+    static std::string name() { return "IncomingWaveComponents"; }
+    static constexpr Options::String help{
+        "Components (xx, xy, xz, yy, yz, zz) of the constant symmetric spatial "
+        "tensor the injected wave is proportional to. They need be neither "
+        "transverse nor trace free: the transverse-traceless projection keeps "
+        "only the part that is, relative to the boundary normal. A constant "
+        "tensor cannot reach beyond l = 2. The default diag(1, 1, -2) is "
+        "proportional to the (2, 0) tensor and so reaches essentially only "
+        "m = 0; populating all five independent components spans the whole "
+        "l = 2 multiplet. Ignored when IncomingWaveProfile is None."};
+    static type default_value() {
+      return Bjorhus::default_incoming_wave_components;
+    }
+  };
+
   using options = tmpl::flatten<tmpl::list<
       TypeOptionTag,
-      tmpl::conditional_t<Dim == 3, tmpl::list<IncomingWaveProfileOptionTag>,
+      tmpl::conditional_t<Dim == 3,
+                          tmpl::list<IncomingWaveProfileOptionTag,
+                                     IncomingWaveComponentsOptionTag>,
                           tmpl::list<>>>>;
   static constexpr Options::String help{
       "ConstraintPreservingBjorhus boundary conditions setting the value of the"
@@ -156,7 +201,9 @@ class ConstraintPreservingBjorhus final : public BoundaryCondition<Dim> {
   explicit ConstraintPreservingBjorhus(
       detail::ConstraintPreservingBjorhusType type,
       std::optional<std::unique_ptr<::MathFunction<1, Frame::Inertial>>>
-          incoming_wave_profile = std::nullopt);
+          incoming_wave_profile = std::nullopt,
+      const std::array<double, 6>& incoming_wave_components =
+          Bjorhus::default_incoming_wave_components);
 
   ConstraintPreservingBjorhus() = default;
   /// \cond
@@ -312,6 +359,8 @@ class ConstraintPreservingBjorhus final : public BoundaryCondition<Dim> {
   detail::ConstraintPreservingBjorhusType type_{
       detail::ConstraintPreservingBjorhusType::ConstraintPreservingPhysical};
   std::unique_ptr<::MathFunction<1, Frame::Inertial>> incoming_wave_profile_{};
+  std::array<double, 6> incoming_wave_components_{
+      Bjorhus::default_incoming_wave_components};
 };
 }  // namespace gh::BoundaryConditions
 

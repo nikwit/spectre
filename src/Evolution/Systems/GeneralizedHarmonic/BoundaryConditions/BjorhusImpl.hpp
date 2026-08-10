@@ -24,6 +24,24 @@ namespace gh::BoundaryConditions {
 /// \brief Detailed implementation of Bjorhus-type boundary corrections
 namespace Bjorhus {
 /*!
+ * \brief Spatial components \f$(xx, xy, xz, yy, yz, zz)\f$ of the symmetric
+ * tensor the injected incoming wave is proportional to.
+ *
+ * The transverse-traceless projection applied to the injected wave means an
+ * arbitrary symmetric tensor is admissible: the components that survive are
+ * whatever is transverse and trace free with respect to the boundary normal.
+ *
+ * Note that a *constant* Cartesian tensor can only excite \f$\ell = 2\f$;
+ * reaching higher \f$\ell\f$ would need an angle-dependent amplitude on the
+ * sphere. The default reproduces \f$\mathrm{diag}(1, 1, -2)\f$, which is
+ * proportional to the \f$(2, 0)\f$ tensor of \cite Lindblom2005qh and so
+ * reaches essentially only \f$m = 0\f$; populating all five independent
+ * components instead spans the whole \f$\ell = 2\f$ multiplet.
+ */
+inline constexpr std::array<double, 6> default_incoming_wave_components{
+    {1., 0., 0., 1., 0., -2.}};
+
+/*!
  * \brief Computes the expression needed to set boundary conditions on the time
  * derivative of the characteristic field \f$v^{g}_{ab}\f$
  *
@@ -252,7 +270,9 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus(
     const tnsr::ijaa<DataType, VolumeDim, Frame::Inertial>& d_phi,
     const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& d_pi,
     const std::array<DataType, 4>& char_speeds,
-    const MathFunction<1, Frame::Inertial>* incoming_wave_profile = nullptr);
+    const MathFunction<1, Frame::Inertial>* incoming_wave_profile = nullptr,
+    const std::array<double, 6>& incoming_wave_components =
+        default_incoming_wave_components);
 
 /*!
  * \brief Which condition to impose on the gauge sector of \f$u^-_{ab}\f$ at a
@@ -533,7 +553,9 @@ void add_physical_terms_to_dt_v_minus(
     const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& d_pi,
     const std::array<DataType, 4>& char_speeds,
     double time = std::numeric_limits<double>::signaling_NaN(),
-    const MathFunction<1, Frame::Inertial>* incoming_wave_profile = nullptr);
+    const MathFunction<1, Frame::Inertial>* incoming_wave_profile = nullptr,
+    const std::array<double, 6>& incoming_wave_components =
+        default_incoming_wave_components);
 }  // namespace detail
 }  // namespace Bjorhus
 }  // namespace gh::BoundaryConditions

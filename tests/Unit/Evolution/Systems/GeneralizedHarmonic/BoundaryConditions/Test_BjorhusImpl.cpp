@@ -1275,7 +1275,7 @@ tnsr::aa<DataVector, VolumeDim, Frame::Inertial> wrapper_func_cpgp_v_minus(
   return dt_v_minus;
 }
 
-void test_incoming_wave_profile_uses_profile_value_in_3d() {
+void test_incoming_wave_profile_uses_profile_derivative_in_3d() {
   constexpr size_t local_volume_dim = 3;
   const size_t num_points = 2;
   const double time = 0.37;
@@ -1390,9 +1390,20 @@ void test_incoming_wave_profile_uses_profile_value_in_3d() {
   auto incoming_wave_profile =
       std::make_unique<MathFunctions::Sinusoid<1, Frame::Inertial>>(1.4, 0.7,
                                                                     0.2);
+  // The injection uses f'(t), not f(t). These differ by more than any
+  // plausible tolerance for this profile, so the check below would fail if the
+  // implementation reverted to using the value.
   const double profile_value = incoming_wave_profile->operator()(time);
   const double profile_derivative = incoming_wave_profile->first_deriv(time);
   CHECK(std::abs(profile_value - profile_derivative) > 1.0e-3);
+
+  // Deliberately generic: neither diagonal, nor trace free, nor transverse to
+  // the boundary normal (which is x^ here, so a transverse tensor would have
+  // no x components at all). The transverse-traceless projection is what makes
+  // arbitrary components admissible, so the test has to feed it arbitrary
+  // components to exercise that.
+  const std::array<double, 6> wave_components{
+      {0.83, -1.27, 0.42, 1.61, -0.35, 0.94}};
 
   gh::BoundaryConditions::Bjorhus::
       constraint_preserving_gauge_physical_corrections_dt_v_minus<
@@ -1418,7 +1429,7 @@ void test_incoming_wave_profile_uses_profile_value_in_3d() {
           three_index_constraint, char_projected_rhs_dt_v_psi,
           char_projected_rhs_dt_v_minus, constraint_char_zero_plus,
           constraint_char_zero_minus, phi, d_phi, d_pi, char_speeds,
-          incoming_wave_profile.get());
+          incoming_wave_profile.get(), wave_components);
 
   auto delta = dt_v_minus_with_profile;
   for (size_t a = 0; a <= local_volume_dim; ++a) {
@@ -1436,9 +1447,14 @@ void test_incoming_wave_profile_uses_profile_value_in_3d() {
   auto char_speed_3 =
       make_with_value<Scalar<DataVector>>(get(gamma2), 0.0);
   get(char_speed_3) = char_speeds[3];
-  injected_wave.get(1, 1) = profile_value;
-  injected_wave.get(2, 2) = profile_value;
-  injected_wave.get(3, 3) = -2.0 * profile_value;
+  size_t component = 0;
+  for (size_t i = 0; i < local_volume_dim; ++i) {
+    for (size_t j = i; j < local_volume_dim; ++j) {
+      injected_wave.get(i + 1, j + 1) =
+          gsl::at(wave_components, component) * profile_derivative;
+      ++component;
+    }
+  }
   tenex::evaluate<ti::a, ti::b>(
       make_not_null(&expected_delta),
       (projection_Ab(ti::C, ti::a) * projection_Ab(ti::D, ti::b) -
@@ -1791,6 +1807,17 @@ SPECTRE_TEST_CASE("Unit.Evolution.Systems.GeneralizedHarmonic.BCBjorhus.VZero",
   test_constraint_preserving_bjorhus_v_zero_vs_spec_3d(grid_size);
 }
 
+// In its own case, with no Python environment: the injected wave is checked
+// against a closed-form expression, so it should not be taken down by an
+// unrelated pypp failure in the VMinus case.
+SPECTRE_TEST_CASE(
+    "Unit.Evolution.Systems.GeneralizedHarmonic.BCBjorhus.IncomingWave",
+    "[Unit][Evolution]") {
+  test_incoming_wave_profile_uses_profile_derivative_in_3d();
+  test_incoming_wave_profile_throws_for_non_3d<1>();
+  test_incoming_wave_profile_throws_for_non_3d<2>();
+}
+
 SPECTRE_TEST_CASE("Unit.Evolution.Systems.GeneralizedHarmonic.BCBjorhus.VMinus",
                   "[Unit][Evolution]") {
   pypp::SetupLocalPythonEnvironment local_python_env{""};
@@ -1810,10 +1837,6 @@ SPECTRE_TEST_CASE("Unit.Evolution.Systems.GeneralizedHarmonic.BCBjorhus.VMinus",
       grid_size);
   test_constraint_preserving_gauge_physical_corrections_dt_v_minus<3>(
       grid_size);
-  test_incoming_wave_profile_uses_profile_value_in_3d();
-  test_incoming_wave_profile_throws_for_non_3d<1>();
-  test_incoming_wave_profile_throws_for_non_3d<2>();
-
   // Piece-wise tests with SpEC output in 3D
   const std::array<double, 3> lower_bound{{299., -0.5, -0.5}};
   const std::array<double, 3> upper_bound{{300., 0.5, 0.5}};

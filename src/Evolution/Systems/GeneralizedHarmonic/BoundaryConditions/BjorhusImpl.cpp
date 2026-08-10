@@ -359,7 +359,8 @@ void add_physical_terms_to_dt_v_minus(
     const tnsr::ijaa<DataType, VolumeDim, Frame::Inertial>& d_phi,
     const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& d_pi,
     const std::array<DataType, 4>& char_speeds, const double time,
-    const MathFunction<1, Frame::Inertial>* const incoming_wave_profile) {
+    const MathFunction<1, Frame::Inertial>* const incoming_wave_profile,
+    const std::array<double, 6>& incoming_wave_components) {
   // hard-coded value from SpEC Bbh input file Mu = MuPhys = 0
   constexpr double mu_phys = 0.;
   constexpr bool adjust_phys_using_c4 = true;
@@ -545,10 +546,26 @@ void add_physical_terms_to_dt_v_minus(
 
   if (incoming_wave_profile != nullptr) {
     if constexpr (VolumeDim == 3) {
-      const double injected_wave_profile_value = (*incoming_wave_profile)(time);
-      injected_wave.get(1, 1) = injected_wave_profile_value;
-      injected_wave.get(2, 2) = injected_wave_profile_value;
-      injected_wave.get(3, 3) = -2. * injected_wave_profile_value;
+      // The configured profile is the envelope f(t); the injected strain rate
+      // is its derivative. With a Gaussian envelope this makes the pulse
+      // bipolar, so the strain returns to zero once it has passed. Using f
+      // itself would leave a permanent offset -- a step rather than a pulse.
+      const double injected_wave_profile_value =
+          incoming_wave_profile->first_deriv(time);
+      // The spatial block of the injected wave, in the storage order
+      // (xx, xy, xz, yy, yz, zz). The transverse-traceless projection applied
+      // below keeps only the part that is transverse and trace free with
+      // respect to the boundary normal, so the components supplied here need
+      // be neither.
+      size_t component = 0;
+      for (size_t i = 0; i < VolumeDim; ++i) {
+        for (size_t j = i; j < VolumeDim; ++j) {
+          injected_wave.get(i + 1, j + 1) =
+              gsl::at(incoming_wave_components, component) *
+              injected_wave_profile_value;
+          ++component;
+        }
+      }
     } else {
       ERROR("IncomingWaveProfile can only be used in 3 spatial dimensions.");
     }
@@ -997,7 +1014,8 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus(
     const tnsr::ijaa<DataType, VolumeDim, Frame::Inertial>& d_phi,
     const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& d_pi,
     const std::array<DataType, 4>& char_speeds,
-    const MathFunction<1, Frame::Inertial>* const incoming_wave_profile) {
+    const MathFunction<1, Frame::Inertial>* const incoming_wave_profile,
+    const std::array<double, 6>& incoming_wave_components) {
   for (size_t a = 0; a <= VolumeDim; ++a) {
     for (size_t b = a; b <= VolumeDim; ++b) {
       bc_dt_v_minus->get(a, b) = -char_projected_rhs_dt_v_minus.get(a, b);
@@ -1014,7 +1032,7 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus(
       projection_Ab, projection_AB, inverse_spatial_metric, extrinsic_curvature,
       spacetime_metric, inverse_spacetime_metric, three_index_constraint,
       char_projected_rhs_dt_v_minus, phi, d_phi, d_pi, char_speeds, time,
-      incoming_wave_profile);
+      incoming_wave_profile, incoming_wave_components);
   detail::add_gauge_sommerfeld_terms_to_dt_v_minus(
       bc_dt_v_minus, gamma2, inertial_coords, incoming_null_one_form,
       outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
@@ -1290,7 +1308,8 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
       const tnsr::ijaa<DTYPE(data), DIM(data), Frame::Inertial>& d_phi,        \
       const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>& d_pi,          \
       const std::array<DTYPE(data), 4>& char_speeds, const double time,        \
-      const MathFunction<1, Frame::Inertial>* incoming_wave_profile);          \
+      const MathFunction<1, Frame::Inertial>* incoming_wave_profile,           \
+      const std::array<double, 6>& incoming_wave_components);                  \
   template void gh::BoundaryConditions::Bjorhus::                              \
       constraint_preserving_corrections_dt_v_minus(                            \
           const gsl::not_null<                                                 \
@@ -1397,7 +1416,8 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(
           const tnsr::ijaa<DTYPE(data), DIM(data), Frame::Inertial>& d_phi,    \
           const tnsr::iaa<DTYPE(data), DIM(data), Frame::Inertial>& d_pi,      \
           const std::array<DTYPE(data), 4>& char_speeds,                       \
-          const MathFunction<1, Frame::Inertial>* incoming_wave_profile);      \
+          const MathFunction<1, Frame::Inertial>* incoming_wave_profile,       \
+          const std::array<double, 6>& incoming_wave_components);              \
   template void gh::BoundaryConditions::Bjorhus::                              \
       constraint_preserving_gauge_physical_corrections_dt_v_minus_worldtube(   \
           const gsl::not_null<                                                 \
