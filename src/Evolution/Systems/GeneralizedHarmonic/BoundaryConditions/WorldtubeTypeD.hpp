@@ -130,9 +130,12 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   struct ConstraintPreservingSector {
     using type = detail::SectorImposition;
     static constexpr Options::String help{
-        "Ghost or Bjorhus imposition of the constraint-preserving sector, "
-        "which comprises v_psi, v_zero and the constraint projection of "
-        "v_minus."};
+        "Ghost, Bjorhus or Frozen imposition of the constraint-preserving "
+        "sector, which comprises v_psi, v_zero and the constraint projection "
+        "of v_minus. Frozen sets their time derivatives to zero and is a "
+        "DIAGNOSTIC ONLY: it deliberately lets constraint violations enter, "
+        "which is what makes it useful for isolating where an influx comes "
+        "from."};
   };
 
   /// \brief How the physical sector -- the transverse-traceless projection of
@@ -140,7 +143,10 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   struct PhysicalSector {
     using type = detail::SectorImposition;
     static constexpr Options::String help{
-        "Ghost or Bjorhus imposition of the physical sector of v_minus."};
+        "Ghost, Bjorhus or Frozen imposition of the physical sector of "
+        "v_minus. Frozen sets dt of that projection to zero; like the "
+        "constraint sector's Frozen it is a diagnostic, not a production "
+        "setting."};
   };
 
   /// \brief How the gauge sector of \f$u^-\f$ is imposed.

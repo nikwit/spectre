@@ -88,18 +88,6 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
                 "gauge sector weakly from the model, or Frozen for the "
                 "no-model control.");
   }
-  if (constraint_preserving_sector_ == detail::SectorImposition::Frozen) {
-    PARSE_ERROR(context,
-                "ConstraintPreservingSector: Frozen is not offered. Freezing "
-                "the constraint sector defeats the purpose of the boundary "
-                "condition, which exists to stop constraint violations "
-                "entering. Use Ghost or Bjorhus.");
-  }
-  if (physical_sector_ == detail::SectorImposition::Frozen) {
-    PARSE_ERROR(context,
-                "PhysicalSector: Frozen is not offered. Use Ghost or "
-                "Bjorhus.");
-  }
 }
 
 template <size_t Dim>
@@ -382,6 +370,20 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
     Bjorhus::constraint_preserving_corrections_dt_v_zero(
         make_not_null(&bc_dt_v_zero), unit_interface_normal_vector,
         four_index_constraint, char_speeds);
+  } else if (constraint_preserving_sector_ ==
+             detail::SectorImposition::Frozen) {
+    // Frozen: dt v_psi = dt v_zero = 0, so the correction cancels whatever the
+    // volume right-hand side supplied.  Diagnostic only -- this deliberately
+    // lets constraint violations enter, which is the point of the test.
+    for (size_t a = 0; a <= Dim; ++a) {
+      for (size_t b = a; b <= Dim; ++b) {
+        bc_dt_v_psi.get(a, b) = -char_projected_rhs_dt_v_psi.get(a, b);
+        for (size_t i = 0; i < Dim; ++i) {
+          bc_dt_v_zero.get(i, a, b) =
+              -char_projected_rhs_dt_v_zero.get(i, a, b);
+        }
+      }
+    }
   } else {
     // Ghost: no correction, so v_psi and v_zero evolve freely and are driven
     // by the ghost state.
@@ -406,6 +408,8 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
         incoming_null_vector, outgoing_null_vector, projection_ab,
         projection_Ab, projection_AB, constraint_char_zero_plus,
         constraint_char_zero_minus, char_projected_rhs_dt_v_minus, char_speeds);
+  }
+  if (constraint_preserving_sector_ != detail::SectorImposition::Ghost) {
     Bjorhus::detail::add_constraint_sector_projection(
         make_not_null(&bc_dt_v_minus), minus_one, outgoing_null_one_form,
         incoming_null_vector, projection_ab, projection_Ab, projection_AB,
@@ -420,6 +424,8 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
         extrinsic_curvature, spacetime_metric, inverse_spacetime_metric,
         three_index_constraint, char_projected_rhs_dt_v_minus, phi, d_phi, d_pi,
         char_speeds);
+  }
+  if (physical_sector_ != detail::SectorImposition::Ghost) {
     Bjorhus::detail::add_physical_sector_projection(
         make_not_null(&bc_dt_v_minus), minus_one, projection_ab, projection_Ab,
         projection_AB, char_projected_rhs_dt_v_minus);
