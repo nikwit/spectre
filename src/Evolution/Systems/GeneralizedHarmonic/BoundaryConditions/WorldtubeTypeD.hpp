@@ -53,8 +53,30 @@ enum class SectorImposition {
   Bjorhus,
   /// Not at all: the sector is frozen, \f$\partial_t u^-|_{\rm sector} = 0\f$.
   /// Needs no model, so it is the control against which a Ghost run is read.
-  Frozen
+  Frozen,
+  /// Gauge sector only. Bayliss-Turkel \f$L=0\f$ condition in the form that
+  /// annihilates an *ingoing* wave \f$g(t+r)/r\f$, i.e. one the hole absorbs:
+  /// \f$(\partial_t - \partial_r - 1/r)f = 0\f$. Needs no model.
+  ///
+  /// The radius is measured from the worldtube centre, not from the origin of
+  /// the inertial coordinates, so it is the local worldtube radius even for a
+  /// hole that is off-centre or in a binary.
+  SommerfeldAbsorbing,
+  /// Gauge sector only. The outer-boundary form of the same condition, which
+  /// annihilates an *outgoing* wave \f$g(t-r)/r\f$:
+  /// \f$(\partial_t + \partial_r + 1/r)f = 0\f$. Provided so the two signs can
+  /// be compared; at an inner boundary `SommerfeldAbsorbing` is the physically
+  /// motivated one.
+  SommerfeldOutgoing
 };
+
+/// Whether an imposition is one of the two Sommerfeld gauge conditions.
+bool is_sommerfeld(SectorImposition imposition);
+
+/// Sign of the \f$1/r\f$ term, as it enters the coefficient
+/// \f$\gamma_2 - c/r\f$: \f$-1\f$ absorbs into the hole, \f$+1\f$ is the
+/// outer-boundary form.
+double sommerfeld_one_over_r_sign(SectorImposition imposition);
 
 SectorImposition convert_sector_imposition_from_yaml(
     const Options::Option& options);
@@ -212,8 +234,13 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   struct GaugeSector {
     using type = detail::SectorImposition;
     static constexpr Options::String help{
-        "Ghost or Frozen imposition of the gauge sector of v_minus. Bjorhus "
-        "is not implemented."};
+        "Imposition of the gauge sector of v_minus: Ghost (from the model), "
+        "Frozen (no condition at all), or SommerfeldAbsorbing / "
+        "SommerfeldOutgoing for a model-free Bayliss-Turkel L=0 condition. "
+        "SommerfeldAbsorbing annihilates a wave falling into the hole and is "
+        "the physically motivated sign at an inner boundary; "
+        "SommerfeldOutgoing is the outer-boundary sign, provided for "
+        "comparison. Bjorhus is not implemented."};
   };
 
   using options =

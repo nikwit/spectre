@@ -65,10 +65,31 @@ SectorImposition convert_sector_imposition_from_yaml(
     return SectorImposition::Bjorhus;
   } else if (read == "Frozen") {
     return SectorImposition::Frozen;
+  } else if (read == "SommerfeldAbsorbing") {
+    return SectorImposition::SommerfeldAbsorbing;
+  } else if (read == "SommerfeldOutgoing") {
+    return SectorImposition::SommerfeldOutgoing;
   }
   PARSE_ERROR(options.context(),
               "Failed to convert input option to a sector imposition. Must be "
-              "one of Ghost, Bjorhus or Frozen.");
+              "one of Ghost, Bjorhus, Frozen, SommerfeldAbsorbing or "
+              "SommerfeldOutgoing. The two Sommerfeld conditions are only "
+              "available for the gauge sector.");
+}
+
+bool is_sommerfeld(const SectorImposition imposition) {
+  return imposition == SectorImposition::SommerfeldAbsorbing or
+         imposition == SectorImposition::SommerfeldOutgoing;
+}
+
+double sommerfeld_one_over_r_sign(const SectorImposition imposition) {
+  ASSERT(is_sommerfeld(imposition),
+         "sommerfeld_one_over_r_sign called on a non-Sommerfeld imposition.");
+  // The coefficient is gamma2 - c/r. At an inner boundary the domain's outward
+  // normal points into the hole, so d_n = -d_r, and the ingoing condition
+  // (d_t - d_r - 1/r) f = 0 carries the opposite 1/r sign to the outgoing
+  // outer-boundary form (d_t + d_r + 1/r) f = 0.
+  return imposition == SectorImposition::SommerfeldAbsorbing ? -1.0 : 1.0;
 }
 
 PerFieldConstraintSectors::PerFieldConstraintSectors(
@@ -108,13 +129,29 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
       gauge_sector_(gauge_sector) {
   if (gauge_sector_ == detail::SectorImposition::Bjorhus) {
     PARSE_ERROR(context,
-                "GaugeSector: Bjorhus is not implemented. A time-derivative "
-                "condition on the gauge sector needs dt of the model's u^-, "
-                "hence a second time derivative of the model, which the "
-                "worldtube matcher does not supply. Use Ghost to drive the "
-                "gauge sector weakly from the model, or Frozen for the "
-                "no-model control.");
+                "GaugeSector: Bjorhus is not implemented. A relaxation towards "
+                "the model needs dt of the model's u^-, hence a second time "
+                "derivative of the model, which the worldtube matcher does not "
+                "supply. Use Ghost to drive the gauge sector weakly from the "
+                "model, Frozen for the no-model control, or "
+                "SommerfeldAbsorbing / SommerfeldOutgoing for a model-free "
+                "time-derivative condition.");
   }
+  const auto reject_sommerfeld = [&context](
+                                     const detail::SectorImposition imposition,
+                                     const std::string& option_name) {
+    if (detail::is_sommerfeld(imposition)) {
+      PARSE_ERROR(context,
+                  option_name
+                      << ": the Sommerfeld conditions apply only to the gauge "
+                         "sector, which is the sector whose characteristic "
+                         "they describe.");
+    }
+  };
+  reject_sommerfeld(constraint_v_psi_, "ConstraintPreservingSector VPsi");
+  reject_sommerfeld(constraint_v_zero_, "ConstraintPreservingSector VZero");
+  reject_sommerfeld(constraint_v_minus_, "ConstraintPreservingSector VMinus");
+  reject_sommerfeld(physical_sector_, "PhysicalSector");
 }
 
 template <size_t Dim>
@@ -476,7 +513,36 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
         projection_AB, char_projected_rhs_dt_v_minus);
   }
 
-  if (gauge_sector_ == detail::SectorImposition::Frozen) {
+  if (detail::is_sommerfeld(gauge_sector_)) {
+    if constexpr (Dim == 3) {
+      if (not matcher_config.has_value()) {
+        ERROR(
+            "A Sommerfeld gauge sector needs the worldtube centre to form its "
+            "1/r term, which comes from the WorldtubeMatcher option, but it is "
+            "None.");
+      }
+      // 1/r is the LOCAL worldtube radius. Measuring it from the origin of the
+      // inertial coordinates -- what the outer-boundary helper does -- would
+      // give the distance to the origin instead, which for a binary is the
+      // orbital separation and is wrong by orders of magnitude.
+      const std::array<double, 3> centre = gh::Worldtube::detail::model_center(
+          *matcher_config, map_parameters, time);
+      DataVector radius_squared(get_size(get(gamma2)), 0.);
+      for (size_t i = 0; i < Dim; ++i) {
+        radius_squared += square(coords.get(i) - gsl::at(centre, i));
+      }
+      const DataVector gauge_coefficient =
+          get(gamma2) - detail::sommerfeld_one_over_r_sign(gauge_sector_) /
+                            sqrt(radius_squared);
+      Bjorhus::detail::add_gauge_sector_terms_to_dt_v_minus(
+          make_not_null(&bc_dt_v_minus), gauge_coefficient,
+          incoming_null_one_form, outgoing_null_one_form, incoming_null_vector,
+          outgoing_null_vector, projection_Ab, char_projected_rhs_dt_v_psi);
+    } else {
+      ERROR("A Sommerfeld gauge sector is only implemented in 3 dimensions.");
+    }
+  }
+  if (gauge_sector_ != detail::SectorImposition::Ghost) {
     Bjorhus::detail::add_gauge_sector_projection(
         make_not_null(&bc_dt_v_minus), minus_one, incoming_null_one_form,
         outgoing_null_one_form, incoming_null_vector, outgoing_null_vector,
