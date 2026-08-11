@@ -16,6 +16,18 @@ spectre_target_sources(
   PunctureFieldOrder0.cpp
   PunctureFieldOrder1.cpp
   PunctureFieldOrder2.cpp
+  PunctureFieldOrder2Part0.cpp
+  PunctureFieldOrder2Part1.cpp
+  PunctureFieldOrder2Part2.cpp
+  PunctureFieldOrder2Part3.cpp
+  PunctureFieldOrder2Part4.cpp
+  PunctureFieldOrder2Part5.cpp
+  PunctureFieldOrder2Part6.cpp
+  PunctureFieldOrder2Part7.cpp
+  PunctureFieldOrder2Part8.cpp
+  PunctureFieldOrder2Part9.cpp
+  PunctureFieldOrder2Part10.cpp
+  PunctureFieldOrder2Part11.cpp
   RadiusFunctions.cpp
   SelfForce.cpp
   )
@@ -29,6 +41,7 @@ spectre_target_headers(
   SingletonChare.hpp
   Tags.hpp
   PunctureField.hpp
+  PunctureFieldOrder2Impl.hpp
   RadiusFunctions.hpp
   SelfForce.hpp
   System.hpp
