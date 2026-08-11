@@ -5,6 +5,7 @@
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/PunctureField.hpp"
 
 #include <array>
+#include <cmath>
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/DynamicBuffer.hpp"
@@ -46,6 +47,15 @@ void puncture_field_2(
   const DataVector& z = get<2>(centered_coords);
 
   std::array<double, detail::order2_n_doubles> d;
+  d[2920] = xp;
+  d[2921] = yp;
+  d[2922] = xpdot;
+  d[2923] = ypdot;
+  d[2924] = xpddot;
+  d[2925] = ypddot;
+  d[2926] = rp;
+  d[2927] = rpdot;
+  d[2928] = M;
   d[0] = rp * rp * rp;
   d[1] = 2.0 * M;
   d[2] = xp * xpdot;

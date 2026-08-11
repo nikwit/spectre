@@ -76,7 +76,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_305 = temps.at(297);
   dv_1331 = d[958] * dv_305;
   DataVector& dv_1332 = temps.at(1226);
-  DataVector& dv_463 = temps.at(408);
+  DataVector& dv_463 = temps.at(193);
   dv_1332 = d[609] * dv_463;
   DataVector& dv_1333 = temps.at(1227);
   dv_1333 = d[959] * dv_1332;
@@ -194,7 +194,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1383 = temps.at(1274);
   dv_1383 = (d[259] * d[984]) * dv_1382;
   DataVector& dv_1384 = temps.at(1275);
-  dv_1384 = M * dv_26;
+  dv_1384 = d[2928] * dv_26;
   DataVector& dv_1385 = temps.at(1276);
   dv_1385 = (d[764] * d[975]) * dv_1384;
   DataVector& dv_1386 = temps.at(1277);
@@ -301,7 +301,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1431 = temps.at(1314);
   dv_1431 = (d[278] * d[420]) * dv_1430;
   DataVector& dv_1432 = temps.at(1315);
-  dv_1432 = dv_1426 * xp;
+  dv_1432 = dv_1426 * d[2920];
   DataVector& dv_1433 = temps.at(1316);
   dv_1433 = d[420] * dv_1432;
   DataVector& dv_1434 = temps.at(1317);
@@ -332,10 +332,10 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1446 = temps.at(1329);
   dv_1446 = (d[1009] * d[726]) * dv_1432;
   DataVector& dv_1447 = temps.at(1330);
-  dv_1447 = (M * d[1010] * d[726]) * dv_1426;
+  dv_1447 = (d[2928] * d[1010] * d[726]) * dv_1426;
   DataVector& dv_1448 = temps.at(1331);
   DataVector& dv_15 = temps.at(15);
-  dv_1448 = M * dv_15;
+  dv_1448 = d[2928] * dv_15;
   DataVector& dv_1449 = temps.at(1332);
   dv_1449 = d[3] * dv_1448;
   DataVector& dv_1450 = temps.at(1333);
@@ -375,7 +375,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1466 = temps.at(1348);
   dv_1466 = d[1019] * dv_1465;
   DataVector& dv_1467 = temps.at(1349);
-  dv_1467 = M * dv_1369;
+  dv_1467 = d[2928] * dv_1369;
   DataVector& dv_1468 = temps.at(1350);
   dv_1468 = d[108] * dv_1467;
   DataVector& dv_1469 = temps.at(1351);
@@ -453,9 +453,9 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_78 = temps.at(76);
   dv_1501 = d[1042] * dv_78;
   DataVector& dv_1502 = temps.at(1382);
-  dv_1502 = Dx * xpddot;
+  dv_1502 = Dx * d[2924];
   DataVector& dv_1503 = temps.at(1383);
-  dv_1503 = Dy * ypddot;
+  dv_1503 = Dy * d[2925];
   DataVector& dv_1504 = temps.at(1384);
   dv_1504 = dv_1502 + dv_1503;
   DataVector& dv_1505 = temps.at(1385);
@@ -463,20 +463,20 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1505 = d[1039] * dv_7;
   DataVector& dv_1506 = temps.at(1386);
   DataVector& dv_2 = temps.at(2);
-  dv_1506 = d[1043] * dv_2 + dv_1505 + dv_7 * rpdot;
+  dv_1506 = d[1043] * dv_2 + dv_1505 + dv_7 * d[2927];
   DataVector& dv_1507 = temps.at(1387);
   dv_1507 = d[17] * dv_10;
   DataVector& dv_11 = temps.at(11);
   DataVector& dv_1508 = temps.at(8);
   DataVector& dv_8 = temps.at(8);
   dv_1508 = (-d[1029] * d[17]) * dv_11 + d[40] * dv_1501 + dv_1500 +
-            dv_1507 * rp *
+            dv_1507 * d[2926] *
                 (d[0] * dv_1504 + d[1040] * dv_2 + d[114] * dv_2 + dv_1506) -
             dv_2 * dv_8;
   DataVector& dv_1509 = temps.at(1388);
   dv_1509 = (d[1045] + d[97]) + dv_2;
   DataVector& dv_1510 = temps.at(1389);
-  dv_1510 = dv_1509 * rp;
+  dv_1510 = dv_1509 * d[2926];
   DataVector& dv_1511 = temps.at(1390);
   DataVector& dv_69 = temps.at(69);
   dv_1511 = -dv_69;
@@ -500,8 +500,8 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_32 = temps.at(32);
   dv_1518 = dv_32 + dv_5;
   DataVector& dv_1519 = temps.at(1397);
-  dv_1519 = (-d[19]) * dv_1512 + (-xp) * (-dv_1515 + dv_1516 * xpdot) +
-            yp * ((-ypdot) * dv_1518 + dv_1517);
+  dv_1519 = (-d[19]) * dv_1512 + (-d[2920]) * (-dv_1515 + dv_1516 * d[2922]) +
+            d[2921] * ((-d[2923]) * dv_1518 + dv_1517);
   DataVector& dv_1520 = temps.at(1398);
   dv_1520 = d[534] + dv_1504;
   DataVector& dv_1521 = temps.at(1399);
@@ -533,8 +533,8 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_36 = temps.at(36);
   DataVector& dv_39 = temps.at(39);
   dv_1532 = d[19] * dv_1528 +
-            xp * (dv_1529 * dv_1530 + xpdot * (dv_1531 + dv_36)) +
-            yp * (-dv_0 * (dv_240 + yp) + ypdot * (dv_39 + dv_5));
+            d[2920] * (dv_1529 * dv_1530 + d[2922] * (dv_1531 + dv_36)) +
+            d[2921] * (-dv_0 * (dv_240 + d[2921]) + d[2923] * (dv_39 + dv_5));
   DataVector& dv_1533 = temps.at(1410);
   DataVector& dv_41 = temps.at(41);
   DataVector& dv_43 = temps.at(43);
@@ -596,7 +596,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1558 = -dv_1557;
   DataVector& dv_1559 = temps.at(1433);
   DataVector& dv_16 = temps.at(16);
-  dv_1559 = dv_16 * ypddot;
+  dv_1559 = dv_16 * d[2925];
   DataVector& dv_1560 = temps.at(1434);
   dv_1560 = -dv_1559;
   DataVector& dv_1561 = temps.at(1435);
@@ -606,14 +606,14 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1562 = d[142] * dv_17;
   DataVector& dv_1563 = temps.at(54);
   DataVector& dv_54 = temps.at(54);
-  dv_1563 = dv_1562 + dv_54 * xpddot;
+  dv_1563 = dv_1562 + dv_54 * d[2924];
   DataVector& dv_1564 = temps.at(1437);
   dv_1564 = 2.0 * dv_0;
   DataVector& dv_1565 = temps.at(65);
   DataVector& dv_65 = temps.at(65);
   DataVector& dv_788 = temps.at(736);
-  dv_1565 = (-xpddot * xpdot) * dv_17 + (-ypddot * ypdot) * dv_65 + dv_1527 +
-            dv_1541 + dv_1564 + dv_788;
+  dv_1565 = (-d[2924] * d[2922]) * dv_17 + (-d[2925] * d[2923]) * dv_65 +
+            dv_1527 + dv_1541 + dv_1564 + dv_788;
   DataVector& dv_1566 = temps.at(1438);
   dv_1566 = d[148] * dv_14;
   DataVector& dv_1567 = temps.at(1439);
@@ -629,24 +629,25 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1572 = temps.at(1444);
   dv_1572 = d[1033] * dv_25;
   DataVector& dv_1573 = temps.at(1445);
-  dv_1573 = M * dv_1572 + dv_1440;
+  dv_1573 = d[2928] * dv_1572 + dv_1440;
   DataVector& dv_1574 = temps.at(1446);
-  dv_1574 = M * dv_1569 + d[1055] * dv_14 + dv_1039 + dv_1386 - dv_1461 +
+  dv_1574 = d[2928] * dv_1569 + d[1055] * dv_14 + dv_1039 + dv_1386 - dv_1461 +
             dv_1566 - dv_1567 + dv_1568 - dv_1571 + dv_1573 + dv_714;
   DataVector& dv_1575 = temps.at(1447);
   DataVector& dv_31 = temps.at(31);
   DataVector& dv_49 = temps.at(49);
-  dv_1575 = (-d[19]) * dv_1565 + dv_1574 +
-            xp * (-Dx * dv_1556 + dv_1563 +
-                  xpdot * ((-d[29]) * dv_1561 + dv_1558 + dv_31 + dv_49));
+  dv_1575 =
+      (-d[19]) * dv_1565 + dv_1574 +
+      d[2920] * (-Dx * dv_1556 + dv_1563 +
+                 d[2922] * ((-d[29]) * dv_1561 + dv_1558 + dv_31 + dv_49));
   DataVector& dv_1576 = temps.at(1448);
   dv_1576 = -dv_1542;
   DataVector& dv_1577 = temps.at(1449);
   dv_1577 = dv_0 * dv_1576 - dv_1540 + dv_1541;
   DataVector& dv_1578 = temps.at(1450);
-  dv_1578 = dv_14 * ypddot;
+  dv_1578 = dv_14 * d[2925];
   DataVector& dv_1579 = temps.at(1451);
-  dv_1579 = dv_0 * ypdot;
+  dv_1579 = dv_0 * d[2923];
   DataVector& dv_1115 = temps.at(1012);
   DataVector& dv_1580 = temps.at(1452);
   dv_1580 = dv_1115 + dv_1579;
@@ -655,23 +656,24 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1582 = temps.at(1454);
   dv_1582 = -dv_5;
   DataVector& dv_1583 = temps.at(1455);
-  dv_1583 = dv_15 * xpddot;
+  dv_1583 = dv_15 * d[2924];
   DataVector& sc_1 = temps.at(3223);
-  sc_1 = d[19] * ((-ypdot) * (Dy - dv_1578 + dv_1580) + d[1030] * dv_17);
-  sc_1 += xp * (dv_1562 + xpdot * (dv_15 + dv_49 + yp * (Dy + dv_1559)) +
-                ypdot * (d[1056] * dv_16 + dv_1581));
+  sc_1 = d[19] * ((-d[2923]) * (Dy - dv_1578 + dv_1580) + d[1030] * dv_17);
+  sc_1 += d[2920] *
+          (dv_1562 + d[2922] * (dv_15 + dv_49 + d[2921] * (Dy + dv_1559)) +
+           d[2923] * (d[1056] * dv_16 + dv_1581));
   DataVector& dv_38 = temps.at(38);
   DataVector& dv_45 = temps.at(45);
   DataVector& dv_50 = temps.at(50);
   DataVector& dv_550 = temps.at(504);
-  sc_1 +=
-      yp * ((-xpdot) * (dv_45 + yp * (-dv_1583 + dv_550)) +
-            d[1057] * (dv_1582 + dv_17) + ypdot * (d[1033] * dv_38 + dv_50));
+  sc_1 += d[2921] *
+          ((-d[2922]) * (dv_45 + d[2921] * (-dv_1583 + dv_550)) +
+           d[1057] * (dv_1582 + dv_17) + d[2923] * (d[1033] * dv_38 + dv_50));
   DataVector& sc_0 = temps.at(3222);
   sc_0 = d[9] * sc_1;
   DataVector& dv_1584 = temps.at(1456);
   DataVector& dv_68 = temps.at(68);
-  dv_1584 = d[105] * dv_1577 + dv_68 * rpdot + sc_0;
+  dv_1584 = d[105] * dv_1577 + dv_68 * d[2927] + sc_0;
   sc_0 = d[21];
   DataVector& dv_1017 = temps.at(917);
   DataVector& dv_233 = temps.at(230);
@@ -690,9 +692,9 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1587 = d[19] * dv_295 + d[20] * dv_285 + dv_22;
   DataVector& dv_1588 = temps.at(50);
   dv_1588 = d[21] * dv_1586 + d[4] * dv_1587;
-  DataVector& dv_1589 = temps.at(68);
+  DataVector& dv_1589 = temps.at(49);
   dv_1589 = pow(dv_1588, 2.0);
-  DataVector& dv_1590 = temps.at(49);
+  DataVector& dv_1590 = temps.at(68);
   dv_1590 = d[47] * dv_1589;
   DataVector& dv_141 = temps.at(139);
   DataVector& dv_1591 = temps.at(139);
@@ -712,7 +714,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_137 = temps.at(135);
   DataVector& dv_1595 = temps.at(135);
   DataVector& dv_178 = temps.at(176);
-  dv_1595 = (-ypdot) * dv_1594 + dv_137 + dv_178;
+  dv_1595 = (-d[2923]) * dv_1594 + dv_137 + dv_178;
   DataVector& dv_1596 = temps.at(176);
   dv_1596 = -dv_1595;
   DataVector& dv_1597 = temps.at(145);
@@ -722,9 +724,9 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1598 = -dv_185;
   DataVector& dv_1599 = temps.at(1458);
   DataVector& dv_184 = temps.at(181);
-  DataVector& dv_316 = temps.at(179);
+  DataVector& dv_316 = temps.at(217);
   dv_1599 = (-d[19]) * dv_184 + d[20] * dv_1598 + 14.0 * dv_316;
-  DataVector& dv_1600 = temps.at(191);
+  DataVector& dv_1600 = temps.at(196);
   DataVector& dv_192 = temps.at(189);
   DataVector& dv_194 = temps.at(191);
   DataVector& dv_199 = temps.at(196);
@@ -733,26 +735,26 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_219 = temps.at(216);
   dv_1600 = (-d[60]) * dv_219 + d[55] * dv_199 +
             d[57] * (-dv_14 * dv_201 + dv_208) - dv_192 - dv_194;
-  DataVector& dv_1601 = temps.at(180);
+  DataVector& dv_1601 = temps.at(186);
   DataVector& dv_183 = temps.at(180);
   DataVector& dv_189 = temps.at(186);
   dv_1601 = d[69] * dv_1600 + dv_1599 * dv_189 + dv_183;
   DataVector& dv_1602 = temps.at(178);
   DataVector& dv_181 = temps.at(178);
   dv_1602 = (-d[17]) * dv_1590 + dv_1597 * dv_181 + dv_1601;
-  DataVector& dv_1603 = temps.at(186);
+  DataVector& dv_1603 = temps.at(180);
   dv_1603 = d[1060] * dv_10;
-  DataVector& dv_1604 = temps.at(196);
-  dv_1604 = (-d[18]) * dv_1603 + (d[5] * xp) * dv_7 + Dx;
-  DataVector& dv_1605 = temps.at(216);
+  DataVector& dv_1604 = temps.at(198);
+  dv_1604 = (-d[18]) * dv_1603 + (d[5] * d[2920]) * dv_7 + Dx;
+  DataVector& dv_1605 = temps.at(205);
   DataVector& dv_6 = temps.at(6);
   dv_1605 = d[5] * dv_6;
-  DataVector& dv_1606 = temps.at(205);
+  DataVector& dv_1606 = temps.at(191);
   dv_1606 = d[1063] * dv_10;
-  DataVector& dv_1607 = temps.at(198);
+  DataVector& dv_1607 = temps.at(189);
   dv_1607 = (-d[18]) * dv_1606 + Dy + d[77] * dv_1605;
-  DataVector& dv_1608 = temps.at(189);
-  dv_1608 = dv_1604 * xpdot + dv_1607 * ypdot;
+  DataVector& dv_1608 = temps.at(216);
+  dv_1608 = dv_1604 * d[2922] + dv_1607 * d[2923];
   DataVector& dv_1609 = temps.at(1459);
   dv_1609 = d[1028] * dv_1508 + dv_1608;
   DataVector& dv_1610 = temps.at(1460);
@@ -772,21 +774,22 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1617 = temps.at(1467);
   dv_1617 = dv_1510 * dv_1587;
   DataVector& dv_1618 = temps.at(1396);
-  dv_1618 = (-d[19]) * dv_1512 + (-xp) * (dv_1514 * dv_1529 + dv_1516 * xpdot) +
-            yp * ((-ypdot) * dv_1518 + dv_1517);
-  DataVector& dv_1619 = temps.at(1395);
-  dv_1619 = dv_1536 * dv_1588 * rp;
-  DataVector& dv_1620 = temps.at(32);
+  dv_1618 = (-d[19]) * dv_1512 +
+            (-d[2920]) * (dv_1514 * dv_1529 + dv_1516 * d[2922]) +
+            d[2921] * ((-d[2923]) * dv_1518 + dv_1517);
+  DataVector& dv_1619 = temps.at(32);
+  dv_1619 = dv_1536 * dv_1588 * d[2926];
+  DataVector& dv_1620 = temps.at(1391);
   dv_1620 = (-d[119]) * dv_1532 + d[1035] * dv_1586 + d[1039] * dv_1587 +
             d[1065] * dv_1618;
-  DataVector& dv_1621 = temps.at(1391);
-  dv_1621 = dv_1620 * rp;
+  DataVector& dv_1621 = temps.at(1395);
+  dv_1621 = dv_1620 * d[2926];
   DataVector& dv_1622 = temps.at(1468);
   DataVector& dv_20 = temps.at(20);
   dv_1622 = dv_1615 * dv_20;
   DataVector& dv_1623 = temps.at(1469);
-  dv_1623 = dv_1601 * rpdot;
-  DataVector& dv_1624 = temps.at(32);
+  dv_1623 = dv_1601 * d[2927];
+  DataVector& dv_1624 = temps.at(1391);
   dv_1624 = dv_1588 * dv_1620;
   DataVector& dv_1625 = temps.at(1470);
   dv_1625 = d[1] * dv_1509;
@@ -796,7 +799,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_89 = temps.at(87);
   dv_1627 = d[104] * dv_1509 * dv_89;
   DataVector& dv_1628 = temps.at(1473);
-  dv_1628 = dv_188 * rpdot;
+  dv_1628 = dv_188 * d[2927];
   DataVector& dv_1629 = temps.at(1474);
   dv_1629 = dv_1510 * dv_7;
   DataVector& dv_1630 = temps.at(1475);
@@ -816,7 +819,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1637 = temps.at(1482);
   dv_1637 = 7.0 * Dy;
   DataVector& dv_1638 = temps.at(1483);
-  dv_1638 = (-ypdot) * (dv_126 + dv_185) + dv_0 * (d[354] + dv_1637);
+  dv_1638 = (-d[2923]) * (dv_126 + dv_185) + dv_0 * (d[354] + dv_1637);
   DataVector& dv_1639 = temps.at(1484);
   dv_1639 = -dv_99;
   DataVector& dv_1640 = temps.at(1485);
@@ -837,7 +840,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1645 = temps.at(1490);
   dv_1645 = -dv_1644;
   DataVector& dv_1646 = temps.at(1491);
-  dv_1646 = dv_1643 + dv_1645 * yp;
+  dv_1646 = dv_1643 + dv_1645 * d[2921];
   DataVector& dv_1647 = temps.at(1492);
   dv_1647 = 15.0 * dv_751;
   DataVector& dv_1648 = temps.at(1493);
@@ -848,21 +851,22 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_406 = temps.at(386);
   DataVector& dv_721 = temps.at(670);
   DataVector& dv_974 = temps.at(880);
-  dv_1650 = (-xpdot) * (-dv_14 * (dv_1648 + dv_1649 + dv_721) +
-                        dv_17 * (dv_124 + dv_974) + dv_406) +
+  dv_1650 = (-d[2922]) * (-dv_14 * (dv_1648 + dv_1649 + dv_721) +
+                          dv_17 * (dv_124 + dv_974) + dv_406) +
             dv_1646 * dv_1647;
   DataVector& dv_164 = temps.at(162);
   DataVector& dv_1651 = temps.at(1496);
   dv_1651 = dv_164 + dv_38;
   DataVector& dv_1652 = temps.at(1497);
-  dv_1652 = dv_1651 * yp;
+  dv_1652 = dv_1651 * d[2921];
   DataVector& dv_1653 = temps.at(1498);
   DataVector& dv_73 = temps.at(73);
   dv_1653 = -dv_15 - dv_73;
   DataVector& dv_1654 = temps.at(209);
   DataVector& dv_212 = temps.at(209);
   DataVector& dv_218 = temps.at(215);
-  dv_1654 = (-15.0 * yp) * Dy * dv_1653 - dv_14 * (dv_1648 + dv_212) + dv_218;
+  dv_1654 =
+      (-15.0 * d[2921]) * Dy * dv_1653 - dv_14 * (dv_1648 + dv_212) + dv_218;
   DataVector& dv_148 = temps.at(146);
   DataVector& dv_1655 = temps.at(1499);
   dv_1655 = -dv_148;
@@ -878,15 +882,15 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_398 = temps.at(379);
   dv_1659 = dv_398 * dv_5;
   DataVector& dv_131 = temps.at(129);
-  DataVector& dv_1660 = temps.at(434);
+  DataVector& dv_1660 = temps.at(671);
   DataVector& dv_326 = temps.at(309);
   DataVector& dv_465 = temps.at(434);
   DataVector& dv_722 = temps.at(671);
   DataVector& dv_972 = temps.at(878);
-  dv_1660 = (-ypdot) * (dv_14 * (dv_131 + dv_1657 + dv_722) + dv_1658 +
-                        dv_1659 - 22.0 * dv_326 + dv_406 + dv_465) +
-            dv_0 * (dv_1656 * yp + dv_39 * dv_972);
-  DataVector& dv_1661 = temps.at(671);
+  dv_1660 = (-d[2923]) * (dv_14 * (dv_131 + dv_1657 + dv_722) + dv_1658 +
+                          dv_1659 - 22.0 * dv_326 + dv_406 + dv_465) +
+            dv_0 * (dv_1656 * d[2921] + dv_39 * dv_972);
+  DataVector& dv_1661 = temps.at(434);
   DataVector& dv_209 = temps.at(206);
   DataVector& dv_210 = temps.at(207);
   dv_1661 = -dv_209 + dv_210;
@@ -894,11 +898,11 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_736 = temps.at(685);
   dv_1662 = dv_1661 + dv_736;
   DataVector& dv_1663 = temps.at(1505);
-  dv_1663 = (-yp) * dv_1662 + 45.0 * dv_1643;
-  DataVector& dv_1664 = temps.at(671);
+  dv_1663 = (-d[2921]) * dv_1662 + 45.0 * dv_1643;
+  DataVector& dv_1664 = temps.at(434);
   dv_1664 = dv_1661 + 68.0 * dv_5;
   sc_1 = (-d[50]) * dv_1660 + (-d[52]) * dv_1650 +
-         d[53] * ((-xpdot) * dv_1654 + dv_1647 * (dv_1652 - dv_39 * dv_538)) +
+         d[53] * ((-d[2922]) * dv_1654 + dv_1647 * (dv_1652 - dv_39 * dv_538)) +
          d[55] * dv_1642;
   DataVector& dv_213 = temps.at(210);
   DataVector& dv_215 = temps.at(212);
@@ -906,30 +910,31 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_217 = temps.at(214);
   DataVector& dv_989 = temps.at(889);
   sc_1 += d[63] * (-dv_0 * dv_1663 +
-                   ypdot * (-dv_14 * dv_1664 + dv_210 * dv_5 + dv_213 - dv_215 -
-                            dv_216 - dv_217 + 22.0 * dv_989));
+                   d[2923] * (-dv_14 * dv_1664 + dv_210 * dv_5 + dv_213 -
+                              dv_215 - dv_216 - dv_217 + 22.0 * dv_989));
   sc_0 = d[64] * sc_1;
   DataVector& dv_1665 = temps.at(1506);
   DataVector& dv_175 = temps.at(173);
-  dv_1665 =
-      d[1072] * dv_1600 + dv_1599 * dv_1628 + dv_1599 * dv_1629 + dv_1627 +
-      dv_175 * ((-d[19]) * dv_1633 +
-                (-xp) * (dv_1529 * dv_1634 + dv_1636 * xpdot) + dv_1638 * yp) +
-      sc_0;
-  DataVector& dv_1666 = temps.at(191);
+  dv_1665 = d[1072] * dv_1600 + dv_1599 * dv_1628 + dv_1599 * dv_1629 +
+            dv_1627 +
+            dv_175 * ((-d[19]) * dv_1633 +
+                      (-d[2920]) * (dv_1529 * dv_1634 + dv_1636 * d[2922]) +
+                      dv_1638 * d[2921]) +
+            sc_0;
+  DataVector& dv_1666 = temps.at(212);
   dv_1666 = -dv_1509;
-  DataVector& dv_1667 = temps.at(214);
+  DataVector& dv_1667 = temps.at(1458);
   dv_1667 = 10.0 * dv_1;
   DataVector& dv_107 = temps.at(105);
   DataVector& dv_1668 = temps.at(105);
   DataVector& dv_97 = temps.at(95);
-  dv_1668 = xpdot * (dv_107 + dv_97);
-  DataVector& dv_1669 = temps.at(212);
+  dv_1668 = d[2922] * (dv_107 + dv_97);
+  DataVector& dv_1669 = temps.at(214);
   dv_1669 = d[56] * (Dx * dv_1667 + dv_1668);
   DataVector& dv_1670 = temps.at(213);
   DataVector& dv_61 = temps.at(61);
   dv_1670 = dv_156 + dv_5 + dv_61;
-  DataVector& dv_1671 = temps.at(1458);
+  DataVector& dv_1671 = temps.at(196);
   dv_1671 = dv_1530 * dv_1670;
   DataVector& dv_116 = temps.at(114);
   DataVector& dv_1672 = temps.at(114);
@@ -952,7 +957,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1679 = temps.at(1513);
   dv_1679 = dv_122 + dv_1678;
   DataVector& dv_1680 = temps.at(1514);
-  dv_1680 = (-ypdot) * dv_1679 + dv_1677;
+  dv_1680 = (-d[2923]) * dv_1679 + dv_1677;
   DataVector& dv_132 = temps.at(130);
   DataVector& dv_1681 = temps.at(130);
   DataVector& dv_645 = temps.at(595);
@@ -960,7 +965,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_133 = temps.at(131);
   DataVector& dv_1682 = temps.at(1515);
   DataVector& dv_637 = temps.at(587);
-  dv_1682 = (-xpdot) * (-dv_125 * dv_637 + dv_1681 * yp) +
+  dv_1682 = (-d[2922]) * (-dv_125 * dv_637 + dv_1681 * d[2921]) +
             dv_1530 * (dv_133 + 34.0 * dv_5);
   DataVector& dv_1683 = temps.at(1516);
   dv_1683 = 9.0 * dv_1;
@@ -976,10 +981,10 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1688 = temps.at(1520);
   dv_1688 = dv_114 + dv_1687;
   DataVector& dv_1689 = temps.at(1521);
-  dv_1689 = dv_1686 + dv_1688 * ypdot;
+  dv_1689 = dv_1686 + dv_1688 * d[2923];
   DataVector& dv_1690 = temps.at(88);
   DataVector& dv_90 = temps.at(88);
-  dv_1690 = dv_90 * xpdot;
+  dv_1690 = dv_90 * d[2922];
   DataVector& dv_1691 = temps.at(1522);
   dv_1691 = dv_1511 + dv_1630;
   DataVector& dv_1692 = temps.at(1523);
@@ -994,11 +999,11 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1696 = temps.at(1527);
   dv_1696 = 4.0 * dv_0;
   DataVector& dv_1697 = temps.at(1528);
-  dv_1697 = dv_1696 * (dv_538 + yp);
+  dv_1697 = dv_1696 * (dv_538 + d[2921]);
   DataVector& dv_1698 = temps.at(1529);
   dv_1698 = 5.0 * dv_5;
   DataVector& dv_1699 = temps.at(101);
-  dv_1699 = (-ypdot) * (dv_103 + dv_1698) + dv_1697;
+  dv_1699 = (-d[2923]) * (dv_103 + dv_1698) + dv_1697;
   DataVector& dv_1700 = temps.at(1530);
   dv_1700 = 4.0 * dv_751;
   DataVector& dv_1701 = temps.at(96);
@@ -1012,7 +1017,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_109 = temps.at(107);
   DataVector& dv_118 = temps.at(116);
   sc_1 = (-d[63]) * dv_1682 +
-         d[50] * (dv_1671 + xpdot * (dv_118 * dv_538 + dv_1673 * yp)) +
+         d[50] * (dv_1671 + d[2922] * (dv_118 * dv_538 + dv_1673 * d[2921])) +
          d[52] * ((-d[29]) * dv_1680 + dv_109 * dv_1674 - dv_1675) + dv_1669;
   sc_1 += d[53] * (d[29] * dv_1689 + dv_118 * dv_1683 - dv_1684);
   sc_0 = d[12] * sc_1;
@@ -1022,39 +1027,39 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1704 =
       d[1073] * dv_135 + dv_104 * dv_1702 + dv_104 * dv_1703 + dv_1690 + sc_0;
   DataVector& dv_105 = temps.at(103);
-  dv_1704 +=
-      dv_105 *
-      ((-d[112]) * (dv_1529 * dv_1700 + dv_1701 * xpdot) + (-d[61]) * dv_1691 +
-       d[20] * ((-xpdot) * dv_1695 + dv_1530 * dv_1693) + d[28] * dv_1699);
+  dv_1704 += dv_105 * ((-d[112]) * (dv_1529 * dv_1700 + dv_1701 * d[2922]) +
+                       (-d[61]) * dv_1691 +
+                       d[20] * ((-d[2922]) * dv_1695 + dv_1530 * dv_1693) +
+                       d[28] * dv_1699);
   DataVector& dv_143 = temps.at(141);
-  DataVector& dv_1705 = temps.at(133);
+  DataVector& dv_1705 = temps.at(107);
   dv_1705 = dv_143 + dv_25;
-  DataVector& dv_1706 = temps.at(116);
+  DataVector& dv_1706 = temps.at(133);
   dv_1706 = dv_1705 + dv_24;
-  DataVector& dv_1707 = temps.at(107);
+  DataVector& dv_1707 = temps.at(102);
   DataVector& dv_241 = temps.at(237);
-  dv_1707 = (-ypdot) * dv_1706 + dv_241;
-  DataVector& dv_1708 = temps.at(102);
+  dv_1707 = (-d[2923]) * dv_1706 + dv_241;
+  DataVector& dv_1708 = temps.at(116);
   DataVector& dv_528 = temps.at(483);
   dv_1708 = dv_14 + dv_528;
   DataVector& dv_1709 = temps.at(1534);
   dv_1709 = 4.0 * Dy;
   DataVector& dv_1710 = temps.at(1535);
   dv_1710 = dv_114 + dv_143 + dv_97;
-  DataVector& dv_1711 = temps.at(197);
+  DataVector& dv_1711 = temps.at(28);
   DataVector& dv_200 = temps.at(197);
   DataVector& dv_94 = temps.at(92);
   dv_1711 = d[52] * (dv_1514 * (dv_1708 + dv_200 + dv_94) +
-                     xpdot * (d[29] * dv_1710 + dv_1709 * dv_28));
-  DataVector& dv_1712 = temps.at(28);
+                     d[2922] * (d[29] * dv_1710 + dv_1709 * dv_28));
+  DataVector& dv_1712 = temps.at(197);
   dv_1712 = 8.0 * dv_1;
   DataVector& dv_140 = temps.at(138);
   DataVector& dv_1713 = temps.at(138);
-  dv_1713 = ypdot * (dv_140 + dv_164);
+  dv_1713 = d[2923] * (dv_140 + dv_164);
   DataVector& dv_157 = temps.at(155);
   DataVector& dv_1714 = temps.at(139);
   DataVector& dv_624 = temps.at(575);
-  dv_1714 = (-3.0 * xpdot) * Dx * dv_157 + d[27] * (dv_0 * dv_624 + dv_1713) +
+  dv_1714 = (-3.0 * d[2922]) * Dx * dv_157 + d[27] * (dv_0 * dv_624 + dv_1713) +
             dv_1591 * dv_1712;
   DataVector& dv_1715 = temps.at(1536);
   dv_1715 = 9.0 * dv_0;
@@ -1080,7 +1085,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1723 = temps.at(150);
   DataVector& dv_21 = temps.at(21);
   dv_1723 = dv_1720 * (dv_157 + dv_21) +
-            xpdot * ((-d[29]) * dv_1722 + dv_152 * dv_240);
+            d[2922] * ((-d[29]) * dv_1722 + dv_152 * dv_240);
   DataVector& dv_1724 = temps.at(1543);
   DataVector& dv_790 = temps.at(738);
   dv_1724 = d[61] * dv_790;
@@ -1095,7 +1100,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1728 = dv_169 + dv_21;
   DataVector& dv_166 = temps.at(164);
   DataVector& dv_1729 = temps.at(164);
-  dv_1729 = (-3.0 * ypdot) * (dv_1531 + dv_166) + dv_1697;
+  dv_1729 = (-3.0 * d[2923]) * (dv_1531 + dv_166) + dv_1697;
   DataVector& dv_1730 = temps.at(1528);
   dv_1730 = dv_1564 * (d[139] + dv_538);
   DataVector& dv_139 = temps.at(137);
@@ -1107,9 +1112,9 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_57 = temps.at(57);
   dv_1732 = dv_1731 + dv_541 + dv_57;
   DataVector& dv_170 = temps.at(168);
-  DataVector& dv_1733 = temps.at(87);
+  DataVector& dv_1733 = temps.at(168);
   dv_1733 = (-d[321]) * dv_89 + dv_170 * dv_1702 + dv_170 * dv_1703;
-  DataVector& dv_1734 = temps.at(168);
+  DataVector& dv_1734 = temps.at(87);
   dv_1734 = d[40] * dv_2;
   DataVector& dv_1735 = temps.at(1548);
   dv_1735 = d[9] * dv_6;
@@ -1127,36 +1132,36 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1738 =
       dv_177 * ((-d[0] * d[1076]) * dv_18 + (-d[1029] * d[82]) * dv_18 +
                 d[1] * dv_3 + d[1075] * dv_966 + d[1077] * dv_1737 +
-                dv_13 * rpdot + dv_1510 * dv_1735 + 12.0 * dv_1734 + dv_1736);
+                dv_13 * d[2927] + dv_1510 * dv_1735 + 12.0 * dv_1734 + dv_1736);
   DataVector& dv_176 = temps.at(174);
   dv_1738 += d[1035] * dv_176 * dv_6 + d[21] * dv_1509 * dv_176;
   sc_1 = d[1073] * dv_1593 + dv_1733;
   sc_1 += d[12] * ((-d[50]) * dv_1714 + (-d[55]) * dv_1707 + d[53] * dv_1723 +
                    d[63] * (-dv_1592 * dv_1715 + dv_1716 +
-                            yp * ((-ypdot) * dv_1719 + dv_1718)) -
+                            d[2921] * ((-d[2923]) * dv_1719 + dv_1718)) -
                    dv_1711);
   DataVector& dv_174 = temps.at(172);
   sc_1 +=
       d[395] * dv_1666 * dv_174 +
-      dv_105 * ((-d[20]) * dv_1729 + d[19] * ((-ypdot) * dv_1732 + dv_1730) +
-                d[28] * (dv_1726 * dv_1727 + dv_1728 * xpdot) - dv_1724);
-  sc_0 = (-ypdot) * sc_1;
+      dv_105 * ((-d[20]) * dv_1729 + d[19] * ((-d[2923]) * dv_1732 + dv_1730) +
+                d[28] * (dv_1726 * dv_1727 + dv_1728 * d[2922]) - dv_1724);
+  sc_0 = (-d[2923]) * sc_1;
   DataVector& dv_136 = temps.at(134);
   DataVector& dv_1739 = temps.at(3);
-  dv_1739 = (-ypddot) * dv_1594 + dv_136 * xpddot + dv_1738 + sc_0;
+  dv_1739 = (-d[2925]) * dv_1594 + dv_136 * d[2924] + dv_1738 + sc_0;
   DataVector& dv_1740 = temps.at(288);
   DataVector& dv_223 = temps.at(220);
   dv_1740 = -dv_223;
-  DataVector& dv_1741 = temps.at(134);
+  DataVector& dv_1741 = temps.at(170);
   DataVector& dv_227 = temps.at(224);
   dv_1741 = -dv_227;
-  DataVector& dv_1742 = temps.at(170);
+  DataVector& dv_1742 = temps.at(1457);
   dv_1742 = pow(dv_1741, 3.0);
   DataVector& dv_1743 = temps.at(75);
   DataVector& dv_237 = temps.at(234);
   DataVector& dv_76 = temps.at(75);
   dv_1743 = dv_237 + dv_76;
-  DataVector& dv_1744 = temps.at(1457);
+  DataVector& dv_1744 = temps.at(134);
   dv_1744 = (d[16] * d[171]) * dv_229;
   DataVector& dv_1745 = temps.at(174);
   dv_1745 = d[574] * dv_229;
@@ -1170,13 +1175,13 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1749 = dv_1743 * dv_1748;
   DataVector& dv_1750 = temps.at(1555);
   DataVector& dv_239 = temps.at(235);
-  DataVector& dv_242 = temps.at(66);
+  DataVector& dv_242 = temps.at(64);
   dv_1750 = dv_239 + dv_242;
   DataVector& dv_1751 = temps.at(241);
   DataVector& dv_247 = temps.at(241);
-  dv_1751 = dv_1750 * rp + dv_247;
+  dv_1751 = dv_1750 * d[2926] + dv_247;
   DataVector& dv_1752 = temps.at(1556);
-  dv_1752 = dv_1741 * rpdot;
+  dv_1752 = dv_1741 * d[2927];
   DataVector& dv_1753 = temps.at(1557);
   dv_1753 = dv_11 * dv_19;
   DataVector& dv_1754 = temps.at(1558);
@@ -1196,13 +1201,13 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1760 = temps.at(1563);
   dv_1760 = d[1084] * dv_1757;
   DataVector& dv_1761 = temps.at(1564);
-  dv_1761 = (-yp) * (d[1086] + dv_538) + (d[20] * d[8]) + dv_1551;
+  dv_1761 = (-d[2921]) * (d[1086] + dv_538) + (d[20] * d[8]) + dv_1551;
   DataVector& dv_1762 = temps.at(1565);
   dv_1762 = Dy * d[1];
   DataVector& dv_1063 = temps.at(962);
   DataVector& dv_1763 = temps.at(53);
   DataVector& dv_53 = temps.at(53);
-  dv_1763 = -dv_1063 + dv_53 + yp * (dv_17 * ypdot + dv_1762);
+  dv_1763 = -dv_1063 + dv_53 + d[2921] * (dv_17 * d[2923] + dv_1762);
   DataVector& dv_1764 = temps.at(1566);
   dv_1764 = dv_1748 * dv_82;
   DataVector& dv_1765 = temps.at(1567);
@@ -1214,11 +1219,11 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1768 = temps.at(1570);
   dv_1768 = dv_1767 * dv_19;
   DataVector& dv_1769 = temps.at(1571);
-  dv_1769 = Dy + yp;
+  dv_1769 = Dy + d[2921];
   DataVector& dv_1770 = temps.at(1572);
-  dv_1770 = dv_1 * yp;
+  dv_1770 = dv_1 * d[2921];
   DataVector& dv_1771 = temps.at(1573);
-  dv_1771 = dv_0 * xp;
+  dv_1771 = dv_0 * d[2920];
   DataVector& dv_1772 = temps.at(1574);
   dv_1772 = d[1073] * dv_1;
   DataVector& dv_1773 = temps.at(1575);
@@ -1230,13 +1235,12 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& sc_2 = temps.at(3224);
   sc_2 = (-d[19]) * dv_1565 + d[6] * (dv_1763 + dv_1774) + dv_1574 - dv_1775;
   DataVector& dv_478 = temps.at(446);
-  sc_2 +=
-      xp *
-      (-Dx * dv_1556 + dv_1563 +
-       xpdot * ((-d[29]) * dv_1561 + d[7] * dv_38 - dv_15 - dv_1557 - dv_478));
+  sc_2 += d[2920] * (-Dx * dv_1556 + dv_1563 +
+                     d[2922] * ((-d[29]) * dv_1561 + d[7] * dv_38 - dv_15 -
+                                dv_1557 - dv_478));
   DataVector& dv_58 = temps.at(58);
-  sc_2 +=
-      xpdot * ((d[20] * xpddot) * dv_58 - Dx * (dv_1761 + dv_1772 - dv_1773));
+  sc_2 += d[2922] *
+          ((d[20] * d[2924]) * dv_58 - Dx * (dv_1761 + dv_1772 - dv_1773));
   sc_1 = d[21] * sc_2;
   DataVector& dv_234 = temps.at(231);
   DataVector& dv_235 = temps.at(232);
@@ -1244,29 +1248,29 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& sc_3 = temps.at(3225);
   sc_3 = (-d[1090]) * dv_244 + (-d[1091]) * dv_244 + d[1030] * dv_234 +
          d[1031] * dv_235;
-  DataVector& dv_243 = temps.at(64);
-  sc_3 += d[1092] * ((-rp) * Dx * ((-d[955]) + Dy * d[1035]) + d[85] * dv_16 +
-                     xpdot * (Dy * d[12] + dv_243));
+  DataVector& dv_243 = temps.at(66);
+  sc_3 += d[1092] * ((-d[2926]) * Dx * ((-d[955]) + Dy * d[1035]) +
+                     d[85] * dv_16 + d[2922] * (Dy * d[12] + dv_243));
   DataVector& dv_1023 = temps.at(923);
   sc_3 += d[6] * (d[2] * dv_17 - dv_1023 + dv_1513 * dv_1770) +
-          d[7] * (d[3] * dv_38 - dv_1017 + dv_1771 * ((-xp) + Dx));
+          d[7] * (d[3] * dv_38 - dv_1017 + dv_1771 * ((-d[2920]) + Dx));
   DataVector& dv_232 = temps.at(229);
-  sc_3 += -dv_232 * ((-ypdot) * (Dx + xp) + dv_1769 * xpdot);
+  sc_3 += -dv_232 * ((-d[2923]) * (Dx + d[2920]) + dv_1769 * d[2922]);
   sc_2 = d[9] * sc_3;
   DataVector& dv_51 = temps.at(51);
-  sc_0 = (-d[1089]) * dv_51 + (d[54] * rpdot) * dv_114 + dv_1750 * rpdot +
+  sc_0 = (-d[1089]) * dv_51 + (d[54] * d[2927]) * dv_114 + dv_1750 * d[2927] +
          sc_1 + sc_2;
   DataVector& dv_1776 = temps.at(1578);
   dv_1776 = dv_1741 * sc_0;
-  DataVector& dv_1777 = temps.at(231);
+  DataVector& dv_1777 = temps.at(1446);
   dv_1777 = d[9] * dv_1747;
   DataVector& dv_1778 = temps.at(1568);
   dv_1778 = d[558] * dv_1766;
-  DataVector& dv_1779 = temps.at(65);
+  DataVector& dv_1779 = temps.at(54);
   dv_1779 = dv_1609 * dv_1754;
-  DataVector& dv_1780 = temps.at(232);
+  DataVector& dv_1780 = temps.at(231);
   dv_1780 = d[16] * dv_1509;
-  DataVector& dv_1781 = temps.at(1446);
+  DataVector& dv_1781 = temps.at(1435);
   DataVector& dv_375 = temps.at(358);
   dv_1781 = 2.0 * dv_375;
   DataVector& dv_1782 = temps.at(223);
@@ -1274,17 +1278,17 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_80 = temps.at(78);
   dv_1782 = (-d[1094]) * dv_226 + (-d[1095]) * dv_80 + dv_10 * dv_1533 -
             dv_1519 * dv_1781 + dv_1524 * dv_81 - dv_1780 * dv_43;
-  DataVector& dv_1783 = temps.at(923);
+  DataVector& dv_1783 = temps.at(1555);
   dv_1783 = pow(dv_1741, 2.0);
-  DataVector& dv_1784 = temps.at(1435);
+  DataVector& dv_1784 = temps.at(229);
   dv_1784 = dv_1782 * dv_1783;
-  DataVector& dv_1785 = temps.at(1555);
+  DataVector& dv_1785 = temps.at(65);
   dv_1785 = d[1080] * dv_19;
-  DataVector& dv_1786 = temps.at(229);
+  DataVector& dv_1786 = temps.at(923);
   dv_1786 = dv_1785 * dv_82;
   DataVector& dv_1787 = temps.at(1430);
   dv_1787 = dv_1751 * dv_1782;
-  DataVector& dv_1788 = temps.at(54);
+  DataVector& dv_1788 = temps.at(232);
   dv_1788 = d[38] * dv_229;
   DataVector& dv_1789 = temps.at(1579);
   dv_1789 = dv_1757 * dv_1788;
@@ -1299,15 +1303,15 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1793 = temps.at(90);
   DataVector& dv_310 = temps.at(90);
   dv_1793 = -dv_310;
-  DataVector& dv_1794 = temps.at(125);
-  DataVector& dv_309 = temps.at(125);
+  DataVector& dv_1794 = temps.at(109);
+  DataVector& dv_309 = temps.at(109);
   dv_1794 = -dv_309;
   DataVector& dv_1795 = temps.at(1583);
   DataVector& dv_91 = temps.at(89);
   dv_1795 = d[12] * dv_1794 + dv_105 * dv_1793 + dv_91;
   DataVector& dv_179 = temps.at(177);
   DataVector& dv_1796 = temps.at(177);
-  dv_1796 = dv_179 + dv_1795 * xpdot;
+  dv_1796 = dv_179 + dv_1795 * d[2922];
   DataVector& dv_1797 = temps.at(86);
   DataVector& dv_314 = temps.at(300);
   DataVector& dv_88 = temps.at(86);
@@ -1323,17 +1327,17 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1802 = temps.at(1588);
   dv_1802 = -dv_1570;
   DataVector& dv_1803 = temps.at(1589);
-  dv_1803 = Dx * ypddot;
+  dv_1803 = Dx * d[2925];
   DataVector& dv_1804 = temps.at(1590);
   dv_1804 = 2.0 * dv_1803;
   DataVector& dv_1805 = temps.at(1591);
-  dv_1805 = Dy * xpddot;
+  dv_1805 = Dy * d[2924];
   DataVector& dv_1806 = temps.at(1592);
   dv_1806 = -dv_1805;
   DataVector& dv_1807 = temps.at(1593);
   dv_1807 = dv_1804 + dv_1806;
   DataVector& dv_1808 = temps.at(1594);
-  dv_1808 = dv_1531 * xpddot;
+  dv_1808 = dv_1531 * d[2924];
   DataVector& dv_1809 = temps.at(1595);
   dv_1809 = d[167] - dv_1554;
   DataVector& dv_1810 = temps.at(1596);
@@ -1368,7 +1372,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1823 = d[49] * dv_5;
   DataVector& dv_1824 = temps.at(1610);
   dv_1824 = dv_1513 * dv_1700;
-  DataVector& dv_1825 = temps.at(107);
+  DataVector& dv_1825 = temps.at(102);
   dv_1825 = d[55] * dv_1707;
   DataVector& dv_163 = temps.at(161);
   DataVector& dv_1826 = temps.at(1611);
@@ -1381,7 +1385,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1829 = temps.at(1614);
   dv_1829 = dv_163 + dv_38;
   DataVector& dv_1830 = temps.at(1615);
-  dv_1830 = dv_1829 * ypdot;
+  dv_1830 = dv_1829 * d[2923];
   DataVector& dv_1831 = temps.at(1616);
   dv_1831 = dv_1830 + dv_241;
   DataVector& dv_1832 = temps.at(1617);
@@ -1410,48 +1414,49 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1842 = dv_1 + dv_1564;
   DataVector& dv_273 = temps.at(265);
   DataVector& dv_280 = temps.at(272);
-  sc_3 = (-d[55]) * (dv_1835 + dv_1837 * xpdot) +
+  sc_3 = (-d[55]) * (dv_1835 + dv_1837 * d[2922]) +
          (-d[86]) * (Dy * dv_273 + d[50] * dv_1672 + dv_1838 * dv_280);
   DataVector& dv_288 = temps.at(280);
-  sc_3 += d[19] * (dv_1530 * ((-d[195]) * Dy + dv_1839 + dv_288 * yp) +
-                   dv_1841 * xpdot);
+  sc_3 += d[19] * (dv_1530 * ((-d[195]) * Dy + dv_1839 + dv_288 * d[2921]) +
+                   dv_1841 * d[2922]);
   DataVector& dv_281 = temps.at(273);
   sc_3 += d[34] * ((-d[91]) * dv_18 * dv_1842 +
                    d[20] * (dv_0 * dv_288 + dv_1552 * dv_281) +
-                   d[287] * dv_1831 + d[58] * (dv_1820 * ypdot + dv_241)) +
+                   d[287] * dv_1831 + d[58] * (dv_1820 * d[2923] + dv_241)) +
           dv_1670 * dv_1834;
   DataVector& dv_283 = temps.at(275);
   sc_3 += d[52] * dv_1696 * dv_283;
-  sc_1 = (-xpdot) * sc_3;
+  sc_1 = (-d[2922]) * sc_3;
   DataVector& dv_291 = temps.at(283);
   DataVector& sc_4 = temps.at(3226);
-  sc_4 = (-d[61]) * ((-xpdot) * (d[29] * dv_1820 + dv_240 * dv_295) +
+  sc_4 = (-d[61]) * ((-d[2922]) * (d[29] * dv_1820 + dv_240 * dv_295) +
                      dv_751 * (dv_21 + dv_291)) -
          dv_1825;
   DataVector& dv_293 = temps.at(285);
-  sc_4 += (-yp) * ((-d[50]) * (dv_1818 + dv_1833 * ypdot) + d[1107] * dv_1831 +
-                   d[243] * dv_1 * dv_293 - dv_1828 * dv_273);
+  sc_4 += (-d[2921]) *
+          ((-d[50]) * (dv_1818 + dv_1833 * d[2923]) + d[1107] * dv_1831 +
+           d[243] * dv_1 * dv_293 - dv_1828 * dv_273);
   DataVector& dv_298 = temps.at(290);
   sc_4 +=
-      (2.0 * xp) *
+      (2.0 * d[2920]) *
       ((-d[86]) * (d[91] * dv_17 + dv_14 * (d[138] + dv_1635) + dv_298 * dv_5) +
        dv_1827 * (dv_1694 + dv_18));
   DataVector& dv_299 = temps.at(291);
-  sc_4 += (d[19] * yp) * (d[3] * dv_1826 - 6.0 * dv_0 * dv_291 +
-                          14.0 * dv_1478 - dv_299 * dv_69);
-  sc_3 = sc_4 * ypdot;
+  sc_4 += (d[19] * d[2921]) * (d[3] * dv_1826 - 6.0 * dv_0 * dv_291 +
+                               14.0 * dv_1478 - dv_299 * dv_69);
+  sc_3 = sc_4 * d[2923];
   DataVector& dv_279 = temps.at(271);
   DataVector& dv_290 = temps.at(282);
   DataVector& dv_301 = temps.at(293);
-  sc_2 = (-xpddot) * dv_290 + (-ypddot) * dv_301 + dv_1625 * dv_279 + sc_1;
+  sc_2 = (-d[2924]) * dv_290 + (-d[2925]) * dv_301 + dv_1625 * dv_279 + sc_1;
   DataVector& dv_277 = temps.at(269);
   DataVector& dv_278 = temps.at(270);
   sc_2 +=
-      dv_1735 *
-          ((-yp) * ((-ypdot) * (dv_1582 + dv_278) + dv_0 * (d[354] + dv_538)) -
-           dv_1812 + xp * (-dv_1515 + xpdot * (dv_126 + dv_277))) +
+      dv_1735 * ((-d[2921]) * ((-d[2923]) * (dv_1582 + dv_278) +
+                               dv_0 * (d[354] + dv_538)) -
+                 dv_1812 + d[2920] * (-dv_1515 + d[2922] * (dv_126 + dv_277))) +
       sc_3;
-  sc_0 = (2.0 * M * d[12]) * sc_2;
+  sc_0 = (2.0 * d[2928] * d[12]) * sc_2;
   sc_3 = (-d[20]) * dv_1813 + (-d[639]) * dv_2 + (-d[2] * d[9]) * dv_2 +
          d[1032] * dv_1814 + d[1033] * dv_1814 + d[1103] * dv_114 +
          d[167] * dv_18 + d[2] * dv_126 - dv_1550 - dv_1812;
@@ -1462,31 +1467,31 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   sc_2 = -dv_1815 * sc_3;
   DataVector& sc_5 = temps.at(3227);
   sc_5 = (-d[1105]) * dv_1528 + (-d[348]) * ((-d[1106]) * dv_39 + dv_1818) +
-         d[112] * (dv_1819 + ypdot * (-dv_1531 - dv_1820 - dv_73)) + dv_1816;
+         d[112] * (dv_1819 + d[2923] * (-dv_1531 - dv_1820 - dv_73)) + dv_1816;
   sc_5 += d[34] * (dv_751 * (d[103] - dv_94) +
-                   xpdot * (d[29] * dv_36 + dv_1821 + dv_1822)) -
+                   d[2922] * (d[29] * dv_36 + dv_1821 + dv_1822)) -
           dv_1817 * dv_2;
-  sc_4 = (-ypdot) * sc_5;
+  sc_4 = (-d[2923]) * sc_5;
   DataVector& dv_378 = temps.at(361);
   DataVector& sc_6 = temps.at(3228);
-  sc_6 = (-d[112]) * (-dv_1824 + xpdot * (dv_34 + dv_378 + dv_97)) +
-         (-d[34]) * ((-d[348]) * dv_1528 + d[29] * (-dv_1818 + dv_39 * ypdot) +
-                     d[49] * dv_0);
+  sc_6 = (-d[112]) * (-dv_1824 + d[2922] * (dv_34 + dv_378 + dv_97)) +
+         (-d[34]) * ((-d[348]) * dv_1528 +
+                     d[29] * (-dv_1818 + dv_39 * d[2923]) + d[49] * dv_0);
   DataVector& dv_40 = temps.at(40);
-  sc_6 += (-xpdot) * (-dv_1455 + dv_1823 + 3.0 * dv_40) +
-          (-6.0 * d[52]) * dv_1528 + (2.0 * d[48] * ypdot) * Dx * dv_1513;
-  sc_5 = sc_6 * xpdot;
+  sc_6 += (-d[2922]) * (-dv_1455 + dv_1823 + 3.0 * dv_40) +
+          (-6.0 * d[52]) * dv_1528 + (2.0 * d[48] * d[2923]) * Dx * dv_1513;
+  sc_5 = sc_6 * d[2922];
   DataVector& dv_270 = temps.at(263);
   DataVector& dv_272 = temps.at(37);
-  sc_1 = (-d[283]) * dv_2 + d[9] * dv_1737 + dv_270 * xpddot + dv_272 * ypddot +
-         sc_4 + sc_5;
+  sc_1 = (-d[283]) * dv_2 + d[9] * dv_1737 + dv_270 * d[2924] +
+         dv_272 * d[2925] + sc_4 + sc_5;
   DataVector& dv_276 = temps.at(268);
   sc_3 = -dv_276 * sc_1;
   DataVector& dv_1843 = temps.at(1627);
   DataVector& dv_251 = temps.at(244);
   DataVector& dv_262 = temps.at(255);
   DataVector& dv_302 = temps.at(294);
-  dv_1843 = (4.0 * M * rp * rpdot) * dv_302 - dv_1509 * dv_262 -
+  dv_1843 = (4.0 * d[2928] * d[2926] * d[2927]) * dv_302 - dv_1509 * dv_262 -
             dv_1519 * dv_1810 - dv_1521 * dv_251 + sc_0 + sc_2;
   DataVector& dv_255 = temps.at(248);
   DataVector& dv_752 = temps.at(700);
@@ -1501,68 +1506,68 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1843 += (-d[104]) * dv_1626 * dv_261 + (-d[105]) * dv_1509 * dv_275 +
              (-d[1100]) * dv_1734 * dv_41 + (-d[1102]) * dv_275 * dv_6 +
              (-d[0] * d[1068]) * dv_267 * dv_43 +
-             (4.0 * d[48] * d[92] * rp) * dv_1509 * dv_253 +
-             (4.0 * d[48] * d[92] * rpdot) * dv_253 * dv_6;
-  dv_1843 += (8.0 * d[4] * d[48] * rp) * dv_253 * dv_6;
+             (4.0 * d[48] * d[92] * d[2926]) * dv_1509 * dv_253 +
+             (4.0 * d[48] * d[92] * d[2927]) * dv_253 * dv_6;
+  dv_1843 += (8.0 * d[4] * d[48] * d[2926]) * dv_253 * dv_6;
   dv_1843 += d[40] * dv_43 *
              ((d[261] + d[638]) + dv_1511 + dv_1801 + dv_1802 + dv_1809 +
-              xp * ((-ypdot) * dv_1807 + xpdot * (dv_1503 + 2.0)) +
-              xpdot * ((d[1033] - 2.0) * Dx - dv_1808));
-  DataVector& dv_1844 = temps.at(1548);
+              d[2920] * ((-d[2923]) * dv_1807 + d[2922] * (dv_1503 + 2.0)) +
+              d[2922] * ((d[1033] - 2.0) * Dx - dv_1808));
+  DataVector& dv_1844 = temps.at(254);
   DataVector& dv_250 = temps.at(243);
   dv_1844 = d[88] * dv_250;
-  DataVector& dv_1845 = temps.at(269);
+  DataVector& dv_1845 = temps.at(1394);
   DataVector& dv_307 = temps.at(299);
   dv_1845 = d[88] * dv_307;
-  DataVector& dv_1846 = temps.at(244);
-  dv_1846 = M * dv_1741;
-  DataVector& dv_1847 = temps.at(1598);
+  DataVector& dv_1846 = temps.at(40);
+  dv_1846 = d[2928] * dv_1741;
+  DataVector& dv_1847 = temps.at(1525);
   DataVector& dv_374 = temps.at(357);
   dv_1847 = -dv_374;
-  DataVector& dv_1848 = temps.at(1424);
+  DataVector& dv_1848 = temps.at(87);
   DataVector& dv_342 = temps.at(325);
   DataVector& dv_477 = temps.at(445);
   dv_1848 = d[114] * dv_1847 + d[118] * dv_342 + dv_477;
-  DataVector& dv_1849 = temps.at(1616);
+  DataVector& dv_1849 = temps.at(270);
   dv_1849 = dv_1848 * dv_375;
-  DataVector& dv_1850 = temps.at(275);
+  DataVector& dv_1850 = temps.at(36);
   dv_1850 = d[1] * dv_81;
-  DataVector& dv_1851 = temps.at(287);
+  DataVector& dv_1851 = temps.at(1616);
   DataVector& dv_382 = temps.at(365);
   dv_1851 = -dv_382;
-  DataVector& dv_1852 = temps.at(291);
+  DataVector& dv_1852 = temps.at(265);
   dv_1852 = dv_174 * dv_1851;
-  DataVector& dv_1853 = temps.at(40);
+  DataVector& dv_1853 = temps.at(41);
   DataVector& dv_395 = temps.at(376);
   dv_1853 = -dv_395;
-  DataVector& dv_1854 = temps.at(290);
+  DataVector& dv_1854 = temps.at(1598);
   DataVector& dv_414 = temps.at(389);
   dv_1854 = -dv_414;
-  DataVector& dv_1855 = temps.at(41);
+  DataVector& dv_1855 = temps.at(1424);
   DataVector& dv_445 = temps.at(418);
   dv_1855 = -dv_445;
-  DataVector& dv_1856 = temps.at(248);
+  DataVector& dv_1856 = temps.at(18);
   dv_1856 = d[114] * dv_1855;
-  DataVector& dv_1857 = temps.at(36);
+  DataVector& dv_1857 = temps.at(269);
   DataVector& dv_475 = temps.at(444);
   dv_1857 = -dv_475;
-  DataVector& dv_1858 = temps.at(263);
+  DataVector& dv_1858 = temps.at(1405);
   dv_1858 = d[12] * dv_1857;
-  DataVector& dv_1859 = temps.at(183);
-  DataVector& dv_317 = temps.at(183);
+  DataVector& dv_1859 = temps.at(179);
+  DataVector& dv_317 = temps.at(179);
   DataVector& dv_318 = temps.at(301);
   DataVector& dv_319 = temps.at(302);
   dv_1859 = dv_174 * ((-d[19]) * dv_318 + (-d[20]) * dv_319 + dv_317);
   DataVector& dv_1860 = temps.at(468);
   DataVector& dv_507 = temps.at(468);
   dv_1860 = Dy * dv_507;
-  DataVector& dv_1861 = temps.at(267);
-  DataVector& dv_500 = temps.at(201);
+  DataVector& dv_1861 = temps.at(263);
+  DataVector& dv_500 = temps.at(211);
   dv_1861 = (-d[114]) * dv_500 + (-d[29]) * dv_1859;
   DataVector& dv_485 = temps.at(453);
   DataVector& dv_491 = temps.at(459);
   DataVector& dv_501 = temps.at(353);
-  DataVector& dv_502 = temps.at(211);
+  DataVector& dv_502 = temps.at(201);
   DataVector& dv_512 = temps.at(473);
   DataVector& dv_513 = temps.at(305);
   DataVector& dv_515 = temps.at(200);
@@ -1572,41 +1577,41 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1861 += d[118] * ((-d[120]) * (-dv_14 * dv_513 + dv_515) +
                        d[128] * (-dv_14 * dv_520 + dv_522) + dv_1860 * dv_485 +
                        dv_491 * dv_512 - dv_501 * dv_502 - dv_519);
-  DataVector& dv_1862 = temps.at(453);
-  dv_1862 = (-ypdot) * dv_1861 +
+  DataVector& dv_1862 = temps.at(477);
+  dv_1862 = (-d[2923]) * dv_1861 +
             d[119] * (d[118] * dv_1853 + d[54] * dv_1854 + dv_1852) +
-            xpdot * (d[100] * dv_477 + dv_1856 + 3.0 * dv_1858);
-  DataVector& dv_1863 = temps.at(211);
+            d[2922] * (d[100] * dv_477 + dv_1856 + 3.0 * dv_1858);
+  DataVector& dv_1863 = temps.at(453);
   dv_1863 = dv_10 * dv_1862 + dv_1796 * dv_1850 - dv_1849;
-  DataVector& dv_1864 = temps.at(200);
+  DataVector& dv_1864 = temps.at(459);
   dv_1864 = 2.0 * pow(dv_1791, 2.0);
-  DataVector& dv_1865 = temps.at(459);
+  DataVector& dv_1865 = temps.at(201);
   dv_1865 = d[111] * dv_1742 - dv_1798 * dv_1846 + dv_1863 * dv_1864;
-  DataVector& dv_1866 = temps.at(477);
+  DataVector& dv_1866 = temps.at(200);
   dv_1866 = d[16] * dv_1612;
   DataVector& dv_1867 = temps.at(305);
   dv_1867 = dv_10 * dv_1588 - dv_1866;
-  DataVector& dv_1868 = temps.at(270);
+  DataVector& dv_1868 = temps.at(255);
   dv_1868 = d[1111] * dv_96;
-  DataVector& dv_1869 = temps.at(254);
+  DataVector& dv_1869 = temps.at(267);
   dv_1869 = d[1111] * dv_163;
-  DataVector& dv_1870 = temps.at(255);
+  DataVector& dv_1870 = temps.at(280);
   dv_1870 = d[1111] * dv_51;
-  DataVector& dv_1871 = temps.at(1409);
+  DataVector& dv_1871 = temps.at(285);
   dv_1871 = d[1112] * dv_1500;
-  DataVector& dv_1872 = temps.at(294);
+  DataVector& dv_1872 = temps.at(248);
   dv_1872 = dv_1625 * dv_375;
   DataVector& dv_1873 = temps.at(13);
   dv_1873 = d[0] * dv_13;
-  DataVector& dv_1874 = temps.at(49);
+  DataVector& dv_1874 = temps.at(68);
   dv_1874 = (-d[16]) * dv_1601 + dv_1590 + dv_1595 * dv_314;
   DataVector& dv_1875 = temps.at(37);
   dv_1875 = dv_1509 * dv_174;
-  DataVector& dv_1876 = temps.at(213);
+  DataVector& dv_1876 = temps.at(287);
   dv_1876 = d[1115] * dv_1875;
-  DataVector& dv_1877 = temps.at(265);
+  DataVector& dv_1877 = temps.at(290);
   dv_1877 = d[109] * dv_1741;
-  DataVector& dv_1878 = temps.at(1525);
+  DataVector& dv_1878 = temps.at(1600);
   dv_1878 = -dv_31;
   DataVector& dv_106 = temps.at(104);
   DataVector& dv_1879 = temps.at(23);
@@ -1619,34 +1624,34 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_62 = temps.at(62);
   dv_1879 =
       (-d[1116]) * dv_106 + (-d[1117]) * dv_540 + dv_546 +
-      xpdot * ((-xp) * dv_533 + dv_537) +
-      ypdot * (d[139] * (d[19] * dv_1878 + d[20] * dv_62 + dv_23) + dv_539);
-  DataVector& dv_1880 = temps.at(1394);
+      d[2922] * ((-d[2920]) * dv_533 + dv_537) +
+      d[2923] * (d[139] * (d[19] * dv_1878 + d[20] * dv_62 + dv_23) + dv_539);
+  DataVector& dv_1880 = temps.at(294);
   DataVector& dv_547 = temps.at(501);
   dv_1880 = -dv_547;
-  DataVector& dv_1881 = temps.at(1390);
+  DataVector& dv_1881 = temps.at(275);
   dv_1881 = 6.0 * dv_1;
-  DataVector& dv_1882 = temps.at(18);
+  DataVector& dv_1882 = temps.at(291);
   dv_1882 = d[3] * dv_1880;
   DataVector& dv_1883 = temps.at(506);
   DataVector& dv_552 = temps.at(506);
   dv_1883 = -dv_552;
-  DataVector& dv_1884 = temps.at(1600);
+  DataVector& dv_1884 = temps.at(213);
   dv_1884 = d[7] * dv_1883;
   DataVector& dv_1885 = temps.at(479);
   DataVector& dv_554 = temps.at(479);
   dv_1885 = dv_1884 + dv_554;
-  DataVector& dv_1886 = temps.at(1600);
+  DataVector& dv_1886 = temps.at(213);
   DataVector& dv_551 = temps.at(505);
   DataVector& dv_559 = temps.at(512);
   DataVector& dv_593 = temps.at(35);
   dv_1886 = d[143] * dv_1880 + d[6] * (dv_1881 * dv_4 + dv_1882 + dv_593) +
-            xpdot * (dv_1885 * xp + dv_551) +
-            ypdot * (dv_559 + yp * (dv_123 + dv_1884 + dv_478 + dv_51));
-  DataVector& dv_1887 = temps.at(168);
+            d[2922] * (dv_1885 * d[2920] + dv_551) +
+            d[2923] * (dv_559 + d[2921] * (dv_123 + dv_1884 + dv_478 + dv_51));
+  DataVector& dv_1887 = temps.at(244);
   DataVector& dv_743 = temps.at(691);
   dv_1887 = -dv_743;
-  DataVector& dv_1888 = temps.at(285);
+  DataVector& dv_1888 = temps.at(1548);
   DataVector& dv_565 = temps.at(518);
   dv_1888 = -dv_565;
   DataVector& dv_1889 = temps.at(517);
@@ -1659,20 +1664,20 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_576 = temps.at(516);
   DataVector& dv_577 = temps.at(529);
   dv_1891 = (-d[3]) * dv_576 + dv_577;
-  DataVector& dv_1892 = temps.at(1405);
+  DataVector& dv_1892 = temps.at(1390);
   DataVector& dv_536 = temps.at(491);
   DataVector& dv_562 = temps.at(515);
   DataVector& dv_584 = temps.at(536);
   DataVector& dv_592 = temps.at(544);
   dv_1892 = (-d[6]) * (d[19] * dv_1891 + dv_584) + dv_592 +
-            xpdot * ((-xp) * dv_1890 + d[1118] * dv_536 + d[1120] * dv_45 +
-                     d[52] * dv_562);
+            d[2922] * ((-d[2920]) * dv_1890 + d[1118] * dv_536 +
+                       d[1120] * dv_45 + d[52] * dv_562);
   DataVector& dv_383 = temps.at(366);
   DataVector& dv_573 = temps.at(526);
   DataVector& dv_575 = temps.at(528);
-  dv_1892 += ypdot * ((-d[58]) * dv_573 + (-yp) * dv_575 + d[1121] * dv_383 +
-                      d[795] * dv_383);
-  DataVector& dv_1893 = temps.at(280);
+  dv_1892 += d[2923] * ((-d[58]) * dv_573 + (-d[2921]) * dv_575 +
+                        d[1121] * dv_383 + d[795] * dv_383);
+  DataVector& dv_1893 = temps.at(1409);
   dv_1893 = d[1122] * dv_5;
   DataVector& dv_1894 = temps.at(1628);
   DataVector& dv_549 = temps.at(503);
@@ -1681,8 +1686,9 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_604 = temps.at(555);
   DataVector& dv_606 = temps.at(557);
   DataVector& dv_611 = temps.at(562);
-  dv_1894 = (-ypdot) * dv_604 + (-xpdot) * (Dx * dv_1893 + dv_611 * xp) +
-            d[255] * dv_131 + d[6] * dv_606 + dv_549 - dv_597 - dv_599;
+  dv_1894 = (-d[2923]) * dv_604 +
+            (-d[2922]) * (Dx * dv_1893 + dv_611 * d[2920]) + d[255] * dv_131 +
+            d[6] * dv_606 + dv_549 - dv_597 - dv_599;
   DataVector& dv_1895 = temps.at(624);
   DataVector& dv_674 = temps.at(624);
   dv_1895 = d[104] * dv_1878 + dv_674;
@@ -1692,42 +1698,42 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_710 = temps.at(660);
   DataVector& dv_715 = temps.at(590);
   dv_1896 = (-d[6]) * dv_706 + d[167] * dv_710 + dv_715 +
-            xpdot * (d[52] * dv_1895 + dv_689);
+            d[2922] * (d[52] * dv_1895 + dv_689);
   DataVector& dv_161 = temps.at(159);
   DataVector& dv_690 = temps.at(640);
   DataVector& dv_692 = temps.at(642);
   DataVector& dv_695 = temps.at(645);
   DataVector& dv_699 = temps.at(649);
-  dv_1896 += ypdot * ((-d[120]) * dv_690 + (-d[218]) * dv_161 +
-                      d[63] * ((-d[91]) * dv_692 + d[20] * dv_695) + dv_699);
+  dv_1896 += d[2923] * ((-d[120]) * dv_690 + (-d[218]) * dv_161 +
+                        d[63] * ((-d[91]) * dv_692 + d[20] * dv_695) + dv_699);
   DataVector& dv_1897 = temps.at(1630);
   DataVector& dv_667 = temps.at(617);
   dv_1897 = -dv_667;
   DataVector& dv_1898 = temps.at(693);
   DataVector& dv_745 = temps.at(693);
   DataVector& dv_746 = temps.at(694);
-  dv_1898 = (-M) * dv_745 + dv_746;
+  dv_1898 = (-d[2928]) * dv_745 + dv_746;
   DataVector& dv_1899 = temps.at(694);
   DataVector& dv_747 = temps.at(695);
   DataVector& dv_750 = temps.at(698);
   DataVector& dv_782 = temps.at(730);
   DataVector& dv_805 = temps.at(753);
-  dv_1899 = d[122] * ((-d[1123]) * dv_747 + dv_1898 * xpdot + dv_750) +
+  dv_1899 = d[122] * ((-d[1123]) * dv_747 + dv_1898 * d[2922] + dv_750) +
             d[191] * (d[1125] * dv_45 + dv_782) + dv_805;
   DataVector& dv_754 = temps.at(702);
   DataVector& dv_755 = temps.at(703);
   DataVector& dv_759 = temps.at(707);
   DataVector& dv_762 = temps.at(710);
   DataVector& dv_766 = temps.at(714);
-  dv_1899 += d[57] *
-             (d[259] * ((-ypdot) * dv_762 + dv_766) - dv_754 * dv_755 - dv_759);
+  dv_1899 += d[57] * (d[259] * ((-d[2923]) * dv_762 + dv_766) -
+                      dv_754 * dv_755 - dv_759);
   DataVector& dv_1900 = temps.at(759);
   DataVector& dv_809 = temps.at(755);
   DataVector& dv_813 = temps.at(759);
   dv_1900 = (-d[20]) * dv_809 + dv_813;
   DataVector& dv_1901 = temps.at(755);
   dv_1901 = d[1126] * dv_45;
-  DataVector& dv_1902 = temps.at(698);
+  DataVector& dv_1902 = temps.at(710);
   DataVector& dv_446 = temps.at(419);
   DataVector& dv_644 = temps.at(594);
   DataVector& dv_825 = temps.at(770);
@@ -1736,22 +1742,22 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_832 = temps.at(565);
   DataVector& dv_845 = temps.at(788);
   dv_1902 = d[313] * ((-d[19]) * dv_446 + d[20] * dv_644) + dv_845 +
-            xpdot * (d[52] * dv_1900 + d[55] * dv_1901 + dv_825) +
-            ypdot * (d[312] * ((-d[19]) * dv_826 + dv_827) + dv_832);
-  DataVector& dv_1903 = temps.at(695);
+            d[2922] * (d[52] * dv_1900 + d[55] * dv_1901 + dv_825) +
+            d[2923] * (d[312] * ((-d[19]) * dv_826 + dv_827) + dv_832);
+  DataVector& dv_1903 = temps.at(702);
   dv_1903 = d[142] * dv_16;
-  DataVector& dv_1904 = temps.at(730);
+  DataVector& dv_1904 = temps.at(714);
   dv_1904 = d[147] * dv_16;
-  DataVector& dv_1905 = temps.at(707);
+  DataVector& dv_1905 = temps.at(753);
   DataVector& dv_846 = temps.at(188);
   DataVector& dv_849 = temps.at(648);
   DataVector& dv_855 = temps.at(794);
   DataVector& dv_856 = temps.at(795);
   DataVector& dv_861 = temps.at(799);
   DataVector& dv_872 = temps.at(808);
-  dv_1905 = (-d[189]) * dv_861 + (-xpdot) * dv_872 + d[175] * dv_1903 +
+  dv_1905 = (-d[189]) * dv_861 + (-d[2922]) * dv_872 + d[175] * dv_1903 +
             d[179] * dv_1904 + d[183] * dv_846 - dv_849 - dv_855 * dv_856;
-  DataVector& dv_1906 = temps.at(753);
+  DataVector& dv_1906 = temps.at(695);
   DataVector& dv_883 = temps.at(815);
   DataVector& dv_886 = temps.at(818);
   DataVector& dv_891 = temps.at(823);
@@ -1763,22 +1769,22 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_1906 = (-d[357]) * dv_883 +
             d[206] * ((-d[356]) * ((-d[92]) * dv_901 + dv_895) +
                       d[1128] * dv_894 + dv_904) +
-            xpdot * (d[36] * ((-d[92]) * dv_891 + dv_886) + dv_893);
-  DataVector& dv_1907 = temps.at(710);
+            d[2922] * (d[36] * ((-d[92]) * dv_891 + dv_886) + dv_893);
+  DataVector& dv_1907 = temps.at(707);
   DataVector& dv_908 = temps.at(840);
   DataVector& dv_912 = temps.at(844);
   DataVector& dv_916 = temps.at(813);
-  DataVector& dv_917 = temps.at(609);
+  DataVector& dv_917 = temps.at(796);
   DataVector& dv_922 = temps.at(852);
   DataVector& dv_924 = temps.at(845);
   dv_1907 = d[34] * ((-d[259]) * dv_912 + dv_916) + dv_908 +
-            xpdot * (d[36] * ((-d[49]) * dv_922 - dv_917) + dv_924);
-  DataVector& dv_1908 = temps.at(714);
+            d[2922] * (d[36] * ((-d[49]) * dv_922 - dv_917) + dv_924);
+  DataVector& dv_1908 = temps.at(730);
   DataVector& dv_928 = temps.at(854);
   DataVector& dv_930 = temps.at(856);
   DataVector& dv_934 = temps.at(858);
-  dv_1908 = (-xpdot) * dv_930 - dv_928 + dv_934 * xp;
-  DataVector& dv_1909 = temps.at(702);
+  dv_1908 = (-d[2922]) * dv_930 - dv_928 + dv_934 * d[2920];
+  DataVector& dv_1909 = temps.at(698);
   DataVector& dv_937 = temps.at(860);
   dv_1909 = -dv_937;
   DataVector& dv_1910 = temps.at(1631);
@@ -1786,24 +1792,24 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_941 = temps.at(832);
   DataVector& dv_942 = temps.at(817);
   DataVector& dv_943 = temps.at(811);
-  DataVector& dv_944 = temps.at(842);
-  DataVector& dv_945 = temps.at(820);
+  DataVector& dv_944 = temps.at(847);
+  DataVector& dv_945 = temps.at(821);
   DataVector& dv_946 = temps.at(859);
-  DataVector& dv_947 = temps.at(847);
+  DataVector& dv_947 = temps.at(857);
   dv_1910 = (-d[357]) * dv_940 +
-            xp * ((-d[180]) * dv_944 + d[31] * (d[92] * dv_943 + dv_942) +
-                  d[449] * dv_941) +
-            xpdot * ((-d[321]) * dv_945 + d[411] * dv_946 + dv_947);
+            d[2920] * ((-d[180]) * dv_944 + d[31] * (d[92] * dv_943 + dv_942) +
+                       d[449] * dv_941) +
+            d[2922] * ((-d[321]) * dv_945 + d[411] * dv_946 + dv_947);
   DataVector& dv_1911 = temps.at(1632);
   DataVector& dv_959 = temps.at(866);
   dv_1911 = -dv_959;
   DataVector& dv_1912 = temps.at(1633);
   DataVector& dv_884 = temps.at(816);
-  DataVector& dv_952 = temps.at(843);
-  DataVector& dv_953 = temps.at(791);
+  DataVector& dv_952 = temps.at(791);
+  DataVector& dv_953 = temps.at(842);
   DataVector& dv_956 = temps.at(863);
   dv_1912 =
-      d[1130] * dv_953 + d[1131] * dv_884 + dv_1911 * xpdot - dv_952 - dv_956;
+      d[1130] * dv_953 + d[1131] * dv_884 + dv_1911 * d[2922] - dv_952 - dv_956;
   DataVector& dv_1913 = temps.at(1634);
   dv_1913 = d[492] * dv_1912;
   DataVector& dv_1914 = temps.at(1635);
@@ -1819,7 +1825,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_905 = temps.at(837);
   DataVector& dv_925 = temps.at(846);
   DataVector& dv_935 = temps.at(855);
-  DataVector& dv_938 = temps.at(857);
+  DataVector& dv_938 = temps.at(843);
   DataVector& dv_948 = temps.at(850);
   dv_1914 += d[260] * dv_1887 + d[331] * dv_1902 + d[351] * dv_1905 +
              d[74] * dv_1886 - dv_1906 * dv_905 - dv_1907 * dv_925 -
@@ -1900,7 +1906,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_679 = temps.at(629);
   dv_1949 = d[48] * dv_679;
   DataVector& dv_1950 = temps.at(1666);
-  dv_1950 = dv_1426 * xpdot;
+  dv_1950 = dv_1426 * d[2922];
   DataVector& dv_1951 = temps.at(1667);
   dv_1951 = d[330] * dv_131;
   DataVector& dv_1952 = temps.at(1668);
@@ -1994,7 +2000,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
              d[759] * dv_1452;
   dv_1969 += d[962] * dv_1545 + d[962] * dv_1566 + d[962] * dv_1946 +
              d[971] * dv_1948 + d[995] * dv_1436;
-  DataVector& dv_1970 = temps.at(1243);
+  DataVector& dv_1970 = temps.at(1662);
   dv_1970 = -dv_1344 - dv_1346 - dv_1415 - dv_1417 - dv_1424 - dv_1457 -
             dv_1463 - dv_1469 - dv_1472 - dv_1476 + dv_1969;
   dv_1970 += (-d[696]) * dv_1927 + (-d[696]) * dv_1934 + (-d[715]) * dv_1925 +
@@ -2011,69 +2017,73 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
              d[696] * dv_1933;
   dv_1970 += d[696] * dv_1935 + d[696] * dv_1941 + d[733] * dv_1923 +
              d[803] * dv_1929 + d[933] * dv_1486 + d[953] * dv_1494;
-  DataVector& dv_1971 = temps.at(1318);
+  DataVector& dv_1971 = temps.at(1374);
   dv_1971 = 8.0 * dv_19;
   DataVector& dv_1972 = temps.at(1655);
   dv_1972 = dv_1609 * dv_1971;
-  DataVector& dv_1973 = temps.at(1374);
+  DataVector& dv_1973 = temps.at(1318);
   dv_1973 = d[958] * dv_11;
-  DataVector& dv_1974 = temps.at(1673);
+  DataVector& dv_1974 = temps.at(1243);
   dv_1974 = dv_1919 * dv_1973;
-  DataVector& dv_1975 = temps.at(1341);
+  DataVector& dv_1975 = temps.at(1667);
   dv_1975 = d[0] * dv_1970;
-  DataVector& dv_1976 = temps.at(498);
+  DataVector& dv_1976 = temps.at(1319);
   dv_1976 = dv_1496 * dv_1975;
-  DataVector& dv_1977 = temps.at(1671);
+  DataVector& dv_1977 = temps.at(1672);
   dv_1977 = (-d[1041]) * dv_1873 + (-d[1187]) * dv_14 + (-d[1187]) * dv_15 +
-            (-d[1187]) * dv_16 + (d[0] * d[16] * xpdot) * Dx - dv_1868 -
+            (-d[1187]) * dv_16 + (d[0] * d[16] * d[2922]) * Dx - dv_1868 -
             dv_1869 - dv_1870 - dv_1871 - dv_1872;
-  dv_1977 += (d[0] * d[16] * ypdot) * Dy + dv_10 * dv_1524;
+  dv_1977 += (d[0] * d[16] * d[2923]) * Dy + dv_10 * dv_1524;
   DataVector& dv_1978 = temps.at(1664);
   dv_1978 = 8.0 * dv_1791;
-  DataVector& dv_1979 = temps.at(1667);
-  dv_1979 = dv_1651 * yp - dv_39 * dv_538;
-  DataVector& dv_1980 = temps.at(1663);
-  dv_1980 = (-7.0 * yp) * Dy * dv_16;
+  DataVector& dv_1979 = temps.at(1313);
+  dv_1979 = dv_1651 * d[2921] - dv_39 * dv_538;
+  DataVector& dv_1980 = temps.at(1250);
+  dv_1980 = (-7.0 * d[2921]) * Dy * dv_16;
   DataVector& dv_1981 = temps.at(149);
-  dv_1981 = (-ypdot) * dv_1719 + dv_1718;
+  dv_1981 = (-d[2923]) * dv_1719 + dv_1718;
   DataVector& dv_159 = temps.at(157);
   sc_2 = (-d[395]) * dv_1875 + d[1073] * dv_159 + dv_1733;
   sc_2 += d[12] * ((-d[50]) * dv_1714 +
-                   (d[19] * yp) * (dv_145 * dv_1715 + dv_1716 + dv_1981 * yp) +
-                   (d[20] * xp) * dv_1723 - dv_1711 - dv_1825);
+                   (d[19] * d[2921]) *
+                       (dv_145 * dv_1715 + dv_1716 + dv_1981 * d[2921]) +
+                   (d[20] * d[2920]) * dv_1723 - dv_1711 - dv_1825);
   sc_2 += dv_105 * ((-d[20]) * dv_1729 +
-                    (2.0 * xp * yp) * (-dv_1725 * dv_1727 + dv_1728 * xpdot) +
-                    d[19] * ((-ypdot) * dv_1732 + dv_1730) - dv_1724);
-  sc_3 = (-ypdot) * sc_2;
+                    (2.0 * d[2920] * d[2921]) *
+                        (-dv_1725 * dv_1727 + dv_1728 * d[2922]) +
+                    d[19] * ((-d[2923]) * dv_1732 + dv_1730) - dv_1724);
+  sc_3 = (-d[2923]) * sc_2;
   DataVector& dv_108 = temps.at(106);
   DataVector& dv_117 = temps.at(115);
-  sc_5 = (-d[52]) * (d[29] * dv_1680 + dv_108 * dv_1674 + dv_1675) +
-         (-d[63]) * dv_1682 +
-         d[50] * ((-xpdot) * (dv_117 * dv_538 + dv_1672 * yp) + dv_1671) +
-         dv_1669;
-  sc_5 += d[53] * ((3.0 * yp) * dv_1689 - dv_117 * dv_1683 - dv_1684);
+  sc_5 =
+      (-d[52]) * (d[29] * dv_1680 + dv_108 * dv_1674 + dv_1675) +
+      (-d[63]) * dv_1682 +
+      d[50] * ((-d[2922]) * (dv_117 * dv_538 + dv_1672 * d[2921]) + dv_1671) +
+      dv_1669;
+  sc_5 += d[53] * ((3.0 * d[2921]) * dv_1689 - dv_117 * dv_1683 - dv_1684);
   sc_1 = d[12] * sc_5;
   sc_0 = d[1073] * dv_1794 + dv_1690 + dv_1876 + sc_1;
-  sc_0 += dv_105 * ((-d[112]) * (dv_1701 * xpdot - dv_1824) +
-                    (-d[20]) * (dv_1530 * dv_1692 + dv_1695 * xpdot) +
-                    (-d[61]) * dv_1691 + (2.0 * xp * yp) * dv_1699) +
+  sc_0 += dv_105 * ((-d[112]) * (dv_1701 * d[2922] - dv_1824) +
+                    (-d[20]) * (dv_1530 * dv_1692 + dv_1695 * d[2922]) +
+                    (-d[61]) * dv_1691 + (2.0 * d[2920] * d[2921]) * dv_1699) +
           dv_1702 * dv_1793;
   sc_0 += dv_1703 * dv_1793;
-  sc_2 = sc_0 * xpdot;
+  sc_2 = sc_0 * d[2922];
   DataVector& dv_173 = temps.at(171);
   DataVector& dv_1982 = temps.at(1539);
-  dv_1982 = (-ypddot) * dv_173 + dv_1738 + dv_1795 * xpddot + sc_2 + sc_3;
-  DataVector& dv_1983 = temps.at(1544);
+  dv_1982 = (-d[2925]) * dv_173 + dv_1738 + dv_1795 * d[2924] + sc_2 + sc_3;
+  DataVector& dv_1983 = temps.at(1583);
   DataVector& dv_476 = temps.at(303);
   dv_1983 = dv_1737 * dv_476;
-  DataVector& dv_1984 = temps.at(157);
+  DataVector& dv_1984 = temps.at(131);
   dv_1984 = 5.0 * dv_0;
-  DataVector& dv_1985 = temps.at(1537);
+  DataVector& dv_1985 = temps.at(1528);
   dv_1985 = dv_174;
   DataVector& dv_639 = temps.at(589);
-  dv_1985 *= (-d[19]) * (dv_1632 + dv_1984) +
-             (-xp) * (-dv_1513 * dv_1720 + xpdot * (dv_318 + dv_639)) +
-             yp * ((-ypdot) * (dv_1698 + dv_319) + dv_0 * (d[354] + dv_637));
+  dv_1985 *=
+      (-d[19]) * (dv_1632 + dv_1984) +
+      (-d[2920]) * (-dv_1513 * dv_1720 + d[2922] * (dv_318 + dv_639)) +
+      d[2921] * ((-d[2923]) * (dv_1698 + dv_319) + dv_0 * (d[354] + dv_637));
   DataVector& dv_1986 = temps.at(302);
   dv_1986 = dv_378 + dv_478;
   DataVector& dv_1987 = temps.at(301);
@@ -2081,129 +2091,129 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_1988 = temps.at(337);
   DataVector& dv_354 = temps.at(337);
   dv_1988 = dv_1987 + dv_354;
-  DataVector& dv_1989 = temps.at(143);
+  DataVector& dv_1989 = temps.at(102);
   dv_1989 = 45.0 * Dy;
-  DataVector& dv_1990 = temps.at(37);
+  DataVector& dv_1990 = temps.at(171);
   dv_1990 = 39.0 * Dy;
   DataVector& dv_1991 = temps.at(349);
   DataVector& dv_366 = temps.at(349);
   dv_1991 = -dv_366;
-  DataVector& dv_1992 = temps.at(1526);
+  DataVector& dv_1992 = temps.at(96);
   dv_1992 = dv_106 + dv_1991;
-  DataVector& dv_1993 = temps.at(1514);
+  DataVector& dv_1993 = temps.at(88);
   DataVector& dv_608 = temps.at(559);
   dv_1993 = dv_1992 + dv_608;
-  DataVector& dv_1994 = temps.at(1509);
+  DataVector& dv_1994 = temps.at(109);
   DataVector& dv_988 = temps.at(888);
-  dv_1994 = (-18.0 * yp) * dv_988;
-  DataVector& dv_1995 = temps.at(1528);
+  dv_1994 = (-18.0 * d[2921]) * dv_988;
+  DataVector& dv_1995 = temps.at(103);
   dv_1995 = 66.0 * dv_5;
-  DataVector& dv_1996 = temps.at(1531);
+  DataVector& dv_1996 = temps.at(1515);
   DataVector& dv_602 = temps.at(553);
   dv_1996 = -dv_602;
-  DataVector& dv_1997 = temps.at(90);
+  DataVector& dv_1997 = temps.at(114);
   dv_1997 = dv_1996 + dv_639;
-  DataVector& dv_1998 = temps.at(96);
+  DataVector& dv_1998 = temps.at(1610);
   DataVector& dv_328 = temps.at(311);
   dv_1998 = -18.0 * dv_326 + dv_328 * dv_5;
-  DataVector& dv_1999 = temps.at(103);
+  DataVector& dv_1999 = temps.at(143);
   dv_1999 = -45.0 * dv_15;
   DataVector& dv_2000 = temps.at(330);
   DataVector& dv_347 = temps.at(330);
   dv_2000 = dv_1999 + dv_347;
-  DataVector& dv_2001 = temps.at(101);
+  DataVector& dv_2001 = temps.at(106);
   dv_2001 = 21.0 * dv_16;
-  DataVector& dv_2002 = temps.at(1458);
+  DataVector& dv_2002 = temps.at(37);
   DataVector& dv_822 = temps.at(767);
   dv_2002 = dv_1639 + dv_2001 + dv_822;
-  DataVector& dv_2003 = temps.at(1532);
+  DataVector& dv_2003 = temps.at(1509);
   dv_2003 = dv_131 + dv_679;
-  DataVector& dv_2004 = temps.at(212);
+  DataVector& dv_2004 = temps.at(57);
   DataVector& dv_601 = temps.at(552);
   dv_2004 = dv_2003 + dv_601;
-  DataVector& dv_2005 = temps.at(1583);
+  DataVector& dv_2005 = temps.at(1522);
   DataVector& dv_330 = temps.at(313);
   dv_2005 = Dy * dv_330;
-  DataVector& dv_2006 = temps.at(1521);
+  DataVector& dv_2006 = temps.at(1514);
   dv_2006 = 27.0 * dv_15;
   DataVector& dv_167 = temps.at(165);
-  DataVector& dv_2007 = temps.at(1522);
+  DataVector& dv_2007 = temps.at(168);
   dv_2007 = dv_167 + dv_2006 + dv_328;
-  DataVector& dv_2008 = temps.at(171);
+  DataVector& dv_2008 = temps.at(167);
   dv_2008 = 5.0 * dv_751;
-  DataVector& dv_2009 = temps.at(1515);
+  DataVector& dv_2009 = temps.at(164);
   DataVector& dv_685 = temps.at(635);
   dv_2009 = -dv_685;
-  DataVector& dv_2010 = temps.at(164);
+  DataVector& dv_2010 = temps.at(157);
   DataVector& dv_335 = temps.at(318);
   dv_2010 = dv_2009 + dv_335;
-  DataVector& dv_2011 = temps.at(1610);
+  DataVector& dv_2011 = temps.at(1550);
   DataVector& dv_691 = temps.at(641);
   dv_2011 = dv_131 + dv_691;
-  DataVector& dv_2012 = temps.at(106);
+  DataVector& dv_2012 = temps.at(1544);
   DataVector& dv_609 = temps.at(560);
   dv_2012 = dv_2011 + dv_609;
   DataVector& dv_195 = temps.at(192);
-  DataVector& dv_2013 = temps.at(114);
+  DataVector& dv_2013 = temps.at(1532);
   dv_2013 = 24.0 * dv_195;
   DataVector& dv_2014 = temps.at(150);
   DataVector& dv_205 = temps.at(202);
   dv_2014 = 24.0 * dv_205;
-  DataVector& dv_2015 = temps.at(139);
+  DataVector& dv_2015 = temps.at(1537);
   dv_2015 = -dv_2014;
-  DataVector& dv_2016 = temps.at(107);
+  DataVector& dv_2016 = temps.at(101);
   dv_2016 = -dv_328;
-  DataVector& dv_2017 = temps.at(88);
+  DataVector& dv_2017 = temps.at(214);
   dv_2017 = d[104] * dv_6;
-  DataVector& dv_2018 = temps.at(1523);
+  DataVector& dv_2018 = temps.at(139);
   dv_2018 = 8.0 * dv_751;
   DataVector& dv_2019 = temps.at(95);
   dv_2019 = dv_17 + dv_97;
-  DataVector& dv_2020 = temps.at(167);
+  DataVector& dv_2020 = temps.at(1521);
   dv_2020 = dv_24 + dv_378;
-  DataVector& dv_2021 = temps.at(125);
+  DataVector& dv_2021 = temps.at(1543);
   DataVector& dv_545 = temps.at(499);
   dv_2021 = dv_155 + dv_545;
-  DataVector& dv_2022 = temps.at(57);
+  DataVector& dv_2022 = temps.at(115);
   dv_2022 = -dv_691;
   DataVector& dv_2023 = temps.at(312);
   DataVector& dv_329 = temps.at(312);
   dv_2023 = dv_2022 + dv_329;
-  DataVector& dv_2024 = temps.at(1550);
+  DataVector& dv_2024 = temps.at(1526);
   DataVector& dv_27 = temps.at(27);
   dv_2024 = dv_122 + dv_27;
-  DataVector& dv_2025 = temps.at(1543);
+  DataVector& dv_2025 = temps.at(28);
   DataVector& dv_403 = temps.at(383);
   dv_2025 = dv_398 + dv_403 + dv_654;
-  DataVector& dv_2026 = temps.at(131);
+  DataVector& dv_2026 = temps.at(1531);
   dv_2026 = 8.0 * dv_195;
-  DataVector& dv_2027 = temps.at(197);
+  DataVector& dv_2027 = temps.at(90);
   dv_2027 = 51.0 * Dy;
   DataVector& dv_2028 = temps.at(349);
   dv_2028 = dv_1991 + dv_210;
-  DataVector& dv_2029 = temps.at(115);
+  DataVector& dv_2029 = temps.at(1523);
   dv_2029 = dv_2028 + dv_608;
-  DataVector& dv_2030 = temps.at(87);
+  DataVector& dv_2030 = temps.at(196);
   dv_2030 = dv_155 + dv_29;
-  DataVector& dv_2031 = temps.at(1662);
+  DataVector& dv_2031 = temps.at(1663);
   dv_2031 = dv_2030 + dv_25;
-  DataVector& dv_2032 = temps.at(1672);
+  DataVector& dv_2032 = temps.at(498);
   dv_2032 = 8.0 * dv_989;
-  DataVector& dv_2033 = temps.at(1668);
+  DataVector& dv_2033 = temps.at(1245);
   dv_2033 = -dv_2032;
   DataVector& dv_202 = temps.at(199);
-  DataVector& dv_2034 = temps.at(1319);
+  DataVector& dv_2034 = temps.at(1671);
   dv_2034 = 8.0 * dv_202 + dv_2033;
-  DataVector& dv_2035 = temps.at(1250);
+  DataVector& dv_2035 = temps.at(1668);
   DataVector& dv_399 = temps.at(380);
   dv_2035 = -51.0 * dv_15 + dv_399;
-  DataVector& dv_2036 = temps.at(1245);
+  DataVector& dv_2036 = temps.at(1673);
   DataVector& dv_440 = temps.at(413);
   DataVector& dv_496 = temps.at(461);
   dv_2036 = dv_440 + dv_496;
-  DataVector& dv_2037 = temps.at(1674);
+  DataVector& dv_2037 = temps.at(1341);
   dv_2037 = dv_2036 - dv_608;
-  DataVector& dv_2038 = temps.at(1313);
+  DataVector& dv_2038 = temps.at(1674);
   DataVector& dv_432 = temps.at(407);
   dv_2038 = -dv_432;
   DataVector& dv_2039 = temps.at(1685);
@@ -2237,7 +2247,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2051 = temps.at(1695);
   dv_2051 = dv_2048 + dv_2050;
   DataVector& dv_2052 = temps.at(1696);
-  dv_2052 = (-19.0 * yp) * Dy * dv_16;
+  dv_2052 = (-19.0 * d[2921]) * Dy * dv_16;
   DataVector& dv_2053 = temps.at(402);
   DataVector& dv_427 = temps.at(402);
   dv_2053 = -165.0 * dv_15 + dv_427;
@@ -2294,12 +2304,12 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_2075 = dv_144 + dv_594;
   DataVector& dv_2076 = temps.at(1702);
   dv_2076 = dv_2011 + dv_2061;
-  DataVector& dv_2077 = temps.at(1610);
+  DataVector& dv_2077 = temps.at(1550);
   dv_2077 = 72.0 * dv_15;
   DataVector& dv_2078 = temps.at(467);
   DataVector& dv_506 = temps.at(467);
   dv_2078 = -dv_2077 + dv_506;
-  DataVector& dv_2079 = temps.at(57);
+  DataVector& dv_2079 = temps.at(115);
   DataVector& dv_516 = temps.at(414);
   dv_2079 = dv_2022 + dv_516;
   DataVector& dv_2080 = temps.at(436);
@@ -2315,11 +2325,11 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2084 = temps.at(1713);
   DataVector& dv_571 = temps.at(524);
   dv_2084 = dv_328 + dv_571;
-  DataVector& dv_2085 = temps.at(1484);
+  DataVector& dv_2085 = temps.at(1673);
   dv_2085 = dv_1639 + dv_2036;
-  DataVector& dv_2086 = temps.at(1313);
+  DataVector& dv_2086 = temps.at(1674);
   dv_2086 = dv_2003 + dv_2038;
-  DataVector& dv_2087 = temps.at(1245);
+  DataVector& dv_2087 = temps.at(1484);
   DataVector& dv_453 = temps.at(426);
   dv_2087 = Dy * dv_453;
   DataVector& dv_2088 = temps.at(425);
@@ -2327,9 +2337,9 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_2088 = 93.0 * dv_15 + dv_452;
   DataVector& dv_2089 = temps.at(1714);
   dv_2089 = 24.0 * dv_5;
-  DataVector& dv_2090 = temps.at(193);
+  DataVector& dv_2090 = temps.at(408);
   DataVector& dv_450 = temps.at(423);
-  DataVector& dv_462 = temps.at(193);
+  DataVector& dv_462 = temps.at(408);
   dv_2090 = dv_450 - dv_462 + dv_463;
   DataVector& dv_2091 = temps.at(1715);
   dv_2091 = 32.0 * dv_16;
@@ -2343,8 +2353,8 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2095 = temps.at(635);
   DataVector& dv_457 = temps.at(430);
   dv_2095 = dv_328 + dv_457 + dv_685;
-  DataVector& dv_2096 = temps.at(875);
-  DataVector& dv_979 = temps.at(875);
+  DataVector& dv_2096 = temps.at(841);
+  DataVector& dv_979 = temps.at(841);
   dv_2096 = 384.0 * dv_979;
   DataVector& dv_2097 = temps.at(873);
   DataVector& dv_967 = temps.at(873);
@@ -2353,17 +2363,17 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2098 = temps.at(1718);
   dv_2098 = d[1203] * dv_12;
   DataVector& dv_2099 = temps.at(1719);
-  DataVector& dv_873 = temps.at(647);
+  DataVector& dv_873 = temps.at(609);
   dv_2099 = d[1204] * dv_873;
-  DataVector& dv_2100 = temps.at(839);
-  DataVector& dv_981 = temps.at(839);
+  DataVector& dv_2100 = temps.at(831);
+  DataVector& dv_981 = temps.at(831);
   dv_2100 = d[568] * dv_981;
   DataVector& dv_2101 = temps.at(1720);
   dv_2101 = d[1077] * dv_2100;
   DataVector& dv_2102 = temps.at(1721);
   dv_2102 = d[526] * dv_1737;
-  DataVector& dv_2103 = temps.at(821);
-  DataVector& dv_962 = temps.at(821);
+  DataVector& dv_2103 = temps.at(820);
+  DataVector& dv_962 = temps.at(820);
   dv_2103 = (16.0 * d[1133]) * dv_962;
   DataVector& dv_2104 = temps.at(1722);
   DataVector& dv_980 = temps.at(806);
@@ -2384,7 +2394,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2111 = temps.at(1728);
   dv_2111 = d[312] * dv_6;
   DataVector& dv_2112 = temps.at(1729);
-  dv_2112 = dv_1509 * xp;
+  dv_2112 = dv_1509 * d[2920];
   DataVector& dv_2113 = temps.at(1730);
   dv_2113 = Dx * dv_1576;
   DataVector& dv_2114 = temps.at(1731);
@@ -2394,14 +2404,14 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2116 = temps.at(1733);
   dv_2116 = dv_2115 * (dv_2114 - 4.0);
   DataVector& dv_2117 = temps.at(1734);
-  dv_2117 = (-ypddot) * dv_1883 + Dy;
+  dv_2117 = (-d[2925]) * dv_1883 + Dy;
   DataVector& dv_2118 = temps.at(1735);
   dv_2118 = 12.0 * dv_0;
   DataVector& dv_2119 = temps.at(1736);
   dv_2119 = dv_1 * dv_2118;
   DataVector& dv_2120 = temps.at(1737);
   dv_2120 = dv_126 * dv_550;
-  DataVector& dv_2121 = temps.at(18);
+  DataVector& dv_2121 = temps.at(291);
   dv_2121 = -dv_1882 + dv_549;
   DataVector& dv_2122 = temps.at(1738);
   dv_2122 = d[7] * dv_51;
@@ -2412,7 +2422,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2125 = temps.at(1741);
   dv_2125 = -dv_2124;
   DataVector& dv_2126 = temps.at(1742);
-  dv_2126 = dv_131 * ypddot;
+  dv_2126 = dv_131 * d[2925];
   DataVector& dv_2127 = temps.at(1743);
   dv_2127 = d[36] * dv_2126;
   DataVector& dv_2128 = temps.at(1744);
@@ -2447,7 +2457,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
              dv_2133 - dv_2134 + dv_2138);
   DataVector& dv_756 = temps.at(704);
   dv_2139 += (-d[1275]) * dv_163 + (-d[1277]) * dv_163 + (-d[1277]) * dv_96 +
-             (d[302] * ypddot) * dv_756 + (-d[1033] * d[6]) * dv_163 +
+             (d[302] * d[2925]) * dv_756 + (-d[1033] * d[6]) * dv_163 +
              d[6] * dv_1572 + d[6] * dv_99 + d[7] * dv_760 + dv_0 * dv_2135 +
              dv_1881 * dv_2136;
   DataVector& dv_2140 = temps.at(1260);
@@ -2495,7 +2505,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_2159 = 11.0 * Dy;
   DataVector& dv_2160 = temps.at(549);
   DataVector& dv_598 = temps.at(549);
-  dv_2160 = (-d[1092]) * ((2.0 * ypddot) * dv_598 - dv_2159) +
+  dv_2160 = (-d[1092]) * ((2.0 * d[2925]) * dv_598 - dv_2159) +
             d[1244] * dv_2158 + dv_1576 * dv_2155;
   DataVector& dv_2161 = temps.at(1772);
   dv_2161 = d[443] * dv_1909;
@@ -2514,18 +2524,18 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_532 = temps.at(487);
   dv_2166 =
       (30.0 * d[280]) * dv_1200 + d[1356] * dv_1478 - dv_526 + dv_530 - dv_532;
-  DataVector& dv_2167 = temps.at(487);
+  DataVector& dv_2167 = temps.at(485);
   dv_2167 = d[133] + d[27] * ((-d[314]) + dv_972);
-  DataVector& dv_2168 = temps.at(485);
+  DataVector& dv_2168 = temps.at(487);
   dv_2168 = d[1083] * dv_1;
   DataVector& dv_2169 = temps.at(1777);
   dv_2169 = d[147] * dv_1529;
   DataVector& dv_2170 = temps.at(1778);
   dv_2170 = 2.0 * Dx;
   DataVector& dv_2171 = temps.at(1779);
-  dv_2171 = (-7.0 * ypddot) * dv_16;
+  dv_2171 = (-7.0 * d[2925]) * dv_16;
   DataVector& dv_2172 = temps.at(1780);
-  dv_2172 = M * dv_538;
+  dv_2172 = d[2928] * dv_538;
   DataVector& dv_2173 = temps.at(1781);
   dv_2173 = d[1242] * dv_106;
   DataVector& dv_2174 = temps.at(1782);
@@ -2536,13 +2546,13 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_420 = temps.at(395);
   dv_2176 = d[7] * dv_420;
   DataVector& dv_2177 = temps.at(1785);
-  dv_2177 = M * dv_646 + dv_252;
+  dv_2177 = d[2928] * dv_646 + dv_252;
   sc_3 = d[1358] * (-dv_2044 - dv_2171) +
          d[31] * (d[80] * (dv_25 + dv_259) + dv_2172 + dv_2174);
   DataVector& dv_100 = temps.at(98);
   DataVector& dv_525 = temps.at(480);
-  sc_3 +=
-      yp * (d[1247] * dv_525 + ypdot * (dv_100 + dv_139 - dv_2175 + dv_2176));
+  sc_3 += d[2921] *
+          (d[1247] * dv_525 + d[2923] * (dv_100 + dv_139 - dv_2175 + dv_2176));
   sc_2 = d[1250] * sc_3;
   DataVector& dv_2178 = temps.at(1786);
   DataVector& dv_331 = temps.at(314);
@@ -2555,15 +2565,15 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2180 = temps.at(1787);
   dv_2180 = d[558] * dv_1;
   DataVector& dv_2181 = temps.at(1788);
-  dv_2181 = M * dv_115;
+  dv_2181 = d[2928] * dv_115;
   DataVector& dv_2182 = temps.at(1789);
-  dv_2182 = (-M) * dv_163;
+  dv_2182 = (-d[2928]) * dv_163;
   DataVector& dv_2183 = temps.at(1790);
   dv_2183 = 15.0 * Dx;
   DataVector& dv_2184 = temps.at(1785);
   dv_2184 = d[1361] * dv_16 + dv_2177;
   DataVector& dv_2185 = temps.at(1791);
-  dv_2185 = dv_2184 * xpdot;
+  dv_2185 = dv_2184 * d[2922];
   DataVector& dv_2186 = temps.at(1792);
   dv_2186 = d[88] * dv_1;
   DataVector& dv_2187 = temps.at(1793);
@@ -2576,20 +2586,20 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_2190 = d[1275] * dv_16;
   DataVector& dv_2191 = temps.at(1797);
   dv_2191 = d[1033] * dv_670;
-  DataVector& dv_2192 = temps.at(732);
+  DataVector& dv_2192 = temps.at(1744);
   DataVector& dv_671 = temps.at(621);
   DataVector& dv_784 = temps.at(732);
   dv_2192 = (-d[1033]) * dv_100 + (-d[1274]) * dv_615 + (-d[1347]) * dv_450 +
             (-d[7]) * dv_100 + d[1033] * dv_671 + d[270] * dv_5 + dv_2128 +
             15.0 * dv_2190 - 30.0 * dv_2191 + dv_784;
-  DataVector& dv_2193 = temps.at(1744);
+  DataVector& dv_2193 = temps.at(732);
   dv_2193 = d[88] * dv_1502;
   DataVector& dv_2194 = temps.at(1798);
   dv_2194 = d[1031] * dv_25;
   DataVector& dv_2195 = temps.at(1799);
   dv_2195 = dv_1527 + dv_2194;
   DataVector& dv_2196 = temps.at(1800);
-  DataVector& dv_807 = temps.at(705);
+  DataVector& dv_807 = temps.at(731);
   dv_2196 = dv_31 + dv_807;
   DataVector& dv_2197 = temps.at(1801);
   dv_2197 = d[1274] * dv_16;
@@ -2612,7 +2622,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_683 = temps.at(633);
   dv_2205 = (-d[1033]) * dv_2201 + (-d[1297]) * dv_683 +
             (-d[134]) * (d[1250] * (-dv_1564 - dv_2195) +
-                         xpddot * (dv_2123 + dv_2196)) -
+                         d[2924] * (dv_2123 + dv_2196)) -
             dv_2199 - dv_2202;
   DataVector& dv_629 = temps.at(580);
   dv_2205 += (-d[1366]) * dv_233 + (-d[1367]) * dv_2197 + (-d[1369]) * dv_5 +
@@ -2633,7 +2643,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_2209 = 84.0 * dv_1;
   DataVector& dv_2210 = temps.at(1813);
   DataVector& dv_429 = temps.at(404);
-  dv_2210 = dv_429 * xpddot;
+  dv_2210 = dv_429 * d[2924];
   DataVector& dv_2211 = temps.at(1814);
   dv_2211 = d[7] * dv_190;
   DataVector& dv_2212 = temps.at(1815);
@@ -2653,7 +2663,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2219 = temps.at(1821);
   dv_2219 = 33.0 * dv_2197;
   DataVector& dv_2220 = temps.at(1822);
-  dv_2220 = dv_45 * xpddot;
+  dv_2220 = dv_45 * d[2924];
   DataVector& dv_2221 = temps.at(1823);
   dv_2221 = d[1031] * dv_14;
   DataVector& dv_2222 = temps.at(1824);
@@ -2679,7 +2689,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_2231 = 17.0 * Dy;
   DataVector& dv_2232 = temps.at(513);
   DataVector& dv_560 = temps.at(513);
-  dv_2232 = (-xpdot * ypdot) * (d[1398] * dv_560 + dv_2231) +
+  dv_2232 = (-d[2922] * d[2923]) * (d[1398] * dv_560 + dv_2231) +
             Dx * d[1244] * dv_2230 + dv_1576 * dv_2229;
   DataVector& dv_2233 = temps.at(1834);
   dv_2233 = 24.0 * dv_1503;
@@ -2692,7 +2702,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2237 = temps.at(1838);
   dv_2237 = 13.0 * Dy;
   DataVector& dv_2238 = temps.at(1839);
-  dv_2238 = M * dv_99;
+  dv_2238 = d[2928] * dv_99;
   DataVector& dv_2239 = temps.at(1840);
   dv_2239 = 12.0 * dv_16;
   DataVector& dv_2240 = temps.at(1841);
@@ -2703,11 +2713,11 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2242 = temps.at(1843);
   dv_2242 = 126.0 * dv_14;
   DataVector& dv_121 = temps.at(119);
-  DataVector& dv_2243 = temps.at(103);
+  DataVector& dv_2243 = temps.at(143);
   DataVector& dv_367 = temps.at(350);
   DataVector& dv_600 = temps.at(551);
   dv_2243 = d[284] * (dv_121 + dv_163 + dv_367) + dv_1999 + dv_2242 +
-            yp * (dv_576 * ypddot - dv_600);
+            d[2921] * (dv_576 * d[2925] - dv_600);
   DataVector& dv_2244 = temps.at(529);
   dv_2244 = d[1250] * dv_1891;
   DataVector& dv_2245 = temps.at(516);
@@ -2728,7 +2738,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_2252 = 28.0 * dv_15;
   DataVector& dv_2253 = temps.at(542);
   DataVector& dv_590 = temps.at(542);
-  dv_2253 = M * (dv_2252 + dv_590) + d[1191] * dv_1653;
+  dv_2253 = d[2928] * (dv_2252 + dv_590) + d[1191] * dv_1653;
   DataVector& dv_2254 = temps.at(1851);
   dv_2254 = d[116] * (1.0 - dv_2114);
   DataVector& dv_2255 = temps.at(1852);
@@ -2748,18 +2758,18 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2261 = temps.at(1857);
   dv_2261 = Dy * d[88];
   DataVector& dv_2262 = temps.at(1858);
-  dv_2262 = (-20.0 * M * ypddot) * dv_16 + dv_2261;
+  dv_2262 = (-20.0 * d[2928] * d[2925]) * dv_16 + dv_2261;
   DataVector& dv_2263 = temps.at(1859);
-  dv_2263 = dv_240 * xpddot;
+  dv_2263 = dv_240 * d[2924];
   DataVector& dv_1112 = temps.at(1009);
   DataVector& dv_2264 = temps.at(1860);
   dv_2264 = -Dy * (dv_1803 - dv_2263) + dv_1112;
   DataVector& dv_2265 = temps.at(1861);
   dv_2265 = dv_1540 + dv_1541;
   DataVector& dv_2266 = temps.at(1862);
-  dv_2266 = (-xpdot) * dv_2264 + dv_2265;
+  dv_2266 = (-d[2922]) * dv_2264 + dv_2265;
   DataVector& dv_2267 = temps.at(1863);
-  dv_2267 = d[142] * (dv_1709 + yp);
+  dv_2267 = d[142] * (dv_1709 + d[2921]);
   DataVector& dv_2268 = temps.at(1864);
   dv_2268 = Dx * d[535];
   DataVector& dv_2269 = temps.at(1865);
@@ -2769,20 +2779,20 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2271 = temps.at(1867);
   dv_2271 = d[36] * dv_16;
   DataVector& dv_2272 = temps.at(1868);
-  dv_2272 = M * dv_637;
-  DataVector& dv_2273 = temps.at(686);
+  dv_2272 = d[2928] * dv_637;
+  DataVector& dv_2273 = temps.at(684);
   DataVector& dv_376 = temps.at(359);
   DataVector& dv_735 = temps.at(684);
   DataVector& dv_737 = temps.at(686);
   dv_2273 = d[1405] * dv_1200 + dv_0 * dv_376 + dv_734 - dv_735 - dv_737;
-  DataVector& dv_2274 = temps.at(684);
+  DataVector& dv_2274 = temps.at(686);
   dv_2274 = dv_2089 * dv_2136;
   DataVector& dv_2275 = temps.at(1869);
   dv_2275 = d[1405] * dv_2190;
   DataVector& dv_2276 = temps.at(1870);
   dv_2276 = d[370] * dv_2221;
   DataVector& dv_2277 = temps.at(1871);
-  dv_2277 = dv_99 * ypdot;
+  dv_2277 = dv_99 * d[2923];
   DataVector& dv_2278 = temps.at(1872);
   DataVector& dv_455 = temps.at(428);
   dv_2278 = d[7] * dv_455;
@@ -2803,15 +2813,15 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_2285 = dv_2284 - 189.0 * dv_730;
   DataVector& dv_2286 = temps.at(1880);
   DataVector& dv_801 = temps.at(749);
-  dv_2286 = (-xpdot) * dv_2285 + d[254] * dv_801;
+  dv_2286 = (-d[2922]) * dv_2285 + d[254] * dv_801;
   DataVector& dv_2287 = temps.at(1881);
-  dv_2287 = (-189.0 * M) * dv_1559;
+  dv_2287 = (-189.0 * d[2928]) * dv_1559;
   DataVector& dv_2288 = temps.at(1882);
   dv_2288 = dv_100 + dv_96;
   DataVector& dv_2289 = temps.at(1883);
   DataVector& dv_418 = temps.at(393);
   DataVector& dv_833 = temps.at(776);
-  dv_2289 = (-yp) * (d[1408] * dv_2288 + dv_2287 + 284.0 * dv_833) +
+  dv_2289 = (-d[2921]) * (d[1408] * dv_2288 + dv_2287 + 284.0 * dv_833) +
             d[46] * (110.0 * dv_14 + dv_1551 + dv_367 - dv_418 + 67.0 * dv_670);
   DataVector& dv_2290 = temps.at(1878);
   dv_2290 = d[1359] * (Dy * d[1409] + dv_2284 - 207.0 * dv_730);
@@ -2821,7 +2831,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_2292 = temps.at(1885);
   dv_2292 =
       d[286] * (d[1410] * dv_455 +
-                dv_2170 * (M * dv_2094 + d[1411] +
+                dv_2170 * (d[2928] * dv_2094 + d[1411] +
                            d[20] * ((-d[1304]) + dv_2291) + 30.0 * dv_1014));
   DataVector& dv_2293 = temps.at(1886);
   dv_2293 = Dy * d[255];
@@ -2837,27 +2847,27 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   dv_2298 = 4.0 * Dx;
   DataVector& dv_2299 = temps.at(1892);
   DataVector& dv_742 = temps.at(690);
-  dv_2299 = dv_742 * xpddot;
+  dv_2299 = dv_742 * d[2924];
   DataVector& dv_2300 = temps.at(1893);
   dv_2300 = 2.0 * dv_1502;
   DataVector& dv_2301 = temps.at(1894);
   DataVector& dv_635 = temps.at(585);
-  dv_2301 = dv_635 * ypddot;
+  dv_2301 = dv_635 * d[2925];
   DataVector& dv_2302 = temps.at(1895);
   dv_2302 = -dv_2301;
   DataVector& dv_2303 = temps.at(1896);
   dv_2303 = Dy * (d[7] + dv_2300) + dv_2302;
   DataVector& dv_2304 = temps.at(1897);
-  dv_2304 = dv_594 * ypdot;
+  dv_2304 = dv_594 * d[2923];
   DataVector& dv_2305 = temps.at(1881);
-  dv_2305 = dv_2287 + dv_2304 + dv_653 * ypdot + 200.0 * dv_833;
+  dv_2305 = dv_2287 + dv_2304 + dv_653 * d[2923] + 200.0 * dv_833;
   DataVector& dv_2306 = temps.at(1898);
   dv_2306 = 96.0 * dv_14;
   DataVector& dv_2307 = temps.at(1899);
   dv_2307 = 96.0 * dv_15;
   DataVector& dv_2308 = temps.at(1900);
   dv_2308 = d[259] * (d[558] * dv_1559 +
-                      ypdot * (dv_114 + dv_2306 + dv_2307 + 207.0 * dv_670));
+                      d[2923] * (dv_114 + dv_2306 + dv_2307 + 207.0 * dv_670));
   DataVector& dv_2309 = temps.at(1901);
   DataVector& dv_619 = temps.at(570);
   dv_2309 = d[252] * dv_619;
@@ -2873,7 +2883,7 @@ void puncture_field_2_part_1(const std::array<double, order2_n_doubles>& d,
   DataVector& dv_794 = temps.at(742);
   dv_2313 = (220.0 * d[273]) * dv_794;
   DataVector& dv_2314 = temps.at(1906);
-  dv_2314 = dv_670 * yp;
+  dv_2314 = dv_670 * d[2921];
   DataVector& dv_2315 = temps.at(1907);
   dv_2315 = d[266] * dv_2314;
   DataVector& dv_2316 = temps.at(1908);

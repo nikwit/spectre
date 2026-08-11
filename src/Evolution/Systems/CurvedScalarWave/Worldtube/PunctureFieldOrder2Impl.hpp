@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 
 #include "DataStructures/DataBox/Prefixes.hpp"
@@ -29,7 +30,7 @@ using Order2Vars =
                          ::Tags::deriv<CurvedScalarWave::Tags::Psi,
                                        tmpl::size_t<3>, Frame::Inertial>>>;
 
-inline constexpr size_t order2_n_doubles = 2920;
+inline constexpr size_t order2_n_doubles = 2929;
 
 void puncture_field_2_part_0(const std::array<double, order2_n_doubles>& d,
                              const DataVector& Dx, const DataVector& Dy,
