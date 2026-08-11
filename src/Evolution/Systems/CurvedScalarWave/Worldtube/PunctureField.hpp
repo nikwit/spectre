@@ -243,16 +243,17 @@ void puncture_field_1(
 
 /*!
  * \brief Computes the puncture/singular field \f$\Psi^\mathcal{P}\f$ of a
- * scalar charge on a circular equatorial geodesic orbit in Schwarzschild
+ * scalar charge on a generic equatorial geodesic orbit in Schwarzschild
  * spacetime as described in \cite Detweiler2003, expanded to second order in
  * coordinate distance.
  *
- * \details Unlike `puncture_field_0` and `puncture_field_1`, the second-order
- * expressions are only implemented for circular equatorial geodesic orbits:
- * the particle velocity and acceleration are implied by the particle position
- * and are asserted to be consistent with it. There are no corresponding
- * acceleration terms at second order, so this order cannot be used with the
- * scalar self-force.
+ * \details Like `puncture_field_0` and `puncture_field_1`, the expressions
+ * hold for generic equatorial geodesic orbits. The returned time derivative
+ * is the exact time derivative of the truncated field, i.e. it retains the
+ * explicit time derivative of the second-order coefficient which is one
+ * order beyond the guaranteed accuracy of the expansion. There are no
+ * corresponding acceleration terms at second order yet, so this order cannot
+ * be used with the scalar self-force.
  */
 void puncture_field_2(
     gsl::not_null<Variables<tmpl::list<

@@ -122,28 +122,18 @@ void test_derivative() {
   std::uniform_real_distribution<double> vel_acc_dist{-0.1, 0.1};
 
   const double wt_radius = 0.1;
-  std::uniform_real_distribution<double> orbit_dist{4., 10.};
-  std::uniform_real_distribution<double> time_dist{0., 100.};
   for (size_t order = 0; order <= 2; ++order) {
     CAPTURE(order);
     const auto puncture_field = make_schwarzschild_puncture_field(order);
-    // the second-order puncture field only supports circular orbits
-    const auto [random_position, random_velocity, random_acceleration] =
-        order < 2
-            ? std::array<tnsr::I<double, 3>,
-                         3>{make_with_random_values<
-                                tnsr::I<double, 3, Frame::Inertial>>(
-                                make_not_null(&gen), make_not_null(&pos_dist),
-                                1),
-                            make_with_random_values<
-                                tnsr::I<double, 3, Frame::Inertial>>(
-                                make_not_null(&gen),
-                                make_not_null(&vel_acc_dist), 1),
-                            make_with_random_values<
-                                tnsr::I<double, 3, Frame::Inertial>>(
-                                make_not_null(&gen),
-                                make_not_null(&vel_acc_dist), 1)}
-            : get_circular_orbit_pos_vel_acc(orbit_dist(gen), time_dist(gen));
+    const auto random_position =
+        make_with_random_values<tnsr::I<double, 3, Frame::Inertial>>(
+            make_not_null(&gen), make_not_null(&pos_dist), 1);
+    const auto random_velocity =
+        make_with_random_values<tnsr::I<double, 3, Frame::Inertial>>(
+            make_not_null(&gen), make_not_null(&vel_acc_dist), 1);
+    const auto random_acceleration =
+        make_with_random_values<tnsr::I<double, 3, Frame::Inertial>>(
+            make_not_null(&gen), make_not_null(&vel_acc_dist), 1);
     const auto helper_func =
         [&random_position, &random_velocity, &random_acceleration,
          &puncture_field](const std::array<double, 3>& point) {
