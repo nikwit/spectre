@@ -31,6 +31,7 @@ void MatcherConfig::pup(PUP::er& p) {
   p | pin_symmetric_factor;
   p | fit_radial_derivative;
   p | radial_derivative_weight;
+  p | fit_order_one_shadow;
   p | centre_advection;
   p | spatial_monopole_weight;
   p | uplus_block_weights;
@@ -61,6 +62,7 @@ bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
          lhs.pin_symmetric_factor == rhs.pin_symmetric_factor and
          lhs.fit_radial_derivative == rhs.fit_radial_derivative and
          lhs.radial_derivative_weight == rhs.radial_derivative_weight and
+         lhs.fit_order_one_shadow == rhs.fit_order_one_shadow and
          lhs.centre_advection == rhs.centre_advection and
          lhs.spatial_monopole_weight == rhs.spatial_monopole_weight and
          lhs.uplus_block_weights == rhs.uplus_block_weights and
@@ -87,6 +89,8 @@ void MapParameterData::pup(PUP::er& pupper) {
   pupper | exact_frame_theta;
   pupper | exact_frame_center_velocity;
   pupper | exact_frame_valid;
+  pupper | order_one_rates;
+  pupper | order_one_valid;
   pupper | ode_state;
   pupper | ode_history;
   pupper | ode_step_start;

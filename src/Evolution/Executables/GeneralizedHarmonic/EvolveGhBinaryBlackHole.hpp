@@ -1040,17 +1040,15 @@ struct EvolutionMetavars {
                  Parallel::Phase::Evolve,
                  Parallel::Phase::Exit};
 
-  // The online worldtube matcher: FitMapParameters at the top of the step
-  // fits the frame-map parameters from the excision-sphere data (no-op when
-  // the WorldtubeMatcher option is None); AdvanceMapParameterOde sits right
-  // before the system history is recorded, as in the single-black-hole
-  // executable.
+  // The online worldtube matcher runs after the DG boundary corrections, so
+  // its D_T u+ channel samples the completed time derivative.  The fitted
+  // frame is retained for the next boundary application.
   using step_actions = tmpl::list<
-      gh::Worldtube::Actions::FitMapParameters,
       evolution::dg::Actions::ComputeTimeDerivative<
           volume_dim, system, AllStepChoosers, use_dg_element_collection>,
       evolution::dg::Actions::ApplyBoundaryCorrectionsToTimeDerivative<
           volume_dim, use_dg_element_collection>,
+      gh::Worldtube::Actions::FitMapParameters,
       gh::Worldtube::Actions::AdvanceMapParameterOde,
       Actions::MutateApply<RecordTimeStepperData<system>>,
       evolution::Actions::RunEventsAndDenseTriggers<tmpl::list<

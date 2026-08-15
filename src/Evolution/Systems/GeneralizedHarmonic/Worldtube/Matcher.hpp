@@ -11,6 +11,7 @@
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Tags.hpp"
+#include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/HarmonicWorldtubeModel.hpp"
 
 /// \cond
 namespace ylm {
@@ -235,8 +236,16 @@ struct RadialDerivativeStencil {
   std::vector<tnsr::aa<DataVector, 3>> metric{};
   std::vector<tnsr::aa<DataVector, 3>> pi{};
   std::vector<tnsr::iaa<DataVector, 3>> phi{};
+  /// Comoving derivatives (partial_t + v_c^i partial_i) of the fields above.
+  /// These are required by the adopted order-zero/order-one solve and are
+  /// deliberately combined with the central, undifferentiated normal and
+  /// gamma2 when forming D_T u+.
+  std::vector<tnsr::aa<DataVector, 3>> dt_metric{};
+  std::vector<tnsr::aa<DataVector, 3>> dt_pi{};
+  std::vector<tnsr::iaa<DataVector, 3>> dt_phi{};
   std::vector<Scalar<DataVector>> gamma2{};
   std::vector<tnsr::I<DataVector, 3>> coords{};
+  std::array<double, 3> center_velocity{};
   size_t fit_shell = 0;
 };
 
@@ -250,6 +259,75 @@ FitResult fit_exact_frame_parameters(
     const std::array<double, 3>& center_offset,
     const std::optional<RadialDerivativeStencil>& radial_stencil =
         std::nullopt);
+
+/// Result of the shadow-only first-order fit on an exact-frame background.
+/// The 13 identifiable affine rates are fitted and the three rotations are
+/// pinned to zero. The fitted state is not consumed by the boundary condition.
+struct OrderOneFitResult {
+  gh::Solutions::order_by_order_worldtube::AffineRates rates{};
+  bool valid = false;
+  double time_residual_initial = 0.;
+  double time_residual_final = 0.;
+  double radial_time_residual_initial = 0.;
+  double radial_time_residual_final = 0.;
+  double minus_residual_initial = 0.;
+  double minus_residual_final = 0.;
+  double condition_number = 0.;
+  size_t alternations = 0;
+  double final_frame_step_norm = 0.;
+};
+
+/*!
+ * \brief Fit the identifiable first-order affine-rate profiles on top of a
+ * fixed zeroth-order exact frame.
+ *
+ * This is the q8-selected rate solve: the full ten tensor components of the
+ * ell=0 sector of \f$D_T u^+\f$ are stacked with those of
+ * \f$D_R(D_T u^+)\f$. The first 13 affine rates are solved linearly with
+ * per-channel residual scaling and column normalization. The three rotation
+ * directions are structurally blind in this channel and are pinned to zero.
+ * The incoming characteristic \f$u^-\f$ is strictly held out.
+ */
+OrderOneFitResult fit_order_one_affine_rates(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
+    const Scalar<DataVector>& gamma2,
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
+    const std::array<double, num_map_parameters>& exact_frame_theta,
+    const std::array<double, 3>& center_offset,
+    const std::optional<RadialDerivativeStencil>& radial_stencil =
+        std::nullopt);
+
+/// Result of the q8-selected projected order-zero/order-one alternation.
+struct IteratedOrderZeroOneFitResult {
+  FitResult order_zero{};
+  OrderOneFitResult order_one{};
+};
+
+/*!
+ * \brief Fit the adopted q8 order-zero/order-one model by gated alternation.
+ *
+ * Order zero uses the full tensor components of the clean sectors
+ * \f$u^+,D_Ru^+\f$ at ell={0,2} and \f$D_Tu^+\f$ at ell={1,2}. Order one is
+ * solved from the ell=0 time/radial-time pair described above. Its linear
+ * response is projected out of all three order-zero channels before the exact
+ * frame is refitted. A candidate frame and each of the two possible feedback
+ * rounds are accepted only if they also improve the strictly held-out
+ * $u^-$ residual; this prevents selected-sector truncation noise from being
+ * fed back through the ghost prescription. The rates are re-solved once on
+ * the final accepted frame. The order-one result remains diagnostic only and
+ * is never supplied to the boundary condition.
+ */
+IteratedOrderZeroOneFitResult fit_iterated_order_zero_one(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& pi, const tnsr::iaa<DataVector, 3>& phi,
+    const Scalar<DataVector>& gamma2,
+    const tnsr::I<DataVector, 3>& inertial_coords,
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
+    const std::array<double, num_map_parameters>& theta_start,
+    const std::array<double, 3>& center_offset,
+    const RadialDerivativeStencil& radial_stencil);
 
 /// Result of one linear rate fit (the `RateOde` mode).
 struct RateFitResult {

@@ -1236,6 +1236,824 @@ FitResult fit_exact_frame_parameters(
 }
 
 namespace {
+
+constexpr size_t num_identifiable_rates = 13;
+constexpr double adopted_time_step = 1.e-4;
+constexpr size_t adopted_feedback_iterations = 2;
+
+struct AdoptedChannels {
+  std::vector<double> value{};
+  std::vector<double> radial{};
+  std::vector<double> time{};
+  std::vector<double> radial_time{};
+  std::vector<double> minus{};
+};
+
+struct AdoptedContext {
+  ModeSet modes{};
+  std::vector<SphereFrame> shell_frames{};
+  std::vector<double> derivative_row{};
+  std::array<double, 3> model_center{};
+};
+
+std::vector<double> full_tensor_modes(const tnsr::aa<DataVector, 3>& tensor,
+                                      const ylm::Spherepack& ylm_transform,
+                                      const ModeSet& modes) {
+  std::vector<double> result{};
+  result.reserve(10 * modes.indices.size());
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      const double tensor_weight = a == b ? 1. : M_SQRT2;
+      const DataVector spectral = ylm_transform.phys_to_spec(tensor.get(a, b));
+      for (size_t k = 0; k < modes.indices.size(); ++k) {
+        result.push_back(tensor_weight * modes.weights[k] *
+                         spectral[modes.indices[k]]);
+      }
+    }
+  }
+  return result;
+}
+
+tnsr::aa<DataVector, 3> static_characteristic_time_derivative(
+    const tnsr::aa<DataVector, 3>& dt_metric,
+    const tnsr::aa<DataVector, 3>& dt_pi,
+    const tnsr::iaa<DataVector, 3>& dt_phi, const SphereFrame& frame,
+    const double normal_sign) {
+  tnsr::aa<DataVector, 3> result(frame.n_points);
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = a; b < 4; ++b) {
+      result.get(a, b) = dt_pi.get(a, b) - frame.gamma2 * dt_metric.get(a, b);
+      for (size_t i = 0; i < 3; ++i) {
+        result.get(a, b) +=
+            normal_sign * frame.normal_up[i] * dt_phi.get(i, a, b);
+      }
+    }
+  }
+  return result;
+}
+
+tnsr::aa<DataVector, 3> radial_combination(
+    const std::vector<tnsr::aa<DataVector, 3>>& shells,
+    const std::vector<double>& derivative_row) {
+  ASSERT(not shells.empty() and shells.size() == derivative_row.size(),
+         "A radial combination needs one coefficient per shell.");
+  tnsr::aa<DataVector, 3> result(get<0, 0>(shells[0]).size(), 0.);
+  for (size_t shell = 0; shell < shells.size(); ++shell) {
+    for (size_t storage = 0; storage < result.size(); ++storage) {
+      result[storage] += derivative_row[shell] * shells[shell][storage];
+    }
+  }
+  return result;
+}
+
+tnsr::I<DataVector, 3> shifted_coords(const tnsr::I<DataVector, 3>& coords,
+                                      const std::array<double, 3>& velocity,
+                                      const double time) {
+  tnsr::I<DataVector, 3> result = coords;
+  for (size_t i = 0; i < 3; ++i) {
+    result.get(i) += time * velocity[i];
+  }
+  return result;
+}
+
+gh::Solutions::exact_frame::FrameMatrix affine_rate_generator(
+    const size_t parameter) {
+  using FrameMatrix = gh::Solutions::exact_frame::FrameMatrix;
+  FrameMatrix generator{};
+  if (parameter == 0) {
+    generator[0][0] = 1.;
+  } else if (parameter < 4) {
+    generator[0][parameter] = 1.;
+  } else if (parameter < 7) {
+    generator[parameter - 3][0] = 1.;
+  } else {
+    static constexpr std::array<std::array<size_t, 2>, 6> symmetric{
+        {{{0, 0}}, {{0, 1}}, {{0, 2}}, {{1, 1}}, {{1, 2}}, {{2, 2}}}};
+    const auto indices = symmetric[parameter - 7];
+    generator[indices[0] + 1][indices[1] + 1] = 1.;
+    generator[indices[1] + 1][indices[0] + 1] = 1.;
+  }
+  return generator;
+}
+
+gh::Solutions::exact_frame::FrameMatrix frame_tangent_for_rate(
+    const gh::Solutions::exact_frame::FrameMatrix& frame, const double mass,
+    const size_t parameter) {
+  const auto generator = affine_rate_generator(parameter);
+  gh::Solutions::exact_frame::FrameMatrix tangent{};
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = 0; b < 4; ++b) {
+      for (size_t c = 0; c < 4; ++c) {
+        tangent[a][b] += frame[a][c] * generator[c][b];
+      }
+      tangent[a][b] /= mass * frame[0][0];
+    }
+  }
+  return tangent;
+}
+
+gh::Solutions::exact_frame::FrameMatrix displaced_frame(
+    gh::Solutions::exact_frame::FrameMatrix frame,
+    const gh::Solutions::exact_frame::FrameMatrix& tangent,
+    const double amount) {
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = 0; b < 4; ++b) {
+      frame[a][b] += amount * tangent[a][b];
+    }
+  }
+  return frame;
+}
+
+AdoptedContext adopted_context(const RadialDerivativeStencil& stencil,
+                               const MatcherConfig& config,
+                               const ylm::Spherepack& ylm_transform,
+                               const std::array<double, 3>& center_offset) {
+  const size_t n_shells = stencil.metric.size();
+  ASSERT(n_shells > 1 and stencil.pi.size() == n_shells and
+             stencil.phi.size() == n_shells and
+             stencil.dt_metric.size() == n_shells and
+             stencil.dt_pi.size() == n_shells and
+             stencil.dt_phi.size() == n_shells and
+             stencil.gamma2.size() == n_shells and
+             stencil.coords.size() == n_shells and stencil.fit_shell < n_shells,
+         "The adopted order-zero/order-one fit requires complete value and "
+         "comoving-time data on a multi-shell stencil.");
+  AdoptedContext result{};
+  result.modes = kept_modes(ylm_transform, config.fit_l_max);
+  result.model_center = config.center;
+  for (size_t i = 0; i < 3; ++i) {
+    result.model_center[i] += center_offset[i];
+  }
+  std::vector<double> radii(n_shells, 0.);
+  result.shell_frames.reserve(n_shells);
+  for (size_t shell = 0; shell < n_shells; ++shell) {
+    result.shell_frames.push_back(
+        build_frame(stencil.metric[shell], stencil.gamma2[shell],
+                    stencil.coords[shell], config.center));
+    DataVector radius_squared(get<0>(stencil.coords[shell]).size(), 0.);
+    for (size_t i = 0; i < 3; ++i) {
+      radius_squared += square(stencil.coords[shell].get(i) - config.center[i]);
+    }
+    for (const double value : radius_squared) {
+      radii[shell] += sqrt(value);
+    }
+    radii[shell] /= static_cast<double>(radius_squared.size());
+  }
+  result.derivative_row = lagrange_derivative_row(radii, stencil.fit_shell);
+  return result;
+}
+
+AdoptedChannels data_channels(const RadialDerivativeStencil& stencil,
+                              const AdoptedContext& context,
+                              const ylm::Spherepack& ylm_transform) {
+  std::vector<tnsr::aa<DataVector, 3>> value_shells{};
+  std::vector<tnsr::aa<DataVector, 3>> time_shells{};
+  value_shells.reserve(stencil.metric.size());
+  time_shells.reserve(stencil.metric.size());
+  for (size_t shell = 0; shell < stencil.metric.size(); ++shell) {
+    value_shells.push_back(u_minus_of(stencil.metric[shell], stencil.pi[shell],
+                                      stencil.phi[shell],
+                                      context.shell_frames[shell], -1.));
+    time_shells.push_back(static_characteristic_time_derivative(
+        stencil.dt_metric[shell], stencil.dt_pi[shell], stencil.dt_phi[shell],
+        context.shell_frames[shell], -1.));
+  }
+  const size_t fit = stencil.fit_shell;
+  AdoptedChannels result{};
+  result.value =
+      full_tensor_modes(value_shells[fit], ylm_transform, context.modes);
+  result.radial = full_tensor_modes(
+      radial_combination(value_shells, context.derivative_row), ylm_transform,
+      context.modes);
+  result.time =
+      full_tensor_modes(time_shells[fit], ylm_transform, context.modes);
+  result.radial_time =
+      full_tensor_modes(radial_combination(time_shells, context.derivative_row),
+                        ylm_transform, context.modes);
+  result.minus = full_tensor_modes(
+      u_minus_of(stencil.metric[fit], stencil.pi[fit], stencil.phi[fit],
+                 context.shell_frames[fit], 1.),
+      ylm_transform, context.modes);
+  return result;
+}
+
+AdoptedChannels exact_frame_channels(
+    const std::array<double, num_map_parameters>& theta,
+    const RadialDerivativeStencil& stencil, const AdoptedContext& context,
+    const MatcherConfig& config, const ylm::Spherepack& ylm_transform) {
+  namespace exact_frame = gh::Solutions::exact_frame;
+  const auto frame = exact_frame::frame_map(theta);
+  std::vector<tnsr::aa<DataVector, 3>> value_shells{};
+  std::vector<tnsr::aa<DataVector, 3>> time_shells{};
+  value_shells.reserve(stencil.metric.size());
+  time_shells.reserve(stencil.metric.size());
+  for (size_t shell = 0; shell < stencil.metric.size(); ++shell) {
+    tnsr::aa<DataVector, 3> metric{};
+    tnsr::aa<DataVector, 3> pi{};
+    tnsr::iaa<DataVector, 3> phi{};
+    exact_frame::evolved_variables(
+        make_not_null(&metric), make_not_null(&pi), make_not_null(&phi),
+        stencil.coords[shell], 0., config.mass, context.model_center, frame);
+    value_shells.push_back(
+        u_minus_of(metric, pi, phi, context.shell_frames[shell], -1.));
+
+    std::array<tnsr::aa<DataVector, 3>, 2> shifted_u{};
+    for (size_t side = 0; side < 2; ++side) {
+      const double dt = side == 0 ? adopted_time_step : -adopted_time_step;
+      const auto coords =
+          shifted_coords(stencil.coords[shell], stencil.center_velocity, dt);
+      exact_frame::evolved_variables(make_not_null(&metric), make_not_null(&pi),
+                                     make_not_null(&phi), coords, dt,
+                                     config.mass, context.model_center, frame);
+      shifted_u[side] =
+          u_minus_of(metric, pi, phi, context.shell_frames[shell], -1.);
+    }
+    tnsr::aa<DataVector, 3> dt_u(context.shell_frames[shell].n_points, 0.);
+    for (size_t storage = 0; storage < dt_u.size(); ++storage) {
+      dt_u[storage] = (shifted_u[0][storage] - shifted_u[1][storage]) /
+                      (2. * adopted_time_step);
+    }
+    time_shells.push_back(std::move(dt_u));
+  }
+  const size_t fit = stencil.fit_shell;
+  AdoptedChannels result{};
+  result.value =
+      full_tensor_modes(value_shells[fit], ylm_transform, context.modes);
+  result.radial = full_tensor_modes(
+      radial_combination(value_shells, context.derivative_row), ylm_transform,
+      context.modes);
+  result.time =
+      full_tensor_modes(time_shells[fit], ylm_transform, context.modes);
+  result.radial_time =
+      full_tensor_modes(radial_combination(time_shells, context.derivative_row),
+                        ylm_transform, context.modes);
+  tnsr::aa<DataVector, 3> metric{};
+  tnsr::aa<DataVector, 3> pi{};
+  tnsr::iaa<DataVector, 3> phi{};
+  exact_frame::evolved_variables(make_not_null(&metric), make_not_null(&pi),
+                                 make_not_null(&phi), stencil.coords[fit], 0.,
+                                 config.mass, context.model_center, frame);
+  result.minus = full_tensor_modes(
+      u_minus_of(metric, pi, phi, context.shell_frames[fit], 1.), ylm_transform,
+      context.modes);
+  return result;
+}
+
+std::array<AdoptedChannels, num_identifiable_rates> affine_rate_columns(
+    const std::array<double, num_map_parameters>& theta,
+    const RadialDerivativeStencil& stencil, const AdoptedContext& context,
+    const MatcherConfig& config, const ylm::Spherepack& ylm_transform) {
+  namespace exact_frame = gh::Solutions::exact_frame;
+  using gh::Solutions::order_by_order_worldtube::AffineRates;
+  const auto frame = exact_frame::frame_map(theta);
+  std::array<AdoptedChannels, num_identifiable_rates> result{};
+  for (size_t parameter = 0; parameter < num_identifiable_rates; ++parameter) {
+    const auto tangent = frame_tangent_for_rate(frame, config.mass, parameter);
+    const auto frame_plus = displaced_frame(frame, tangent, adopted_time_step);
+    const auto frame_minus =
+        displaced_frame(frame, tangent, -adopted_time_step);
+    AffineRates direction{};
+    direction[parameter] = 1.;
+    std::vector<tnsr::aa<DataVector, 3>> value_shells{};
+    std::vector<tnsr::aa<DataVector, 3>> time_shells{};
+    value_shells.reserve(stencil.metric.size());
+    time_shells.reserve(stencil.metric.size());
+    for (size_t shell = 0; shell < stencil.metric.size(); ++shell) {
+      tnsr::aa<DataVector, 3> metric_response{};
+      tnsr::aa<DataVector, 3> pi_response{};
+      tnsr::iaa<DataVector, 3> phi_response{};
+      gh::Solutions::order_by_order_worldtube::
+          affine_rate_evolved_variables_response(
+              make_not_null(&metric_response), make_not_null(&pi_response),
+              make_not_null(&phi_response), stencil.coords[shell], 0.,
+              config.mass, context.model_center, frame, direction);
+      value_shells.push_back(u_minus_of(metric_response, pi_response,
+                                        phi_response,
+                                        context.shell_frames[shell], -1.));
+
+      std::array<tnsr::aa<DataVector, 3>, 2> chain_u{};
+      std::array<tnsr::aa<DataVector, 3>, 2> explicit_u{};
+      for (size_t side = 0; side < 2; ++side) {
+        const double dt = side == 0 ? adopted_time_step : -adopted_time_step;
+        const auto& shifted_frame = side == 0 ? frame_plus : frame_minus;
+        tnsr::aa<DataVector, 3> metric{};
+        tnsr::aa<DataVector, 3> pi{};
+        tnsr::iaa<DataVector, 3> phi{};
+        exact_frame::evolved_variables(make_not_null(&metric),
+                                       make_not_null(&pi), make_not_null(&phi),
+                                       stencil.coords[shell], 0., config.mass,
+                                       context.model_center, shifted_frame);
+        chain_u[side] =
+            u_minus_of(metric, pi, phi, context.shell_frames[shell], -1.);
+
+        const auto coords =
+            shifted_coords(stencil.coords[shell], stencil.center_velocity, dt);
+        gh::Solutions::order_by_order_worldtube::
+            affine_rate_evolved_variables_response(
+                make_not_null(&metric_response), make_not_null(&pi_response),
+                make_not_null(&phi_response), coords, dt, config.mass,
+                context.model_center, frame, direction);
+        explicit_u[side] =
+            u_minus_of(metric_response, pi_response, phi_response,
+                       context.shell_frames[shell], -1.);
+      }
+      tnsr::aa<DataVector, 3> dt_response(context.shell_frames[shell].n_points,
+                                          0.);
+      for (size_t storage = 0; storage < dt_response.size(); ++storage) {
+        dt_response[storage] =
+            (chain_u[0][storage] - chain_u[1][storage] +
+             explicit_u[0][storage] - explicit_u[1][storage]) /
+            (2. * adopted_time_step);
+      }
+      time_shells.push_back(std::move(dt_response));
+    }
+    const size_t fit = stencil.fit_shell;
+    result[parameter].value =
+        full_tensor_modes(value_shells[fit], ylm_transform, context.modes);
+    result[parameter].radial = full_tensor_modes(
+        radial_combination(value_shells, context.derivative_row), ylm_transform,
+        context.modes);
+    result[parameter].time =
+        full_tensor_modes(time_shells[fit], ylm_transform, context.modes);
+    result[parameter].radial_time = full_tensor_modes(
+        radial_combination(time_shells, context.derivative_row), ylm_transform,
+        context.modes);
+
+    tnsr::aa<DataVector, 3> metric_response{};
+    tnsr::aa<DataVector, 3> pi_response{};
+    tnsr::iaa<DataVector, 3> phi_response{};
+    gh::Solutions::order_by_order_worldtube::
+        affine_rate_evolved_variables_response(
+            make_not_null(&metric_response), make_not_null(&pi_response),
+            make_not_null(&phi_response), stencil.coords[fit], 0., config.mass,
+            context.model_center, frame, direction);
+    result[parameter].minus =
+        full_tensor_modes(u_minus_of(metric_response, pi_response, phi_response,
+                                     context.shell_frames[fit], 1.),
+                          ylm_transform, context.modes);
+  }
+  return result;
+}
+
+std::vector<double> difference(const std::vector<double>& left,
+                               const std::vector<double>& right) {
+  ASSERT(left.size() == right.size(), "Mode vectors must have equal size.");
+  std::vector<double> result(left.size());
+  for (size_t i = 0; i < left.size(); ++i) {
+    result[i] = left[i] - right[i];
+  }
+  return result;
+}
+
+std::vector<double> selected_ells(const std::vector<double>& modes_vector,
+                                  const ModeSet& modes,
+                                  const std::array<bool, 5>& keep_ell) {
+  const size_t n_modes = modes.indices.size();
+  ASSERT(modes_vector.size() == 10 * n_modes,
+         "A full symmetric tensor must provide ten modal fields.");
+  std::vector<double> result{};
+  for (size_t component = 0; component < 10; ++component) {
+    for (size_t mode = 0; mode < n_modes; ++mode) {
+      if (keep_ell[modes.ells[mode]]) {
+        result.push_back(modes_vector[component * n_modes + mode]);
+      }
+    }
+  }
+  return result;
+}
+
+AdoptedChannels project_out_rates(
+    AdoptedChannels data,
+    const std::array<AdoptedChannels, num_identifiable_rates>& columns,
+    const gh::Solutions::order_by_order_worldtube::AffineRates& rates) {
+  const auto project = [&rates, &columns](std::vector<double>* field,
+                                          const auto member) {
+    for (size_t parameter = 0; parameter < num_identifiable_rates;
+         ++parameter) {
+      const auto& column = columns[parameter].*member;
+      for (size_t row = 0; row < field->size(); ++row) {
+        (*field)[row] -= rates[parameter] * column[row];
+      }
+    }
+  };
+  project(&data.value, &AdoptedChannels::value);
+  project(&data.radial, &AdoptedChannels::radial);
+  project(&data.time, &AdoptedChannels::time);
+  project(&data.radial_time, &AdoptedChannels::radial_time);
+  project(&data.minus, &AdoptedChannels::minus);
+  return data;
+}
+
+OrderOneFitResult solve_adopted_rates(
+    const AdoptedChannels& data, const AdoptedChannels& background,
+    const std::array<AdoptedChannels, num_identifiable_rates>& columns,
+    const ModeSet& modes) {
+  static constexpr std::array<bool, 5> ell_zero{
+      {true, false, false, false, false}};
+  const std::vector<double> time_target =
+      selected_ells(difference(data.time, background.time), modes, ell_zero);
+  const std::vector<double> radial_time_target = selected_ells(
+      difference(data.radial_time, background.radial_time), modes, ell_zero);
+  const double time_scale = std::max(norm_of(time_target), 1.e-300);
+  const double radial_time_scale =
+      std::max(norm_of(radial_time_target), 1.e-300);
+  std::vector<double> target{};
+  target.reserve(time_target.size() + radial_time_target.size());
+  for (const double value : time_target) {
+    target.push_back(value / time_scale);
+  }
+  for (const double value : radial_time_target) {
+    target.push_back(value / radial_time_scale);
+  }
+
+  std::array<std::vector<double>, num_identifiable_rates> fit_columns{};
+  std::array<double, num_identifiable_rates> column_norms{};
+  for (size_t parameter = 0; parameter < num_identifiable_rates; ++parameter) {
+    const auto time_column =
+        selected_ells(columns[parameter].time, modes, ell_zero);
+    const auto radial_time_column =
+        selected_ells(columns[parameter].radial_time, modes, ell_zero);
+    auto& column = fit_columns[parameter];
+    column.reserve(target.size());
+    for (const double value : time_column) {
+      column.push_back(value / time_scale);
+    }
+    for (const double value : radial_time_column) {
+      column.push_back(value / radial_time_scale);
+    }
+    column_norms[parameter] = norm_of(column);
+  }
+  const double largest_column =
+      *std::max_element(column_norms.begin(), column_norms.end());
+  OrderOneFitResult result{};
+  if (largest_column == 0. or
+      std::any_of(column_norms.begin(), column_norms.end(),
+                  [largest_column](const double norm) {
+                    return norm <= 1.e-12 * largest_column;
+                  })) {
+    result.condition_number = std::numeric_limits<double>::infinity();
+    return result;
+  }
+
+  std::vector<std::vector<double>> normal(
+      num_identifiable_rates, std::vector<double>(num_identifiable_rates, 0.));
+  std::vector<double> rhs(num_identifiable_rates, 0.);
+  for (size_t a = 0; a < num_identifiable_rates; ++a) {
+    for (size_t b = a; b < num_identifiable_rates; ++b) {
+      for (size_t row = 0; row < target.size(); ++row) {
+        normal[a][b] += fit_columns[a][row] * fit_columns[b][row] /
+                        (column_norms[a] * column_norms[b]);
+      }
+      normal[b][a] = normal[a][b];
+    }
+    for (size_t row = 0; row < target.size(); ++row) {
+      rhs[a] += fit_columns[a][row] * target[row] / column_norms[a];
+    }
+  }
+  result.condition_number = design_matrix_condition_number(normal);
+  if (not std::isfinite(result.condition_number)) {
+    return result;
+  }
+  const std::vector<double> scaled =
+      solve_normal_equations(std::move(normal), std::move(rhs));
+  result.valid = true;
+  for (size_t parameter = 0; parameter < num_identifiable_rates; ++parameter) {
+    result.rates[parameter] = scaled[parameter] / column_norms[parameter];
+    result.valid = result.valid and std::isfinite(result.rates[parameter]);
+  }
+  // rates[13:16] remain exactly zero: rotation is pinned, not regularized.
+  if (not result.valid) {
+    result.rates.fill(0.);
+    return result;
+  }
+
+  std::vector<double> time_residual = time_target;
+  std::vector<double> radial_time_residual = radial_time_target;
+  std::vector<double> minus_residual = difference(data.minus, background.minus);
+  for (size_t parameter = 0; parameter < num_identifiable_rates; ++parameter) {
+    const auto time_column =
+        selected_ells(columns[parameter].time, modes, ell_zero);
+    const auto radial_time_column =
+        selected_ells(columns[parameter].radial_time, modes, ell_zero);
+    for (size_t row = 0; row < time_residual.size(); ++row) {
+      time_residual[row] -= result.rates[parameter] * time_column[row];
+    }
+    for (size_t row = 0; row < radial_time_residual.size(); ++row) {
+      radial_time_residual[row] -=
+          result.rates[parameter] * radial_time_column[row];
+    }
+    for (size_t row = 0; row < minus_residual.size(); ++row) {
+      minus_residual[row] -=
+          result.rates[parameter] * columns[parameter].minus[row];
+    }
+  }
+  result.time_residual_initial = norm_of(time_target);
+  result.time_residual_final = norm_of(time_residual);
+  result.radial_time_residual_initial = norm_of(radial_time_target);
+  result.radial_time_residual_final = norm_of(radial_time_residual);
+  result.minus_residual_initial =
+      norm_of(difference(data.minus, background.minus));
+  result.minus_residual_final = norm_of(minus_residual);
+  return result;
+}
+
+FitResult fit_clean_exact_frame(
+    const AdoptedChannels& adjusted_data,
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::iaa<DataVector, 3>& phi, const RadialDerivativeStencil& stencil,
+    const AdoptedContext& context, const MatcherConfig& config,
+    const ylm::Spherepack& ylm_transform,
+    const std::array<double, num_map_parameters>& theta_start,
+    const std::array<double, 3>& center_offset) {
+  namespace exact_frame = gh::Solutions::exact_frame;
+  static constexpr std::array<bool, 5> value_ells{
+      {true, false, true, false, false}};
+  static constexpr std::array<bool, 5> time_ells{
+      {false, true, true, false, false}};
+  const auto selected_residual = [&adjusted_data, &context](
+                                     const AdoptedChannels& model,
+                                     const std::array<double, 3>& scales) {
+    std::vector<double> result{};
+    const auto append = [&result](const std::vector<double>& model_values,
+                                  const std::vector<double>& data_values,
+                                  const ModeSet& modes,
+                                  const std::array<bool, 5>& ells,
+                                  const double scale) {
+      const auto selected_model = selected_ells(model_values, modes, ells);
+      const auto selected_data = selected_ells(data_values, modes, ells);
+      for (size_t row = 0; row < selected_model.size(); ++row) {
+        result.push_back((selected_model[row] - selected_data[row]) / scale);
+      }
+    };
+    append(model.value, adjusted_data.value, context.modes, value_ells,
+           scales[0]);
+    append(model.radial, adjusted_data.radial, context.modes, value_ells,
+           scales[1]);
+    append(model.time, adjusted_data.time, context.modes, time_ells, scales[2]);
+    return result;
+  };
+  const auto model = [&stencil, &context, &config,
+                      &ylm_transform](const auto& theta) {
+    return exact_frame_channels(theta, stencil, context, config, ylm_transform);
+  };
+  std::array<double, num_map_parameters> theta = theta_start;
+  const auto admissible = [](const auto& candidate) {
+    const auto frame = exact_frame::frame_map(candidate);
+    if (exact_frame::determinant(frame) <= 0.) {
+      return false;
+    }
+    double time_axis_norm = -square(frame[0][0]);
+    for (size_t i = 0; i < 3; ++i) {
+      time_axis_norm += square(frame[i + 1][0]);
+    }
+    return time_axis_norm < 0.;
+  };
+  if (not admissible(theta)) {
+    theta.fill(0.);
+  }
+  const std::array<double, num_map_parameters> theta_baseline = theta;
+  const AdoptedChannels start_model = model(theta);
+  std::array<double, 3> scales{
+      {std::max(norm_of(selected_ells(
+                    difference(start_model.value, adjusted_data.value),
+                    context.modes, value_ells)),
+                1.e-12),
+       std::max(norm_of(selected_ells(
+                    difference(start_model.radial, adjusted_data.radial),
+                    context.modes, value_ells)),
+                1.e-12),
+       std::max(norm_of(selected_ells(
+                    difference(start_model.time, adjusted_data.time),
+                    context.modes, time_ells)),
+                1.e-12)}};
+  std::vector<double> residual = selected_residual(start_model, scales);
+  FitResult result{};
+  result.residual_initial =
+      norm_of(difference(start_model.value, adjusted_data.value));
+  constexpr size_t max_iterations = 24;
+  constexpr double fd_step = 1.e-7;
+  for (size_t iteration = 0; iteration < max_iterations; ++iteration) {
+    std::array<std::vector<double>, num_map_parameters> jacobian{};
+    std::array<double, num_map_parameters> column_norms{};
+    for (size_t parameter = 0; parameter < num_map_parameters; ++parameter) {
+      auto plus = theta;
+      plus[parameter] += fd_step;
+      jacobian[parameter] = selected_residual(model(plus), scales);
+      for (size_t row = 0; row < residual.size(); ++row) {
+        jacobian[parameter][row] =
+            (jacobian[parameter][row] - residual[row]) / fd_step;
+      }
+      column_norms[parameter] = norm_of(jacobian[parameter]);
+    }
+    const double largest_column =
+        *std::max_element(column_norms.begin(), column_norms.end());
+    if (largest_column == 0. or
+        std::any_of(column_norms.begin(), column_norms.end(),
+                    [largest_column](const double norm) {
+                      return norm <= 1.e-12 * largest_column;
+                    })) {
+      result.condition_number = std::numeric_limits<double>::infinity();
+      break;
+    }
+    std::vector<std::vector<double>> normal(
+        num_map_parameters, std::vector<double>(num_map_parameters, 0.));
+    std::vector<double> rhs(num_map_parameters, 0.);
+    for (size_t a = 0; a < num_map_parameters; ++a) {
+      for (size_t b = a; b < num_map_parameters; ++b) {
+        for (size_t row = 0; row < residual.size(); ++row) {
+          normal[a][b] += jacobian[a][row] * jacobian[b][row] /
+                          (column_norms[a] * column_norms[b]);
+        }
+        normal[b][a] = normal[a][b];
+      }
+      for (size_t row = 0; row < residual.size(); ++row) {
+        rhs[a] -= jacobian[a][row] * residual[row] / column_norms[a];
+      }
+    }
+    result.condition_number = design_matrix_condition_number(normal);
+    if (not std::isfinite(result.condition_number)) {
+      break;
+    }
+    const auto scaled_delta =
+        solve_normal_equations(std::move(normal), std::move(rhs));
+    std::array<double, num_map_parameters> delta{};
+    for (size_t parameter = 0; parameter < num_map_parameters; ++parameter) {
+      delta[parameter] = scaled_delta[parameter] / column_norms[parameter];
+    }
+    const double old_norm = norm_of(residual);
+    double line_factor = 1.;
+    bool accepted = false;
+    std::array<double, num_map_parameters> candidate{};
+    std::vector<double> candidate_residual{};
+    while (line_factor >= 1. / 128.) {
+      candidate = theta;
+      for (size_t parameter = 0; parameter < num_map_parameters; ++parameter) {
+        candidate[parameter] += line_factor * delta[parameter];
+      }
+      if (admissible(candidate)) {
+        candidate_residual = selected_residual(model(candidate), scales);
+        if (norm_of(candidate_residual) < old_norm) {
+          accepted = true;
+          break;
+        }
+      }
+      line_factor *= 0.5;
+    }
+    if (not accepted) {
+      break;
+    }
+    theta = candidate;
+    residual = std::move(candidate_residual);
+    ++result.iterations;
+    double maximum_step = 0.;
+    double maximum_theta = 0.;
+    for (size_t parameter = 0; parameter < num_map_parameters; ++parameter) {
+      maximum_step =
+          std::max(maximum_step, abs(line_factor * delta[parameter]));
+      maximum_theta = std::max(maximum_theta, abs(theta[parameter]));
+    }
+    if (maximum_step < std::max(1.e-13, 1.e-8 * maximum_theta)) {
+      break;
+    }
+  }
+  AdoptedChannels final_model = model(theta);
+  result.residual_final =
+      norm_of(difference(final_model.value, adjusted_data.value));
+  result.minus_baseline_residual =
+      norm_of(difference(start_model.minus, adjusted_data.minus));
+  result.minus_residual_final =
+      norm_of(difference(final_model.minus, adjusted_data.minus));
+  // The opposite characteristic is never fitted, so it is an independent
+  // guard against feeding a selected-sector improvement back as a worse
+  // ghost prescription.  This is especially important near an exact
+  // stationary frame, where the selected residual is dominated by
+  // truncation noise.  Keep the warm-start frame when the held-out channel
+  // does not improve.
+  if (result.minus_residual_final >
+      result.minus_baseline_residual * (1. + 1.e-12)) {
+    theta = theta_baseline;
+    final_model = start_model;
+    result.residual_final = result.residual_initial;
+    result.minus_residual_final = result.minus_baseline_residual;
+  }
+  result.exact_frame_theta = theta;
+  const std::array<double, 3> rapidity{{theta[0], theta[1], theta[2]}};
+  result.exact_frame_velocity = exact_frame::velocity_from_rapidity(rapidity);
+  result.exact_frame_center_velocity =
+      exact_frame::center_velocity(exact_frame::frame_map(theta));
+  result.bulk_velocity = result.exact_frame_velocity;
+  result.p = exact_frame::old13_dictionary(theta);
+  result.center_offset = center_offset;
+
+  tnsr::aa<DataVector, 3> final_metric{};
+  tnsr::aa<DataVector, 3> final_pi{};
+  tnsr::iaa<DataVector, 3> final_phi{};
+  exact_frame::evolved_variables(
+      make_not_null(&final_metric), make_not_null(&final_pi),
+      make_not_null(&final_phi), stencil.coords[stencil.fit_shell], 0.,
+      config.mass, context.model_center, theta);
+  result.metric_residual_final =
+      collocation_difference_norm(final_metric, spacetime_metric);
+  result.phi_residual_final = collocation_difference_norm(final_phi, phi);
+  return result;
+}
+}  // namespace
+
+OrderOneFitResult fit_order_one_affine_rates(
+    const tnsr::aa<DataVector, 3>& /*spacetime_metric*/,
+    const tnsr::aa<DataVector, 3>& /*pi*/,
+    const tnsr::iaa<DataVector, 3>& /*phi*/,
+    const Scalar<DataVector>& /*gamma2*/,
+    const tnsr::I<DataVector, 3>& /*inertial_coords*/,
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
+    const std::array<double, num_map_parameters>& exact_frame_theta,
+    const std::array<double, 3>& center_offset,
+    const std::optional<RadialDerivativeStencil>& radial_stencil) {
+  ASSERT(radial_stencil.has_value(),
+         "The adopted affine-rate fit requires D_T and D_R(D_T) data.");
+  const AdoptedContext context =
+      adopted_context(*radial_stencil, config, ylm_transform, center_offset);
+  const AdoptedChannels data =
+      data_channels(*radial_stencil, context, ylm_transform);
+  const AdoptedChannels background = exact_frame_channels(
+      exact_frame_theta, *radial_stencil, context, config, ylm_transform);
+  const auto columns = affine_rate_columns(exact_frame_theta, *radial_stencil,
+                                           context, config, ylm_transform);
+  return solve_adopted_rates(data, background, columns, context.modes);
+}
+
+IteratedOrderZeroOneFitResult fit_iterated_order_zero_one(
+    const tnsr::aa<DataVector, 3>& spacetime_metric,
+    const tnsr::aa<DataVector, 3>& /*pi*/, const tnsr::iaa<DataVector, 3>& phi,
+    const Scalar<DataVector>& /*gamma2*/,
+    const tnsr::I<DataVector, 3>& /*inertial_coords*/,
+    const ylm::Spherepack& ylm_transform, const MatcherConfig& config,
+    const std::array<double, num_map_parameters>& theta_start,
+    const std::array<double, 3>& center_offset,
+    const RadialDerivativeStencil& radial_stencil) {
+  const AdoptedContext context =
+      adopted_context(radial_stencil, config, ylm_transform, center_offset);
+  const AdoptedChannels data =
+      data_channels(radial_stencil, context, ylm_transform);
+  IteratedOrderZeroOneFitResult result{};
+  result.order_zero = fit_clean_exact_frame(
+      data, spacetime_metric, phi, radial_stencil, context, config,
+      ylm_transform, theta_start, center_offset);
+  std::array<double, num_map_parameters> theta =
+      result.order_zero.exact_frame_theta;
+  size_t total_inner_iterations = result.order_zero.iterations;
+  for (size_t iteration = 0; iteration < adopted_feedback_iterations;
+       ++iteration) {
+    const AdoptedChannels background = exact_frame_channels(
+        theta, radial_stencil, context, config, ylm_transform);
+    const auto columns = affine_rate_columns(theta, radial_stencil, context,
+                                             config, ylm_transform);
+    result.order_one =
+        solve_adopted_rates(data, background, columns, context.modes);
+    if (not result.order_one.valid) {
+      break;
+    }
+    if (result.order_one.minus_residual_final >
+        result.order_one.minus_residual_initial * (1. + 1.e-12)) {
+      // The rates are a shadow diagnostic, and their held-out u- response is
+      // also the acceptance gate for projecting them back out of the
+      // order-zero data.  Do not let an overfit time channel move the frame.
+      break;
+    }
+    const AdoptedChannels adjusted =
+        project_out_rates(data, columns, result.order_one.rates);
+    FitResult refit = fit_clean_exact_frame(
+        adjusted, spacetime_metric, phi, radial_stencil, context, config,
+        ylm_transform, theta, center_offset);
+    double step_squared = 0.;
+    for (size_t parameter = 0; parameter < num_map_parameters; ++parameter) {
+      step_squared +=
+          square(refit.exact_frame_theta[parameter] - theta[parameter]);
+    }
+    result.order_one.final_frame_step_norm = sqrt(step_squared);
+    result.order_one.alternations = iteration + 1;
+    total_inner_iterations += refit.iterations;
+    theta = refit.exact_frame_theta;
+    result.order_zero = std::move(refit);
+  }
+  result.order_zero.iterations = total_inner_iterations;
+
+  // Final variable-projection solve on the converged nonlinear frame. This
+  // keeps the reported rates consistent with the frame returned to the state.
+  const AdoptedChannels final_background = exact_frame_channels(
+      theta, radial_stencil, context, config, ylm_transform);
+  const auto final_columns = affine_rate_columns(theta, radial_stencil, context,
+                                                 config, ylm_transform);
+  const size_t alternations = result.order_one.alternations;
+  const double final_step = result.order_one.final_frame_step_norm;
+  result.order_one =
+      solve_adopted_rates(data, final_background, final_columns, context.modes);
+  result.order_one.alternations = alternations;
+  result.order_one.final_frame_step_norm = final_step;
+  return result;
+}
+
+namespace {
 // Shared core of the rate and acceleration fits: project a symmetric-tensor
 // target onto the nine unpinned rate directions of the covariant response,
 // -(g R_A g), and unfold the (rate-level) pins.

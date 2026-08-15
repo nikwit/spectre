@@ -7,6 +7,7 @@ set(LIBRARY_SOURCES
   Test_AffineMappedHarmonicSchwarzschild.cpp
   Test_GaugeWave.cpp
   Test_GaugePlaneWave.cpp
+  Test_HarmonicWorldtubeModel.cpp
   Test_HarmonicSchwarzschild.cpp
   Test_HighSpinKerrPuncture.cpp
   Test_KerrSchild.cpp

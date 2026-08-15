@@ -11,6 +11,7 @@ spectre_target_sources(
   AffineMappedHarmonicSchwarzschild.cpp
   GaugeWave.cpp
   GaugePlaneWave.cpp
+  HarmonicWorldtubeModel.cpp
   HarmonicSchwarzschild.cpp
   HighSpinKerrPuncture.cpp
   KerrSchild.cpp
@@ -29,6 +30,7 @@ spectre_target_headers(
   Factory.hpp
   GaugeWave.hpp
   GaugePlaneWave.hpp
+  HarmonicWorldtubeModel.hpp
   HarmonicSchwarzschild.hpp
   HighSpinKerrPuncture.hpp
   KerrSchild.hpp

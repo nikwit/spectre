@@ -21,6 +21,7 @@
 #include "Domain/Structure/Direction.hpp"
 #include "Domain/Structure/Element.hpp"
 #include "Domain/Tags.hpp"
+#include "Domain/TagsTimeDependent.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matcher.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Tags.hpp"
@@ -42,6 +43,7 @@
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "PointwiseFunctions/GeneralRelativity/WeylElectric.hpp"
 #include "Time/Tags/Time.hpp"
+#include "Time/Tags/TimeStepId.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Gsl.hpp"
@@ -190,12 +192,17 @@ struct FitMapParameters {
       // the parameter evolution itself is handled after the RHS computation.
       return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
-    // FitInterval 0 means fit at every invocation, with no time
-    // comparison at all: substep times need not be monotone (a stepper
-    // may have equal or decreasing stage times), and a high-water-mark
-    // gate would silently skip fits and hold a p fitted at a LATER time
-    // than the fields it is applied to. The worldtube center above is updated
-    // even when this gate skips the expensive field fit.
+    // Algebraic fits change the ghost prescription.  Applying a new
+    // prescription on an interior Runge--Kutta stage makes the stages of one
+    // step use different boundary data and produces a strong positive
+    // feedback in the clean projected solve.  Fit only at step boundaries;
+    // the worldtube center above is still refreshed on every invocation.
+    if (db::get<::Tags::TimeStepId>(box).substep() != 0) {
+      return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+    }
+    // FitInterval 0 means fit at every step boundary, with no time comparison
+    // at all. The worldtube center above is updated even when this gate skips
+    // the expensive field fit.
     if (config_opt->fit_interval > 0.) {
       if (config_opt->stepper_ode) {
         if (state.anchor_valid and
@@ -235,6 +242,7 @@ struct FitMapParameters {
     double residual_final = 0.;
     double iterations = 0.;
     std::optional<FitResult> value_diagnostics{};
+    std::optional<OrderOneFitResult> order_one_diagnostics{};
     std::array<double, 3> track_velocity{};
     bool track_velocity_valid = false;
 
@@ -601,6 +609,26 @@ struct FitMapParameters {
         if (fit_config.fit_radial_derivative) {
           radial_stencil.emplace();
           radial_stencil->fit_shell = radial_index;
+          // The adopted time channel follows the extraction sphere. Its
+          // velocity is the l=0 content of the grid-to-inertial mesh velocity;
+          // static domains have no mesh-velocity value and therefore zero
+          // comoving correction.
+          const auto& mesh_velocity =
+              db::get<domain::Tags::MeshVelocity<Dim, Frame::Inertial>>(box);
+          if (mesh_velocity.has_value()) {
+            tnsr::I<DataVector, Dim> mesh_velocity_face{};
+            slice_tensor(make_not_null(&mesh_velocity_face), *mesh_velocity);
+            radial_stencil->center_velocity =
+                detail::worldtube_center(mesh_velocity_face, ylm_transform);
+          } else if (state.valid and time > state.last_fit_time) {
+            const double elapsed = time - state.last_fit_time;
+            for (size_t i = 0; i < 3; ++i) {
+              radial_stencil->center_velocity[i] =
+                  (current_worldtube_center[i] -
+                   state.worldtube_center_at_last_fit[i]) /
+                  elapsed;
+            }
+          }
           const auto& metric_volume =
               db::get<gr::Tags::SpacetimeMetric<DataVector, Dim>>(box);
           const auto& pi_volume = db::get<gh::Tags::Pi<DataVector, Dim>>(box);
@@ -608,28 +636,86 @@ struct FitMapParameters {
           const auto& gamma2_volume = db::get<gh::Tags::ConstraintGamma2>(box);
           const auto& coords_volume =
               db::get<domain::Tags::Coordinates<Dim, Frame::Inertial>>(box);
+          const auto& dt_metric_volume =
+              db::get<::Tags::dt<gr::Tags::SpacetimeMetric<DataVector, Dim>>>(
+                  box);
+          const auto& dt_pi_volume =
+              db::get<::Tags::dt<gh::Tags::Pi<DataVector, Dim>>>(box);
+          const auto& dt_phi_volume =
+              db::get<::Tags::dt<gh::Tags::Phi<DataVector, Dim>>>(box);
+          const auto& inverse_jacobian =
+              db::get<domain::Tags::InverseJacobian<Dim, Frame::ElementLogical,
+                                                    Frame::Inertial>>(box);
+          const auto deriv_pi_volume =
+              partial_derivative(pi_volume, mesh, inverse_jacobian);
+          const auto deriv_phi_volume =
+              partial_derivative(phi_volume, mesh, inverse_jacobian);
           for (size_t shell = 0; shell < n_radial; ++shell) {
             tnsr::aa<DataVector, Dim> metric_shell{};
             tnsr::aa<DataVector, Dim> pi_shell{};
             tnsr::iaa<DataVector, Dim> phi_shell{};
+            tnsr::aa<DataVector, Dim> dt_metric_shell{};
+            tnsr::aa<DataVector, Dim> dt_pi_shell{};
+            tnsr::iaa<DataVector, Dim> dt_phi_shell{};
             Scalar<DataVector> gamma2_shell{};
             tnsr::I<DataVector, Dim> coords_shell{};
             slice_tensor_at(make_not_null(&metric_shell), metric_volume, shell);
             slice_tensor_at(make_not_null(&pi_shell), pi_volume, shell);
             slice_tensor_at(make_not_null(&phi_shell), phi_volume, shell);
+            slice_tensor_at(make_not_null(&dt_metric_shell), dt_metric_volume,
+                            shell);
+            slice_tensor_at(make_not_null(&dt_pi_shell), dt_pi_volume, shell);
+            slice_tensor_at(make_not_null(&dt_phi_shell), dt_phi_volume, shell);
+            tnsr::iaa<DataVector, Dim> deriv_pi_shell{};
+            tnsr::ijaa<DataVector, Dim> deriv_phi_shell{};
+            slice_tensor_at(make_not_null(&deriv_pi_shell), deriv_pi_volume,
+                            shell);
+            slice_tensor_at(make_not_null(&deriv_phi_shell), deriv_phi_volume,
+                            shell);
+            for (size_t a = 0; a < Dim + 1; ++a) {
+              for (size_t b = a; b < Dim + 1; ++b) {
+                for (size_t i = 0; i < Dim; ++i) {
+                  dt_metric_shell.get(a, b) +=
+                      radial_stencil->center_velocity[i] *
+                      phi_shell.get(i, a, b);
+                  dt_pi_shell.get(a, b) += radial_stencil->center_velocity[i] *
+                                           deriv_pi_shell.get(i, a, b);
+                  for (size_t j = 0; j < Dim; ++j) {
+                    dt_phi_shell.get(j, a, b) +=
+                        radial_stencil->center_velocity[i] *
+                        deriv_phi_shell.get(i, j, a, b);
+                  }
+                }
+              }
+            }
             slice_tensor_at(make_not_null(&gamma2_shell), gamma2_volume, shell);
             slice_tensor_at(make_not_null(&coords_shell), coords_volume, shell);
             radial_stencil->metric.push_back(std::move(metric_shell));
             radial_stencil->pi.push_back(std::move(pi_shell));
             radial_stencil->phi.push_back(std::move(phi_shell));
+            radial_stencil->dt_metric.push_back(std::move(dt_metric_shell));
+            radial_stencil->dt_pi.push_back(std::move(dt_pi_shell));
+            radial_stencil->dt_phi.push_back(std::move(dt_phi_shell));
             radial_stencil->gamma2.push_back(std::move(gamma2_shell));
             radial_stencil->coords.push_back(std::move(coords_shell));
           }
         }
-        result = fit_exact_frame_parameters(
-            metric_face, pi_face, phi_face, gamma2_face, coords_face,
-            ylm_transform, fit_config, theta_start, center_offset_start,
-            radial_stencil);
+        if (config_opt->fit_order_one_shadow) {
+          ASSERT(radial_stencil.has_value(),
+                 "The adopted order-one shadow fit requires the element-local "
+                 "radial stencil.");
+          IteratedOrderZeroOneFitResult iterated = fit_iterated_order_zero_one(
+              metric_face, pi_face, phi_face, gamma2_face, coords_face,
+              ylm_transform, fit_config, theta_start, center_offset_start,
+              *radial_stencil);
+          result = std::move(iterated.order_zero);
+          order_one_diagnostics = std::move(iterated.order_one);
+        } else {
+          result = fit_exact_frame_parameters(
+              metric_face, pi_face, phi_face, gamma2_face, coords_face,
+              ylm_transform, fit_config, theta_start, center_offset_start,
+              radial_stencil);
+        }
       } else {
         result = fit_map_parameters(
             metric_face, pi_face, phi_face, gamma2_face, coords_face,
@@ -652,12 +738,12 @@ struct FitMapParameters {
         finite = finite and
                  std::isfinite(gsl::at(result.exact_frame_center_velocity, i));
       }
-
       if (finite) {
         const bool exact_frame_mode = config_opt->fit_exact_frame;
         db::mutate<Tags::MapParameters>(
-            [&result, &time, &current_worldtube_center,
-             &exact_frame_mode](const gsl::not_null<MapParameterData*> data) {
+            [&result, &time, &current_worldtube_center, &exact_frame_mode,
+             &order_one_diagnostics](
+                const gsl::not_null<MapParameterData*> data) {
               if (data->valid and time > data->last_fit_time) {
                 data->previous_fit_time = data->last_fit_time;
                 data->p_previous = data->p;
@@ -674,6 +760,11 @@ struct FitMapParameters {
                 data->exact_frame_center_velocity =
                     result.exact_frame_center_velocity;
                 data->exact_frame_valid = true;
+              }
+              if (order_one_diagnostics.has_value() and
+                  order_one_diagnostics->valid) {
+                data->order_one_rates = order_one_diagnostics->rates;
+                data->order_one_valid = true;
               }
               data->valid = true;
             },
@@ -841,6 +932,63 @@ struct FitMapParameters {
         observers::ThreadedActions::WriteReductionDataRow>(
         writer[0], std::string{"/WorldtubeMatcher"}, std::move(legend),
         std::make_tuple(std::move(row)));
+
+    if (order_one_diagnostics.has_value()) {
+      static const std::array<std::string, num_order_one_rates> rate_names{{
+          "ClockAcceleration",
+          "TimeGradientRate_x",
+          "TimeGradientRate_y",
+          "TimeGradientRate_z",
+          "CenterAcceleration_x",
+          "CenterAcceleration_y",
+          "CenterAcceleration_z",
+          "StrainRate_xx",
+          "StrainRate_xy",
+          "StrainRate_xz",
+          "StrainRate_yy",
+          "StrainRate_yz",
+          "StrainRate_zz",
+          "RotationRate_xy",
+          "RotationRate_xz",
+          "RotationRate_yz",
+      }};
+      std::vector<std::string> order_one_legend{"Time"};
+      for (const auto& name : rate_names) {
+        order_one_legend.push_back(name);
+      }
+      order_one_legend.emplace_back("DtUPlusEll0ResidualInitial");
+      order_one_legend.emplace_back("DtUPlusEll0ResidualFinal");
+      order_one_legend.emplace_back("DrDtUPlusEll0ResidualInitial");
+      order_one_legend.emplace_back("DrDtUPlusEll0ResidualFinal");
+      order_one_legend.emplace_back("HeldOutMinusResidualInitial");
+      order_one_legend.emplace_back("HeldOutMinusResidualFinal");
+      order_one_legend.emplace_back("WeightedDesignConditionNumber");
+      order_one_legend.emplace_back("GatedAlternations");
+      order_one_legend.emplace_back("FinalFrameStepNorm");
+      order_one_legend.emplace_back("Valid");
+      const auto& diagnostic = *order_one_diagnostics;
+      std::vector<double> order_one_row{};
+      order_one_row.reserve(1 + num_order_one_rates + 10);
+      order_one_row.push_back(time);
+      for (const double rate : diagnostic.rates) {
+        order_one_row.push_back(rate);
+      }
+      order_one_row.push_back(diagnostic.time_residual_initial);
+      order_one_row.push_back(diagnostic.time_residual_final);
+      order_one_row.push_back(diagnostic.radial_time_residual_initial);
+      order_one_row.push_back(diagnostic.radial_time_residual_final);
+      order_one_row.push_back(diagnostic.minus_residual_initial);
+      order_one_row.push_back(diagnostic.minus_residual_final);
+      order_one_row.push_back(diagnostic.condition_number);
+      order_one_row.push_back(static_cast<double>(diagnostic.alternations));
+      order_one_row.push_back(diagnostic.final_frame_step_norm);
+      order_one_row.push_back(diagnostic.valid ? 1. : 0.);
+      Parallel::threaded_action<
+          observers::ThreadedActions::WriteReductionDataRow>(
+          writer[0], std::string{"/WorldtubeMatcherOrderOne"},
+          std::move(order_one_legend),
+          std::make_tuple(std::move(order_one_row)));
+    }
 
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
   }

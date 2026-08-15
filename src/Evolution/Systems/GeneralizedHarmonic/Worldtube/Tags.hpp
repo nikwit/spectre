@@ -14,7 +14,6 @@
 #include "Options/String.hpp"
 #include "Time/History.hpp"
 #include "Time/TimeStepId.hpp"
-#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -34,6 +33,9 @@ namespace gh::Worldtube {
 /// (qdot0, beta_i, qdot^i, sigma_ij).
 static constexpr size_t num_map_parameters = 13;
 
+/// Number of first-order affine-rate profiles in the order-by-order model.
+static constexpr size_t num_order_one_rates = 16;
+
 /// Option-created configuration of the online matcher.
 struct MatcherConfig {
   struct Mass {
@@ -41,300 +43,28 @@ struct MatcherConfig {
     static constexpr Options::String help = {"Mass of the black hole"};
     static type lower_bound() { return 0.; }
   };
-  struct Center {
-    using type = std::array<double, 3>;
-    static constexpr Options::String help = {
-        "Fallback inertial center used by direct matcher calls. During an "
-        "online evolution the matcher measures the instantaneous excision-"
-        "sphere center from its inertial collocation coordinates instead, so "
-        "a time-dependent domain map remains independent of the fit."};
-  };
-  struct CenterVelocity {
-    using type = std::array<double, 3>;
-    static constexpr Options::String help = {
-        "Kinematic pin for the map velocity: qdot^i = (1 + qdot^0) v_center. "
-        "Zero for a hole at rest."};
-  };
-  struct TraceStrainPin {
-    using type = double;
-    static constexpr Options::String help = {
-        "Pin for tr(sigma)/3. Zero for an unperturbed single hole; for a "
-        "tidally perturbed hole use the invariant-radius value (findings "
-        "§12)."};
-  };
-  struct FitLMax {
-    using type = size_t;
-    static constexpr Options::String help = {
-        "The fit residual keeps spherical-harmonic modes with l <= FitLMax "
-        "of the gauge components. The first-order model space has content "
-        "up to l = 4."};
-  };
   struct FitInterval {
     using type = double;
     static constexpr Options::String help = {
         "Minimum simulation-time interval between fits. The fit runs at the "
         "first step whose time exceeds the previous fit time by this "
-        "amount. In the default strict first-order value mode the fitted "
-        "p_(1) state is held constant while the zeroth-order model center is "
-        "advanced with the fitted finite bulk velocity when FitBulkBoost is "
-        "active, or otherwise its fitted O(epsilon) velocity; derivative ODE "
-        "modes retain their higher-order extrapolation."};
+        "amount. Between fits the exact frame is held fixed while the model "
+        "center advances with its fitted coordinate velocity."};
     static type lower_bound() { return 0.; }
   };
-  struct FitRadialIndex {
-    using type = size_t;
-    static constexpr Options::String help = {
-        "Radial collocation index of the worldtube element at which the fit "
-        "reads the fields: 0 is the excision face itself. With FitUPlus, "
-        "index 0 is valid because the boundary condition does not prescribe "
-        "u+; this is the direct face-matching configuration. If fitting u- "
-        "instead, index 0 is tautological because the boundary condition "
-        "clamps that gauge characteristic, so an off-face index is then "
-        "required for an independent signal."};
-  };
-  struct RateOde {
+  struct FitOrderOneShadow {
     using type = bool;
     static constexpr Options::String help = {
-        "HIGHER-ORDER EXPERIMENT (not part of the strict Dhesi slow-time "
-        "first-order system): obtain p(t) by fitting the parameter rates "
-        "pdot from the "
-        "time-derivative content of the boundary data (dt g = beta.Phi - "
-        "alpha.Pi, projected on the covariant response columns, a linear "
-        "solve) and integrating the first-order ODE dp/dt = pdot by the "
-        "trapezoid rule from p = 0 (Schwarzschild) at the first fit. The "
-        "algebraic value fit is bypassed. Complementary to the default "
-        "mode: uses the Pi channel instead of the u^- gauge components, "
-        "smooth by construction, but integration accumulates rate bias "
-        "with no restoring force."};
+        "Use the q8-selected projected order-zero/order-one solve: fit the "
+        "exact frame from the clean u+, D_R u+, and D_T u+ sectors, solve "
+        "the 13 identifiable affine rates from ell=0 of D_T u+ stacked with "
+        "D_R(D_T u+), pin rotation to zero, and perform two gated feedback "
+        "iterations. Frame updates and projected feedback rounds are accepted "
+        "only when they also improve the held-out u- prediction. The rates "
+        "are stored and observed as a shadow "
+        "diagnostic only; they are never supplied to the worldtube boundary "
+        "condition."};
   };
-  struct SecondOrderOde {
-    using type = bool;
-    static constexpr Options::String help = {
-        "HIGHER-ORDER EXPERIMENT (not part of the strict Dhesi slow-time "
-        "first-order system): obtain p(t) by fitting the parameter "
-        "accelerations pddot from the "
-        "evolution equations (d2t g assembled from the GH right-hand sides "
-        "stored in the DataBox, projected on the covariant response columns, "
-        "a linear solve) and integrating the second-order ODE by velocity "
-        "Verlet from (p, pdot) = (0, 0) (Schwarzschild) at the first fit. "
-        "Produces a smooth, dynamically consistent (p, pdot) pair - the "
-        "scalar-worldtube architecture. Mutually exclusive with RateOde and "
-        "FitCenterOffset."};
-  };
-  struct StepperOde {
-    using type = bool;
-    static constexpr Options::String help = {
-        "HIGHER-ORDER EXPERIMENT (not part of the strict Dhesi slow-time "
-        "first-order system): integrate (p, pdot) through the element's own "
-        "TimeStepper: the "
-        "acceleration is measured from the just-computed right-hand sides "
-        "at every (sub)step and recorded in a TimeSteppers::History, with "
-        "the integration order slaved to the system history, dormancy "
-        "during self-start, and TimeStepId-keyed rewind on step rejection. "
-        "FitInterval is ignored. Mutually exclusive with the other modes."};
-  };
-  struct GaugeDamping {
-    using type = double;
-    static constexpr Options::String help = {
-        "Restoring rate gamma for the ODE modes: the integrated "
-        "acceleration is pddot_meas - 2*gamma*pdot - gamma^2*(p - pin), "
-        "with the pin the kinematic pin values (zero for the unpinned "
-        "parameters). The affine map is pure gauge, so (p, pdot) is a "
-        "double zero root of the raw equations-of-motion loop; any "
-        "measurement bias epsilon splits it into +-sqrt(epsilon), one "
-        "growing. gamma^2 > epsilon turns the pair into a damped "
-        "oscillator, i.e. gauge-fixes the flat direction. Zero disables."};
-    static double lower_bound() { return 0.; }
-  };
-  struct UPlusAnchor {
-    using type = double;
-    static constexpr Options::String help = {
-        "Anchor rate kappa for the StepperOde mode: every FitInterval the "
-        "map parameters are value-fitted to the gauge projection of the "
-        "OUTGOING characteristic u^+ = Pi - n Phi - gamma2 g (same null "
-        "projectors as u^-), the one channel the ghost BC does not set, "
-        "and the ODE acceleration gains -2 kappa (pdot - pdot_anchor) "
-        "- kappa^2 (p - p_anchor) on the free directions, unfolded "
-        "through the pins. u^+ is the data the ambient evolution feeds "
-        "the excision, so this anchors the map to the ambient chart and "
-        "lifts the double zero root of the self-referential loop "
-        "(kappa^2 must exceed the loop bias epsilon). Zero disables."};
-    static double lower_bound() { return 0.; }
-  };
-  struct FitUPlus {
-    using type = bool;
-    static constexpr Options::String help = {
-        "Target the value fit at the gauge projection of the OUTGOING "
-        "characteristic u^+ = Pi - n Phi - gamma2 g instead of u^-. u^+ "
-        "is the data the ambient evolution feeds the excision and the one "
-        "channel the ghost BC does not set, so the fit reads a quantity "
-        "the closed loop cannot manufacture (the u^- value fit at the "
-        "face measures the penalty-driven combination and is "
-        "tautological). Combined with StepperOde, the acceleration "
-        "sensor targets dt of the u^+ gauge projection instead of the "
-        "all-components d2t g projection."};
-  };
-  struct KretschmannTracePin {
-    using type = bool;
-    static constexpr Options::String help = {
-        "Set the trace-strain pin from the curvature each fit instead of "
-        "the TraceStrainPin constant: the vacuum Gauss-Bonnet scalar "
-        "(= Kretschmann) gives the invariant harmonic radius rho_GB = "
-        "(48 M^2/K)^{1/6} - M, and tr sigma / 3 = 1 - <rho_GB>/<R> on "
-        "the face (findings 12: the fit-independent measurement of the "
-        "one strain direction the metric fit cannot own). Applies to the "
-        "value-fit modes; the ODE modes keep the constant."};
-  };
-  struct TracePinInterval {
-    using type = double;
-    static constexpr Options::String help = {
-        "Recompute cadence of the Kretschmann trace pin (held constant "
-        "in between). The pin is secular physics and must NOT be an "
-        "instantaneous closure: recomputing it every substep couples the "
-        "fit to the fields through the second-derivative operator at "
-        "unit gain and blows up in ~2 M regardless of the value-fit "
-        "cadence (measured). Ignored unless KretschmannTracePin."};
-    static double lower_bound() { return 0.; }
-  };
-  struct FitTraceStrain {
-    using type = bool;
-    static constexpr Options::String help = {
-        "Free the trace of the strain as a tenth fit parameter instead "
-        "of pinning it: the trace then rides the same ambient anchor as "
-        "the other directions (meaningful for the u^+ target, which the "
-        "ghost BC cannot drag). TraceStrainPin/KretschmannTracePin then "
-        "affect nothing in the solve; the Kretschmann measurement, if "
-        "enabled, is logged as an open-loop diagnostic only (closing it "
-        "as feedback measured a sampled-loop gain of -2, findings 15t)."};
-  };
-  struct SpatialMonopoleWeight {
-    using type = double;
-    static constexpr Options::String help = {
-        "Relative weight of the l = 0 modes of the spatial components in "
-        "the rate/acceleration least squares. The q8 block analysis found "
-        "the spatial monopole absorbs unmodeled content into the trace "
-        "strain and clock rate without degrading the condition number; "
-        "set to 0 to exclude it from the solve. The demoted rows are "
-        "still evaluated in the held-out closure diagnostics."};
-    static double lower_bound() { return 0.; }
-  };
-  struct UPlusBlockWeights {
-    using type = std::array<double, 15>;
-    static constexpr Options::String help = {
-        "Multiplicative residual weights for the FitUPlus value and "
-        "StepperOde acceleration solves, ordered [A_l0..A_l4, "
-        "C_l0..C_l4, V_l0..V_l4]. A zero excludes a block from the solve, "
-        "but its unweighted residual is still evaluated in the diagnostics. "
-        "These weights do not apply to the rate or metric-acceleration "
-        "fits."};
-  };
-  struct FitCenterOffset {
-    using type = bool;
-    static constexpr Options::String help = {
-        "Also fit the zeroth-order spatial offset q^i of the map: the model "
-        "is evaluated about Center + q with q fitted (exactly, not "
-        "linearized), correcting an imperfect worldtube center online. The "
-        "time offset q^0 is an exact zero mode of the static-in-time model "
-        "and is never fitted."};
-  };
-
-  struct FitVelocity {
-    using type = bool;
-    static constexpr Options::String help = {
-        "Free the three map velocities qdot^i instead of pinning them "
-        "kinematically to (1 + qdot^0) CenterVelocity. All thirteen map "
-        "parameters are then fitted (with FitTraceStrain), which is what "
-        "the binary needs: the hole's centre moves relative to the "
-        "excision centre and its velocity is wanted as an input to the "
-        "control system rather than an output of it. Only the value fit "
-        "supports this; combining it with a rate/ODE mode is an error. "
-        "findings 9 measured qdot^i = (1 + qdot^0) dz/dT offline to 2.3% "
-        "-- freeing it tests that relation online."};
-  };
-  struct FitBulkBoost {
-    using type = bool;
-    static constexpr Options::String help = {
-        "Before fitting the first-order affine residual, determine a separate "
-        "finite Lorentz-boost velocity from the covariant metric on the "
-        "sampling sphere. The boost is exact in velocity and the residual "
-        "remains strict first order. This is implemented only for the value "
-        "fit and is mutually exclusive with FitVelocity: otherwise the "
-        "tangent of the finite boost would be fitted a second time as beta_i "
-        "and qdot^i."};
-  };
-  struct FitExactFrame {
-    using type = bool;
-    static constexpr Options::String help = {
-        "Replace the linear 13-parameter value fit with the zeroth-order "
-        "exact-frame model: one nonlinear Gauss-Newton fit of the finite "
-        "frame map L = B(rapidity) S(s0, sigma, s_ij) -- the exact "
-        "pushforward of harmonic Schwarzschild, no linear residual stage -- "
-        "to the l <= FitLMax gauge projection of u+. All 13 frame parameters "
-        "are free. CenterVelocity and the trace pin act only as cold-start "
-        "priors (V ~ CenterVelocity, s0 ~ -pin, s_ij ~ pin delta_ij), never "
-        "as constraints. Requires FitUPlus; mutually exclusive with "
-        "FitBulkBoost, FitVelocity, FitTraceStrain, FitCenterOffset, and the "
-        "ODE modes. Between fits the model centre advances with the exact "
-        "coordinate centre velocity V_c = L^i_0/L^0_0 regardless of "
-        "CentreAdvection (the exact model contains its advection by "
-        "construction, so that A/B switch does not apply)."};
-  };
-  struct FitVelocitySeparately {
-    using type = bool;
-    static constexpr Options::String help = {
-        "Exact-frame mode only: split the 13-parameter Gauss-Newton solve "
-        "into two stages per fit instant -- first the boost rapidity alone "
-        "with the symmetric factor S frozen at its warm start, then the ten "
-        "S parameters with the rapidity frozen. Each stage sees only its own "
-        "residual response, so the near-degenerate combined direction "
-        "delta V = delta sigma (which leaves the coordinate centre velocity "
-        "V_c unchanged) cannot be traversed within a single fit cycle. "
-        "Requires FitExactFrame."};
-  };
-  struct PinSymmetricFactor {
-    using type = bool;
-    static constexpr Options::String help = {
-        "Exact-frame mode only: pin the eta-symmetric frame factor to the "
-        "identity, S = 1 (s0 = sigma_i = s_ij = 0), and fit only the three "
-        "boost rapidity components. Physically exact for an isolated "
-        "(companion-free) hole, where the symmetric sector carries no "
-        "content; removes the near-degenerate delta V = delta sigma "
-        "direction by construction. Do not use with a companion present: "
-        "S = 1 then discards the O(m1/a) uniform-potential sector. Requires "
-        "FitExactFrame; mutually exclusive with FitVelocitySeparately."};
-  };
-  struct FitRadialDerivative {
-    using type = bool;
-    static constexpr Options::String help = {
-        "Exact-frame mode only: append the radial derivative of u^+ at the "
-        "fit shell to the residual, formed on both the data and model side "
-        "with the same Lagrange differentiation row over all radial "
-        "collocation shells of the boundary element. The derivative rows "
-        "carry the first-order radial-profile information that "
-        "distinguishes the boost from the simultaneity mixing sigma, which "
-        "the single-shell values only separate at second order. Requires "
-        "FitExactFrame."};
-  };
-  struct RadialDerivativeWeight {
-    using type = double;
-    static constexpr Options::String help = {
-        "Overall weight multiplying the radial-derivative rows relative to "
-        "the value rows (dimensionally a length scale; 1.0 weights d_r u^+ "
-        "in units of the mass). Only used with FitRadialDerivative."};
-  };
-  struct CentreAdvection {
-    using type = bool;
-    static constexpr Options::String help = {
-        "Include the strict first-order centre-motion term -qdot^k "
-        "Phi^(0)_kab in the model's d_t g and advance the zeroth-order "
-        "analytic model center between value fits. This does not move the "
-        "mesh. It is the only channel that puts qdot^i into Pi; with it off, "
-        "qdot^i is visible only in g and Phi. Physically it should always be "
-        "on -- off is for the A/B that demonstrates the difference. "
-        "Identically zero when qdot^i = 0, so it cannot alter a run whose "
-        "velocity is pinned to a vanishing CenterVelocity."};
-  };
-
   struct ExcisionSphereName {
     using type = std::string;
     static constexpr Options::String help = {
@@ -343,160 +73,35 @@ struct MatcherConfig {
         "'ExcisionSphere' for the single-hole Sphere/SphericalShells "
         "domains; 'ExcisionSphereB' for the small hole in a "
         "BinaryCompactObject domain."};
-    static type suggested_value() { return "ExcisionSphere"; }
   };
 
   using options =
-      tmpl::list<Mass, Center, CenterVelocity, TraceStrainPin, FitLMax,
-                 FitInterval, FitCenterOffset, RateOde, SecondOrderOde,
-                 StepperOde, GaugeDamping, UPlusAnchor, FitUPlus,
-                 KretschmannTracePin, TracePinInterval, FitTraceStrain,
-                 FitVelocity, FitBulkBoost, FitExactFrame,
-                 FitVelocitySeparately, PinSymmetricFactor, FitRadialDerivative,
-                 RadialDerivativeWeight, CentreAdvection, SpatialMonopoleWeight,
-                 UPlusBlockWeights, FitRadialIndex, ExcisionSphereName>;
+      tmpl::list<Mass, FitInterval, FitOrderOneShadow, ExcisionSphereName>;
   static constexpr Options::String help = {
-      "Online worldtube matching. By default, algebraically fit the "
-      "instantaneous center and 13 affine-map coefficients using a strict "
-      "Dhesi slow-time first-order model: no coefficient rates, no "
-      "between-fit extrapolation, and no nonlinear resummation. RateOde, "
-      "SecondOrderOde, and StepperOde select explicitly higher-order "
-      "experimental systems instead."};
+      "Online exact-frame worldtube matching. Fits the 13-parameter finite "
+      "frame map to outgoing u+ at the excision face using l<=4 and the "
+      "element-local radial stencil. It can optionally run the q8-selected "
+      "projected order-zero/order-one alternation as a shadow diagnostic. "
+      "Historical and A/B controls are deliberately fixed to the q8-validated "
+      "production choices."};
 
   MatcherConfig() = default;
-  MatcherConfig(double mass, const std::array<double, 3>& center,
-                const std::array<double, 3>& center_velocity,
-                double trace_strain_pin, size_t fit_l_max, double fit_interval,
-                bool fit_center_offset, bool rate_ode, bool second_order_ode,
-                bool stepper_ode, double gauge_damping, double uplus_anchor,
-                bool fit_uplus, bool kretschmann_trace_pin,
-                double trace_pin_interval, bool fit_trace_strain,
-                bool fit_velocity, bool fit_bulk_boost, bool fit_exact_frame,
-                bool fit_velocity_separately, bool pin_symmetric_factor,
-                bool fit_radial_derivative, double radial_derivative_weight,
-                bool centre_advection, double spatial_monopole_weight,
-                const std::array<double, 15>& uplus_block_weights,
-                size_t fit_radial_index,
-                std::string excision_sphere_name = "ExcisionSphere")
+  MatcherConfig(double mass, double fit_interval, bool fit_order_one_shadow,
+                std::string excision_sphere_name)
       : mass(mass),
-        center(center),
-        center_velocity(center_velocity),
-        trace_strain_pin(trace_strain_pin),
-        fit_l_max(fit_l_max),
         fit_interval(fit_interval),
-        fit_center_offset(fit_center_offset),
-        rate_ode(rate_ode),
-        second_order_ode(second_order_ode),
-        stepper_ode(stepper_ode),
-        gauge_damping(gauge_damping),
-        uplus_anchor(uplus_anchor),
-        fit_uplus(fit_uplus),
-        kretschmann_trace_pin(kretschmann_trace_pin),
-        trace_pin_interval(trace_pin_interval),
-        fit_trace_strain(fit_trace_strain),
-        fit_velocity(fit_velocity),
-        fit_bulk_boost(fit_bulk_boost),
-        fit_exact_frame(fit_exact_frame),
-        fit_velocity_separately(fit_velocity_separately),
-        pin_symmetric_factor(pin_symmetric_factor),
-        fit_radial_derivative(fit_radial_derivative),
-        radial_derivative_weight(radial_derivative_weight),
-        centre_advection(centre_advection),
-        spatial_monopole_weight(spatial_monopole_weight),
-        uplus_block_weights(uplus_block_weights),
-        fit_radial_index(fit_radial_index),
-        excision_sphere_name(std::move(excision_sphere_name)) {
-    if (fit_velocity and (rate_ode or second_order_ode or stepper_ode)) {
-      ERROR(
-          "FitVelocity is implemented for the value fit only: the rate and "
-          "acceleration solves carry their own velocity pin (qddot^i = "
-          "qddot^0 v_centre) and a fixed nine-column layout, so enabling "
-          "both would silently keep the velocity pinned. Set RateOde, "
-          "SecondOrderOde and StepperOde false.");
-    }
-    if (fit_bulk_boost and (rate_ode or second_order_ode or stepper_ode)) {
-      ERROR(
-          "FitBulkBoost is implemented for the strict value fit only. Set "
-          "RateOde, SecondOrderOde and StepperOde false.");
-    }
-    if (fit_bulk_boost and fit_velocity) {
-      ERROR(
-          "FitBulkBoost and FitVelocity are mutually exclusive: the latter "
-          "would duplicate the tangent of the finite Lorentz boost in the "
-          "first-order residual.");
-    }
-    if (fit_bulk_boost and
-        center_velocity != std::array<double, 3>{{0., 0., 0.}}) {
-      ERROR(
-          "FitBulkBoost requires CenterVelocity = [0, 0, 0]. The finite "
-          "boost owns the bulk center motion; a separate velocity pin would "
-          "double count it.");
-    }
-    if (fit_exact_frame and (rate_ode or second_order_ode or stepper_ode)) {
-      ERROR(
-          "FitExactFrame is a value fit. Set RateOde, SecondOrderOde and "
-          "StepperOde false.");
-    }
-    if (fit_exact_frame and (fit_bulk_boost or fit_velocity)) {
-      ERROR(
-          "FitExactFrame owns the full frame including the boost, so "
-          "FitBulkBoost and FitVelocity would fit the same velocity a second "
-          "time. Set both false.");
-    }
-    if (fit_exact_frame and not fit_uplus) {
-      ERROR(
-          "FitExactFrame fits the gauge projection of the outgoing "
-          "characteristic; set FitUPlus true.");
-    }
-    if (fit_exact_frame and fit_center_offset) {
-      ERROR(
-          "FitExactFrame takes the centre from the tracked worldtube (the "
-          "Gauss-Bonnet track); a fitted centre offset is not part of the "
-          "zeroth-order model. Set FitCenterOffset false.");
-    }
-    if (fit_exact_frame and fit_trace_strain) {
-      ERROR(
-          "FitExactFrame always fits the full symmetric strain including its "
-          "trace; FitTraceStrain configures the linear path only. Set it "
-          "false.");
-    }
-    if (fit_velocity_separately and not fit_exact_frame) {
-      ERROR(
-          "FitVelocitySeparately splits the exact-frame Gauss-Newton solve "
-          "and requires FitExactFrame.");
-    }
-    if (pin_symmetric_factor and not fit_exact_frame) {
-      ERROR(
-          "PinSymmetricFactor pins the exact-frame symmetric factor and "
-          "requires FitExactFrame.");
-    }
-    if (pin_symmetric_factor and fit_velocity_separately) {
-      ERROR(
-          "PinSymmetricFactor leaves only the boost stage, so "
-          "FitVelocitySeparately has nothing to split. Set one of them "
-          "false.");
-    }
-    if (fit_radial_derivative and not fit_exact_frame) {
-      ERROR(
-          "FitRadialDerivative extends the exact-frame fit and requires "
-          "FitExactFrame.");
-    }
-    if (fit_radial_derivative and radial_derivative_weight <= 0.) {
-      ERROR("RadialDerivativeWeight must be positive, got "
-            << radial_derivative_weight << ".");
-    }
-    for (const double weight : uplus_block_weights) {
-      if (weight < 0.) {
-        ERROR("UPlusBlockWeights entries must be non-negative, got " << weight
-                                                                     << ".");
-      }
-    }
-  }
+        fit_uplus(true),
+        fit_exact_frame(true),
+        fit_radial_derivative(true),
+        fit_order_one_shadow(fit_order_one_shadow),
+        excision_sphere_name(std::move(excision_sphere_name)) {}
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& p);
 
   double mass = 1.0;
+  // Internal implementation and regression-test controls below are fixed by
+  // the option constructor above; they are not input-file options.
   std::array<double, 3> center{{0., 0., 0.}};
   std::array<double, 3> center_velocity{{0., 0., 0.}};
   double trace_strain_pin = 0.;
@@ -519,6 +124,7 @@ struct MatcherConfig {
   bool pin_symmetric_factor = false;
   bool fit_radial_derivative = false;
   double radial_derivative_weight = 1.0;
+  bool fit_order_one_shadow = false;
   bool centre_advection = true;
   double spatial_monopole_weight = 1.;
   std::array<double, 15> uplus_block_weights{
@@ -563,6 +169,10 @@ struct MapParameterData {
   std::array<double, num_map_parameters> exact_frame_theta{};
   std::array<double, 3> exact_frame_center_velocity{};
   bool exact_frame_valid = false;
+  /// Shadow-only order-one state. No boundary-condition path consumes this
+  /// array; it is persisted solely for restart continuity and diagnostics.
+  std::array<double, num_order_one_rates> order_one_rates{};
+  bool order_one_valid = false;
   /// Stepper-integrated mode: the 26-component state (p, pdot) and its
   /// time-stepper history
   DataVector ode_state{};
@@ -604,8 +214,9 @@ namespace OptionTags {
 struct WorldtubeMatcher {
   using type = Options::Auto<MatcherConfig, Options::AutoLabel::None>;
   static constexpr Options::String help = {
-      "Online worldtube matching of the first-order affine map from the "
-      "evolved fields on the excision sphere. Set to None to disable."};
+      "Online exact-frame matching from the evolved fields on the excision "
+      "sphere, with an optional shadow-only first-order affine-rate fit. Set "
+      "to None to disable."};
 };
 }  // namespace OptionTags
 

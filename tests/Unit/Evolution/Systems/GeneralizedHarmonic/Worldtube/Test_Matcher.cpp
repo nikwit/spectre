@@ -6,16 +6,26 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <type_traits>
 #include <vector>
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matcher.hpp"
+#include "Framework/TestCreation.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/AffineMappedHarmonicSchwarzschild.hpp"
 #include "Utilities/ConstantExpressions.hpp"
 
 namespace {
+using matcher_options = gh::Worldtube::MatcherConfig::options;
+using expected_matcher_options =
+    tmpl::list<gh::Worldtube::MatcherConfig::Mass,
+               gh::Worldtube::MatcherConfig::FitInterval,
+               gh::Worldtube::MatcherConfig::FitOrderOneShadow,
+               gh::Worldtube::MatcherConfig::ExcisionSphereName>;
+static_assert(std::is_same_v<matcher_options, expected_matcher_options>);
+
 struct SphereFields {
   tnsr::aa<DataVector, 3> metric;
   tnsr::aa<DataVector, 3> pi;
@@ -24,6 +34,37 @@ struct SphereFields {
   tnsr::I<DataVector, 3> coords;
   std::array<double, 3> center;
 };
+
+SPECTRE_TEST_CASE(
+    "Unit.Evolution.Systems.GeneralizedHarmonic.Worldtube.MatcherOptions",
+    "[Unit][Evolution]") {
+  const auto config = TestHelpers::test_creation<gh::Worldtube::MatcherConfig>(
+      "Mass: 0.125\n"
+      "FitInterval: 0.5\n"
+      "FitOrderOneShadow: true\n"
+      "ExcisionSphereName: ExcisionSphereB\n");
+  CHECK(config.mass == 0.125);
+  CHECK(config.fit_interval == 0.5);
+  CHECK(config.fit_l_max == 4);
+  CHECK(config.fit_uplus);
+  CHECK(config.fit_exact_frame);
+  CHECK(config.fit_radial_derivative);
+  CHECK(config.radial_derivative_weight == 1.);
+  CHECK(config.fit_order_one_shadow);
+  CHECK(config.fit_radial_index == 0);
+  CHECK(config.excision_sphere_name == "ExcisionSphereB");
+  const std::array<double, 15> unit_weights{
+      {1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.}};
+  CHECK(config.uplus_block_weights == unit_weights);
+
+  CHECK_THROWS_WITH(TestHelpers::test_creation<gh::Worldtube::MatcherConfig>(
+                        "Mass: 0.125\n"
+                        "FitInterval: 0.5\n"
+                        "FitOrderOneShadow: true\n"
+                        "ExcisionSphereName: ExcisionSphereB\n"
+                        "RateOde: false\n"),
+                    Catch::Matchers::ContainsSubstring("RateOde"));
+}
 
 SphereFields fields_at(const ylm::Spherepack& ylm, const double time) {
   const auto& theta_phi = ylm.theta_phi_points();
@@ -117,6 +158,92 @@ SphereFields exact_frame_fields_at(
   gh::Solutions::exact_frame::evolved_variables(
       make_not_null(&result.metric), make_not_null(&result.pi),
       make_not_null(&result.phi), result.coords, 0., 1., center, theta);
+  return result;
+}
+
+SphereFields order_one_fields_at(
+    const ylm::Spherepack& ylm, const double radius,
+    const std::array<double, gh::Worldtube::num_map_parameters>& theta,
+    const gh::Solutions::order_by_order_worldtube::AffineRates& rates) {
+  const auto& theta_phi = ylm.theta_phi_points();
+  const size_t n_points = theta_phi[0].size();
+  const std::array<double, 3> center{{0., 0., 0.}};
+  SphereFields result{tnsr::aa<DataVector, 3>{},
+                      tnsr::aa<DataVector, 3>{},
+                      tnsr::iaa<DataVector, 3>{},
+                      Scalar<DataVector>{DataVector(n_points, 0.1)},
+                      tnsr::I<DataVector, 3>{n_points},
+                      center};
+  get<0>(result.coords) = radius * sin(theta_phi[0]) * cos(theta_phi[1]);
+  get<1>(result.coords) = radius * sin(theta_phi[0]) * sin(theta_phi[1]);
+  get<2>(result.coords) = radius * cos(theta_phi[0]);
+  gh::Solutions::order_by_order_worldtube::evolved_variables(
+      make_not_null(&result.metric), make_not_null(&result.pi),
+      make_not_null(&result.phi), result.coords, 0., 1., center,
+      gh::Solutions::exact_frame::frame_map(theta), rates);
+  return result;
+}
+
+gh::Solutions::exact_frame::FrameMatrix frame_tangent_from_rates(
+    const gh::Solutions::exact_frame::FrameMatrix& frame,
+    const gh::Solutions::order_by_order_worldtube::AffineRates& rates) {
+  gh::Solutions::exact_frame::FrameMatrix generator{};
+  generator[0][0] = rates[0];
+  for (size_t i = 0; i < 3; ++i) {
+    generator[0][i + 1] = rates[i + 1];
+    generator[i + 1][0] = rates[i + 4];
+  }
+  static constexpr std::array<std::array<size_t, 2>, 6> symmetric{
+      {{{0, 0}}, {{0, 1}}, {{0, 2}}, {{1, 1}}, {{1, 2}}, {{2, 2}}}};
+  for (size_t parameter = 0; parameter < symmetric.size(); ++parameter) {
+    const auto ij = symmetric[parameter];
+    generator[ij[0] + 1][ij[1] + 1] = rates[parameter + 7];
+    generator[ij[1] + 1][ij[0] + 1] = rates[parameter + 7];
+  }
+  gh::Solutions::exact_frame::FrameMatrix tangent{};
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = 0; b < 4; ++b) {
+      for (size_t c = 0; c < 4; ++c) {
+        tangent[a][b] += frame[a][c] * generator[c][b];
+      }
+      tangent[a][b] /= frame[0][0];  // manufactured mass is one
+    }
+  }
+  return tangent;
+}
+
+SphereFields evolving_order_one_fields_at(
+    const ylm::Spherepack& ylm, const double radius, const double time,
+    const std::array<double, gh::Worldtube::num_map_parameters>& theta,
+    const gh::Solutions::order_by_order_worldtube::AffineRates& rates) {
+  SphereFields result = order_one_fields_at(ylm, radius, theta, {});
+  const auto frame = gh::Solutions::exact_frame::frame_map(theta);
+  const auto tangent = frame_tangent_from_rates(frame, rates);
+  auto time_frame = frame;
+  for (size_t a = 0; a < 4; ++a) {
+    for (size_t b = 0; b < 4; ++b) {
+      time_frame[a][b] += time * tangent[a][b];
+    }
+  }
+  gh::Solutions::exact_frame::evolved_variables(
+      make_not_null(&result.metric), make_not_null(&result.pi),
+      make_not_null(&result.phi), result.coords, time, 1., result.center,
+      time_frame);
+  tnsr::aa<DataVector, 3> metric_response{};
+  tnsr::aa<DataVector, 3> pi_response{};
+  tnsr::iaa<DataVector, 3> phi_response{};
+  gh::Solutions::order_by_order_worldtube::
+      affine_rate_evolved_variables_response(
+          make_not_null(&metric_response), make_not_null(&pi_response),
+          make_not_null(&phi_response), result.coords, time, 1., result.center,
+          frame, rates);
+  for (size_t storage = 0; storage < result.metric.size(); ++storage) {
+    result.metric[storage] += metric_response[storage];
+    result.pi[storage] += pi_response[storage];
+  }
+  for (size_t storage = 0; storage < result.phi.size(); ++storage) {
+    result.phi[storage] += phi_response[storage];
+  }
   return result;
 }
 
@@ -583,4 +710,97 @@ SPECTRE_TEST_CASE(
   // ... while the physical content itself only doubles
   CHECK(linear_baselines[1] / linear_baselines[0] < 2.5);
   CHECK(linear_baselines[2] / linear_baselines[1] < 2.5);
+}
+
+SPECTRE_TEST_CASE(
+    "Unit.Evolution.Systems.GeneralizedHarmonic.Worldtube."
+    "OrderOneAffineRateFit",
+    "[Unit][Evolution]") {
+  const ylm::Spherepack ylm{5, 5};
+  const std::array<double, gh::Worldtube::num_map_parameters> theta{
+      {0.03, -0.02, 0.01, 0.012, -0.008, 0.005, -0.004, 0.006, 0.002, -0.003,
+       -0.005, 0.004, 0.007}};
+  const gh::Solutions::order_by_order_worldtube::AffineRates expected{
+      {2.e-4, -1.e-4, 1.5e-4, -0.8e-4, 1.2e-4, -1.1e-4, 0.9e-4, 0.7e-4, -0.6e-4,
+       0.5e-4, -0.4e-4, 0.3e-4, -0.2e-4, 0., 0., 0.}};
+  constexpr double derivative_step = 2.e-6;
+  gh::Worldtube::RadialDerivativeStencil radial_stencil{};
+  radial_stencil.fit_shell = 1;
+  for (const double radius : {3., 3.2, 3.4}) {
+    const SphereFields middle =
+        evolving_order_one_fields_at(ylm, radius, 0., theta, expected);
+    const SphereFields upper = evolving_order_one_fields_at(
+        ylm, radius, derivative_step, theta, expected);
+    const SphereFields lower = evolving_order_one_fields_at(
+        ylm, radius, -derivative_step, theta, expected);
+    radial_stencil.metric.push_back(middle.metric);
+    radial_stencil.pi.push_back(middle.pi);
+    radial_stencil.phi.push_back(middle.phi);
+    radial_stencil.dt_metric.push_back(
+        centered_derivative(upper.metric, lower.metric, derivative_step));
+    radial_stencil.dt_pi.push_back(
+        centered_derivative(upper.pi, lower.pi, derivative_step));
+    radial_stencil.dt_phi.push_back(
+        centered_derivative(upper.phi, lower.phi, derivative_step));
+    radial_stencil.gamma2.push_back(middle.gamma2);
+    radial_stencil.coords.push_back(middle.coords);
+  }
+  const SphereFields data =
+      evolving_order_one_fields_at(ylm, 3.2, 0., theta, expected);
+  const auto config = exact_frame_config(data.center);
+  const auto fit = gh::Worldtube::fit_order_one_affine_rates(
+      data.metric, data.pi, data.phi, data.gamma2, data.coords, ylm, config,
+      theta, {{0., 0., 0.}}, radial_stencil);
+  CAPTURE(fit.condition_number, fit.time_residual_initial,
+          fit.time_residual_final, fit.radial_time_residual_initial,
+          fit.radial_time_residual_final, fit.minus_residual_initial,
+          fit.minus_residual_final);
+  CHECK(fit.valid);
+  CHECK(fit.condition_number < 1.e9);
+  CHECK(fit.time_residual_final < 2.e-5 * fit.time_residual_initial);
+  CHECK(fit.radial_time_residual_final <
+        2.e-5 * fit.radial_time_residual_initial);
+  for (size_t parameter = 0; parameter < 13; ++parameter) {
+    CAPTURE(parameter, expected[parameter], fit.rates[parameter]);
+    CHECK(fit.rates[parameter] ==
+          Approx::custom().epsilon(2.e-4).scale(1.e-10)(expected[parameter]));
+  }
+  for (size_t parameter = 13; parameter < 16; ++parameter) {
+    CHECK(fit.rates[parameter] == 0.);
+  }
+
+  // The full wrapper must feed the projected rate response back into the
+  // clean order-zero sectors twice and then re-solve the rates on the final
+  // frame. Starting away from the manufactured frame exercises both blocks.
+  auto theta_start = theta;
+  theta_start[0] += 2.e-3;
+  theta_start[7] -= 1.e-3;
+  const auto iterated = gh::Worldtube::fit_iterated_order_zero_one(
+      data.metric, data.pi, data.phi, data.gamma2, data.coords, ylm, config,
+      theta_start, {{0., 0., 0.}}, radial_stencil);
+  CAPTURE(iterated.order_zero.exact_frame_theta, iterated.order_one.rates,
+          iterated.order_one.final_frame_step_norm);
+  CHECK(iterated.order_one.valid);
+  CHECK(iterated.order_one.alternations == 2);
+  double initial_frame_error = 0.;
+  double final_frame_error = 0.;
+  for (size_t parameter = 0; parameter < theta.size(); ++parameter) {
+    initial_frame_error =
+        std::max(initial_frame_error,
+                 std::abs(theta_start[parameter] - theta[parameter]));
+    final_frame_error =
+        std::max(final_frame_error,
+                 std::abs(iterated.order_zero.exact_frame_theta[parameter] -
+                          theta[parameter]));
+    CHECK(std::abs(iterated.order_zero.exact_frame_theta[parameter] -
+                   theta[parameter]) < 2.e-5);
+  }
+  CHECK(final_frame_error < 0.01 * initial_frame_error);
+  for (size_t parameter = 0; parameter < 13; ++parameter) {
+    CHECK(std::abs(iterated.order_one.rates[parameter] - expected[parameter]) <
+          1.e-6);
+  }
+  for (size_t parameter = 13; parameter < 16; ++parameter) {
+    CHECK(iterated.order_one.rates[parameter] == 0.);
+  }
 }
