@@ -7,10 +7,13 @@
 #include <cstddef>
 #include <limits>
 #include <optional>
+#include <string>
+#include <utility>
 
 #include "DataStructures/DataBox/Tag.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "Options/Auto.hpp"
+#include "Options/Options.hpp"
 #include "Options/String.hpp"
 #include "Time/History.hpp"
 #include "Time/TimeStepId.hpp"
@@ -36,6 +39,16 @@ static constexpr size_t num_map_parameters = 13;
 /// Number of first-order affine-rate profiles in the order-by-order model.
 static constexpr size_t num_order_one_rates = 16;
 
+/// How the adopted q8 order-one affine-rate model is used online.
+enum class OrderOneMode {
+  /// Do not fit or apply the order-one rates.
+  Off,
+  /// Fit and observe the rates, but keep the boundary frame-only.
+  Shadow,
+  /// Fit the rates and add their strict linear response to the boundary model.
+  Apply,
+};
+
 /// Option-created configuration of the online matcher.
 struct MatcherConfig {
   struct Mass {
@@ -52,18 +65,17 @@ struct MatcherConfig {
         "center advances with its fitted coordinate velocity."};
     static type lower_bound() { return 0.; }
   };
-  struct FitOrderOneShadow {
-    using type = bool;
+  struct OrderOne {
+    using type = OrderOneMode;
     static constexpr Options::String help = {
-        "Use the q8-selected projected order-zero/order-one solve: fit the "
-        "exact frame from the clean u+, D_R u+, and D_T u+ sectors, solve "
-        "the 13 identifiable affine rates from ell=0 of D_T u+ stacked with "
-        "D_R(D_T u+), pin rotation to zero, and perform two gated feedback "
-        "iterations. Frame updates and projected feedback rounds are accepted "
-        "only when they also improve the held-out u- prediction. The rates "
-        "are stored and observed as a shadow "
-        "diagnostic only; they are never supplied to the worldtube boundary "
-        "condition."};
+        "Use of the q8-selected order-one affine-rate model. 'Off' runs only "
+        "the clean-sector order-zero exact-frame fit. 'Shadow' also solves "
+        "the 13 identifiable rates from ell=0 of D_T u+ stacked with "
+        "D_R(D_T u+), pins rotation to zero, performs two held-out-gated "
+        "feedback iterations, and observes the rates without applying them. "
+        "'Apply' runs the identical fit and adds its strict linear rate "
+        "response to the exact-frame model supplied to the boundary whenever "
+        "the rate solve is valid. The held-out u- result remains diagnostic."};
   };
   struct ExcisionSphereName {
     using type = std::string;
@@ -75,25 +87,25 @@ struct MatcherConfig {
         "BinaryCompactObject domain."};
   };
 
-  using options =
-      tmpl::list<Mass, FitInterval, FitOrderOneShadow, ExcisionSphereName>;
+  using options = tmpl::list<Mass, FitInterval, OrderOne, ExcisionSphereName>;
   static constexpr Options::String help = {
       "Online exact-frame worldtube matching. Fits the 13-parameter finite "
       "frame map to outgoing u+ at the excision face using l<=4 and the "
-      "element-local radial stencil. It can optionally run the q8-selected "
-      "projected order-zero/order-one alternation as a shadow diagnostic. "
+      "element-local radial stencil. It can run the q8-selected projected "
+      "order-zero/order-one alternation either as a shadow diagnostic or as "
+      "the strict first-order boundary model. "
       "Historical and A/B controls are deliberately fixed to the q8-validated "
       "production choices."};
 
   MatcherConfig() = default;
-  MatcherConfig(double mass, double fit_interval, bool fit_order_one_shadow,
+  MatcherConfig(double mass, double fit_interval, OrderOneMode order_one,
                 std::string excision_sphere_name)
       : mass(mass),
         fit_interval(fit_interval),
         fit_uplus(true),
         fit_exact_frame(true),
         fit_radial_derivative(true),
-        fit_order_one_shadow(fit_order_one_shadow),
+        order_one(order_one),
         excision_sphere_name(std::move(excision_sphere_name)) {}
 
   // NOLINTNEXTLINE(google-runtime-references)
@@ -124,7 +136,7 @@ struct MatcherConfig {
   bool pin_symmetric_factor = false;
   bool fit_radial_derivative = false;
   double radial_derivative_weight = 1.0;
-  bool fit_order_one_shadow = false;
+  OrderOneMode order_one = OrderOneMode::Off;
   bool centre_advection = true;
   double spatial_monopole_weight = 1.;
   std::array<double, 15> uplus_block_weights{
@@ -169,8 +181,9 @@ struct MapParameterData {
   std::array<double, num_map_parameters> exact_frame_theta{};
   std::array<double, 3> exact_frame_center_velocity{};
   bool exact_frame_valid = false;
-  /// Shadow-only order-one state. No boundary-condition path consumes this
-  /// array; it is persisted solely for restart continuity and diagnostics.
+  /// Adopted order-one affine rates. Persisted for restart continuity and
+  /// diagnostics; consumed by the boundary in `OrderOneMode::Apply` whenever
+  /// the rate solve is valid.
   std::array<double, num_order_one_rates> order_one_rates{};
   bool order_one_valid = false;
   /// Stepper-integrated mode: the 26-component state (p, pdot) and its
@@ -215,8 +228,8 @@ struct WorldtubeMatcher {
   using type = Options::Auto<MatcherConfig, Options::AutoLabel::None>;
   static constexpr Options::String help = {
       "Online exact-frame matching from the evolved fields on the excision "
-      "sphere, with an optional shadow-only first-order affine-rate fit. Set "
-      "to None to disable."};
+      "sphere, with optional shadow or applied first-order affine rates. Set "
+      "to None to disable all matching."};
 };
 }  // namespace OptionTags
 
@@ -252,3 +265,16 @@ struct InitializeMapParameters {
 };
 }  // namespace Initialization
 }  // namespace gh::Worldtube
+
+template <>
+struct Options::create_from_yaml<gh::Worldtube::OrderOneMode> {
+  template <typename Metavariables>
+  static gh::Worldtube::OrderOneMode create(const Options::Option& options) {
+    return create<void>(options);
+  }
+};
+
+template <>
+gh::Worldtube::OrderOneMode
+Options::create_from_yaml<gh::Worldtube::OrderOneMode>::create<void>(
+    const Options::Option& options);

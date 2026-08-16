@@ -88,6 +88,27 @@ std::array<double, 3> model_center(const MatcherConfig& config,
   return result;
 }
 
+void exact_frame_boundary_evolved_variables(
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+    const gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+    const gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+    const tnsr::I<DataVector, 3>& inertial_coords, const MatcherConfig& config,
+    const MapParameterData& map_parameters,
+    const std::array<double, 3>& model_center_at_time) {
+  const auto frame_map =
+      gh::Solutions::exact_frame::frame_map(map_parameters.exact_frame_theta);
+  if (config.order_one == OrderOneMode::Apply and
+      map_parameters.order_one_valid) {
+    gh::Solutions::order_by_order_worldtube::evolved_variables(
+        spacetime_metric, pi, phi, inertial_coords, 0., config.mass,
+        model_center_at_time, frame_map, map_parameters.order_one_rates);
+  } else {
+    gh::Solutions::exact_frame::evolved_variables(
+        spacetime_metric, pi, phi, inertial_coords, 0., config.mass,
+        model_center_at_time, frame_map);
+  }
+}
+
 }  // namespace detail
 
 namespace {

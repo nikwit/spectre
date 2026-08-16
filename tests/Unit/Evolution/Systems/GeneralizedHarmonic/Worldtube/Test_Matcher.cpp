@@ -13,6 +13,7 @@
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matcher.hpp"
 #include "Framework/TestCreation.hpp"
+#include "Framework/TestHelpers.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
 #include "PointwiseFunctions/AnalyticSolutions/GeneralRelativity/AffineMappedHarmonicSchwarzschild.hpp"
 #include "Utilities/ConstantExpressions.hpp"
@@ -22,7 +23,7 @@ using matcher_options = gh::Worldtube::MatcherConfig::options;
 using expected_matcher_options =
     tmpl::list<gh::Worldtube::MatcherConfig::Mass,
                gh::Worldtube::MatcherConfig::FitInterval,
-               gh::Worldtube::MatcherConfig::FitOrderOneShadow,
+               gh::Worldtube::MatcherConfig::OrderOne,
                gh::Worldtube::MatcherConfig::ExcisionSphereName>;
 static_assert(std::is_same_v<matcher_options, expected_matcher_options>);
 
@@ -41,7 +42,7 @@ SPECTRE_TEST_CASE(
   const auto config = TestHelpers::test_creation<gh::Worldtube::MatcherConfig>(
       "Mass: 0.125\n"
       "FitInterval: 0.5\n"
-      "FitOrderOneShadow: true\n"
+      "OrderOne: Apply\n"
       "ExcisionSphereName: ExcisionSphereB\n");
   CHECK(config.mass == 0.125);
   CHECK(config.fit_interval == 0.5);
@@ -50,20 +51,49 @@ SPECTRE_TEST_CASE(
   CHECK(config.fit_exact_frame);
   CHECK(config.fit_radial_derivative);
   CHECK(config.radial_derivative_weight == 1.);
-  CHECK(config.fit_order_one_shadow);
+  CHECK(config.order_one == gh::Worldtube::OrderOneMode::Apply);
   CHECK(config.fit_radial_index == 0);
   CHECK(config.excision_sphere_name == "ExcisionSphereB");
+  test_serialization(config);
   const std::array<double, 15> unit_weights{
       {1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.}};
   CHECK(config.uplus_block_weights == unit_weights);
+
+  CHECK(TestHelpers::test_creation<gh::Worldtube::MatcherConfig>(
+            "Mass: 0.125\n"
+            "FitInterval: 0.5\n"
+            "OrderOne: Shadow\n"
+            "ExcisionSphereName: ExcisionSphereB\n")
+            .order_one == gh::Worldtube::OrderOneMode::Shadow);
+  CHECK(TestHelpers::test_creation<gh::Worldtube::MatcherConfig>(
+            "Mass: 0.125\n"
+            "FitInterval: 0.5\n"
+            "OrderOne: Off\n"
+            "ExcisionSphereName: ExcisionSphereB\n")
+            .order_one == gh::Worldtube::OrderOneMode::Off);
+
+  CHECK_THROWS_WITH(
+      TestHelpers::test_creation<gh::Worldtube::MatcherConfig>(
+          "Mass: 0.125\n"
+          "FitInterval: 0.5\n"
+          "OrderOne: First\n"
+          "ExcisionSphereName: ExcisionSphereB\n"),
+      Catch::Matchers::ContainsSubstring("Must be Off, Shadow, or Apply"));
+
+  CHECK_THROWS_WITH(TestHelpers::test_creation<gh::Worldtube::MatcherConfig>(
+                        "Mass: 0.125\n"
+                        "FitInterval: 0.5\n"
+                        "OrderOne: Apply\n"
+                        "ExcisionSphereName: ExcisionSphereB\n"
+                        "RateOde: false\n"),
+                    Catch::Matchers::ContainsSubstring("RateOde"));
 
   CHECK_THROWS_WITH(TestHelpers::test_creation<gh::Worldtube::MatcherConfig>(
                         "Mass: 0.125\n"
                         "FitInterval: 0.5\n"
                         "FitOrderOneShadow: true\n"
-                        "ExcisionSphereName: ExcisionSphereB\n"
-                        "RateOde: false\n"),
-                    Catch::Matchers::ContainsSubstring("RateOde"));
+                        "ExcisionSphereName: ExcisionSphereB\n"),
+                    Catch::Matchers::ContainsSubstring("FitOrderOneShadow"));
 }
 
 SphereFields fields_at(const ylm::Spherepack& ylm, const double time) {
@@ -329,6 +359,67 @@ SPECTRE_TEST_CASE(
   CHECK_ITERABLE_APPROX(
       gh::Worldtube::detail::current_center_offset(config, state, 2.5),
       (std::array<double, 3>{{-0.34, 0.12, -0.18}}));
+}
+
+SPECTRE_TEST_CASE(
+    "Unit.Evolution.Systems.GeneralizedHarmonic.Worldtube.OrderOneBoundary",
+    "[Unit][Evolution]") {
+  const ylm::Spherepack ylm{5, 5};
+  const SphereFields sphere = fields_at(ylm, 0.);
+  gh::Worldtube::MatcherConfig config = exact_frame_config(sphere.center);
+  gh::Worldtube::MapParameterData state{};
+  state.exact_frame_theta = {{0.02, -0.01, 0.015, 0.003, -0.002, 0.001, 0.004,
+                              0.002, -0.001, 0.0005, -0.003, 0.0015, 0.0025}};
+  state.order_one_rates = {{1.e-5, -2.e-5, 1.5e-5, 0.5e-5, -1.e-5, 2.e-5,
+                            -0.5e-5, 3.e-5, -2.e-5, 1.e-5, 2.5e-5, -1.5e-5,
+                            0.5e-5, 0., 0., 0.}};
+  state.order_one_valid = true;
+
+  const auto frame =
+      gh::Solutions::exact_frame::frame_map(state.exact_frame_theta);
+  tnsr::aa<DataVector, 3> expected_metric{};
+  tnsr::aa<DataVector, 3> expected_pi{};
+  tnsr::iaa<DataVector, 3> expected_phi{};
+  tnsr::aa<DataVector, 3> actual_metric{};
+  tnsr::aa<DataVector, 3> actual_pi{};
+  tnsr::iaa<DataVector, 3> actual_phi{};
+  const auto check_tensors = [&expected_metric, &expected_pi, &expected_phi,
+                              &actual_metric, &actual_pi, &actual_phi]() {
+    for (size_t storage = 0; storage < expected_metric.size(); ++storage) {
+      CHECK_ITERABLE_APPROX(actual_metric[storage], expected_metric[storage]);
+      CHECK_ITERABLE_APPROX(actual_pi[storage], expected_pi[storage]);
+    }
+    for (size_t storage = 0; storage < expected_phi.size(); ++storage) {
+      CHECK_ITERABLE_APPROX(actual_phi[storage], expected_phi[storage]);
+    }
+  };
+
+  config.order_one = gh::Worldtube::OrderOneMode::Apply;
+  gh::Solutions::order_by_order_worldtube::evolved_variables(
+      make_not_null(&expected_metric), make_not_null(&expected_pi),
+      make_not_null(&expected_phi), sphere.coords, 0., config.mass,
+      sphere.center, frame, state.order_one_rates);
+  gh::Worldtube::detail::exact_frame_boundary_evolved_variables(
+      make_not_null(&actual_metric), make_not_null(&actual_pi),
+      make_not_null(&actual_phi), sphere.coords, config, state, sphere.center);
+  check_tensors();
+
+  // Shadow and an invalid Apply solve both preserve the frame-only boundary.
+  gh::Solutions::exact_frame::evolved_variables(
+      make_not_null(&expected_metric), make_not_null(&expected_pi),
+      make_not_null(&expected_phi), sphere.coords, 0., config.mass,
+      sphere.center, frame);
+  config.order_one = gh::Worldtube::OrderOneMode::Shadow;
+  gh::Worldtube::detail::exact_frame_boundary_evolved_variables(
+      make_not_null(&actual_metric), make_not_null(&actual_pi),
+      make_not_null(&actual_phi), sphere.coords, config, state, sphere.center);
+  check_tensors();
+  config.order_one = gh::Worldtube::OrderOneMode::Apply;
+  state.order_one_valid = false;
+  gh::Worldtube::detail::exact_frame_boundary_evolved_variables(
+      make_not_null(&actual_metric), make_not_null(&actual_pi),
+      make_not_null(&actual_phi), sphere.coords, config, state, sphere.center);
+  check_tensors();
 }
 
 SPECTRE_TEST_CASE(

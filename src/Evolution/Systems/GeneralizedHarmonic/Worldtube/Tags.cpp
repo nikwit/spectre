@@ -3,8 +3,28 @@
 
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Tags.hpp"
 
+#include <string>
+
 #include <pup.h>
 #include <pup_stl.h>
+
+#include "Options/ParseOptions.hpp"
+
+template <>
+gh::Worldtube::OrderOneMode
+Options::create_from_yaml<gh::Worldtube::OrderOneMode>::create<void>(
+    const Options::Option& options) {
+  const std::string mode = options.parse_as<std::string>();
+  if (mode == "Off") {
+    return gh::Worldtube::OrderOneMode::Off;
+  } else if (mode == "Shadow") {
+    return gh::Worldtube::OrderOneMode::Shadow;
+  } else if (mode == "Apply") {
+    return gh::Worldtube::OrderOneMode::Apply;
+  }
+  PARSE_ERROR(options.context(),
+              "Invalid OrderOne mode. Must be Off, Shadow, or Apply.");
+}
 
 namespace gh::Worldtube {
 void MatcherConfig::pup(PUP::er& p) {
@@ -31,7 +51,7 @@ void MatcherConfig::pup(PUP::er& p) {
   p | pin_symmetric_factor;
   p | fit_radial_derivative;
   p | radial_derivative_weight;
-  p | fit_order_one_shadow;
+  p | order_one;
   p | centre_advection;
   p | spatial_monopole_weight;
   p | uplus_block_weights;
@@ -62,7 +82,7 @@ bool operator==(const MatcherConfig& lhs, const MatcherConfig& rhs) {
          lhs.pin_symmetric_factor == rhs.pin_symmetric_factor and
          lhs.fit_radial_derivative == rhs.fit_radial_derivative and
          lhs.radial_derivative_weight == rhs.radial_derivative_weight and
-         lhs.fit_order_one_shadow == rhs.fit_order_one_shadow and
+         lhs.order_one == rhs.order_one and
          lhs.centre_advection == rhs.centre_advection and
          lhs.spatial_monopole_weight == rhs.spatial_monopole_weight and
          lhs.uplus_block_weights == rhs.uplus_block_weights and

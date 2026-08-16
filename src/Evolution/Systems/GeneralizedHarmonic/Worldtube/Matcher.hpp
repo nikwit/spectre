@@ -55,6 +55,23 @@ std::array<double, 3> model_center(const MatcherConfig& config,
                                    const MapParameterData& map_parameters,
                                    double time);
 
+/*!
+ * \brief Evaluate the exact-frame branch of the online boundary model.
+ *
+ * `OrderOneMode::Off` and `OrderOneMode::Shadow` return the fitted finite
+ * frame alone. `OrderOneMode::Apply` adds the adopted strict linear affine-rate
+ * response when the latest rate solve is valid, and otherwise falls back to
+ * the finite frame. `model_center_at_time` is already advanced to the current
+ * simulation time; the fit instant is therefore the local time origin.
+ */
+void exact_frame_boundary_evolved_variables(
+    gsl::not_null<tnsr::aa<DataVector, 3>*> spacetime_metric,
+    gsl::not_null<tnsr::aa<DataVector, 3>*> pi,
+    gsl::not_null<tnsr::iaa<DataVector, 3>*> phi,
+    const tnsr::I<DataVector, 3>& inertial_coords, const MatcherConfig& config,
+    const MapParameterData& map_parameters,
+    const std::array<double, 3>& model_center_at_time);
+
 /// Result of a block-weighted linear fit and an unweighted held-out test.
 struct WeightedModeFit {
   std::vector<double> coefficients{};

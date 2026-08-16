@@ -243,6 +243,7 @@ struct FitMapParameters {
     double iterations = 0.;
     std::optional<FitResult> value_diagnostics{};
     std::optional<OrderOneFitResult> order_one_diagnostics{};
+    bool order_one_improves_held_out = false;
     std::array<double, 3> track_velocity{};
     bool track_velocity_valid = false;
 
@@ -700,9 +701,9 @@ struct FitMapParameters {
             radial_stencil->coords.push_back(std::move(coords_shell));
           }
         }
-        if (config_opt->fit_order_one_shadow) {
+        if (config_opt->order_one != OrderOneMode::Off) {
           ASSERT(radial_stencil.has_value(),
-                 "The adopted order-one shadow fit requires the element-local "
+                 "The adopted order-one fit requires the element-local "
                  "radial stencil.");
           IteratedOrderZeroOneFitResult iterated = fit_iterated_order_zero_one(
               metric_face, pi_face, phi_face, gamma2_face, coords_face,
@@ -710,6 +711,12 @@ struct FitMapParameters {
               *radial_stencil);
           result = std::move(iterated.order_zero);
           order_one_diagnostics = std::move(iterated.order_one);
+          order_one_improves_held_out =
+              order_one_diagnostics->valid and
+              std::isfinite(order_one_diagnostics->minus_residual_initial) and
+              std::isfinite(order_one_diagnostics->minus_residual_final) and
+              order_one_diagnostics->minus_residual_final <=
+                  order_one_diagnostics->minus_residual_initial * (1. + 1.e-12);
         } else {
           result = fit_exact_frame_parameters(
               metric_face, pi_face, phi_face, gamma2_face, coords_face,
@@ -761,10 +768,12 @@ struct FitMapParameters {
                     result.exact_frame_center_velocity;
                 data->exact_frame_valid = true;
               }
-              if (order_one_diagnostics.has_value() and
-                  order_one_diagnostics->valid) {
+              data->order_one_valid = order_one_diagnostics.has_value() and
+                                      order_one_diagnostics->valid;
+              if (data->order_one_valid) {
                 data->order_one_rates = order_one_diagnostics->rates;
-                data->order_one_valid = true;
+              } else {
+                data->order_one_rates.fill(0.);
               }
               data->valid = true;
             },
@@ -966,9 +975,10 @@ struct FitMapParameters {
       order_one_legend.emplace_back("GatedAlternations");
       order_one_legend.emplace_back("FinalFrameStepNorm");
       order_one_legend.emplace_back("Valid");
+      order_one_legend.emplace_back("ImprovesHeldOutMinus");
       const auto& diagnostic = *order_one_diagnostics;
       std::vector<double> order_one_row{};
-      order_one_row.reserve(1 + num_order_one_rates + 10);
+      order_one_row.reserve(1 + num_order_one_rates + 11);
       order_one_row.push_back(time);
       for (const double rate : diagnostic.rates) {
         order_one_row.push_back(rate);
@@ -983,6 +993,7 @@ struct FitMapParameters {
       order_one_row.push_back(static_cast<double>(diagnostic.alternations));
       order_one_row.push_back(diagnostic.final_frame_step_norm);
       order_one_row.push_back(diagnostic.valid ? 1. : 0.);
+      order_one_row.push_back(order_one_improves_held_out ? 1. : 0.);
       Parallel::threaded_action<
           observers::ThreadedActions::WriteReductionDataRow>(
           writer[0], std::string{"/WorldtubeMatcherOrderOne"},

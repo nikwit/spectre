@@ -701,12 +701,10 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_ghost(
     tnsr::aa<DataVector, Dim, Frame::Inertial> model_pi{};
     tnsr::iaa<DataVector, Dim, Frame::Inertial> model_phi{};
     if (matcher_config->fit_exact_frame) {
-      // Zeroth-order exact-frame model, as in the Bjorhus path above: the
-      // fitted finite frame map evaluated exactly at the Z4-advanced centre.
-      gh::Solutions::exact_frame::evolved_variables(
+      gh::Worldtube::detail::exact_frame_boundary_evolved_variables(
           make_not_null(&model_metric), make_not_null(&model_pi),
-          make_not_null(&model_phi), coords, 0., matcher_config->mass,
-          model_center, map_parameters.exact_frame_theta);
+          make_not_null(&model_phi), coords, *matcher_config, map_parameters,
+          model_center);
     } else if (first_order_value_mode) {
       gh::Solutions::affine_map_model::first_order_boosted_evolved_variables(
           make_not_null(&model_metric), make_not_null(&model_pi),
