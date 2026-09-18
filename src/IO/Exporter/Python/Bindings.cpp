@@ -6,8 +6,10 @@
 #include <pybind11/stl.h>
 
 #include "DataStructures/Tensor/Tensor.hpp"
+#include "IO/Exporter/ModalSpacetimeInterpolator.hpp"
 #include "IO/Exporter/PointwiseInterpolator.hpp"
 #include "IO/Exporter/SpacetimeInterpolator.hpp"
+#include "IO/Logging/Verbosity.hpp"
 #include "Utilities/CloneUniquePtrs.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/ErrorHandling/SegfaultHandler.hpp"
@@ -93,6 +95,35 @@ void bind_spacetime_interpolator_impl(py::module& m) {
           py::arg("target_point"), py::arg("time"));
 }
 
+template <size_t Dim>
+void bind_modal_spacetime_interpolator_impl(py::module& m) {
+  using ModalSpacetimeInterpolator =
+      spectre::Exporter::ModalSpacetimeInterpolator<Dim, Frame::Inertial>;
+  py::class_<ModalSpacetimeInterpolator>(
+      m, ("ModalSpacetimeInterpolator" + std::to_string(Dim) + "D").c_str())
+      .def(py::init<const std::variant<std::vector<std::string>, std::string>&,
+                    std::vector<std::string>, std::vector<std::string>,
+                    std::optional<double>, std::optional<double>, Verbosity>(),
+           py::arg("volume_files_or_glob"),
+           py::arg("subfiles_in_priority_order"), py::arg("tensor_components"),
+           py::arg("start_time") = std::nullopt,
+           py::arg("end_time") = std::nullopt,
+           py::arg("verbosity") = Verbosity::Quiet)
+      .def("time_bounds", &ModalSpacetimeInterpolator::time_bounds)
+      .def("tensor_components", &ModalSpacetimeInterpolator::tensor_components)
+      .def(
+          "interpolate_to_point",
+          [](const ModalSpacetimeInterpolator& self,
+             const tnsr::I<double, Dim, Frame::Inertial>& target_point,
+             const double time) {
+            std::vector<double> result{};
+            self.interpolate_to_point(make_not_null(&result), target_point,
+                                      time);
+            return result;
+          },
+          py::arg("target_point"), py::arg("time"));
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_Pybindings, m) {  // NOLINT
@@ -109,6 +140,11 @@ PYBIND11_MODULE(_Pybindings, m) {  // NOLINT
            py::arg("epsilon") = 1e-12)
       .def_readonly("value", &spectre::Exporter::ObservationValue::value)
       .def_readonly("epsilon", &spectre::Exporter::ObservationValue::epsilon);
+  py::enum_<Verbosity>(m, "Verbosity")
+      .value("Silent", Verbosity::Silent)
+      .value("Quiet", Verbosity::Quiet)
+      .value("Verbose", Verbosity::Verbose)
+      .value("Debug", Verbosity::Debug);
   bind_interpolate_to_points_impl<1, Frame::Grid>(m);
   bind_interpolate_to_points_impl<2, Frame::Grid>(m);
   bind_interpolate_to_points_impl<3, Frame::Grid>(m);
@@ -124,4 +160,7 @@ PYBIND11_MODULE(_Pybindings, m) {  // NOLINT
   bind_spacetime_interpolator_impl<1>(m);
   bind_spacetime_interpolator_impl<2>(m);
   bind_spacetime_interpolator_impl<3>(m);
+  bind_modal_spacetime_interpolator_impl<1>(m);
+  bind_modal_spacetime_interpolator_impl<2>(m);
+  bind_modal_spacetime_interpolator_impl<3>(m);
 }
