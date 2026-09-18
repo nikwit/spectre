@@ -79,6 +79,27 @@ SectorImposition convert_sector_imposition_from_yaml(
 
 std::ostream& operator<<(std::ostream& os, SectorImposition imposition);
 
+/*!
+ * \brief Which model supplies the radiation entering the domain through the
+ * physical sector.
+ */
+enum class PhysicalModel {
+  /// No model: the physical Bjorhus term forbids incoming radiation, as at an
+  /// outer boundary.
+  None,
+  /// Order zero of the curvature matching: the excised region holds a type-D
+  /// (Kerr) hole. The Kinnersley Coulomb scalar \f$\Psi_2^K = -3J/I\f$ and
+  /// the null rotations aligning the NR tetrad with the principal null
+  /// directions are read off the face curvature pointwise, and the incoming
+  /// mode is \f$\Psi_0 = 6 b^2 \Psi_2^K\f$ (eq. `psi0-leading` of the
+  /// worldtube NP-matching note). Needs no mass, boost or radius.
+  TypeD
+};
+
+PhysicalModel convert_physical_model_from_yaml(const Options::Option& options);
+
+std::ostream& operator<<(std::ostream& os, PhysicalModel model);
+
 /// \brief Per-field imposition of the constraint-preserving sector.
 ///
 /// The sector bundles three structurally different corrections: the
@@ -139,6 +160,50 @@ tnsr::I<double, Dim, Frame::Inertial> excision_sphere_center(
         excision_spheres,
     const ElementId<Dim>& element_id, double time,
     const domain::FunctionsOfTimeMap& functions_of_time);
+
+/*!
+ * \brief The electric and magnetic parts of the Weyl tensor on the face from
+ * the generalized harmonic variables.
+ *
+ * \details The spatial Ricci tensor comes from \f$\Phi\f$ and its derivative
+ * and the covariant derivative of the extrinsic curvature from
+ * `gh::covariant_deriv_of_extrinsic_curvature()`; then
+ * `gr::weyl_electric()` and `gr::weyl_magnetic()`. Unlike the physical
+ * Bjorhus term, no four-index-constraint terms are added to the Ricci tensor:
+ * the model consumes the curvature as it is.
+ */
+void face_weyl_electric_magnetic(
+    gsl::not_null<tnsr::ii<DataVector, 3, Frame::Inertial>*> electric,
+    gsl::not_null<tnsr::ii<DataVector, 3, Frame::Inertial>*> magnetic,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi,
+    const tnsr::ijaa<DataVector, 3, Frame::Inertial>& d_phi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& d_pi,
+    const tnsr::A<DataVector, 3, Frame::Inertial>& spacetime_unit_normal_vector,
+    const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
+    const tnsr::II<DataVector, 3, Frame::Inertial>& inverse_spatial_metric,
+    const tnsr::ii<DataVector, 3, Frame::Inertial>& extrinsic_curvature,
+    const tnsr::AA<DataVector, 3, Frame::Inertial>& inverse_spacetime_metric);
+
+/*!
+ * \brief The incoming Weyl mode \f$U^{8-}_{ij}\f$ of the type-D model, in
+ * the normalization of `gr::weyl_propagating()` with sign \f$-1\f$.
+ *
+ * \details The worldtube-adapted tetrad is built with \f$s\f$ along
+ * `unit_normal_covector`, the outward normal of the domain, which at the
+ * excision points into the hole. In that tetrad the mode entering the domain
+ * is \f$\Psi_0\f$ and
+ * \f$U^{8-}_{ij} = \tfrac12 w^-_{ij}
+ *  = \bar\Psi_0 m_i m_j + \Psi_0 \bar m_i \bar m_j\f$
+ * (checked against `gr::weyl_propagating()` in the unit tests). \f$\Psi_0\f$
+ * is the type-D value \f$6 b^2 \Psi_2^K\f$ measured from the face curvature
+ * by `gr::np::solve_type_d_rotation()`. The result is in covariant coordinate
+ * components.
+ */
+tnsr::ii<DataVector, 3, Frame::Inertial> type_d_incoming_mode(
+    const tnsr::ii<DataVector, 3, Frame::Inertial>& electric,
+    const tnsr::ii<DataVector, 3, Frame::Inertial>& magnetic,
+    const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
+    const tnsr::i<DataVector, 3, Frame::Inertial>& unit_normal_covector);
 }  // namespace gh::BoundaryConditions::detail
 
 namespace gh::BoundaryConditions {
@@ -179,13 +244,16 @@ namespace gh::BoundaryConditions {
  * `detail::PerFieldConstraintSectors`. The field \f$v^+\f$ is always frozen,
  * as in `ConstraintPreservingBjorhus`.
  *
- * With `Bjorhus` for all sectors the physical sector currently drives the
- * incoming Weyl mode \f$U^{8-}\f$ to zero, i.e. it forbids incoming
- * radiation, exactly like the outer-boundary condition. At a worldtube the
- * incoming radiation is the field of the excised hole and has to be
- * supplied; this is the `incoming_weyl_propagating_minus` argument of
- * `Bjorhus::detail::add_physical_terms_to_dt_v_minus()`, to be filled by the
- * worldtube's curvature matching.
+ * The physical sector's Bjorhus term drives the incoming Weyl mode
+ * \f$U^{8-}\f$ towards a value supplied by the `PhysicalModel`. With `None`
+ * that value is zero, i.e. no incoming radiation, exactly like the
+ * outer-boundary condition. With `TypeD` it is the order-zero curvature
+ * matching of the worldtube NP-matching note, see
+ * `detail::type_d_incoming_mode()`: the face curvature is read as a type-D
+ * hole seen from a misaligned tetrad and the radiation such a hole sends into
+ * the domain is supplied. The construction consumes the interior \f$\Psi_0\f$
+ * through the invariants, so the evolution itself is the fixed-point
+ * iteration of the note's circularity discussion.
  *
  * \note Unlike `ConstraintPreservingBjorhus`, this condition does not reject a
  * mesh velocity along the outward normal. At an inner boundary the outward
@@ -235,15 +303,27 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
         "SommerfeldOutgoing is the outer-boundary sign, provided for "
         "comparison. Bjorhus is not implemented."};
   };
-  using options =
-      tmpl::list<ConstraintPreservingSector, PhysicalSector, GaugeSector>;
+  /// \brief Which model supplies the incoming radiation to the physical
+  /// sector's Bjorhus term.
+  struct PhysicalModel {
+    using type = detail::PhysicalModel;
+    static constexpr Options::String help{
+        "The incoming radiation the physical Bjorhus term drives the boundary "
+        "towards: None (no incoming radiation, the outer-boundary condition) "
+        "or TypeD (order zero of the curvature matching: the excised region "
+        "is a type-D hole, Psi0 = 6 b^2 Psi2^K from the face curvature). "
+        "Requires PhysicalSector: Bjorhus."};
+  };
+  using options = tmpl::list<ConstraintPreservingSector, PhysicalSector,
+                             GaugeSector, PhysicalModel>;
   static constexpr Options::String help{
       "Bjorhus-type boundary condition for the inner boundary of a worldtube "
       "around a black hole. Each of the three characteristic sectors of "
       "v_minus is imposed independently, through its Bjorhus time-derivative "
       "correction or not at all (Frozen); the gauge sector can use a "
       "Sommerfeld condition instead. The sectors partition v_minus exactly, "
-      "so the choices are independent."};
+      "so the choices are independent. The physical sector's Bjorhus term "
+      "drives the incoming radiation towards the value of PhysicalModel."};
   static std::string name() { return "WorldtubeTypeD"; }
 
   WorldtubeTypeD(
@@ -251,6 +331,7 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
           constraint_preserving_sector,
       detail::SectorImposition physical_sector,
       detail::SectorImposition gauge_sector,
+      detail::PhysicalModel physical_model,
       const Options::Context& context = {});
 
   WorldtubeTypeD() = default;
@@ -354,6 +435,7 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   }
   detail::SectorImposition physical_sector() const { return physical_sector_; }
   detail::SectorImposition gauge_sector() const { return gauge_sector_; }
+  detail::PhysicalModel physical_model() const { return physical_model_; }
 
  private:
   detail::SectorImposition constraint_v_psi_{detail::SectorImposition::Bjorhus};
@@ -364,6 +446,7 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   detail::SectorImposition physical_sector_{detail::SectorImposition::Bjorhus};
   detail::SectorImposition gauge_sector_{
       detail::SectorImposition::SommerfeldAbsorbing};
+  detail::PhysicalModel physical_model_{detail::PhysicalModel::None};
 };
 
 template <size_t Dim>
@@ -379,6 +462,17 @@ struct Options::create_from_yaml<
   static typename gh::BoundaryConditions::detail::SectorImposition create(
       const Options::Option& options) {
     return gh::BoundaryConditions::detail::convert_sector_imposition_from_yaml(
+        options);
+  }
+};
+
+template <>
+struct Options::create_from_yaml<
+    gh::BoundaryConditions::detail::PhysicalModel> {
+  template <typename Metavariables>
+  static typename gh::BoundaryConditions::detail::PhysicalModel create(
+      const Options::Option& options) {
+    return gh::BoundaryConditions::detail::convert_physical_model_from_yaml(
         options);
   }
 };

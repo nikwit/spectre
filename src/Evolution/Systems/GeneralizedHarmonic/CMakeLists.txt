@@ -61,6 +61,7 @@ target_link_libraries(
   Importers
   Initialization
   LinearOperators
+  NewmanPenrose
   Options
   Serialization
   Spectral
