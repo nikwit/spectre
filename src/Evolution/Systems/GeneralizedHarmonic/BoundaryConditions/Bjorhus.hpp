@@ -115,7 +115,10 @@ namespace gh::BoundaryConditions {
  * `Bjorhus::constraint_preserving_corrections_dt_v_zero()`,
  * `Bjorhus::constraint_preserving_gauge_corrections_dt_v_minus()`, and
  * `Bjorhus::constraint_preserving_gauge_physical_corrections_dt_v_minus()`
- * for the further details on implementation.
+ * for the further details on implementation. The face quantities these
+ * corrections are built from are assembled by
+ * `Bjorhus::compute_intermediate_variables()`, shared with the inner-boundary
+ * `WorldtubeTypeD` condition.
  *
  * \note These boundary conditions assume a spherical outer boundary.
  */
@@ -247,68 +250,6 @@ class ConstraintPreservingBjorhus final : public BoundaryCondition<Dim> {
       double time = std::numeric_limits<double>::signaling_NaN()) const;
 
  private:
-  void compute_intermediate_vars(
-      gsl::not_null<tnsr::I<DataVector, Dim, Frame::Inertial>*>
-          unit_interface_normal_vector,
-      gsl::not_null<tnsr::iaa<DataVector, Dim, Frame::Inertial>*>
-          four_index_constraint,
-      gsl::not_null<tnsr::II<DataVector, Dim, Frame::Inertial>*>
-          inverse_spatial_metric,
-      gsl::not_null<tnsr::ii<DataVector, Dim, Frame::Inertial>*>
-          extrinsic_curvature,
-      gsl::not_null<tnsr::a<DataVector, Dim, Frame::Inertial>*>
-          incoming_null_one_form,
-      gsl::not_null<tnsr::a<DataVector, Dim, Frame::Inertial>*>
-          outgoing_null_one_form,
-      gsl::not_null<tnsr::A<DataVector, Dim, Frame::Inertial>*>
-          incoming_null_vector,
-      gsl::not_null<tnsr::A<DataVector, Dim, Frame::Inertial>*>
-          outgoing_null_vector,
-      gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*> projection_ab,
-      gsl::not_null<tnsr::Ab<DataVector, Dim, Frame::Inertial>*> projection_Ab,
-      gsl::not_null<tnsr::AA<DataVector, Dim, Frame::Inertial>*> projection_AB,
-      gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
-          char_projected_rhs_dt_v_psi,
-      gsl::not_null<tnsr::iaa<DataVector, Dim, Frame::Inertial>*>
-          char_projected_rhs_dt_v_zero,
-      gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
-          char_projected_rhs_dt_v_plus,
-      gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
-          char_projected_rhs_dt_v_minus,
-      gsl::not_null<tnsr::a<DataVector, Dim, Frame::Inertial>*>
-          constraint_char_zero_plus,
-      gsl::not_null<tnsr::a<DataVector, Dim, Frame::Inertial>*>
-          constraint_char_zero_minus,
-      gsl::not_null<std::array<DataVector, 4>*> char_speeds,
-
-      const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
-          face_mesh_velocity,
-      const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_covector,
-      const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
-      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
-      const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
-      const tnsr::I<DataVector, Dim, Frame::Inertial>& coords,
-      const Scalar<DataVector>& gamma1, const Scalar<DataVector>& gamma2,
-      const Scalar<DataVector>& lapse,
-      const tnsr::I<DataVector, Dim, Frame::Inertial>& shift,
-      const tnsr::AA<DataVector, Dim, Frame::Inertial>&
-          inverse_spacetime_metric,
-      const tnsr::A<DataVector, Dim, Frame::Inertial>&
-          spacetime_unit_normal_vector,
-      const tnsr::a<DataVector, Dim, Frame::Inertial>&
-          spacetime_unit_normal_one_form,
-      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& three_index_constraint,
-      const tnsr::a<DataVector, Dim, Frame::Inertial>& gauge_source,
-      const tnsr::ab<DataVector, Dim, Frame::Inertial>&
-          spacetime_deriv_gauge_source,
-      const tnsr::aa<DataVector, Dim, Frame::Inertial>& dt_pi,
-      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& dt_phi,
-      const tnsr::aa<DataVector, Dim, Frame::Inertial>& dt_spacetime_metric,
-      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_pi,
-      const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi,
-      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_spacetime_metric)
-      const;
-
   detail::ConstraintPreservingBjorhusType type_{
       detail::ConstraintPreservingBjorhusType::ConstraintPreservingPhysical};
   std::unique_ptr<::MathFunction<1, Frame::Inertial>> incoming_wave_profile_{};

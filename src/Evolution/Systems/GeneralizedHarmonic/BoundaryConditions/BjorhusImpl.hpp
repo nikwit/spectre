@@ -6,12 +6,14 @@
 #include <array>
 #include <cstddef>
 #include <limits>
+#include <optional>
 
+#include "DataStructures/DataVector.hpp"
+#include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Utilities/ContainerHelpers.hpp"
 
 /// \cond
-class DataVector;
 template <size_t VolumeDim, typename Fr>
 class MathFunction;
 namespace gsl {
@@ -255,7 +257,195 @@ void constraint_preserving_gauge_physical_corrections_dt_v_minus(
     const MathFunction<1, Frame::Inertial>* incoming_wave_profile = nullptr);
 /// @}
 
+/*!
+ * \brief The quantities on an external face that every Bjorhus-type boundary
+ * condition of the generalized harmonic system assembles from the interior
+ * data before adding its own corrections.
+ *
+ * \details Fill with `compute_intermediate_variables()`. The time derivatives
+ * are in the inertial frame: when the face moves, the advective mesh-velocity
+ * term is subtracted from the logical time derivatives supplied by the DG
+ * scheme. The characteristic speeds already account for the mesh velocity, see
+ * `gh::characteristic_speeds()`.
+ *
+ * A boundary condition then computes its corrections to the four
+ * characteristic time derivatives and calls
+ * `project_corrections_onto_evolved_variables()` to obtain the corrections to
+ * the evolved variables. See `ConstraintPreservingBjorhus` and
+ * `WorldtubeTypeD` for the two users.
+ */
+template <size_t Dim>
+struct IntermediateVariables {
+  explicit IntermediateVariables(size_t num_points);
+
+  tnsr::a<DataVector, Dim, Frame::Inertial> spacetime_unit_normal_one_form;
+  tnsr::I<DataVector, Dim, Frame::Inertial> unit_interface_normal_vector;
+  tnsr::iaa<DataVector, Dim, Frame::Inertial> four_index_constraint;
+  tnsr::II<DataVector, Dim, Frame::Inertial> inverse_spatial_metric;
+  tnsr::ii<DataVector, Dim, Frame::Inertial> extrinsic_curvature;
+  tnsr::a<DataVector, Dim, Frame::Inertial> incoming_null_one_form;
+  tnsr::a<DataVector, Dim, Frame::Inertial> outgoing_null_one_form;
+  tnsr::A<DataVector, Dim, Frame::Inertial> incoming_null_vector;
+  tnsr::A<DataVector, Dim, Frame::Inertial> outgoing_null_vector;
+  tnsr::aa<DataVector, Dim, Frame::Inertial> projection_ab;
+  tnsr::Ab<DataVector, Dim, Frame::Inertial> projection_Ab;
+  tnsr::AA<DataVector, Dim, Frame::Inertial> projection_AB;
+  /// Inertial-frame time derivatives of the evolved variables
+  tnsr::aa<DataVector, Dim, Frame::Inertial> dt_spacetime_metric;
+  tnsr::aa<DataVector, Dim, Frame::Inertial> dt_pi;
+  tnsr::iaa<DataVector, Dim, Frame::Inertial> dt_phi;
+  /// Characteristic projections of the inertial-frame time derivatives
+  tnsr::aa<DataVector, Dim, Frame::Inertial> char_projected_rhs_dt_v_psi;
+  tnsr::iaa<DataVector, Dim, Frame::Inertial> char_projected_rhs_dt_v_zero;
+  tnsr::aa<DataVector, Dim, Frame::Inertial> char_projected_rhs_dt_v_plus;
+  tnsr::aa<DataVector, Dim, Frame::Inertial> char_projected_rhs_dt_v_minus;
+  /// \f$c^{\hat 0 \pm}_a = F_a \mp n^k C_{ka}\f$
+  tnsr::a<DataVector, Dim, Frame::Inertial> constraint_char_zero_plus;
+  tnsr::a<DataVector, Dim, Frame::Inertial> constraint_char_zero_minus;
+  std::array<DataVector, 4> char_speeds;
+};
+
+/// \brief Fill an `IntermediateVariables` from the data on the face.
+///
+/// The arguments are the ones a boundary condition receives in its
+/// `dg_time_derivative` for the tags of `ConstraintPreservingBjorhus`.
+template <size_t Dim>
+void compute_intermediate_variables(
+    gsl::not_null<IntermediateVariables<Dim>*> vars,
+    const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
+        face_mesh_velocity,
+    const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_covector,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
+    const Scalar<DataVector>& gamma1, const Scalar<DataVector>& gamma2,
+    const Scalar<DataVector>& lapse,
+    const tnsr::I<DataVector, Dim, Frame::Inertial>& shift,
+    const tnsr::AA<DataVector, Dim, Frame::Inertial>& inverse_spacetime_metric,
+    const tnsr::A<DataVector, Dim, Frame::Inertial>&
+        spacetime_unit_normal_vector,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& three_index_constraint,
+    const tnsr::a<DataVector, Dim, Frame::Inertial>& gauge_source,
+    const tnsr::ab<DataVector, Dim, Frame::Inertial>&
+        spacetime_deriv_gauge_source,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>&
+        logical_dt_spacetime_metric,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& logical_dt_pi,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& logical_dt_phi,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_spacetime_metric,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_pi,
+    const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi);
+
+/// \brief The smallest characteristic speed on the face. When it is
+/// non-negative no characteristic field is incoming anywhere on the face and a
+/// Bjorhus-type boundary condition has nothing to correct.
+double min_characteristic_speed(const std::array<DataVector, 4>& char_speeds);
+
+/*!
+ * \brief Turn corrections to the characteristic time derivatives into
+ * corrections to the time derivatives of the evolved variables.
+ *
+ * \details The corrections are first set to zero at every grid point where
+ * the corresponding characteristic speed is positive, since only incoming
+ * fields receive boundary conditions. They are then transformed with
+ * `gh::evolved_fields_from_characteristic_fields()`, i.e. inverted from the
+ * characteristic projection, c.f. Eqs. (63) - (65) of \cite Lindblom2005qh.
+ * The `bc_dt_v_*` arguments are modified in place by the zeroing.
+ */
+template <size_t Dim>
+void project_corrections_onto_evolved_variables(
+    gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
+        dt_spacetime_metric_correction,
+    gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*> dt_pi_correction,
+    gsl::not_null<tnsr::iaa<DataVector, Dim, Frame::Inertial>*>
+        dt_phi_correction,
+    gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*> bc_dt_v_psi,
+    gsl::not_null<tnsr::iaa<DataVector, Dim, Frame::Inertial>*> bc_dt_v_zero,
+    gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*> bc_dt_v_plus,
+    gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*> bc_dt_v_minus,
+    const std::array<DataVector, 4>& char_speeds,
+    const Scalar<DataVector>& gamma2,
+    const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_covector);
+
 namespace detail {
+/// @{
+/*!
+ * \brief Add \f$c\,X^{\rm sector}_{ab}\f$ to `result`, where
+ * \f$X^{\rm sector}\f$ is the projection of the symmetric source
+ * \f$X_{cd}\f$ onto one of the three characteristic sectors of \f$u^-\f$ and
+ * \f$c\f$ is a scalar coefficient.
+ *
+ * \details The three sectors are the constraint-preserving, physical and
+ * gauge parts of Eq. (64) of \cite Lindblom2005qh, i.e. the tensor structures
+ * multiplying \f$\partial_t v^-_{cd}\f$ in \f$T^{\mathrm C}_{ab}\f$,
+ * \f$T^{\mathrm P}_{ab}\f$ and \f$T^{\mathrm G}_{ab}\f$ (see
+ * `constraint_preserving_gauge_physical_corrections_dt_v_minus()`). The gauge
+ * sector is defined with the sign that makes the three projections partition
+ * the identity on symmetric tensors: they are idempotent, annihilate one
+ * another and sum to the identity. This is what allows a boundary condition
+ * to impose the sectors independently, see `WorldtubeTypeD`.
+ *
+ * \note `add_gauge_sommerfeld_terms_to_dt_v_minus()` applies the negative of
+ * the gauge projection, so that a positive coefficient there reads as the
+ * damping rate of \f$\partial_t u^-|_{\rm gauge}\f$.
+ */
+template <size_t VolumeDim, typename DataType>
+void add_constraint_sector_projection(
+    gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*> result,
+    const DataType& scalar_coefficient,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& outgoing_null_one_form,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& incoming_null_vector,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& projection_ab,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>& projection_AB,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& source);
+
+template <size_t VolumeDim, typename DataType>
+void add_physical_sector_projection(
+    gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*> result,
+    const DataType& scalar_coefficient,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& projection_ab,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::AA<DataType, VolumeDim, Frame::Inertial>& projection_AB,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& source);
+
+template <size_t VolumeDim, typename DataType>
+void add_gauge_sector_projection(
+    gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*> result,
+    const DataType& scalar_coefficient,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& incoming_null_one_form,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& outgoing_null_one_form,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& incoming_null_vector,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& outgoing_null_vector,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& source);
+/// @}
+
+/*!
+ * \brief Add the gauge-sector correction \f$-c\,X^{\rm gauge}_{ab}\f$ to
+ * `bc_dt_v_minus` for a pointwise coefficient \f$c\f$ and a symmetric source
+ * \f$X_{cd}\f$.
+ *
+ * \details With \f$c = \gamma_2 - 1/r\f$ and \f$X = \partial_t v^g\f$ this is
+ * the Sommerfeld gauge condition \f$T^{\mathrm G}_{ab}\f$ of
+ * `constraint_preserving_gauge_physical_corrections_dt_v_minus()`;
+ * `add_gauge_sommerfeld_terms_to_dt_v_minus()` forms that coefficient with the
+ * radius measured from the origin of the inertial coordinates. A boundary
+ * condition whose boundary is not centered at the origin forms the coefficient
+ * itself and calls this function.
+ */
+template <size_t VolumeDim, typename DataType>
+void add_gauge_sector_terms_to_dt_v_minus(
+    gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
+        bc_dt_v_minus,
+    const DataType& scalar_coefficient,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& incoming_null_one_form,
+    const tnsr::a<DataType, VolumeDim, Frame::Inertial>& outgoing_null_one_form,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& incoming_null_vector,
+    const tnsr::A<DataType, VolumeDim, Frame::Inertial>& outgoing_null_vector,
+    const tnsr::Ab<DataType, VolumeDim, Frame::Inertial>& projection_Ab,
+    const tnsr::aa<DataType, VolumeDim, Frame::Inertial>& source);
+
 template <size_t VolumeDim, typename DataType>
 void add_gauge_sommerfeld_terms_to_dt_v_minus(
     const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
@@ -288,6 +478,22 @@ void add_constraint_dependent_terms_to_dt_v_minus(
         char_projected_rhs_dt_v_minus,
     const std::array<DataType, 4>& char_speeds);
 
+/*!
+ * \brief Add the physical correction \f$T^{\mathrm P}_{ab}\f$ of
+ * `constraint_preserving_gauge_physical_corrections_dt_v_minus()` to
+ * `bc_dt_v_minus`.
+ *
+ * \details The incoming Weyl mode \f$U^{8-}_{ij}\f$ is computed from the
+ * interior data on the face. By default the correction drives it to zero (no
+ * incoming gravitational waves), optionally plus the injected wave given by
+ * `incoming_wave_profile`. If `incoming_weyl_propagating_minus` is not null,
+ * it is subtracted from the interior \f$U^{8-}_{ij}\f$ before the correction
+ * is formed, so that the incoming field is driven towards the supplied value
+ * instead. It must be given in the normalization and projection of
+ * `gr::weyl_propagating()` with sign \f$-1\f$, i.e. spatial, symmetric, and
+ * transverse to the face normal. This is how a worldtube boundary condition
+ * supplies the incoming radiation of the excised region.
+ */
 template <size_t VolumeDim, typename DataType>
 void add_physical_terms_to_dt_v_minus(
     const gsl::not_null<tnsr::aa<DataType, VolumeDim, Frame::Inertial>*>
@@ -317,7 +523,9 @@ void add_physical_terms_to_dt_v_minus(
     const tnsr::iaa<DataType, VolumeDim, Frame::Inertial>& d_pi,
     const std::array<DataType, 4>& char_speeds,
     double time = std::numeric_limits<double>::signaling_NaN(),
-    const MathFunction<1, Frame::Inertial>* incoming_wave_profile = nullptr);
+    const MathFunction<1, Frame::Inertial>* incoming_wave_profile = nullptr,
+    const tnsr::ii<DataType, VolumeDim, Frame::Inertial>*
+        incoming_weyl_propagating_minus = nullptr);
 }  // namespace detail
 }  // namespace Bjorhus
 }  // namespace gh::BoundaryConditions

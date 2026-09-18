@@ -8,8 +8,12 @@
 #include <cstddef>
 #include <limits>
 #include <memory>
+#include <random>
+#include <string>
 
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/Tensor/EagerMath/DeterminantAndInverse.hpp"
+#include "DataStructures/Tensor/EagerMath/RaiseOrLowerIndex.hpp"
 #include "DataStructures/Tensor/IndexType.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "Domain/Structure/Direction.hpp"
@@ -18,7 +22,15 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Constraints.hpp"
 #include "Framework/CheckWithRandomValues.hpp"
 #include "Framework/SetupLocalPythonEnvironment.hpp"
+#include "Framework/TestHelpers.hpp"
+#include "Helpers/DataStructures/MakeWithRandomValues.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "PointwiseFunctions/GeneralRelativity/InterfaceNullNormal.hpp"
+#include "PointwiseFunctions/GeneralRelativity/InverseSpacetimeMetric.hpp"
+#include "PointwiseFunctions/GeneralRelativity/ProjectionOperators.hpp"
+#include "PointwiseFunctions/GeneralRelativity/SpacetimeMetric.hpp"
+#include "PointwiseFunctions/GeneralRelativity/SpacetimeNormalOneForm.hpp"
+#include "PointwiseFunctions/GeneralRelativity/SpacetimeNormalVector.hpp"
 #include "PointwiseFunctions/MathFunctions/Sinusoid.hpp"
 #include "Utilities/ContainerHelpers.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
@@ -1421,8 +1433,7 @@ void test_incoming_wave_profile_uses_profile_value_in_3d() {
   auto injected_wave =
       make_with_value<tnsr::aa<DataVector, local_volume_dim, frame>>(
           get(gamma2), 0.0);
-  auto char_speed_3 =
-      make_with_value<Scalar<DataVector>>(get(gamma2), 0.0);
+  auto char_speed_3 = make_with_value<Scalar<DataVector>>(get(gamma2), 0.0);
   get(char_speed_3) = char_speeds[3];
   injected_wave.get(1, 1) = profile_value;
   injected_wave.get(2, 2) = profile_value;
@@ -1583,7 +1594,308 @@ void test_constraint_preserving_gauge_physical_corrections_dt_v_minus(
       "constraint_preserving_gauge_physical_corrections_dt_v_minus",
       {{{-1., 1.}}}, DataVector(grid_size_each_dimension));
 }
+
+// A valid boundary: a perturbation of flat space with a generic unit normal,
+// and the null vectors and projection operators built from it.
+struct BoundaryGeometry {
+  tnsr::i<DataVector, VolumeDim, frame> normal_covector;
+  tnsr::I<DataVector, VolumeDim, frame> normal_vector;
+  Scalar<DataVector> lapse;
+  tnsr::I<DataVector, VolumeDim, frame> shift;
+  tnsr::ii<DataVector, VolumeDim, frame> spatial_metric;
+  tnsr::II<DataVector, VolumeDim, frame> inverse_spatial_metric;
+  tnsr::aa<DataVector, VolumeDim, frame> spacetime_metric;
+  tnsr::AA<DataVector, VolumeDim, frame> inverse_spacetime_metric;
+  tnsr::a<DataVector, VolumeDim, frame> spacetime_normal_one_form;
+  tnsr::A<DataVector, VolumeDim, frame> spacetime_normal_vector;
+  tnsr::aa<DataVector, VolumeDim, frame> projection_ab;
+  tnsr::Ab<DataVector, VolumeDim, frame> projection_Ab;
+  tnsr::AA<DataVector, VolumeDim, frame> projection_AB;
+  tnsr::a<DataVector, VolumeDim, frame> incoming_null_one_form;
+  tnsr::a<DataVector, VolumeDim, frame> outgoing_null_one_form;
+  tnsr::A<DataVector, VolumeDim, frame> incoming_null_vector;
+  tnsr::A<DataVector, VolumeDim, frame> outgoing_null_vector;
+};
+
+template <typename Generator>
+BoundaryGeometry make_boundary_geometry(
+    const gsl::not_null<Generator*> generator, const size_t num_points) {
+  std::uniform_real_distribution<> distribution(-0.1, 0.1);
+  const DataVector used_for_size(num_points);
+  BoundaryGeometry geometry{};
+
+  geometry.spatial_metric =
+      make_with_value<tnsr::ii<DataVector, VolumeDim, frame>>(used_for_size,
+                                                              0.);
+  for (size_t i = 0; i < VolumeDim; ++i) {
+    for (size_t j = i; j < VolumeDim; ++j) {
+      geometry.spatial_metric.get(i, j) = make_with_random_values<DataVector>(
+          generator, make_not_null(&distribution), used_for_size);
+    }
+    geometry.spatial_metric.get(i, i) += 1.;
+  }
+  geometry.inverse_spatial_metric =
+      determinant_and_inverse(geometry.spatial_metric).second;
+  geometry.lapse = make_with_value<Scalar<DataVector>>(used_for_size, 1.);
+  get(geometry.lapse) += make_with_random_values<DataVector>(
+      generator, make_not_null(&distribution), used_for_size);
+  geometry.shift =
+      make_with_random_values<tnsr::I<DataVector, VolumeDim, frame>>(
+          generator, make_not_null(&distribution), used_for_size);
+
+  geometry.normal_covector =
+      make_with_value<tnsr::i<DataVector, VolumeDim, frame>>(used_for_size, 0.);
+  get<0>(geometry.normal_covector) = 1.;
+  get<1>(geometry.normal_covector) = 0.3;
+  get<2>(geometry.normal_covector) = -0.2;
+  DataVector normal_norm(num_points, 0.);
+  for (size_t i = 0; i < VolumeDim; ++i) {
+    for (size_t j = 0; j < VolumeDim; ++j) {
+      normal_norm += geometry.inverse_spatial_metric.get(i, j) *
+                     geometry.normal_covector.get(i) *
+                     geometry.normal_covector.get(j);
+    }
+  }
+  normal_norm = sqrt(normal_norm);
+  for (size_t i = 0; i < VolumeDim; ++i) {
+    geometry.normal_covector.get(i) /= normal_norm;
+  }
+  geometry.normal_vector =
+      make_with_value<tnsr::I<DataVector, VolumeDim, frame>>(used_for_size, 0.);
+  raise_or_lower_index(make_not_null(&geometry.normal_vector),
+                       geometry.normal_covector,
+                       geometry.inverse_spatial_metric);
+
+  geometry.spacetime_metric = gr::spacetime_metric(
+      geometry.lapse, geometry.shift, geometry.spatial_metric);
+  geometry.inverse_spacetime_metric = gr::inverse_spacetime_metric(
+      geometry.lapse, geometry.shift, geometry.inverse_spatial_metric);
+  geometry.spacetime_normal_one_form =
+      gr::spacetime_normal_one_form<DataVector, VolumeDim, frame>(
+          geometry.lapse);
+  geometry.spacetime_normal_vector =
+      gr::spacetime_normal_vector(geometry.lapse, geometry.shift);
+
+  geometry.projection_ab =
+      make_with_value<tnsr::aa<DataVector, VolumeDim, frame>>(used_for_size,
+                                                              0.);
+  geometry.projection_Ab =
+      make_with_value<tnsr::Ab<DataVector, VolumeDim, frame>>(used_for_size,
+                                                              0.);
+  geometry.projection_AB =
+      make_with_value<tnsr::AA<DataVector, VolumeDim, frame>>(used_for_size,
+                                                              0.);
+  gr::transverse_projection_operator(make_not_null(&geometry.projection_ab),
+                                     geometry.spacetime_metric,
+                                     geometry.spacetime_normal_one_form,
+                                     geometry.normal_covector, geometry.shift);
+  gr::transverse_projection_operator(
+      make_not_null(&geometry.projection_Ab), geometry.spacetime_normal_vector,
+      geometry.spacetime_normal_one_form, geometry.normal_vector,
+      geometry.normal_covector, geometry.shift);
+  gr::transverse_projection_operator(
+      make_not_null(&geometry.projection_AB), geometry.inverse_spacetime_metric,
+      geometry.spacetime_normal_vector, geometry.normal_vector);
+
+  geometry.incoming_null_one_form =
+      make_with_value<tnsr::a<DataVector, VolumeDim, frame>>(used_for_size, 0.);
+  geometry.outgoing_null_one_form =
+      make_with_value<tnsr::a<DataVector, VolumeDim, frame>>(used_for_size, 0.);
+  geometry.incoming_null_vector =
+      make_with_value<tnsr::A<DataVector, VolumeDim, frame>>(used_for_size, 0.);
+  geometry.outgoing_null_vector =
+      make_with_value<tnsr::A<DataVector, VolumeDim, frame>>(used_for_size, 0.);
+  gr::interface_null_normal(make_not_null(&geometry.incoming_null_one_form),
+                            geometry.spacetime_normal_one_form,
+                            geometry.normal_covector, geometry.shift, -1.);
+  gr::interface_null_normal(make_not_null(&geometry.outgoing_null_one_form),
+                            geometry.spacetime_normal_one_form,
+                            geometry.normal_covector, geometry.shift, 1.);
+  gr::interface_null_normal(make_not_null(&geometry.incoming_null_vector),
+                            geometry.spacetime_normal_vector,
+                            geometry.normal_vector, -1.);
+  gr::interface_null_normal(make_not_null(&geometry.outgoing_null_vector),
+                            geometry.spacetime_normal_vector,
+                            geometry.normal_vector, 1.);
+  return geometry;
+}
+
+// The constraint-preserving, physical and gauge projections must partition the
+// identity on symmetric tensors. That is what lets a boundary condition impose
+// the three sectors of u^- independently.
+void test_sector_projections_partition_the_identity() {
+  MAKE_GENERATOR(generator);
+  std::uniform_real_distribution<> distribution(-0.1, 0.1);
+  const size_t num_points = 5;
+  const DataVector used_for_size(num_points);
+  const auto geometry =
+      make_boundary_geometry(make_not_null(&generator), num_points);
+  const DataVector unit_coefficient(num_points, 1.);
+
+  const auto project = [&](const std::string& sector,
+                           const tnsr::aa<DataVector, VolumeDim, frame>&
+                               source) {
+    auto result = make_with_value<tnsr::aa<DataVector, VolumeDim, frame>>(
+        used_for_size, 0.);
+    if (sector == "constraint") {
+      gh::BoundaryConditions::Bjorhus::detail::add_constraint_sector_projection(
+          make_not_null(&result), unit_coefficient,
+          geometry.outgoing_null_one_form, geometry.incoming_null_vector,
+          geometry.projection_ab, geometry.projection_Ab,
+          geometry.projection_AB, source);
+    } else if (sector == "physical") {
+      gh::BoundaryConditions::Bjorhus::detail::add_physical_sector_projection(
+          make_not_null(&result), unit_coefficient, geometry.projection_ab,
+          geometry.projection_Ab, geometry.projection_AB, source);
+    } else {
+      gh::BoundaryConditions::Bjorhus::detail::add_gauge_sector_projection(
+          make_not_null(&result), unit_coefficient,
+          geometry.incoming_null_one_form, geometry.outgoing_null_one_form,
+          geometry.incoming_null_vector, geometry.outgoing_null_vector,
+          geometry.projection_Ab, source);
+    }
+    return result;
+  };
+
+  const auto source =
+      make_with_random_values<tnsr::aa<DataVector, VolumeDim, frame>>(
+          make_not_null(&generator), make_not_null(&distribution),
+          used_for_size);
+  const std::array<std::string, 3> sectors{{"constraint", "physical", "gauge"}};
+
+  auto sum = make_with_value<tnsr::aa<DataVector, VolumeDim, frame>>(
+      used_for_size, 0.);
+  for (const auto& sector : sectors) {
+    const auto piece = project(sector, source);
+    for (size_t a = 0; a <= VolumeDim; ++a) {
+      for (size_t b = a; b <= VolumeDim; ++b) {
+        sum.get(a, b) += piece.get(a, b);
+      }
+    }
+  }
+  CHECK_ITERABLE_APPROX(sum, source);
+
+  const auto zero = make_with_value<tnsr::aa<DataVector, VolumeDim, frame>>(
+      used_for_size, 0.);
+  for (const auto& sector : sectors) {
+    const auto piece = project(sector, source);
+    CHECK_ITERABLE_APPROX(project(sector, piece), piece);
+    for (const auto& other : sectors) {
+      if (other != sector) {
+        CHECK_ITERABLE_APPROX(project(other, piece), zero);
+      }
+    }
+  }
+
+  // The gauge Sommerfeld term applies minus the gauge projection
+  {
+    auto sommerfeld = make_with_value<tnsr::aa<DataVector, VolumeDim, frame>>(
+        used_for_size, 0.);
+    gh::BoundaryConditions::Bjorhus::detail::
+        add_gauge_sector_terms_to_dt_v_minus(
+            make_not_null(&sommerfeld), unit_coefficient,
+            geometry.incoming_null_one_form, geometry.outgoing_null_one_form,
+            geometry.incoming_null_vector, geometry.outgoing_null_vector,
+            geometry.projection_Ab, source);
+    auto expected = project("gauge", source);
+    for (auto& component : expected) {
+      component *= -1.;
+    }
+    CHECK_ITERABLE_APPROX(sommerfeld, expected);
+  }
+}
+
+// Supplying an incoming Weyl mode shifts the physical correction by exactly
+// minus the characteristic speed times the transverse-traceless projection of
+// that mode, independently of the interior data.
+void test_physical_terms_with_supplied_incoming_mode() {
+  MAKE_GENERATOR(generator);
+  std::uniform_real_distribution<> distribution(-0.1, 0.1);
+  const size_t num_points = 5;
+  const DataVector used_for_size(num_points);
+  const auto geometry =
+      make_boundary_geometry(make_not_null(&generator), num_points);
+  const auto random = [&](auto tensor_type) {
+    using T = decltype(tensor_type);
+    return make_with_random_values<T>(
+        make_not_null(&generator), make_not_null(&distribution), used_for_size);
+  };
+  const auto gamma2 = random(Scalar<DataVector>{});
+  const auto extrinsic_curvature =
+      random(tnsr::ii<DataVector, VolumeDim, frame>{});
+  const auto three_index_constraint =
+      random(tnsr::iaa<DataVector, VolumeDim, frame>{});
+  const auto char_projected_rhs_dt_v_minus =
+      random(tnsr::aa<DataVector, VolumeDim, frame>{});
+  const auto phi = random(tnsr::iaa<DataVector, VolumeDim, frame>{});
+  const auto d_phi = random(tnsr::ijaa<DataVector, VolumeDim, frame>{});
+  const auto d_pi = random(tnsr::iaa<DataVector, VolumeDim, frame>{});
+  const auto incoming_mode = random(tnsr::ii<DataVector, VolumeDim, frame>{});
+  const std::array<DataVector, 4> char_speeds{
+      {DataVector(num_points, -0.3), DataVector(num_points, -0.4),
+       DataVector(num_points, -0.5), DataVector(num_points, -0.7)}};
+
+  const auto physical_terms = [&](const tnsr::ii<DataVector, VolumeDim,
+                                                 frame>* const incoming) {
+    auto result = make_with_value<tnsr::aa<DataVector, VolumeDim, frame>>(
+        used_for_size, 0.);
+    gh::BoundaryConditions::Bjorhus::detail::add_physical_terms_to_dt_v_minus(
+        make_not_null(&result), gamma2, geometry.normal_covector,
+        geometry.normal_vector, geometry.spacetime_normal_vector,
+        geometry.projection_ab, geometry.projection_Ab, geometry.projection_AB,
+        geometry.inverse_spatial_metric, extrinsic_curvature,
+        geometry.spacetime_metric, geometry.inverse_spacetime_metric,
+        three_index_constraint, char_projected_rhs_dt_v_minus, phi, d_phi, d_pi,
+        char_speeds, 0.0, nullptr, incoming);
+    return result;
+  };
+  const auto without = physical_terms(nullptr);
+  const auto with = physical_terms(&incoming_mode);
+  const auto zero_mode =
+      make_with_value<tnsr::ii<DataVector, VolumeDim, frame>>(used_for_size,
+                                                              0.);
+  CHECK_ITERABLE_APPROX(physical_terms(&zero_mode), without);
+
+  // Expected difference: -lambda_- (P^c_a P^d_b - 1/2 P_ab P^cd)
+  //                        2 P^i_c P^j_d X_ij
+  auto u3_of_mode = make_with_value<tnsr::aa<DataVector, VolumeDim, frame>>(
+      used_for_size, 0.);
+  for (size_t a = 0; a <= VolumeDim; ++a) {
+    for (size_t b = a; b <= VolumeDim; ++b) {
+      for (size_t i = 0; i < VolumeDim; ++i) {
+        for (size_t j = 0; j < VolumeDim; ++j) {
+          u3_of_mode.get(a, b) += 2. * geometry.projection_Ab.get(i + 1, a) *
+                                  geometry.projection_Ab.get(j + 1, b) *
+                                  incoming_mode.get(i, j);
+        }
+      }
+    }
+  }
+  auto expected_difference =
+      make_with_value<tnsr::aa<DataVector, VolumeDim, frame>>(used_for_size,
+                                                              0.);
+  gh::BoundaryConditions::Bjorhus::detail::add_physical_sector_projection(
+      make_not_null(&expected_difference), DataVector{-char_speeds[3]},
+      geometry.projection_ab, geometry.projection_Ab, geometry.projection_AB,
+      u3_of_mode);
+  auto difference = with;
+  for (size_t a = 0; a <= VolumeDim; ++a) {
+    for (size_t b = a; b <= VolumeDim; ++b) {
+      difference.get(a, b) -= without.get(a, b);
+    }
+  }
+  CHECK_ITERABLE_APPROX(difference, expected_difference);
+}
 }  // namespace
+
+// Pure algebra with no python dependency, so it stays runnable when the pypp
+// comparisons cannot run.
+SPECTRE_TEST_CASE(
+    "Unit.Evolution.Systems.GeneralizedHarmonic.BCBjorhus.SectorProjections",
+    "[Unit][Evolution]") {
+  test_sector_projections_partition_the_identity();
+  test_physical_terms_with_supplied_incoming_mode();
+}
 
 SPECTRE_TEST_CASE("Unit.Evolution.Systems.GeneralizedHarmonic.BCBjorhus.VPsi",
                   "[Unit][Evolution]") {
