@@ -45,6 +45,7 @@ class Cli(click.Group):
             "status",
             "transform-volume-data",
             "validate",
+            "validate-modal-spacetime-interpolator",
         ]
 
     def get_command(self, ctx, name):
@@ -118,6 +119,12 @@ class Cli(click.Group):
             )
 
             return interpolate_to_points_command
+        elif name == "validate-modal-spacetime-interpolator":
+            from spectre.IO.Exporter.ValidateModalSpacetimeInterpolator import (
+                validate_modal_spacetime_interpolator_command,
+            )
+
+            return validate_modal_spacetime_interpolator_command
         elif name == "interpolate-to-mesh":
             from spectre.IO.H5.InterpolateToMesh import (
                 interpolate_to_mesh_command,
