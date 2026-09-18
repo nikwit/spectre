@@ -47,5 +47,6 @@ target_link_libraries(
   Utilities
 )
 
+add_subdirectory(NewmanPenrose)
 add_subdirectory(Python)
 add_subdirectory(Surfaces)
