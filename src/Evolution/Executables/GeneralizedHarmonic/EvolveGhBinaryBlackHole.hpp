@@ -72,6 +72,7 @@
 #include "Evolution/Systems/GeneralizedHarmonic/SpectralFilter.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Actions/UpdateKretschmannFaceData.hpp"
 #include "Evolution/Triggers/SeparationLessThan.hpp"
 #include "Evolution/TypeTraits.hpp"
 #include "IO/Importers/Actions/RegisterWithElementDataReader.hpp"
@@ -591,6 +592,8 @@ struct EvolutionMetavars {
                  Parallel::Phase::Exit};
 
   using step_actions = tmpl::list<
+      Actions::MutateApply<
+          gh::worldtube::UpdateKretschmannFaceData<volume_dim>>,
       evolution::dg::Actions::ComputeTimeDerivative<
           volume_dim, system, AllStepChoosers, use_dg_element_collection>,
       evolution::dg::Actions::ApplyBoundaryCorrectionsToTimeDerivative<
@@ -625,6 +628,8 @@ struct EvolutionMetavars {
                                           Frame::Inertial>,
           typename system::gradient_variables>>>,
       gh::Actions::InitializeGhAnd3Plus1Variables<volume_dim>,
+      Initialization::Actions::InitializeItems<
+          gh::worldtube::Initialization::KretschmannFaceData<volume_dim>>,
       Initialization::Actions::AddComputeTags<
           StepChoosers::step_chooser_compute_tags<EvolutionMetavars>>,
       Initialization::Actions::AddSimpleTags<
@@ -734,7 +739,8 @@ struct EvolutionMetavars {
             evolution::dg::Tags::Quadrature,
             Tags::StepperErrors<typename system::variables_tag>,
             SelfStart::Tags::InitialValue<typename system::variables_tag>,
-            SelfStart::Tags::InitialValue<Tags::TimeStep>>,
+            SelfStart::Tags::InitialValue<Tags::TimeStep>,
+            gh::worldtube::Tags::KretschmannFaceData<volume_dim>>,
         ::amr::projectors::CopyFromCreatorOrLeaveAsIs<tmpl::push_back<
             tmpl::append<
                 typename control_system::Actions::InitializeMeasurements<

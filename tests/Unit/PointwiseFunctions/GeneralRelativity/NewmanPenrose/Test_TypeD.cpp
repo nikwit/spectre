@@ -95,6 +95,33 @@ void test_type_d() {
       pull_back(exact.psi, exact_rotation.a_bar, exact_rotation.b),
       kinnersley_scalars(exact_coulomb), custom_approx);
 }
+
+// A tetrad already aligned with the principal null directions: Psi1 and
+// Psi3 vanish up to roundoff, so a_bar = x / b is a ratio of roundoff-sized
+// numbers. The solve must return the aligned rotation, not O(1) noise.
+void test_aligned_limit() {
+  const size_t num_points = 3;
+  const std::complex<double> coulomb_value{-0.064, 0.};
+  Scalar<ComplexDataVector> coulomb(num_points, coulomb_value);
+  WeylScalars psi(num_points, std::complex<double>{0., 0.});
+  // Deterministic roundoff-sized contamination: Psi2 off by 1e-14 relative,
+  // Psi1 and Psi3 at 1e-15 of the Coulomb scalar
+  for (size_t p = 0; p < num_points; ++p) {
+    psi.get(2)[p] = coulomb_value * (1. + 1.e-14);
+    psi.get(1)[p] = 1.e-15 * std::abs(coulomb_value);
+    psi.get(3)[p] = -1.e-15 * std::abs(coulomb_value);
+  }
+  const TypeDRotation rotation = solve_type_d_rotation(psi, coulomb);
+  for (size_t p = 0; p < num_points; ++p) {
+    CHECK(get(rotation.a_bar)[p] == std::complex<double>{0., 0.});
+    CHECK(std::abs(get(rotation.b)[p]) < 1.e-14);
+  }
+  CHECK_ITERABLE_CUSTOM_APPROX(rotation.predicted_psi, psi,
+                               Approx::custom().epsilon(1.e-12).scale(0.1));
+  // Without the alignment threshold the same input amplifies the roundoff
+  const TypeDRotation unregularized = solve_type_d_rotation(psi, coulomb, 0.);
+  CHECK(std::abs(get(unregularized.a_bar)[0]) > 0.1);
+}
 }  // namespace
 
 SPECTRE_TEST_CASE("Unit.PointwiseFunctions.Gr.NewmanPenrose.TypeD",
@@ -102,5 +129,6 @@ SPECTRE_TEST_CASE("Unit.PointwiseFunctions.Gr.NewmanPenrose.TypeD",
   pypp::SetupLocalPythonEnvironment local_python_env{
       "PointwiseFunctions/GeneralRelativity/NewmanPenrose/"};
   test_type_d();
+  test_aligned_limit();
 }
 }  // namespace gr::np

@@ -42,6 +42,8 @@
 #include "Evolution/Systems/GeneralizedHarmonic/SpectralFilter.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Actions/UpdateKretschmannFaceData.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Events/ObserveWorldtubeMatching.hpp"
 #include "Evolution/TypeTraits.hpp"
 #include "IO/Importers/Actions/RegisterWithElementDataReader.hpp"
 #include "IO/Importers/ElementDataReader.hpp"
@@ -304,7 +306,11 @@ struct FactoryCreation : tt::ConformsTo<Options::protocols::FactoryCreation> {
               typename detail::ObserverTags<volume_dim>::field_observations,
               Events::time_events<system>,
               dg::Events::ObserveTimeStepVolume<system>,
-              dg::Events::ChangeFixedLtsRatio<volume_dim>>>>,
+              dg::Events::ChangeFixedLtsRatio<volume_dim>,
+              tmpl::conditional_t<
+                  volume_dim == 3,
+                  tmpl::list<gh::worldtube::Events::ObserveWorldtubeMatching>,
+                  tmpl::list<>>>>>,
       tmpl::pair<
           evolution::BoundaryCorrection,
           gh::BoundaryCorrections::standard_boundary_corrections<volume_dim>>,
@@ -391,6 +397,8 @@ struct GeneralizedHarmonicTemplateBase {
 
   template <typename DerivedMetavars, typename ControlSystems>
   using step_actions = tmpl::list<
+      Actions::MutateApply<
+          gh::worldtube::UpdateKretschmannFaceData<volume_dim>>,
       evolution::dg::Actions::ComputeTimeDerivative<
           volume_dim, system, AllStepChoosers, use_dg_element_collection>,
       evolution::dg::Actions::ApplyBoundaryCorrectionsToTimeDerivative<
@@ -427,6 +435,8 @@ struct GeneralizedHarmonicTemplateBase {
           typename system::gradient_variables,
           domain::Tags::Coordinates<volume_dim, Frame::Inertial>>>,
       gh::Actions::InitializeGhAnd3Plus1Variables<volume_dim>,
+      Initialization::Actions::InitializeItems<
+          gh::worldtube::Initialization::KretschmannFaceData<volume_dim>>,
       Initialization::Actions::AddComputeTags<
           StepChoosers::step_chooser_compute_tags<
               GeneralizedHarmonicTemplateBase>>,

@@ -11,27 +11,18 @@
 #include <unordered_map>
 #include <variant>
 
-#include "DataStructures/ComplexDataVector.hpp"
 #include "DataStructures/DataVector.hpp"
-#include "DataStructures/Tensor/EagerMath/Determinant.hpp"
-#include "DataStructures/Tensor/EagerMath/RaiseOrLowerIndex.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "Domain/CoordinateMaps/CoordinateMap.hpp"
 #include "Domain/Domain.hpp"
 #include "Domain/ExcisionSphere.hpp"
 #include "Domain/Structure/Element.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/BjorhusImpl.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matching.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/WeylCurvature.hpp"
 #include "Options/ParseError.hpp"
 #include "Options/ParseOptions.hpp"
-#include "PointwiseFunctions/GeneralRelativity/Christoffel.hpp"
-#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/CovariantDerivOfExtrinsicCurvature.hpp"
-#include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/Ricci.hpp"
-#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/NullRotations.hpp"
-#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Tetrad.hpp"
-#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/TypeD.hpp"
-#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Types.hpp"
-#include "PointwiseFunctions/GeneralRelativity/WeylElectric.hpp"
-#include "PointwiseFunctions/GeneralRelativity/WeylMagnetic.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
@@ -89,29 +80,6 @@ std::ostream& operator<<(std::ostream& os, const SectorImposition imposition) {
   }
 }
 
-PhysicalModel convert_physical_model_from_yaml(const Options::Option& options) {
-  const auto read = options.parse_as<std::string>();
-  if (read == "None") {
-    return PhysicalModel::None;
-  } else if (read == "TypeD") {
-    return PhysicalModel::TypeD;
-  }
-  PARSE_ERROR(options.context(),
-              "Failed to convert input option to a physical model. Must be "
-              "one of None or TypeD.");
-}
-
-std::ostream& operator<<(std::ostream& os, const PhysicalModel model) {
-  switch (model) {
-    case PhysicalModel::None:
-      return os << "None";
-    case PhysicalModel::TypeD:
-      return os << "TypeD";
-    default:
-      ERROR("Unknown PhysicalModel");
-  }
-}
-
 PerFieldConstraintSectors::PerFieldConstraintSectors(
     const SectorImposition v_psi_in, const SectorImposition v_zero_in,
     const SectorImposition v_minus_in)
@@ -146,77 +114,19 @@ tnsr::I<double, Dim, Frame::Inertial> excision_sphere_center(
         << excision_spheres.size() << " excision sphere(s).");
 }
 
-void face_weyl_electric_magnetic(
-    const gsl::not_null<tnsr::ii<DataVector, 3, Frame::Inertial>*> electric,
-    const gsl::not_null<tnsr::ii<DataVector, 3, Frame::Inertial>*> magnetic,
-    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi,
-    const tnsr::ijaa<DataVector, 3, Frame::Inertial>& d_phi,
-    const tnsr::iaa<DataVector, 3, Frame::Inertial>& d_pi,
-    const tnsr::A<DataVector, 3, Frame::Inertial>& spacetime_unit_normal_vector,
-    const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
-    const tnsr::II<DataVector, 3, Frame::Inertial>& inverse_spatial_metric,
-    const tnsr::ii<DataVector, 3, Frame::Inertial>& extrinsic_curvature,
-    const tnsr::AA<DataVector, 3, Frame::Inertial>& inverse_spacetime_metric) {
-  const size_t num_points = get_size(get<0, 0>(spatial_metric));
-  // d_k gamma_ij = Phi_kij
-  tnsr::ijj<DataVector, 3, Frame::Inertial> d_spatial_metric(num_points);
-  for (size_t k = 0; k < 3; ++k) {
-    for (size_t i = 0; i < 3; ++i) {
-      for (size_t j = i; j < 3; ++j) {
-        d_spatial_metric.get(k, i, j) = phi.get(k, i + 1, j + 1);
-      }
-    }
-  }
-  const auto christoffel_second_kind = raise_or_lower_first_index(
-      gr::christoffel_first_kind(d_spatial_metric), inverse_spatial_metric);
-  const auto cov_deriv_extrinsic_curvature =
-      gh::covariant_deriv_of_extrinsic_curvature(
-          extrinsic_curvature, spacetime_unit_normal_vector,
-          christoffel_second_kind, inverse_spacetime_metric, phi, d_pi, d_phi);
-  const auto ricci =
-      gh::spatial_ricci_tensor(phi, d_phi, inverse_spatial_metric);
-  gr::weyl_electric(electric, ricci, extrinsic_curvature,
-                    inverse_spatial_metric);
-  const Scalar<DataVector> sqrt_det_spatial_metric{
-      sqrt(get(determinant(spatial_metric)))};
-  gr::weyl_magnetic(magnetic, cov_deriv_extrinsic_curvature, spatial_metric,
-                    sqrt_det_spatial_metric);
-}
-
 tnsr::ii<DataVector, 3, Frame::Inertial> type_d_incoming_mode(
     const tnsr::ii<DataVector, 3, Frame::Inertial>& electric,
     const tnsr::ii<DataVector, 3, Frame::Inertial>& magnetic,
     const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
     const tnsr::i<DataVector, 3, Frame::Inertial>& unit_normal_covector) {
-  // The adapted triad takes the Euclidean direction of the sphere normal
-  // covector; s is then that covector normalized with the metric, i.e. the
-  // face normal pointing out of the domain.
-  tnsr::I<DataVector, 3, Frame::Inertial> directions(
-      get_size(get<0>(unit_normal_covector)), 0.);
-  const DataVector euclidean_norm = sqrt(square(get<0>(unit_normal_covector)) +
-                                         square(get<1>(unit_normal_covector)) +
-                                         square(get<2>(unit_normal_covector)));
-  for (size_t i = 0; i < 3; ++i) {
-    directions.get(i) = unit_normal_covector.get(i) / euclidean_norm;
-  }
-  const gr::np::RealMatrix rotation =
-      gr::np::adapted_triad(spatial_metric, directions);
-  const gr::np::WeylScalars psi = gr::np::weyl_scalars_from_electric_magnetic(
-      electric, magnetic, spatial_metric, directions);
-  const Scalar<ComplexDataVector> coulomb = gr::np::coulomb_scalar(
-      gr::np::invariant_i(psi), gr::np::invariant_j(psi));
-  const gr::np::TypeDRotation type_d_rotation =
-      gr::np::solve_type_d_rotation(psi, coulomb);
-  const Scalar<ComplexDataVector> psi0 =
-      gr::np::psi0_leading(coulomb, type_d_rotation.b);
-  // U^{8-} = w^- / 2 in covariant coordinate components
-  auto mode = gr::np::orthonormal_to_coordinate_covariant(
-      gr::np::incoming_weyl_field(psi0, rotation),
-      gr::np::cholesky_factor(spatial_metric));
-  for (auto& component : mode) {
-    component *= 0.5;
-  }
-  return mode;
+  // Lapse, shift and face data are not consumed by the type-D model
+  const Scalar<DataVector> unused_lapse{};
+  const tnsr::I<DataVector, 3, Frame::Inertial> unused_shift{};
+  return worldtube::evaluate_matching(worldtube::PhysicalModel::TypeD,
+                                      std::nullopt, electric, magnetic,
+                                      spatial_metric, unit_normal_covector,
+                                      unused_lapse, unused_shift, nullptr)
+      .incoming_mode;
 }
 }  // namespace detail
 
@@ -240,7 +150,8 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
         constraint_preserving_sector,
     const detail::SectorImposition physical_sector,
     const detail::SectorImposition gauge_sector,
-    const detail::PhysicalModel physical_model, const Options::Context& context)
+    const detail::PhysicalModel physical_model,
+    const std::optional<double> mass, const Options::Context& context)
     : constraint_v_psi_(
           resolve_constraint_sectors(constraint_preserving_sector).v_psi),
       constraint_v_zero_(
@@ -249,7 +160,8 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
           resolve_constraint_sectors(constraint_preserving_sector).v_minus),
       physical_sector_(physical_sector),
       gauge_sector_(gauge_sector),
-      physical_model_(physical_model) {
+      physical_model_(physical_model),
+      mass_(mass) {
   if (gauge_sector_ == detail::SectorImposition::Bjorhus) {
     PARSE_ERROR(context,
                 "GaugeSector: Bjorhus is not implemented. A relaxation towards "
@@ -282,6 +194,21 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
                        "sector, but PhysicalSector is "
                     << physical_sector_ << ". Use PhysicalSector: Bjorhus.");
   }
+  if (physical_model_ == detail::PhysicalModel::Quadrupole) {
+    if (not mass_.has_value()) {
+      PARSE_ERROR(context,
+                  "PhysicalModel: Quadrupole needs the mass of the excised "
+                  "hole. Set Mass.");
+    }
+    if (*mass_ <= 0.) {
+      PARSE_ERROR(context, "Mass must be positive, not " << *mass_);
+    }
+  } else if (mass_.has_value()) {
+    PARSE_ERROR(context,
+                "Mass is only used by PhysicalModel: Quadrupole, but "
+                "PhysicalModel is "
+                    << physical_model_ << ". Set Mass: None.");
+  }
   if constexpr (Dim != 3) {
     if (physical_model_ != detail::PhysicalModel::None) {
       PARSE_ERROR(context,
@@ -310,6 +237,7 @@ void WorldtubeTypeD<Dim>::pup(PUP::er& p) {
   p | physical_sector_;
   p | gauge_sector_;
   p | physical_model_;
+  p | mass_;
 }
 
 template <size_t Dim>
@@ -346,7 +274,8 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
     const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_pi,
     const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi,
     const double time, const Domain<Dim>& domain, const Element<Dim>& element,
-    const domain::FunctionsOfTimeMap& functions_of_time) const {
+    const domain::FunctionsOfTimeMap& functions_of_time,
+    const worldtube::KretschmannFaceData<Dim>& face_data) const {
   const size_t num_points = get_size(get<0>(normal_covector));
   Bjorhus::IntermediateVariables<Dim> vars{num_points};
   Bjorhus::compute_intermediate_variables(
@@ -448,7 +377,7 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
   if (physical_sector_ == detail::SectorImposition::Bjorhus) {
     // The incoming Weyl mode the model supplies, if any
     std::optional<tnsr::ii<DataVector, Dim, Frame::Inertial>> incoming_mode{};
-    if (physical_model_ == detail::PhysicalModel::TypeD) {
+    if (physical_model_ != detail::PhysicalModel::None) {
       if constexpr (Dim == 3) {
         tnsr::ii<DataVector, Dim, Frame::Inertial> spatial_metric(num_points);
         for (size_t i = 0; i < Dim; ++i) {
@@ -458,15 +387,20 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
         }
         tnsr::ii<DataVector, Dim, Frame::Inertial> electric{};
         tnsr::ii<DataVector, Dim, Frame::Inertial> magnetic{};
-        detail::face_weyl_electric_magnetic(
+        worldtube::weyl_electric_magnetic(
             make_not_null(&electric), make_not_null(&magnetic), phi, d_phi,
             d_pi, spacetime_unit_normal_vector, spatial_metric,
             vars.inverse_spatial_metric, vars.extrinsic_curvature,
             inverse_spacetime_metric);
-        incoming_mode = detail::type_d_incoming_mode(
-            electric, magnetic, spatial_metric, normal_covector);
+        incoming_mode =
+            worldtube::evaluate_matching(
+                physical_model_, mass_, electric, magnetic, spatial_metric,
+                normal_covector, lapse, shift, &face_data)
+                .incoming_mode;
       } else {
-        ERROR("PhysicalModel: TypeD is only implemented in 3 dimensions.");
+        (void)face_data;
+        ERROR("PhysicalModel: " << physical_model_
+                                << " is only implemented in 3 dimensions.");
       }
     }
     Bjorhus::detail::add_physical_terms_to_dt_v_minus(
@@ -533,7 +467,8 @@ bool operator==(const WorldtubeTypeD<Dim>& lhs,
          lhs.constraint_v_minus() == rhs.constraint_v_minus() and
          lhs.physical_sector() == rhs.physical_sector() and
          lhs.gauge_sector() == rhs.gauge_sector() and
-         lhs.physical_model() == rhs.physical_model();
+         lhs.physical_model() == rhs.physical_model() and
+         lhs.mass() == rhs.mass();
 }
 
 template <size_t Dim>

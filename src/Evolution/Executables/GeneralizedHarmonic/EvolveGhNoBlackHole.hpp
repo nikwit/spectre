@@ -10,6 +10,7 @@
 #include "Evolution/DiscontinuousGalerkin/EqualRateLts/ChangeFixedLtsRatio.hpp"
 #include "Evolution/DiscontinuousGalerkin/Initialization/ProjectSpectralFilters.hpp"
 #include "Evolution/Executables/GeneralizedHarmonic/GeneralizedHarmonicBase.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
 #include "Options/Protocols/FactoryCreation.hpp"
 #include "Options/String.hpp"
 #include "Parallel/ArrayCollection/DgElementCollection.hpp"
@@ -114,7 +115,8 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<VolumeDim> {
             evolution::dg::Tags::Quadrature,
             Tags::StepperErrors<typename system::variables_tag>,
             SelfStart::Tags::InitialValue<typename system::variables_tag>,
-            SelfStart::Tags::InitialValue<Tags::TimeStep>>,
+            SelfStart::Tags::InitialValue<Tags::TimeStep>,
+            gh::worldtube::Tags::KretschmannFaceData<volume_dim>>,
         ::amr::projectors::CopyFromCreatorOrLeaveAsIs<
             evolution::dg::Tags::ChangeFixedLtsRatio::NumberOfExpectedMessages,
             evolution::dg::Tags::ChangeFixedLtsRatio::NewStepSize,

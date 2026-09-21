@@ -1,0 +1,309 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+Executable: EvolveGhSingleBlackHole
+# A Kerr-Schild hole excised OUTSIDE its horizon (r_h = 2M) by a worldtube of
+# coordinate radius 2.5M, with one spherical-harmonic element owning the whole
+# excision face. The inner boundary condition is the worldtube curvature
+# matching (WorldtubeTypeD) with the order-zero type-D model, i.e. the
+# radiation entering the domain is the one a Kerr hole seen from the face
+# curvature sends in. On the exact Kerr-Schild solution the model target
+# equals the face's Psi0, so the MaxTypeDMismatch column of the
+# WorldtubeMatching diagnostics measures truncation error plus the feedback of
+# the boundary condition on itself. Switch PhysicalModel to Quadrupole with
+# Mass: 1.0 for the order-two model (the Kretschmann face data it needs are
+# computed by the executable before every time-derivative evaluation).
+Testing:
+  Check: parse;execute
+  Timeout: 120
+  Priority: High
+ExpectedOutput:
+  - GhKerrSchildWorldtubeVolume0.h5
+  - GhKerrSchildWorldtubeReductions.h5
+
+---
+
+Parallelization:
+  ElementDistribution: NumGridPointsAndGridSpacing
+
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
+
+Evolution:
+  InitialTime: 0.0
+  # Global time stepping: the local-time-stepping step choosers do not
+  # support the spherical-harmonic angular basis of the shells.
+  InitialTimeStep: &time_step 0.0005
+  InitialSlabSize: *time_step
+  MinimumTimeStep: 1e-7
+  LocalTimeStepping: Off
+  VariableOrderAlgorithm:
+    GoalOrder: 4
+  LtsStepChoosers:
+  TimeStepper:
+    AdamsBashforth:
+      Order: 4
+
+Amr:
+  Criteria:
+  EnableInBlocks: All
+  Policies:
+    EnforceTwoToOneBalanceInNormalDirection: true
+    Isotropy: Anisotropic
+    Limits:
+      RefinementLevel: Auto
+      NumGridPoints: Auto
+      ErrorBeyondLimits: False
+    AllowCoarsening: True
+  Verbosity: Quiet
+
+PhaseChangeAndTriggers:
+  - Trigger:
+      Slabs:
+       EvenlySpaced:
+         # Current implementation checks wallclock at these global syncs
+         Interval: 100
+         Offset: 0
+    PhaseChanges:
+      - CheckpointAndExitAfterWallclock:
+          WallclockHours: None
+
+InitialData: &InitialData
+  GeneralizedHarmonic(KerrSchild):
+    Mass: 1.0
+    Spin: [0.0, 0.0, 0.0]
+    Center: &Center [0.0, 0.0, 0.0]
+    Velocity: [0.0, 0.0, 0.0]
+
+DomainCreator:
+  SphericalShells:
+    InnerRadius: &InnerRadius 2.5
+    OuterRadius: 40.0
+    InitialRadialRefinement: 2
+    # The order-two model and its diagnostics need the gradient of the
+    # Kretschmann scalar, a third derivative of the metric: at 8 radial
+    # points on this innermost shell the invariant boost is off by tens of
+    # percent, at 12 it is accurate to 1e-3.
+    InitialNumberOfRadialGridPoints: 12
+    InitialSphericalHarmonicL: 10
+    RadialPartitioning: []
+    RadialDistribution: Logarithmic
+    TimeDependentMaps: None
+    InnerBoundaryCondition:
+      WorldtubeTypeD:
+        ConstraintPreservingSector: Bjorhus
+        PhysicalSector: Bjorhus
+        # Model-free gauge condition absorbing waves into the hole; Frozen
+        # imposes no gauge condition at all.
+        GaugeSector: SommerfeldAbsorbing
+        # None: no incoming radiation (the outer-boundary condition).
+        # TypeD: order zero of the curvature matching, needs no Mass.
+        # Quadrupole: order two, needs Mass.
+        PhysicalModel: TypeD
+        Mass: None
+    OuterBoundaryCondition:
+      ConstraintPreservingBjorhus:
+        Type: ConstraintPreservingPhysical
+        IncomingWaveProfile: None
+
+EvolutionSystem:
+  GeneralizedHarmonic:
+    GaugeCondition:
+      AnalyticChristoffel:
+        AnalyticPrescription: *InitialData
+    # The parameter choices here come from our experience with the Spectral
+    # Einstein Code (SpEC). They should be suitable for evolutions of a
+    # perturbation of a Kerr-Schild black hole.
+    DampingFunctionGamma0:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 3.0
+        Width: 11.313708499
+        Center: [0.0, 0.0, 0.0]
+    DampingFunctionGamma1:
+      GaussianPlusConstant:
+        Constant: -1.0
+        Amplitude: 0.0
+        Width: 11.313708499
+        Center: [0.0, 0.0, 0.0]
+    DampingFunctionGamma2:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 1.0
+        Width: 11.313708499
+        Center: [0.0, 0.0, 0.0]
+
+SpatialDiscretization:
+  BoundaryCorrection:
+    AveragedUpwindPenalty:
+  DiscontinuousGalerkin:
+    Formulation: StrongInertial
+    Quadrature: GaussLobatto
+    Filtering:
+      - Hypercube:
+          HalfPower: 64
+          Enable: true
+          BlocksToFilter: All
+          VolumeFilterOnSubstep: true
+          BoundaryCorrectionFilterOnSubstep: false
+          VolumeFilterEveryNSteps: None
+          BoundaryCorrectionFilterEveryNSteps: None
+      - SphericalShell:
+          NumModesToKill: 1
+          AngularHalfPower: 64
+          RadialHalfPower: 64
+          Enable: true
+          BlocksToFilter: All
+          VolumeFilterOnSubstep: true
+          BoundaryCorrectionFilterOnSubstep: false
+          VolumeFilterEveryNSteps: None
+          BoundaryCorrectionFilterEveryNSteps: None
+
+EventsAndTriggersAtCheckpoints:
+
+EventsAndTriggersAtSlabs:
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 2
+          Offset: 0
+    Events:
+      - ObserveTimeStep:
+          SubfileName: TimeSteps
+          PrintTimeToTerminal: True
+          ObservePerCore: False
+      - ObserveNorms:
+          SubfileName: Errors
+          TensorsToObserve:
+            - Name: Error(SpacetimeMetric)
+              NormType: L2Norm
+              Components: Sum
+            - Name: Error(Pi)
+              NormType: L2Norm
+              Components: Sum
+            - Name: Error(Phi)
+              NormType: L2Norm
+              Components: Sum
+      - ObserveNorms:
+          SubfileName: Norms
+          TensorsToObserve:
+          - Name: Lapse
+            NormType: L2Norm
+            Components: Individual
+          - Name: PointwiseL2Norm(GaugeConstraint)
+            NormType: L2Norm
+            Components: Sum
+          - Name: PointwiseL2Norm(ThreeIndexConstraint)
+            NormType: L2Norm
+            Components: Sum
+          - Name: PointwiseL2Norm(FourIndexConstraint)
+            NormType: L2Norm
+            Components: Sum
+      # Diagnostics of the curvature matching on the excision face. With a
+      # Mass the order-two model is evaluated as well, whether or not the
+      # boundary condition uses it.
+      - ObserveWorldtubeMatching:
+          SubfileName: WorldtubeMatching
+          Mass: 1.0
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 5
+          Offset: 0
+    Events:
+      - ObserveFields:
+          SubfileName: VolumeData
+          VariablesToObserve:
+            - SpacetimeMetric
+            - Pi
+            - Phi
+            - GaugeH
+            - PointwiseL2Norm(GaugeConstraint)
+            - PointwiseL2Norm(ThreeIndexConstraint)
+            - PointwiseL2Norm(FourIndexConstraint)
+          InterpolateToMesh: None
+          ProjectToMesh: None
+          CoordinatesFloatingPointType: Double
+          FloatingPointTypes: [Double]
+          BlocksToObserve: All
+  - Trigger:
+      Slabs:
+        Specified:
+          Values: [5]
+    Events:
+      - Completion
+
+EventsAndTriggersAtSteps:
+
+EventsAndDenseTriggers:
+
+EventsRunAtCleanup:
+  ObservationValue: -1000.0
+  Events:
+    - ObserveTimeStepVolume:
+        SubfileName: FailureTimeStep
+        FloatingPointType: Double
+        CoordinatesFloatingPointType: Float
+
+Observers:
+  VolumeFileName: "GhKerrSchildWorldtubeVolume"
+  ReductionFileName: "GhKerrSchildWorldtubeReductions"
+  SurfaceFileName: "GhKerrSchildWorldtubeSurfaces"
+
+Interpolator:
+  Verbosity: Silent
+
+ApparentHorizons:
+  LMax: 10
+  ApparentHorizon: &Ah
+    Criteria:
+      - Residual:
+          MinResidual: 1.e-2
+          MaxResidual: 1.e-1
+          MinResolutionL: 4
+    InitialGuess:
+      InitialL: &LMax 8
+      InitialShape:
+        Sphere:
+          Radius: 2.2
+          Center: *Center
+    FastFlow:
+      Flow: Fast
+      Alpha: 1.0
+      Beta: 0.5
+      AbsTol: 1e-12
+      TruncationTol: 1e-2
+      DivergenceTol: 1.2
+      DivergenceIter: 5
+      MaxIts: 100
+    Verbosity: Verbose
+    MaxComputeCoordsRetries: 3
+    BlocksForHorizonFind: All
+  ControlSystemSingleAh: *Ah
+  ControlSystemCharSpeedAh: *Ah
+
+InterpolationTargets:
+  BondiSachsInterpolation:
+    LMax: 16
+    Radius: [100, 150, 200]
+    Center: [0, 0, 0]
+    AngularOrdering: Cce
+  ExcisionBoundary: &ExBdry
+    LMax: *LMax
+    Center: *Center
+    Radius: *InnerRadius
+    AngularOrdering: "Strahlkorper"
+  ControlSystemCharSpeedExcision: *ExBdry
+
+Cce:
+  BondiSachsOutputFilePrefix: "BondiSachs"
+
+ControlSystems:
+  WriteDataToDisk: true
+  MeasurementsPerUpdate: 4
+  DelayUpdate: true
+  Verbosity: Silent
+  Translation: None
+  Shape: None
+  Size: None

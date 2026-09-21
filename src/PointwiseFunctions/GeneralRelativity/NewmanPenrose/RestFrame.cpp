@@ -111,7 +111,7 @@ TangentBoostMember tangent_boost_member(const Scalar<ComplexDataVector>& a_bar,
   return member;
 }
 
-Scalar<DataVector> invariant_rapidity(
+Scalar<DataVector> invariant_tanh_rapidity(
     const TangentBoostMember& member, const RealMatrix& adapted_rotation,
     const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
     const Scalar<DataVector>& lapse,
@@ -121,7 +121,7 @@ Scalar<DataVector> invariant_rapidity(
   const size_t num_points = get_size(get(lapse));
   const RealMatrix cholesky_inverse =
       inverse_lower_triangular(cholesky_factor(spatial_metric));
-  Scalar<DataVector> rapidity(num_points, 0.);
+  Scalar<DataVector> tanh_rapidity(num_points, 0.);
   for (size_t p = 0; p < num_points; ++p) {
     double normal_gradient = get(time_derivative)[p];
     for (size_t i = 0; i < 3; ++i) {
@@ -146,9 +146,24 @@ Scalar<DataVector> invariant_rapidity(
       radial_gradient += member.radial_direction.get(i)[p] * adapted;
       tangential += member.transverse_velocity.get(i)[p] * adapted;
     }
-    const double tanh_rapidity = -get(member.lorentz_factor)[p] *
-                                 (normal_gradient + tangential) /
-                                 radial_gradient;
+    get(tanh_rapidity)[p] = -get(member.lorentz_factor)[p] *
+                            (normal_gradient + tangential) / radial_gradient;
+  }
+  return tanh_rapidity;
+}
+
+Scalar<DataVector> invariant_rapidity(
+    const TangentBoostMember& member, const RealMatrix& adapted_rotation,
+    const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
+    const Scalar<DataVector>& lapse,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& shift,
+    const tnsr::i<DataVector, 3, Frame::Inertial>& spatial_gradient,
+    const Scalar<DataVector>& time_derivative) {
+  Scalar<DataVector> rapidity =
+      invariant_tanh_rapidity(member, adapted_rotation, spatial_metric, lapse,
+                              shift, spatial_gradient, time_derivative);
+  for (size_t p = 0; p < get_size(get(rapidity)); ++p) {
+    const double tanh_rapidity = get(rapidity)[p];
     if (std::abs(tanh_rapidity) >= 1.) {
       ERROR("Invariant-boost rapidity is not physical at point "
             << p << ": tanh(eta) = " << tanh_rapidity);

@@ -23,6 +23,9 @@
 #include "Evolution/BoundaryConditions/Type.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/BoundaryCondition.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matching.hpp"
+#include "Options/Auto.hpp"
 #include "Options/Context.hpp"
 #include "Options/Options.hpp"
 #include "Options/String.hpp"
@@ -79,26 +82,9 @@ SectorImposition convert_sector_imposition_from_yaml(
 
 std::ostream& operator<<(std::ostream& os, SectorImposition imposition);
 
-/*!
- * \brief Which model supplies the radiation entering the domain through the
- * physical sector.
- */
-enum class PhysicalModel {
-  /// No model: the physical Bjorhus term forbids incoming radiation, as at an
-  /// outer boundary.
-  None,
-  /// Order zero of the curvature matching: the excised region holds a type-D
-  /// (Kerr) hole. The Kinnersley Coulomb scalar \f$\Psi_2^K = -3J/I\f$ and
-  /// the null rotations aligning the NR tetrad with the principal null
-  /// directions are read off the face curvature pointwise, and the incoming
-  /// mode is \f$\Psi_0 = 6 b^2 \Psi_2^K\f$ (eq. `psi0-leading` of the
-  /// worldtube NP-matching note). Needs no mass, boost or radius.
-  TypeD
-};
-
-PhysicalModel convert_physical_model_from_yaml(const Options::Option& options);
-
-std::ostream& operator<<(std::ostream& os, PhysicalModel model);
+/// The model of the radiation entering the domain through the physical
+/// sector, see `gh::worldtube::PhysicalModel`.
+using PhysicalModel = worldtube::PhysicalModel;
 
 /// \brief Per-field imposition of the constraint-preserving sector.
 ///
@@ -162,41 +148,14 @@ tnsr::I<double, Dim, Frame::Inertial> excision_sphere_center(
     const domain::FunctionsOfTimeMap& functions_of_time);
 
 /*!
- * \brief The electric and magnetic parts of the Weyl tensor on the face from
- * the generalized harmonic variables.
- *
- * \details The spatial Ricci tensor comes from \f$\Phi\f$ and its derivative
- * and the covariant derivative of the extrinsic curvature from
- * `gh::covariant_deriv_of_extrinsic_curvature()`; then
- * `gr::weyl_electric()` and `gr::weyl_magnetic()`. Unlike the physical
- * Bjorhus term, no four-index-constraint terms are added to the Ricci tensor:
- * the model consumes the curvature as it is.
- */
-void face_weyl_electric_magnetic(
-    gsl::not_null<tnsr::ii<DataVector, 3, Frame::Inertial>*> electric,
-    gsl::not_null<tnsr::ii<DataVector, 3, Frame::Inertial>*> magnetic,
-    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi,
-    const tnsr::ijaa<DataVector, 3, Frame::Inertial>& d_phi,
-    const tnsr::iaa<DataVector, 3, Frame::Inertial>& d_pi,
-    const tnsr::A<DataVector, 3, Frame::Inertial>& spacetime_unit_normal_vector,
-    const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
-    const tnsr::II<DataVector, 3, Frame::Inertial>& inverse_spatial_metric,
-    const tnsr::ii<DataVector, 3, Frame::Inertial>& extrinsic_curvature,
-    const tnsr::AA<DataVector, 3, Frame::Inertial>& inverse_spacetime_metric);
-
-/*!
  * \brief The incoming Weyl mode \f$U^{8-}_{ij}\f$ of the type-D model, in
  * the normalization of `gr::weyl_propagating()` with sign \f$-1\f$.
  *
- * \details The worldtube-adapted tetrad is built with \f$s\f$ along
- * `unit_normal_covector`, the outward normal of the domain, which at the
- * excision points into the hole. In that tetrad the mode entering the domain
- * is \f$\Psi_0\f$ and
- * \f$U^{8-}_{ij} = \tfrac12 w^-_{ij}
- *  = \bar\Psi_0 m_i m_j + \Psi_0 \bar m_i \bar m_j\f$
- * (checked against `gr::weyl_propagating()` in the unit tests). \f$\Psi_0\f$
- * is the type-D value \f$6 b^2 \Psi_2^K\f$ measured from the face curvature
- * by `gr::np::solve_type_d_rotation()`. The result is in covariant coordinate
+ * \details `gh::worldtube::evaluate_matching()` with
+ * `gh::worldtube::PhysicalModel::TypeD`: the worldtube-adapted tetrad is
+ * built with \f$s\f$ along `unit_normal_covector`, the outward normal of the
+ * domain, and \f$\Psi_0\f$ is the type-D value \f$6 b^2 \Psi_2^K\f$
+ * measured from the face curvature. The result is in covariant coordinate
  * components.
  */
 tnsr::ii<DataVector, 3, Frame::Inertial> type_d_incoming_mode(
@@ -251,9 +210,13 @@ namespace gh::BoundaryConditions {
  * matching of the worldtube NP-matching note, see
  * `detail::type_d_incoming_mode()`: the face curvature is read as a type-D
  * hole seen from a misaligned tetrad and the radiation such a hole sends into
- * the domain is supplied. The construction consumes the interior \f$\Psi_0\f$
- * through the invariants, so the evolution itself is the fixed-point
- * iteration of the note's circularity discussion.
+ * the domain is supplied. With `Quadrupole` the hole additionally carries a
+ * quadrupolar tide fitted to the face's \f$\Psi_4\f$ in the invariant rest
+ * frame, order two of the matching; this needs the `Mass` option and the
+ * Kretschmann face data that `gh::worldtube::UpdateKretschmannFaceData`
+ * supplies before each time-derivative evaluation. The construction consumes
+ * the interior \f$\Psi_0\f$ through the invariants, so the evolution itself
+ * is the fixed-point iteration of the note's circularity discussion.
  *
  * \note Unlike `ConstraintPreservingBjorhus`, this condition does not reject a
  * mesh velocity along the outward normal. At an inner boundary the outward
@@ -309,13 +272,26 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
     using type = detail::PhysicalModel;
     static constexpr Options::String help{
         "The incoming radiation the physical Bjorhus term drives the boundary "
-        "towards: None (no incoming radiation, the outer-boundary condition) "
-        "or TypeD (order zero of the curvature matching: the excised region "
-        "is a type-D hole, Psi0 = 6 b^2 Psi2^K from the face curvature). "
-        "Requires PhysicalSector: Bjorhus."};
+        "towards: None (no incoming radiation, the outer-boundary condition), "
+        "TypeD (order zero of the curvature matching: the excised region "
+        "is a type-D hole, Psi0 = 6 b^2 Psi2^K from the face curvature) or "
+        "Quadrupole (order two: the type-D hole carries a quadrupolar tide "
+        "fitted to Psi4 over the face, in the invariant rest frame fixed by "
+        "the gradient of the Kretschmann scalar; needs Mass and the "
+        "UpdateKretschmannFaceData action). Requires PhysicalSector: "
+        "Bjorhus."};
+  };
+  /// \brief The mass of the excised hole, needed by `PhysicalModel:
+  /// Quadrupole` for the tidal profiles and the background radius.
+  struct Mass {
+    using type = Options::Auto<double, Options::AutoLabel::None>;
+    static constexpr Options::String help{
+        "The mass of the excised hole. Required by PhysicalModel: Quadrupole "
+        "(tidal radial profiles and the areal radius of the worldtube), None "
+        "otherwise."};
   };
   using options = tmpl::list<ConstraintPreservingSector, PhysicalSector,
-                             GaugeSector, PhysicalModel>;
+                             GaugeSector, PhysicalModel, Mass>;
   static constexpr Options::String help{
       "Bjorhus-type boundary condition for the inner boundary of a worldtube "
       "around a black hole. Each of the three characteristic sectors of "
@@ -332,6 +308,7 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
       detail::SectorImposition physical_sector,
       detail::SectorImposition gauge_sector,
       detail::PhysicalModel physical_model,
+      std::optional<double> mass = std::nullopt,
       const Options::Context& context = {});
 
   WorldtubeTypeD() = default;
@@ -381,7 +358,8 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
                                Frame::Inertial>>;
   using dg_gridless_tags =
       tmpl::list<::Tags::Time, domain::Tags::Domain<Dim>,
-                 domain::Tags::Element<Dim>, domain::Tags::FunctionsOfTime>;
+                 domain::Tags::Element<Dim>, domain::Tags::FunctionsOfTime,
+                 worldtube::Tags::KretschmannFaceData<Dim>>;
 
   std::optional<std::string> dg_time_derivative(
       gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
@@ -422,7 +400,8 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
       const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi,
       // c.f. dg_gridless_tags
       double time, const Domain<Dim>& domain, const Element<Dim>& element,
-      const domain::FunctionsOfTimeMap& functions_of_time) const;
+      const domain::FunctionsOfTimeMap& functions_of_time,
+      const worldtube::KretschmannFaceData<Dim>& face_data) const;
 
   detail::SectorImposition constraint_v_psi() const {
     return constraint_v_psi_;
@@ -436,6 +415,7 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   detail::SectorImposition physical_sector() const { return physical_sector_; }
   detail::SectorImposition gauge_sector() const { return gauge_sector_; }
   detail::PhysicalModel physical_model() const { return physical_model_; }
+  const std::optional<double>& mass() const { return mass_; }
 
  private:
   detail::SectorImposition constraint_v_psi_{detail::SectorImposition::Bjorhus};
@@ -447,6 +427,7 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   detail::SectorImposition gauge_sector_{
       detail::SectorImposition::SommerfeldAbsorbing};
   detail::PhysicalModel physical_model_{detail::PhysicalModel::None};
+  std::optional<double> mass_{};
 };
 
 template <size_t Dim>
@@ -462,17 +443,6 @@ struct Options::create_from_yaml<
   static typename gh::BoundaryConditions::detail::SectorImposition create(
       const Options::Option& options) {
     return gh::BoundaryConditions::detail::convert_sector_imposition_from_yaml(
-        options);
-  }
-};
-
-template <>
-struct Options::create_from_yaml<
-    gh::BoundaryConditions::detail::PhysicalModel> {
-  template <typename Metavariables>
-  static typename gh::BoundaryConditions::detail::PhysicalModel create(
-      const Options::Option& options) {
-    return gh::BoundaryConditions::detail::convert_physical_model_from_yaml(
         options);
   }
 };

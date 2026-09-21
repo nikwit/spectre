@@ -35,6 +35,10 @@
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/BjorhusImpl.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/BoundaryCondition.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/WorldtubeTypeD.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matching.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/WeylCurvature.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/WorldtubeTestHelpers.hpp"
 #include "Framework/TestCreation.hpp"
 #include "Framework/TestHelpers.hpp"
 #include "Helpers/DataStructures/MakeWithRandomValues.hpp"
@@ -48,6 +52,8 @@
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/Ricci.hpp"
 #include "PointwiseFunctions/GeneralRelativity/InverseSpacetimeMetric.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/NullRotations.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Psi4Fit.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/RestFrame.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Tetrad.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/TypeD.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Types.hpp"
@@ -206,7 +212,8 @@ Corrections make_corrections(const size_t num_points) {
 Corrections apply_worldtube(
     const Worldtube& boundary_condition, const FaceData& data,
     const double time, const Domain<Dim>& domain, const Element<Dim>& element,
-    const domain::FunctionsOfTimeMap& functions_of_time) {
+    const domain::FunctionsOfTimeMap& functions_of_time,
+    const gh::worldtube::KretschmannFaceData<Dim>& face_data = {}) {
   auto corrections = make_corrections(get_size(get(data.lapse)));
   const auto error = boundary_condition.dg_time_derivative(
       make_not_null(&corrections.dt_spacetime_metric),
@@ -218,7 +225,7 @@ Corrections apply_worldtube(
       data.gauge_source, data.spacetime_deriv_gauge_source,
       data.dt_spacetime_metric, data.dt_pi, data.dt_phi,
       data.d_spacetime_metric, data.d_pi, data.d_phi, time, domain, element,
-      functions_of_time);
+      functions_of_time, face_data);
   CHECK_FALSE(error.has_value());
   return corrections;
 }
@@ -290,7 +297,8 @@ void test_option_parsing_and_serialization() {
         "  ConstraintPreservingSector: Bjorhus\n"
         "  PhysicalSector: Frozen\n"
         "  GaugeSector: SommerfeldAbsorbing\n"
-        "  PhysicalModel: None");
+        "  PhysicalModel: None\n"
+        "  Mass: None");
     const auto* const worldtube = dynamic_cast<const Worldtube*>(created.get());
     REQUIRE(worldtube != nullptr);
     CHECK(worldtube->constraint_v_psi() == Imposition::Bjorhus);
@@ -318,7 +326,8 @@ void test_option_parsing_and_serialization() {
         "    VMinus: Frozen\n"
         "  PhysicalSector: Bjorhus\n"
         "  GaugeSector: Frozen\n"
-        "  PhysicalModel: None");
+        "  PhysicalModel: None\n"
+        "  Mass: None");
     const auto* const worldtube = dynamic_cast<const Worldtube*>(created.get());
     REQUIRE(worldtube != nullptr);
     CHECK(worldtube->constraint_v_psi() == Imposition::Frozen);
@@ -331,7 +340,12 @@ void test_option_parsing_and_serialization() {
                               Worldtube>(
       gh::BoundaryConditions::detail::PerFieldConstraintSectors{
           Imposition::Frozen, Imposition::Bjorhus, Imposition::Bjorhus},
-      Imposition::Frozen, Imposition::SommerfeldOutgoing, Model::None);
+      Imposition::Frozen, Imposition::SommerfeldOutgoing, Model::None,
+      std::nullopt);
+  test_serialization_via_base<gh::BoundaryConditions::BoundaryCondition<Dim>,
+                              Worldtube>(
+      Imposition::Bjorhus, Imposition::Bjorhus, Imposition::Frozen,
+      Model::Quadrupole, std::optional<double>{1.0});
 
   CHECK_THROWS_WITH(
       (TestHelpers::test_creation<
@@ -340,7 +354,8 @@ void test_option_parsing_and_serialization() {
                          "  ConstraintPreservingSector: Bjorhus\n"
                          "  PhysicalSector: Bjorhus\n"
                          "  GaugeSector: Bjorhus\n"
-                         "  PhysicalModel: None")),
+                         "  PhysicalModel: None\n"
+                         "  Mass: None")),
       Catch::Matchers::ContainsSubstring("GaugeSector: Bjorhus is not"));
   CHECK_THROWS_WITH(
       (TestHelpers::test_creation<
@@ -349,7 +364,8 @@ void test_option_parsing_and_serialization() {
                          "  ConstraintPreservingSector: Bjorhus\n"
                          "  PhysicalSector: SommerfeldAbsorbing\n"
                          "  GaugeSector: Frozen\n"
-                         "  PhysicalModel: None")),
+                         "  PhysicalModel: None\n"
+                         "  Mass: None")),
       Catch::Matchers::ContainsSubstring(
           "PhysicalSector: the Sommerfeld conditions apply only"));
   CHECK_THROWS_WITH(
@@ -359,7 +375,8 @@ void test_option_parsing_and_serialization() {
                          "  ConstraintPreservingSector: Ghost\n"
                          "  PhysicalSector: Bjorhus\n"
                          "  GaugeSector: Frozen\n"
-                         "  PhysicalModel: None")),
+                         "  PhysicalModel: None\n"
+                         "  Mass: None")),
       Catch::Matchers::ContainsSubstring("Must be one of Bjorhus, Frozen"));
   CHECK_THROWS_WITH(
       (TestHelpers::test_creation<
@@ -368,7 +385,8 @@ void test_option_parsing_and_serialization() {
                          "  ConstraintPreservingSector: Bjorhus\n"
                          "  PhysicalSector: Frozen\n"
                          "  GaugeSector: Frozen\n"
-                         "  PhysicalModel: TypeD")),
+                         "  PhysicalModel: TypeD\n"
+                         "  Mass: None")),
       Catch::Matchers::ContainsSubstring("Use PhysicalSector: Bjorhus"));
   {
     const auto created = TestHelpers::test_creation<
@@ -378,11 +396,64 @@ void test_option_parsing_and_serialization() {
         "  ConstraintPreservingSector: Bjorhus\n"
         "  PhysicalSector: Bjorhus\n"
         "  GaugeSector: SommerfeldAbsorbing\n"
-        "  PhysicalModel: TypeD");
+        "  PhysicalModel: TypeD\n"
+        "  Mass: None");
     const auto* const worldtube = dynamic_cast<const Worldtube*>(created.get());
     REQUIRE(worldtube != nullptr);
     CHECK(worldtube->physical_model() == Model::TypeD);
+    CHECK_FALSE(worldtube->mass().has_value());
   }
+  {
+    const auto created = TestHelpers::test_creation<
+        std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+        Metavariables>(
+        "WorldtubeTypeD:\n"
+        "  ConstraintPreservingSector: Bjorhus\n"
+        "  PhysicalSector: Bjorhus\n"
+        "  GaugeSector: SommerfeldAbsorbing\n"
+        "  PhysicalModel: Quadrupole\n"
+        "  Mass: 1.0");
+    const auto* const worldtube = dynamic_cast<const Worldtube*>(created.get());
+    REQUIRE(worldtube != nullptr);
+    CHECK(worldtube->physical_model() == Model::Quadrupole);
+    CHECK(worldtube->mass() == std::optional<double>{1.0});
+    CHECK(*worldtube == Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                                  Imposition::SommerfeldAbsorbing,
+                                  Model::Quadrupole, 1.0});
+    CHECK(*worldtube != Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                                  Imposition::SommerfeldAbsorbing,
+                                  Model::Quadrupole, 2.0});
+  }
+  CHECK_THROWS_WITH(
+      (TestHelpers::test_creation<
+          std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+          Metavariables>("WorldtubeTypeD:\n"
+                         "  ConstraintPreservingSector: Bjorhus\n"
+                         "  PhysicalSector: Bjorhus\n"
+                         "  GaugeSector: Frozen\n"
+                         "  PhysicalModel: Quadrupole\n"
+                         "  Mass: None")),
+      Catch::Matchers::ContainsSubstring("Quadrupole needs the mass"));
+  CHECK_THROWS_WITH(
+      (TestHelpers::test_creation<
+          std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+          Metavariables>("WorldtubeTypeD:\n"
+                         "  ConstraintPreservingSector: Bjorhus\n"
+                         "  PhysicalSector: Bjorhus\n"
+                         "  GaugeSector: Frozen\n"
+                         "  PhysicalModel: TypeD\n"
+                         "  Mass: 1.0")),
+      Catch::Matchers::ContainsSubstring("Mass is only used by"));
+  CHECK_THROWS_WITH(
+      (TestHelpers::test_creation<
+          std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+          Metavariables>("WorldtubeTypeD:\n"
+                         "  ConstraintPreservingSector: Bjorhus\n"
+                         "  PhysicalSector: Bjorhus\n"
+                         "  GaugeSector: Frozen\n"
+                         "  PhysicalModel: Quadrupole\n"
+                         "  Mass: -1.0")),
+      Catch::Matchers::ContainsSubstring("Mass must be positive"));
 }
 
 // With every sector imposed by its Bjorhus correction and the outgoing
@@ -786,7 +857,7 @@ void test_type_d_model_on_boosted_kerr_schild() {
 
   tnsr::ii<DataVector, Dim, frame> electric{};
   tnsr::ii<DataVector, Dim, frame> magnetic{};
-  gh::BoundaryConditions::detail::face_weyl_electric_magnetic(
+  gh::worldtube::weyl_electric_magnetic(
       make_not_null(&electric), make_not_null(&magnetic), data.phi, data.d_phi,
       data.d_pi, data.spacetime_unit_normal_vector, spatial_metric,
       inverse_spatial_metric, extrinsic_curvature,
@@ -902,6 +973,136 @@ void test_type_d_model_on_boosted_kerr_schild() {
   add_to(make_not_null(&difference.dt_phi), without_model.dt_phi, -1.);
   check_corrections_equal(difference, expected_difference);
 }
+
+// The Kerr-Schild hole carries no tide, so the order-two model must find no
+// tidal moments and reproduce the order-zero target; the invariant rapidity
+// must boost the tangent member to the rest frame of the hole.
+void test_quadrupole_model_on_boosted_kerr_schild() {
+  MAKE_GENERATOR(generator);
+  const size_t num_points = 8;
+  const std::array<double, 3> velocity{{0.2, -0.1, 0.15}};
+  const auto data =
+      kerr_schild_face_data(make_not_null(&generator), num_points);
+  tnsr::ii<DataVector, Dim, frame> spatial_metric(num_points, 0.);
+  for (size_t i = 0; i < Dim; ++i) {
+    for (size_t j = i; j < Dim; ++j) {
+      spatial_metric.get(i, j) = data.spacetime_metric.get(i + 1, j + 1);
+    }
+  }
+  const auto det_and_inverse = determinant_and_inverse(spatial_metric);
+  const auto& inverse_spatial_metric = det_and_inverse.second;
+  const auto extrinsic_curvature = gh::extrinsic_curvature(
+      data.spacetime_unit_normal_vector, data.pi, data.phi);
+  tnsr::ii<DataVector, Dim, frame> electric{};
+  tnsr::ii<DataVector, Dim, frame> magnetic{};
+  gh::worldtube::weyl_electric_magnetic(
+      make_not_null(&electric), make_not_null(&magnetic), data.phi, data.d_phi,
+      data.d_pi, data.spacetime_unit_normal_vector, spatial_metric,
+      inverse_spatial_metric, extrinsic_curvature,
+      data.inverse_spacetime_metric);
+
+  // The Kretschmann scalar of the face curvature is 48 M^2 / r'^6 with r' the
+  // rest-frame radius
+  const auto analytic =
+      TestHelpers::gh_worldtube::boosted_kretschmann(data.coords, velocity, 0.);
+  CHECK_ITERABLE_CUSTOM_APPROX(get(gh::worldtube::kretschmann_scalar(
+                                   electric, magnetic, inverse_spatial_metric)),
+                               get(analytic.kretschmann),
+                               Approx::custom().epsilon(1.e-6).scale(
+                                   max(abs(get(analytic.kretschmann)))));
+
+  gh::worldtube::KretschmannFaceData<Dim> face_data{};
+  face_data.direction = Direction<Dim>::lower_zeta();
+  face_data.time = 0.;
+  face_data.kretschmann = analytic.kretschmann;
+  face_data.d_kretschmann = analytic.d_kretschmann;
+  face_data.dt_kretschmann = analytic.dt_kretschmann;
+  face_data.quadrature_weights = DataVector(num_points, 1. / num_points);
+
+  const auto quadrupole = gh::worldtube::evaluate_matching(
+      Model::Quadrupole, 1.0, electric, magnetic, spatial_metric,
+      data.normal_covector, data.lapse, data.shift, &face_data);
+  const auto type_d = gh::worldtube::evaluate_matching(
+      Model::TypeD, std::nullopt, electric, magnetic, spatial_metric,
+      data.normal_covector, data.lapse, data.shift, nullptr);
+  REQUIRE(quadrupole.rapidity.has_value());
+  REQUIRE(quadrupole.registration.has_value());
+  REQUIRE(quadrupole.second_order.has_value());
+
+  // Rest frame: u = cosh(eta) Gamma (n + w) + sinh(eta) r_hat, with the
+  // tangent member (Gamma, w, r_hat) in the adapted triad, moves with the
+  // boost velocity of the hole
+  const auto& member = quadrupole.registration->member;
+  const auto& rotation = quadrupole.adapted_rotation;
+  const auto cholesky_inverse =
+      gr::np::inverse_lower_triangular(gr::np::cholesky_factor(spatial_metric));
+  Approx velocity_approx = Approx::custom().epsilon(1.e-5).scale(1.);
+  for (size_t p = 0; p < num_points; ++p) {
+    const double eta = get(*quadrupole.rapidity)[p];
+    const double gamma = get(member.lorentz_factor)[p];
+    std::array<double, 3> u_triad{};
+    for (size_t a = 0; a < 3; ++a) {
+      gsl::at(u_triad, a) =
+          std::cosh(eta) * gamma * member.transverse_velocity.get(a)[p] +
+          std::sinh(eta) * member.radial_direction.get(a)[p];
+    }
+    const double u_0 = std::cosh(eta) * gamma / get(data.lapse)[p];
+    for (size_t i = 0; i < 3; ++i) {
+      double u_i = -data.shift.get(i)[p] * u_0;
+      for (size_t a = 0; a < 3; ++a) {
+        for (size_t k = 0; k < 3; ++k) {
+          u_i += gsl::at(u_triad, a) * rotation.get(a, k)[p] *
+                 cholesky_inverse.get(k, i)[p];
+        }
+      }
+      CHECK(u_i / u_0 == velocity_approx(gsl::at(velocity, i)));
+    }
+  }
+
+  // No tide: the fitted moments vanish and the target is the type-D one
+  for (size_t a = 0; a < 5; ++a) {
+    CHECK(std::abs(gsl::at(quadrupole.second_order->fit.components, a)) <
+          1.e-5);
+  }
+  Approx fd_approx = Approx::custom().epsilon(1.e-7).scale(1.);
+  CHECK_ITERABLE_CUSTOM_APPROX(get(quadrupole.psi0_target),
+                               get(type_d.psi0_target), fd_approx);
+  CHECK_ITERABLE_CUSTOM_APPROX(quadrupole.incoming_mode, type_d.incoming_mode,
+                               fd_approx);
+  const double lorentz_factor =
+      1. / sqrt(1. - square(0.2) - square(0.1) - square(0.15));
+  for (size_t p = 0; p < num_points; ++p) {
+    const double radius = get(quadrupole.registration->measured_radius)[p];
+    CHECK(radius > 4. - 1.e-6);
+    CHECK(radius < 4. * lorentz_factor + 1.e-6);
+  }
+
+  // Through the boundary condition the two models agree to the same accuracy
+  const ExcisedSphere sphere{};
+  const auto with_quadrupole =
+      apply_worldtube(Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                                Imposition::Frozen, Model::Quadrupole, 1.0},
+                      data, 0., sphere.domain, sphere.element,
+                      sphere.functions_of_time, face_data);
+  const auto with_type_d = apply_worldtube(
+      Worldtube{Imposition::Bjorhus, Imposition::Bjorhus, Imposition::Frozen,
+                Model::TypeD},
+      data, 0., sphere.domain, sphere.element, sphere.functions_of_time);
+  CHECK_ITERABLE_CUSTOM_APPROX(with_quadrupole.dt_spacetime_metric,
+                               with_type_d.dt_spacetime_metric, fd_approx);
+  CHECK_ITERABLE_CUSTOM_APPROX(with_quadrupole.dt_pi, with_type_d.dt_pi,
+                               fd_approx);
+  CHECK_ITERABLE_CUSTOM_APPROX(with_quadrupole.dt_phi, with_type_d.dt_phi,
+                               fd_approx);
+
+  // The order-two model needs the face data of the element
+  CHECK_THROWS_WITH(
+      apply_worldtube(Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                                Imposition::Frozen, Model::Quadrupole, 1.0},
+                      data, 0., sphere.domain, sphere.element,
+                      sphere.functions_of_time),
+      Catch::Matchers::ContainsSubstring("needs the Kretschmann face data"));
+}
 }  // namespace
 
 SPECTRE_TEST_CASE(
@@ -914,4 +1115,5 @@ SPECTRE_TEST_CASE(
   test_excision_sphere_center();
   test_incoming_mode_normalization();
   test_type_d_model_on_boosted_kerr_schild();
+  test_quadrupole_model_on_boosted_kerr_schild();
 }

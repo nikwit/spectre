@@ -68,9 +68,18 @@ struct TypeDRotation {
  * \f$\bar a = x/b\f$. Errors if the aligning root exceeds 0.5 in magnitude
  * (the tetrad is longitudinally exchanged) or if \f$\Psi_1 = 0\f$ while
  * \f$x \neq 0\f$.
+ *
+ * When the tetrad is already aligned with the principal null directions
+ * (\f$\Psi_1 = \Psi_3 = 0\f$ up to roundoff, as for a hole at rest seen from
+ * a radial tetrad) both \f$x = \bar a b\f$ and \f$b\f$ are roundoff-sized
+ * and \f$\bar a = x/b\f$ would amplify the noise to \f$O(1)\f$. Below
+ * `alignment_threshold` on \f$|x|\f$ the aligned rotation \f$\bar a = 0\f$
+ * is returned instead; the default is far below any physical \f$\bar a b\f$
+ * (which is \f$O(v^2)\f$ for a boosted hole).
  */
 TypeDRotation solve_type_d_rotation(const WeylScalars& psi,
-                                    const Scalar<ComplexDataVector>& coulomb);
+                                    const Scalar<ComplexDataVector>& coulomb,
+                                    double alignment_threshold = 1.e-12);
 
 /// \brief Apply the inverse of the Kinnersley rotations: type I
 /// (\f$-\bar a\f$) followed by type II (\f$-b\f$). On type-D scalars this

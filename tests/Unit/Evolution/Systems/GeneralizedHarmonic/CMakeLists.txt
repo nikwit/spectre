@@ -31,6 +31,8 @@ set(LIBRARY_SOURCES
   Test_System.cpp
   Test_Tags.cpp
   Test_TensorYlmTransforms.cpp
+  Worldtube/Test_KretschmannFaceData.cpp
+  Worldtube/Test_ObserveWorldtubeMatching.cpp
   )
 
 add_test_library(${LIBRARY} "${LIBRARY_SOURCES}")
@@ -46,6 +48,7 @@ target_link_libraries(
   Domain
   DomainCreators
   DomainStructure
+  EventsAndTriggers
   FunctionsOfTime
   GeneralRelativity
   GeneralRelativityHelpers
@@ -54,7 +57,9 @@ target_link_libraries(
   Importers
   LinearOperators
   MathFunctions
+  Observer
   Options
+  Parallel
   Spectral
   SphericalHarmonics
   Utilities

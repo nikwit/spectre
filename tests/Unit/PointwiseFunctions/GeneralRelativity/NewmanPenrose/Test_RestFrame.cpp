@@ -125,6 +125,13 @@ void test_gradient_boost() {
           member.transverse_velocity, member.lorentz_factor, geometry.rotation,
           geometry.spatial_metric, geometry.lapse, geometry.shift,
           spatial_gradient, time_derivative));
+  CHECK_ITERABLE_APPROX(
+      DataVector(tanh(get(invariant_rapidity(
+          member, geometry.rotation, geometry.spatial_metric, geometry.lapse,
+          geometry.shift, spatial_gradient, time_derivative)))),
+      get(invariant_tanh_rapidity(
+          member, geometry.rotation, geometry.spatial_metric, geometry.lapse,
+          geometry.shift, spatial_gradient, time_derivative)));
 }
 }  // namespace
 

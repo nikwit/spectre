@@ -121,7 +121,7 @@ def type_d_scalars(
 
 
 def solve_type_d_rotation(
-    psi: np.ndarray, coulomb: np.ndarray
+    psi: np.ndarray, coulomb: np.ndarray, alignment_threshold: float = 1.0e-12
 ) -> TypeDRotation:
     """Fix (a_bar, b) from the Psi1 and Psi2 equations of Sec. 3.
 
@@ -133,7 +133,8 @@ def solve_type_d_rotation(
     the NR tetrad (the other root swaps them).  The Psi1'' equation,
     Psi1'' = 3 b (1 + 2 a_bar b) Psi2^K, then gives b, and a_bar = x/b.
     The remaining equations (slots 0, 3, 4 of ``predicted_psi``) are the
-    O(eps^2) constraints.
+    O(eps^2) constraints.  Where |a_bar b| is below ``alignment_threshold``
+    the tetrad counts as aligned and a_bar = 0 (see the comment below).
     """
     psi = np.asarray(psi, dtype=complex)
     coulomb = np.asarray(coulomb, dtype=complex)
@@ -158,6 +159,11 @@ def solve_type_d_rotation(
             "Psi1 vanishes while a_bar*b does not; the Psi1/Psi2 equation "
             "pair cannot fix the rotation at such points."
         )
+    # a_bar = x / b is a ratio of two roundoff-sized numbers when the tetrad
+    # is already aligned (Psi1 = Psi3 = 0, e.g. a hole at rest seen from a
+    # radial tetrad); below the threshold on |x| return the aligned rotation
+    # instead of amplifying roundoff to O(1).
+    aligned = aligned | (np.abs(x) <= alignment_threshold)
     a_bar = np.where(aligned, 0.0 + 0.0j, x / np.where(aligned, 1.0, b))
     return TypeDRotation(
         a_bar=a_bar,

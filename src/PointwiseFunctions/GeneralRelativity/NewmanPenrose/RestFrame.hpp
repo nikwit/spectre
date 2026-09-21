@@ -66,8 +66,19 @@ TangentBoostMember tangent_boost_member(const Scalar<ComplexDataVector>& a_bar,
  * with \f$n\cdot\nabla K = (\partial_t K - \beta^i D_i K)/\alpha\f$.
  * `spatial_gradient` is \f$D_i K\f$ in coordinate covector components and
  * `time_derivative` is \f$\partial_t K\f$ at fixed inertial coordinates.
- * Errors if the rapidity is not physical.
+ * Errors if the rapidity is not physical, i.e. if \f$|\tanh\eta| \geq 1\f$
+ * at any point; `invariant_tanh_rapidity()` returns \f$\tanh\eta\f$
+ * without that check, for diagnostics.
  */
+/// @{
+Scalar<DataVector> invariant_tanh_rapidity(
+    const TangentBoostMember& member, const RealMatrix& adapted_rotation,
+    const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
+    const Scalar<DataVector>& lapse,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& shift,
+    const tnsr::i<DataVector, 3, Frame::Inertial>& spatial_gradient,
+    const Scalar<DataVector>& time_derivative);
+
 Scalar<DataVector> invariant_rapidity(
     const TangentBoostMember& member, const RealMatrix& adapted_rotation,
     const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
@@ -75,4 +86,5 @@ Scalar<DataVector> invariant_rapidity(
     const tnsr::I<DataVector, 3, Frame::Inertial>& shift,
     const tnsr::i<DataVector, 3, Frame::Inertial>& spatial_gradient,
     const Scalar<DataVector>& time_derivative);
+/// @}
 }  // namespace gr::np

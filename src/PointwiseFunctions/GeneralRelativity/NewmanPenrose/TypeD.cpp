@@ -46,7 +46,8 @@ WeylScalars type_d_scalars(const Scalar<ComplexDataVector>& coulomb,
 }
 
 TypeDRotation solve_type_d_rotation(const WeylScalars& psi,
-                                    const Scalar<ComplexDataVector>& coulomb) {
+                                    const Scalar<ComplexDataVector>& coulomb,
+                                    const double alignment_threshold) {
   const size_t num_points = get_size(get(coulomb));
   TypeDRotation result{Scalar<ComplexDataVector>(num_points),
                        Scalar<ComplexDataVector>(num_points),
@@ -76,8 +77,14 @@ TypeDRotation solve_type_d_rotation(const WeylScalars& psi,
     }
     get(result.x)[p] = x;
     get(result.b)[p] = b;
+    // a_bar = x / b is a ratio of two roundoff-sized numbers when the tetrad
+    // is already aligned (Psi1 = Psi3 = 0, as for a hole at rest seen from
+    // a radial tetrad). Below the alignment threshold, take the aligned
+    // rotation instead of amplifying roundoff to O(1).
     get(result.a_bar)[p] =
-        std::abs(b) == 0. ? std::complex<double>{0., 0.} : x / b;
+        std::abs(x) <= alignment_threshold or std::abs(b) == 0.
+            ? std::complex<double>{0., 0.}
+            : x / b;
   }
   result.predicted_psi = type_d_scalars(coulomb, result.a_bar, result.b);
   return result;
