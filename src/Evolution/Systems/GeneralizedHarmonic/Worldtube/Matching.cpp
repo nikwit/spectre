@@ -10,10 +10,12 @@
 
 #include "DataStructures/ComplexDataVector.hpp"
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/Tensor/EagerMath/DeterminantAndInverse.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
 #include "Options/ParseError.hpp"
 #include "Options/ParseOptions.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/CoulombDecode.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/NullRotations.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Psi4Fit.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/RestFrame.hpp"
@@ -30,10 +32,12 @@ PhysicalModel convert_physical_model_from_yaml(const Options::Option& options) {
     return PhysicalModel::TypeD;
   } else if (read == "Quadrupole") {
     return PhysicalModel::Quadrupole;
+  } else if (read == "QuadrupoleCoulomb") {
+    return PhysicalModel::QuadrupoleCoulomb;
   }
   PARSE_ERROR(options.context(),
               "Failed to convert input option to a physical model. Must be "
-              "one of None, TypeD or Quadrupole.");
+              "one of None, TypeD, Quadrupole or QuadrupoleCoulomb.");
 }
 
 std::ostream& operator<<(std::ostream& os, const PhysicalModel model) {
@@ -44,9 +48,28 @@ std::ostream& operator<<(std::ostream& os, const PhysicalModel model) {
       return os << "TypeD";
     case PhysicalModel::Quadrupole:
       return os << "Quadrupole";
+    case PhysicalModel::QuadrupoleCoulomb:
+      return os << "QuadrupoleCoulomb";
     default:
       ERROR("Unknown PhysicalModel");
   }
+}
+
+bool is_order_two(const PhysicalModel model) {
+  return model == PhysicalModel::Quadrupole or
+         model == PhysicalModel::QuadrupoleCoulomb;
+}
+
+Scalar<DataVector> normal_derivative_of_coulomb(
+    const Scalar<ComplexDataVector>& coulomb,
+    const tnsr::i<DataVector, 3, Frame::Inertial>& d_kretschmann,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& unit_normal_vector) {
+  Scalar<DataVector> result(get_size(get(coulomb)), 0.);
+  for (size_t i = 0; i < 3; ++i) {
+    get(result) += unit_normal_vector.get(i) * d_kretschmann.get(i);
+  }
+  get(result) /= 96. * real(get(coulomb));
+  return result;
 }
 
 MatchingEvaluation evaluate_matching(
@@ -85,16 +108,18 @@ MatchingEvaluation evaluate_matching(
           gr::np::psi0_leading(result.coulomb, result.type_d_rotation.b);
       break;
     }
-    case PhysicalModel::Quadrupole: {
+    case PhysicalModel::Quadrupole:
+    case PhysicalModel::QuadrupoleCoulomb: {
       if (not mass.has_value()) {
-        ERROR("PhysicalModel: Quadrupole needs the mass of the hole.");
+        ERROR("PhysicalModel: " << model << " needs the mass of the hole.");
       }
       if (face_data == nullptr or not face_data->direction.has_value()) {
-        ERROR(
-            "PhysicalModel: Quadrupole needs the Kretschmann face data of the "
-            "element, but none is available. The element must abut an "
-            "excision sphere and gh::worldtube::UpdateKretschmannFaceData "
-            "must run before the boundary condition is applied.");
+        ERROR("PhysicalModel: "
+              << model
+              << " needs the Kretschmann face data of the element, but none "
+                 "is available. The element must abut an excision sphere and "
+                 "gh::worldtube::UpdateKretschmannFaceData must run before the "
+                 "boundary condition is applied.");
       }
       if (get(face_data->kretschmann).size() != num_points or
           get(face_data->dt_kretschmann).size() != num_points) {
@@ -115,9 +140,40 @@ MatchingEvaluation evaluate_matching(
           face_data->quadrature_weights.size() == num_points
               ? std::optional<DataVector>{face_data->quadrature_weights}
               : std::nullopt;
+      std::optional<gr::np::TidalMoments> moments = imposed_moments;
+      if (model == PhysicalModel::QuadrupoleCoulomb and
+          not moments.has_value()) {
+        // The tide from the Coulomb channel: unit normal vector s^i =
+        // gamma^{ij} n_j for the normal derivative of K
+        const auto inverse_spatial_metric =
+            determinant_and_inverse(spatial_metric).second;
+        tnsr::I<DataVector, 3, Frame::Inertial> unit_normal_vector(num_points,
+                                                                   0.);
+        for (size_t i = 0; i < 3; ++i) {
+          for (size_t j = 0; j < 3; ++j) {
+            unit_normal_vector.get(i) +=
+                inverse_spatial_metric.get(i, j) * unit_normal_covector.get(j);
+          }
+        }
+        result.coulomb_decode = gr::np::decode_tidal_moments_from_coulomb(
+            *result.registration, *result.rapidity, *mass,
+            normal_derivative_of_coulomb(
+                result.coulomb, face_data->d_kretschmann, unit_normal_vector),
+            weights);
+        if (not result.coulomb_decode->valid) {
+          ERROR(
+              "The Coulomb decode of the tide failed: the radius solve did "
+              "not stay on the outer branch of sqrt(1 - 2M/r)/r^4 or did not "
+              "converge (largest relative residual "
+              << result.coulomb_decode->newton_residual
+              << "). The excision must lie outside about 2.4M for "
+                 "PhysicalModel: QuadrupoleCoulomb.");
+        }
+        moments = result.coulomb_decode->components;
+      }
       result.second_order = gr::np::evaluate_second_order(
           *result.registration, *result.rapidity, result.adapted_rotation,
-          *mass, weights, imposed_moments);
+          *mass, weights, moments);
       result.psi0_target = result.second_order->psi0_target;
       break;
     }

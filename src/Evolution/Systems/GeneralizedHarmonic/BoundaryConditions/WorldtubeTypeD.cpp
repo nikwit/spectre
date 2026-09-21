@@ -197,26 +197,27 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
                        "sector, but PhysicalSector is "
                     << physical_sector_ << ". Use PhysicalSector: Bjorhus.");
   }
-  if (physical_model_ == detail::PhysicalModel::Quadrupole) {
+  if (worldtube::is_order_two(physical_model_)) {
     if (not mass_.has_value()) {
-      PARSE_ERROR(context,
-                  "PhysicalModel: Quadrupole needs the mass of the excised "
-                  "hole. Set Mass.");
+      PARSE_ERROR(context, "PhysicalModel: "
+                               << physical_model_
+                               << " needs the mass of the excised hole. Set "
+                                  "Mass.");
     }
     if (*mass_ <= 0.) {
       PARSE_ERROR(context, "Mass must be positive, not " << *mass_);
     }
   } else if (mass_.has_value()) {
     PARSE_ERROR(context,
-                "Mass is only used by PhysicalModel: Quadrupole, but "
-                "PhysicalModel is "
+                "Mass is only used by the order-two models Quadrupole and "
+                "QuadrupoleCoulomb, but PhysicalModel is "
                     << physical_model_ << ". Set Mass: None.");
   }
   if (moment_relaxation_time_.has_value()) {
-    if (physical_model_ != detail::PhysicalModel::Quadrupole) {
+    if (not worldtube::is_order_two(physical_model_)) {
       PARSE_ERROR(context,
-                  "MomentRelaxationTime is only used by PhysicalModel: "
-                  "Quadrupole, but PhysicalModel is "
+                  "MomentRelaxationTime is only used by the order-two models "
+                  "Quadrupole and QuadrupoleCoulomb, but PhysicalModel is "
                       << physical_model_
                       << ". Set MomentRelaxationTime: None.");
     }

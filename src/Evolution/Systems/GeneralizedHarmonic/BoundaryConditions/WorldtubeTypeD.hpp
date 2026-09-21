@@ -278,17 +278,20 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
         "Quadrupole (order two: the type-D hole carries a quadrupolar tide "
         "fitted to Psi4 over the face, in the invariant rest frame fixed by "
         "the gradient of the Kretschmann scalar; needs Mass and the "
-        "UpdateKretschmannFaceData action). Requires PhysicalSector: "
-        "Bjorhus."};
+        "UpdateKretschmannFaceData action) or QuadrupoleCoulomb (order two "
+        "with the tide read from the Coulomb scalar and its normal "
+        "derivative instead of Psi4, which removes the feedback of the "
+        "condition on itself through the leaving mode; same needs, and the "
+        "excision outside about 2.4M). Requires PhysicalSector: Bjorhus."};
   };
   /// \brief The mass of the excised hole, needed by `PhysicalModel:
   /// Quadrupole` for the tidal profiles and the background radius.
   struct Mass {
     using type = Options::Auto<double, Options::AutoLabel::None>;
     static constexpr Options::String help{
-        "The mass of the excised hole. Required by PhysicalModel: Quadrupole "
-        "(tidal radial profiles and the areal radius of the worldtube), None "
-        "otherwise."};
+        "The mass of the excised hole. Required by the order-two models "
+        "Quadrupole and QuadrupoleCoulomb (tidal radial profiles and the "
+        "areal radius of the worldtube), None otherwise."};
   };
   /// \brief Relaxation time of the fitted tidal moments of `PhysicalModel:
   /// Quadrupole`, a first-order low-pass that breaks the feedback loop of
@@ -296,7 +299,7 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   struct MomentRelaxationTime {
     using type = Options::Auto<double, Options::AutoLabel::None>;
     static constexpr Options::String help{
-        "PhysicalModel: Quadrupole only. Relax the five fitted tidal moments "
+        "Order-two models only. Relax the five fitted tidal moments "
         "toward the instantaneous fit on this timescale (first-order "
         "low-pass) before they enter the target. Without it the condition "
         "is unstable: the Psi0 it injects returns as Psi4 at the face, is "

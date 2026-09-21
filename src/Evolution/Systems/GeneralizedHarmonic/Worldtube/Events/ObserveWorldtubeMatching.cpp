@@ -23,6 +23,7 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matching.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/WeylCurvature.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/CoulombDecode.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Psi4Fit.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/RestFrame.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Types.hpp"
@@ -98,7 +99,11 @@ std::vector<std::string> ObserveWorldtubeMatching::legend() {
           "MaxRapidity",
           "MinMeasuredRadius",
           "MaxMeasuredRadius",
-          "MaxAbsPsi0QuadrupoleImposed"};
+          "MaxAbsPsi0QuadrupoleImposed",
+          "MaxAbsPsi0Coulomb",
+          "CoulombFitResidual",
+          "MinCoulombRadius",
+          "MaxCoulombRadius"};
 }
 
 std::optional<MatchingReductionData>
@@ -145,6 +150,10 @@ ObserveWorldtubeMatching::compute_reduction_data(
   double min_radius = nan;
   double max_radius = nan;
   double max_abs_psi0_imposed = nan;
+  double max_abs_psi0_coulomb = nan;
+  double coulomb_fit_residual = nan;
+  double min_coulomb_radius = nan;
+  double max_coulomb_radius = nan;
   if (mass_.has_value()) {
     // Face data of the observed state: the backward difference against the
     // stored history, at the observation time
@@ -183,6 +192,41 @@ ObserveWorldtubeMatching::compute_reduction_data(
             face_data.filtered_moments);
         max_abs_psi0_imposed = max_abs(get(imposed.psi0_target));
       }
+      // The tide from the Coulomb channel, valid only outside the turning
+      // point of the radius solve
+      const Scalar<DataVector> rapidity{
+          atanh(get(gr::np::invariant_tanh_rapidity(
+              registration.member, type_d.adapted_rotation, spatial_metric,
+              lapse, shift, current_face_data.d_kretschmann,
+              current_face_data.dt_kretschmann)))};
+      tnsr::I<DataVector, 3, Frame::Inertial> unit_normal_vector(
+          get_size(get(lapse)), 0.);
+      for (size_t i = 0; i < 3; ++i) {
+        for (size_t j = 0; j < 3; ++j) {
+          unit_normal_vector.get(i) +=
+              inverse_spatial_metric.get(i, j) * normal_covector.get(j);
+        }
+      }
+      const std::optional<DataVector> weights =
+          current_face_data.quadrature_weights.size() == get_size(get(lapse))
+              ? std::optional<DataVector>{current_face_data.quadrature_weights}
+              : std::nullopt;
+      const gr::np::CoulombDecode decode =
+          gr::np::decode_tidal_moments_from_coulomb(
+              registration, rapidity, *mass_,
+              normal_derivative_of_coulomb(registration.coulomb,
+                                           current_face_data.d_kretschmann,
+                                           unit_normal_vector),
+              weights);
+      if (decode.valid) {
+        const MatchingEvaluation coulomb = evaluate_matching(
+            PhysicalModel::QuadrupoleCoulomb, mass_, electric, magnetic,
+            spatial_metric, normal_covector, lapse, shift, &current_face_data);
+        max_abs_psi0_coulomb = max_abs(get(coulomb.psi0_target));
+        coulomb_fit_residual = decode.relative_residual;
+        min_coulomb_radius = min(get(decode.areal_radius));
+        max_coulomb_radius = max(get(decode.areal_radius));
+      }
     }
   }
 
@@ -206,7 +250,11 @@ ObserveWorldtubeMatching::compute_reduction_data(
       max_rapidity,
       min_radius,
       max_radius,
-      max_abs_psi0_imposed};
+      max_abs_psi0_imposed,
+      max_abs_psi0_coulomb,
+      coulomb_fit_residual,
+      min_coulomb_radius,
+      max_coulomb_radius};
 }
 
 void ObserveWorldtubeMatching::pup(PUP::er& p) {

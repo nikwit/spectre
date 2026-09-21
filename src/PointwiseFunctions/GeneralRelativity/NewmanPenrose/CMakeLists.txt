@@ -8,6 +8,7 @@ add_spectre_library(${LIBRARY})
 spectre_target_sources(
   ${LIBRARY}
   PRIVATE
+  CoulombDecode.cpp
   NullRotations.cpp
   Psi4Fit.cpp
   RestFrame.cpp
@@ -20,6 +21,7 @@ spectre_target_headers(
   ${LIBRARY}
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
+  CoulombDecode.hpp
   NullRotations.hpp
   Psi4Fit.hpp
   RestFrame.hpp

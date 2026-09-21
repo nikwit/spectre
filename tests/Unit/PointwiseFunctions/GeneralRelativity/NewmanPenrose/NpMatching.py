@@ -18,6 +18,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "npmatch"))
 
+import coulomb  # noqa: E402
 import kinnersley  # noqa: E402
 import manufactured_wplus  # noqa: E402
 import profiles  # noqa: E402
@@ -396,3 +397,101 @@ def manufactured_truth(seed, n):
 
 def manufactured_mass():
     return float(manufactured_wplus.MASS)
+
+
+# --- Coulomb-channel decode ----------------------------------------------------
+
+
+def _coulomb_registration(psi_list, reals, mass):
+    """The frame registration of gr::np::register_frame: leading type-D map,
+    tangent member, measured radius and the member's vectors in the
+    Cholesky frame."""
+    _, rotation, _, _, _ = _unpack_reals(reals)
+    psi = _unpack_psi(psi_list)
+    frame = wplus.measure_qk_map(psi, newton_steps=0)
+    member = restframe.tangent_boost_member(
+        frame.leading.a_bar, frame.leading.b
+    )
+    measured_radius = np.power(-mass / frame.coulomb, 1.0 / 3.0).real
+    radial_cholesky = np.einsum(
+        "...ji,...j->...i", rotation, member.radial_direction
+    )
+    transverse_cholesky = np.einsum(
+        "...ji,...j->...i", rotation, member.transverse_velocity
+    )
+    return SimpleNamespace(
+        coulomb=frame.coulomb,
+        member=member,
+        measured_radius=measured_radius,
+        radial_cholesky=radial_cholesky,
+        transverse_cholesky=transverse_cholesky,
+    )
+
+
+def coulomb_background_radial_derivative(radius, mass):
+    return coulomb.background_radial_derivative(np.asarray(radius), mass)
+
+
+def coulomb_normal_derivative_factor(psi_list, reals, mass, rapidity):
+    reg = _coulomb_registration(psi_list, reals, mass)
+    return coulomb.normal_derivative_factor(
+        reg.member.radial_direction,
+        reg.member.transverse_velocity,
+        reg.member.lorentz_factor,
+        np.asarray(rapidity),
+    )
+
+
+def coulomb_radius_from_normal_derivative(d_s_coulomb, factor, initial, mass):
+    radius, _, _ = coulomb.radius_from_normal_derivative(
+        np.asarray(d_s_coulomb), np.asarray(factor), np.asarray(initial), mass
+    )
+    return radius
+
+
+def coulomb_radius_solve_valid(d_s_coulomb, factor, initial, mass):
+    _, valid, _ = coulomb.radius_from_normal_derivative(
+        np.asarray(d_s_coulomb), np.asarray(factor), np.asarray(initial), mass
+    )
+    return bool(valid)
+
+
+def coulomb_tide_column(psi_list, reals, mass, radius, index):
+    reg = _coulomb_registration(psi_list, reals, mass)
+    return coulomb.coulomb_tide_columns(
+        reg.radial_cholesky, np.asarray(radius), mass
+    )[int(index)]
+
+
+def _coulomb_decode(psi_list, reals, mass, rapidity, d_s_coulomb, weights):
+    reg = _coulomb_registration(psi_list, reals, mass)
+    return coulomb.decode_tidal_moments_from_coulomb(
+        reg.coulomb,
+        np.asarray(d_s_coulomb),
+        reg.member.radial_direction,
+        reg.member.transverse_velocity,
+        reg.member.lorentz_factor,
+        np.asarray(rapidity),
+        reg.measured_radius,
+        reg.radial_cholesky,
+        reg.transverse_cholesky,
+        mass,
+        None if len(weights) == 0 else np.asarray(weights),
+    )
+
+
+def coulomb_decode_components(psi_list, reals, mass, rapidity, d_s, weights):
+    decode = _coulomb_decode(psi_list, reals, mass, rapidity, d_s, weights)
+    return list(decode.components.real) + list(decode.components.imag)
+
+
+def coulomb_decode_radius(psi_list, reals, mass, rapidity, d_s, weights):
+    return _coulomb_decode(psi_list, reals, mass, rapidity, d_s, weights).radius
+
+
+def coulomb_decode_residual(psi_list, reals, mass, rapidity, d_s, weights):
+    return float(
+        _coulomb_decode(
+            psi_list, reals, mass, rapidity, d_s, weights
+        ).relative_residual
+    )

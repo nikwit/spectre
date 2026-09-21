@@ -4,6 +4,7 @@
 set(LIBRARY "Test_NewmanPenrose")
 
 set(LIBRARY_SOURCES
+  Test_CoulombDecode.cpp
   Test_NullRotations.cpp
   Test_Psi4Fit.cpp
   Test_RestFrame.cpp

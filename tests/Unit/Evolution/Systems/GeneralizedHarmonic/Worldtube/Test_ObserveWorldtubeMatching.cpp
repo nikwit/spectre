@@ -310,6 +310,13 @@ void test_observe() {
   // Zero relaxed moments were stored in the face data: the imposed target is
   // the type-D one
   CHECK(std::get<19>(data) == approx(std::get<9>(data)).epsilon(1.e-6));
+  // Coulomb decode: exact type D, so the decoded tide vanishes to
+  // truncation error, the target is the type-D one and the areal radius
+  // lies in the Lorentz-contraction band
+  CHECK(std::get<20>(data) == approx(max_abs_psi0).epsilon(1.e-2));
+  CHECK(std::isfinite(std::get<21>(data)));
+  CHECK(std::get<22>(data) > 2.5 * 0.99);
+  CHECK(std::get<23>(data) < 2.5 * lorentz_factor * 1.01);
 
   // Without a mass the order-two columns are not evaluated
   const auto without_mass = run_event(
@@ -322,6 +329,8 @@ void test_observe() {
   CHECK(std::isnan(std::get<13>(data_without_mass)));
   CHECK(std::isnan(std::get<14>(data_without_mass)));
   CHECK(std::isnan(std::get<19>(data_without_mass)));
+  CHECK(std::isnan(std::get<20>(data_without_mass)));
+  CHECK(std::isnan(std::get<23>(data_without_mass)));
   CHECK(std::isnan(std::get<18>(data_without_mass)));
 
   // An element off the excision sphere contributes nothing
@@ -370,6 +379,9 @@ void test_static_hole_on_spherical_shell() {
   CHECK(std::get<17>(data) == approx(radius).epsilon(1.e-6));
   CHECK(std::get<18>(data) == approx(radius).epsilon(1.e-6));
   CHECK(std::isnan(std::get<19>(data)));
+  CHECK(std::get<20>(data) < 1.e-6 * std::abs(coulomb));
+  CHECK(std::get<22>(data) == approx(radius).epsilon(1.e-4));
+  CHECK(std::get<23>(data) == approx(radius).epsilon(1.e-4));
 }
 }  // namespace
 

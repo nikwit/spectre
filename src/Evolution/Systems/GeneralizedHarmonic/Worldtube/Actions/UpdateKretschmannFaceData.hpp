@@ -101,10 +101,11 @@ struct UpdateKretschmannFaceData {
             dynamic_cast<const BoundaryConditions::WorldtubeTypeD<Dim>*>(
                 conditions.at(*data->direction).get());
         if (worldtube != nullptr and
-            worldtube->physical_model() == PhysicalModel::Quadrupole) {
+            is_order_two(worldtube->physical_model())) {
           update_filtered_tidal_moments(
               data, spacetime_metric, pi, phi, mesh, inverse_jacobian,
-              *worldtube->mass(), worldtube->moment_relaxation_time(), time);
+              worldtube->physical_model(), *worldtube->mass(),
+              worldtube->moment_relaxation_time(), time);
           return;
         }
       }

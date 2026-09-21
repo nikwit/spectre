@@ -11,6 +11,7 @@
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "Options/Options.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/CoulombDecode.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Psi4Fit.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/TypeD.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Types.hpp"
@@ -46,8 +47,22 @@ enum class PhysicalModel {
   /// and the incoming mode is the tide's \f$\Psi_0\f$ pushed forward to the
   /// NR tetrad (`gr::np::evaluate_second_order()`). Needs the mass of the
   /// hole and the `KretschmannFaceData` of the element.
-  Quadrupole
+  Quadrupole,
+  /// Order two with the tide read from the Coulomb channel instead of the
+  /// leaving mode: the areal radius of every face point follows from the
+  /// normal derivative of the Coulomb scalar with the kinematics of the
+  /// type-D background treated exactly, and the moments are the fit of the
+  /// Coulomb excess over \f$-M/r^3\f$
+  /// (`gr::np::decode_tidal_moments_from_coulomb()`). The radiative modes
+  /// enter only through the invariants, quadratically, so the condition does
+  /// not feed back on itself through \f$\Psi_4\f$. Needs the same inputs as
+  /// `Quadrupole` and the excision outside about \f$2.4M\f$.
+  QuadrupoleCoulomb
 };
+
+/// Whether the model is one of the order-two models, which need the mass
+/// and the Kretschmann face data
+bool is_order_two(PhysicalModel model);
 
 PhysicalModel convert_physical_model_from_yaml(const Options::Option& options);
 
@@ -69,11 +84,31 @@ struct MatchingEvaluation {
   /// components, the normalization of `gr::weyl_propagating()` with sign
   /// \f$-1\f$
   tnsr::ii<DataVector, 3, Frame::Inertial> incoming_mode;
-  /// Set for `PhysicalModel::Quadrupole` only
+  /// Set for the order-two models only
   std::optional<Scalar<DataVector>> rapidity;
   std::optional<gr::np::FrameRegistration> registration;
   std::optional<gr::np::SecondOrderEvaluation> second_order;
+  /// Set for `PhysicalModel::QuadrupoleCoulomb` without imposed moments
+  std::optional<gr::np::CoulombDecode> coulomb_decode;
 };
+
+/*!
+ * \brief The derivative of the real part of the Coulomb scalar along the
+ * sphere normal from the Kretschmann data on the face.
+ *
+ * \details \f$K = 16\,\mathrm{Re}\, I = 48\,\mathrm{Re}\,\Psi_2^2\f$ up to
+ * terms quadratic in the tide, so
+ * \f$\partial_s K = 96\,\mathrm{Re}(\Psi_2 \partial_s \Psi_2)\f$ and, for a
+ * Coulomb scalar with a small imaginary part (a slowly spinning hole),
+ * \f$\partial_s \mathrm{Re}\,\Psi_2 = \partial_s K /
+ * (96\,\mathrm{Re}\,\Psi_2)\f$. `d_kretschmann` is the coordinate gradient of
+ * \f$K\f$ and `unit_normal_vector` the unit normal vector \f$s^i\f$ of the
+ * face.
+ */
+Scalar<DataVector> normal_derivative_of_coulomb(
+    const Scalar<ComplexDataVector>& coulomb,
+    const tnsr::i<DataVector, 3, Frame::Inertial>& d_kretschmann,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& unit_normal_vector);
 
 /*!
  * \brief The curvature matching on the excision face of the worldtube.
@@ -86,7 +121,7 @@ struct MatchingEvaluation {
  *  = \bar\Psi_0 m_i m_j + \Psi_0 \bar m_i \bar m_j\f$
  * (checked against `gr::weyl_propagating()` in the unit tests). The
  * `model` selects the value of \f$\Psi_0\f$, see `PhysicalModel`. For
- * `PhysicalModel::Quadrupole` the `mass`, the `lapse`, the `shift` and the
+ * the order-two models the `mass`, the `lapse`, the `shift` and the
  * `face_data` (with the point count of the face) are required; they are
  * ignored otherwise. With `imposed_moments` the tidal fit is skipped and the
  * target is built from these moments, e.g. the relaxed moments of

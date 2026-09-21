@@ -28,6 +28,8 @@ class er;
 /// \endcond
 
 namespace gh::worldtube {
+enum class PhysicalModel;
+
 /*!
  * \brief The Kretschmann scalar, its spacetime gradient and the quadrature
  * weights on the excision face of an element, for the second-order worldtube
@@ -155,9 +157,10 @@ void relax_tidal_moments(
  * `relax_tidal_moments()`.
  *
  * \details The face curvature is `face_curvature()` of the current evolved
- * variables and the fit is the one of `evaluate_matching()` with
- * `PhysicalModel::Quadrupole`, using the Kretschmann data of `data`, which
- * must therefore be current: call after `update_kretschmann_face_data()`.
+ * variables and the fit is the one of `evaluate_matching()` with the
+ * order-two `model` (`Quadrupole` or `QuadrupoleCoulomb`), using the
+ * Kretschmann data of `data`, which must therefore be current: call after
+ * `update_kretschmann_face_data()`.
  * Relaxing the moments breaks the feedback loop of the order-two condition
  * through the leaving mode (the injected \f$\Psi_0\f$ returns as
  * \f$\Psi_4\f$ at the face, is read as a tide and re-emitted amplified by
@@ -173,7 +176,8 @@ void update_filtered_tidal_moments(
     const Mesh<Dim>& mesh,
     const InverseJacobian<DataVector, Dim, Frame::ElementLogical,
                           Frame::Inertial>& inverse_jacobian,
-    double mass, const std::optional<double>& relaxation_time, double time);
+    PhysicalModel model, double mass,
+    const std::optional<double>& relaxation_time, double time);
 
 namespace Tags {
 /// The `gh::worldtube::KretschmannFaceData` of the element

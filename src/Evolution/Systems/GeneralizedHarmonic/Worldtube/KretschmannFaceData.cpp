@@ -259,8 +259,8 @@ void update_filtered_tidal_moments(
     const Mesh<Dim>& mesh,
     const InverseJacobian<DataVector, Dim, Frame::ElementLogical,
                           Frame::Inertial>& inverse_jacobian,
-    const double mass, const std::optional<double>& relaxation_time,
-    const double time) {
+    const PhysicalModel model, const double mass,
+    const std::optional<double>& relaxation_time, const double time) {
   if constexpr (Dim != 3) {
     (void)data;
     (void)spacetime_metric;
@@ -268,6 +268,7 @@ void update_filtered_tidal_moments(
     (void)phi;
     (void)mesh;
     (void)inverse_jacobian;
+    (void)model;
     (void)mass;
     (void)relaxation_time;
     (void)time;
@@ -280,10 +281,14 @@ void update_filtered_tidal_moments(
     }
     const FaceCurvature face = face_curvature(
         spacetime_metric, pi, phi, mesh, inverse_jacobian, *data->direction);
-    const MatchingEvaluation raw = evaluate_matching(
-        PhysicalModel::Quadrupole, mass, face.electric, face.magnetic,
-        face.spatial_metric, face.unit_normal_covector, face.lapse, face.shift,
-        &*data, std::nullopt);
+    if (not is_order_two(model)) {
+      ERROR("Tidal moments are only defined for the order-two models, not "
+            << model);
+    }
+    const MatchingEvaluation raw =
+        evaluate_matching(model, mass, face.electric, face.magnetic,
+                          face.spatial_metric, face.unit_normal_covector,
+                          face.lapse, face.shift, &*data, std::nullopt);
     relax_tidal_moments(make_not_null(&data->filtered_moments),
                         make_not_null(&data->filtered_moments_time),
                         raw.second_order->fit.components, time,
@@ -313,7 +318,7 @@ void update_filtered_tidal_moments(
       const Mesh<DIM(data)>&,                                                \
       const InverseJacobian<DataVector, DIM(data), Frame::ElementLogical,    \
                             Frame::Inertial>&,                               \
-      double, const std::optional<double>&, double);                         \
+      PhysicalModel, double, const std::optional<double>&, double);          \
   template void update_kretschmann_face_data(                                \
       gsl::not_null<KretschmannFaceData<DIM(data)>*>,                        \
       const tnsr::aa<DataVector, DIM(data), Frame::Inertial>&,               \

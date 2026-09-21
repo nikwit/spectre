@@ -277,7 +277,8 @@ void test_update_filtered_tidal_moments() {
       make_not_null(&data), get<gr::Tags::SpacetimeMetric<DataVector, 3>>(vars),
       get<gh::Tags::Pi<DataVector, 3>>(vars),
       get<gh::Tags::Phi<DataVector, 3>>(vars), setup.mesh,
-      setup.inverse_jacobian, 1.0, 10.0, 0.);
+      setup.inverse_jacobian, gh::worldtube::PhysicalModel::Quadrupole, 1.0,
+      10.0, 0.);
   REQUIRE(data.filtered_moments.has_value());
   CHECK(data.filtered_moments_time == 0.);
   // The moments are the instantaneous fit on the face curvature
@@ -302,7 +303,8 @@ void test_update_filtered_tidal_moments() {
       make_not_null(&data), get<gr::Tags::SpacetimeMetric<DataVector, 3>>(vars),
       get<gh::Tags::Pi<DataVector, 3>>(vars),
       get<gh::Tags::Phi<DataVector, 3>>(vars), setup.mesh,
-      setup.inverse_jacobian, 1.0, 10.0, 1.);
+      setup.inverse_jacobian, gh::worldtube::PhysicalModel::Quadrupole, 1.0,
+      10.0, 1.);
   for (size_t a = 0; a < 5; ++a) {
     CHECK(std::abs(gsl::at(*data.filtered_moments, a) - gsl::at(saved, a)) <
           1.e-12);

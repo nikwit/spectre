@@ -75,6 +75,12 @@ using MatchingReductionData = Parallel::ReductionData<
     Parallel::ReductionDatum<double, funcl::Min<>>,
     Parallel::ReductionDatum<double, funcl::Max<>>,
     // Max |Psi0| of the order-two target from the relaxed moments
+    Parallel::ReductionDatum<double, funcl::Max<>>,
+    // Coulomb decode: max |Psi0| of its target, its fit residual, min and
+    // max areal radius
+    Parallel::ReductionDatum<double, funcl::Max<>>,
+    Parallel::ReductionDatum<double, funcl::Max<>>,
+    Parallel::ReductionDatum<double, funcl::Min<>>,
     Parallel::ReductionDatum<double, funcl::Max<>>>;
 
 /*!
@@ -118,6 +124,12 @@ using MatchingReductionData = Parallel::ReductionData<
  *   relaxed moments the boundary condition imposes
  *   (`KretschmannFaceData::filtered_moments`, NaN when the face carries no
  *   order-two condition), as opposed to the instantaneous fit above
+ * - MaxAbsPsi0Coulomb, CoulombFitResidual, MinCoulombRadius,
+ *   MaxCoulombRadius: the order-two target with the tide decoded from the
+ *   Coulomb channel (`gr::np::decode_tidal_moments_from_coulomb()`), the
+ *   relative residual of that decode and the range of the areal radius it
+ *   measures from the normal derivative of the Coulomb scalar; NaN when the
+ *   decode is not valid (excision inside about \f$2.4M\f$)
  * \f$(-M/\Psi_2^K)^{1/3}\f$
  *
  * Elements abutting no excision sphere neither register nor contribute.

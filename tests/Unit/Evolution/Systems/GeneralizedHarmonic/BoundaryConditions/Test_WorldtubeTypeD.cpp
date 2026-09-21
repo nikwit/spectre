@@ -492,6 +492,34 @@ void test_option_parsing_and_serialization() {
                          "  Mass: None\n"
                          "  MomentRelaxationTime: None")),
       Catch::Matchers::ContainsSubstring("Quadrupole needs the mass"));
+  {
+    const auto created = TestHelpers::test_creation<
+        std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+        Metavariables>(
+        "WorldtubeTypeD:\n"
+        "  ConstraintPreservingSector: Bjorhus\n"
+        "  PhysicalSector: Bjorhus\n"
+        "  GaugeSector: SommerfeldAbsorbing\n"
+        "  PhysicalModel: QuadrupoleCoulomb\n"
+        "  Mass: 1.0\n"
+        "  MomentRelaxationTime: 5.0");
+    const auto* const worldtube = dynamic_cast<const Worldtube*>(created.get());
+    REQUIRE(worldtube != nullptr);
+    CHECK(worldtube->physical_model() == Model::QuadrupoleCoulomb);
+    CHECK(worldtube->mass() == std::optional<double>{1.0});
+    CHECK(worldtube->moment_relaxation_time() == std::optional<double>{5.0});
+  }
+  CHECK_THROWS_WITH(
+      (TestHelpers::test_creation<
+          std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+          Metavariables>("WorldtubeTypeD:\n"
+                         "  ConstraintPreservingSector: Bjorhus\n"
+                         "  PhysicalSector: Bjorhus\n"
+                         "  GaugeSector: Frozen\n"
+                         "  PhysicalModel: QuadrupoleCoulomb\n"
+                         "  Mass: None\n"
+                         "  MomentRelaxationTime: None")),
+      Catch::Matchers::ContainsSubstring("QuadrupoleCoulomb needs the mass"));
   CHECK_THROWS_WITH(
       (TestHelpers::test_creation<
           std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
@@ -1185,6 +1213,37 @@ void test_quadrupole_model_on_boosted_kerr_schild() {
         with_moments.filtered_moments);
     CHECK_ITERABLE_CUSTOM_APPROX(get(zero_moments.psi0_target),
                                  get(type_d.psi0_target), fd_approx);
+  }
+
+  // The Coulomb-channel decode on the same face: no tide, so the areal
+  // radius it measures from the normal derivative of K equals the one the
+  // Coulomb scalar gives, the decoded moments vanish and the target is the
+  // type-D one
+  {
+    const auto coulomb = gh::worldtube::evaluate_matching(
+        Model::QuadrupoleCoulomb, 1.0, electric, magnetic, spatial_metric,
+        data.normal_covector, data.lapse, data.shift, &face_data);
+    REQUIRE(coulomb.coulomb_decode.has_value());
+    CHECK(coulomb.coulomb_decode->valid);
+    CHECK_ITERABLE_CUSTOM_APPROX(get(coulomb.coulomb_decode->areal_radius),
+                                 get(coulomb.registration->measured_radius),
+                                 Approx::custom().epsilon(1.e-5).scale(1.));
+    for (size_t a = 0; a < 5; ++a) {
+      CHECK(std::abs(gsl::at(coulomb.coulomb_decode->components, a)) < 1.e-5);
+    }
+    CHECK_ITERABLE_CUSTOM_APPROX(get(coulomb.psi0_target),
+                                 get(type_d.psi0_target), fd_approx);
+    const auto with_coulomb = apply_worldtube(
+        Worldtube{Imposition::Bjorhus, Imposition::Bjorhus, Imposition::Frozen,
+                  Model::QuadrupoleCoulomb, 1.0},
+        data, 0., sphere.domain, sphere.element, sphere.functions_of_time,
+        face_data);
+    CHECK_ITERABLE_CUSTOM_APPROX(with_coulomb.dt_spacetime_metric,
+                                 with_type_d.dt_spacetime_metric, fd_approx);
+    CHECK_ITERABLE_CUSTOM_APPROX(with_coulomb.dt_pi, with_type_d.dt_pi,
+                                 fd_approx);
+    CHECK_ITERABLE_CUSTOM_APPROX(with_coulomb.dt_phi, with_type_d.dt_phi,
+                                 fd_approx);
   }
 
   // The order-two model needs the face data of the element
