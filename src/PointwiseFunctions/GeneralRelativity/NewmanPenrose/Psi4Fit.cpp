@@ -113,6 +113,26 @@ DirectPsi4Fit fit_psi4(
   return fit;
 }
 
+double relative_fit_residual(
+    const Scalar<ComplexDataVector>& measured_psi4,
+    const std::array<Scalar<ComplexDataVector>, 5>& projected_columns,
+    const TidalMoments& components,
+    const std::optional<DataVector>& point_weights) {
+  const size_t num_points = get_size(get(measured_psi4));
+  double residual_squared = 0.;
+  double data_squared = 0.;
+  for (size_t p = 0; p < num_points; ++p) {
+    const double weight = point_weights.has_value() ? (*point_weights)[p] : 1.;
+    std::complex<double> fitted{0., 0.};
+    for (size_t a = 0; a < 5; ++a) {
+      fitted += get(gsl::at(projected_columns, a))[p] * gsl::at(components, a);
+    }
+    residual_squared += weight * std::norm(fitted - get(measured_psi4)[p]);
+    data_squared += weight * std::norm(get(measured_psi4)[p]);
+  }
+  return sqrt(residual_squared) / std::max(sqrt(data_squared), 1.e-300);
+}
+
 FrameRegistration register_frame(const WeylScalars& psi,
                                  const RealMatrix& adapted_rotation,
                                  const double mass) {
@@ -149,7 +169,8 @@ FrameRegistration register_frame(const WeylScalars& psi,
 SecondOrderEvaluation evaluate_second_order(
     const FrameRegistration& registration, const Scalar<DataVector>& rapidity,
     const RealMatrix& adapted_rotation, const double mass,
-    const std::optional<DataVector>& fit_point_weights) {
+    const std::optional<DataVector>& fit_point_weights,
+    const std::optional<TidalMoments>& imposed_components) {
   SecondOrderEvaluation evaluation{};
   evaluation.direct_columns = direct_tide_scalar_columns(
       registration.radial_direction, registration.transverse_velocity, rapidity,
@@ -161,9 +182,17 @@ SecondOrderEvaluation evaluate_second_order(
                   registration.rotation.a_bar, registration.rotation.b)
             .get(4);
   }
-  evaluation.fit =
-      fit_psi4(Scalar<ComplexDataVector>{registration.pulled_back.get(4)},
-               projected_psi4, fit_point_weights);
+  const Scalar<ComplexDataVector> pulled_back_psi4{
+      registration.pulled_back.get(4)};
+  if (imposed_components.has_value()) {
+    evaluation.fit.components = *imposed_components;
+    evaluation.fit.relative_residual =
+        relative_fit_residual(pulled_back_psi4, projected_psi4,
+                              *imposed_components, fit_point_weights);
+  } else {
+    evaluation.fit =
+        fit_psi4(pulled_back_psi4, projected_psi4, fit_point_weights);
+  }
   // Psi0 target: Kinnersley scalars pushed forward to the NR tetrad, plus the
   // fitted transverse tide in the NR tetrad
   const WeylScalars kinematic_nr =

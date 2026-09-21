@@ -11,6 +11,13 @@
 
 /// Items shared by the worldtube boundary condition, the action supplying its
 /// curvature-gradient data and the diagnostics event
+/// \cond
+template <size_t Dim>
+class Direction;
+template <size_t Dim>
+class Mesh;
+/// \endcond
+
 namespace gh::worldtube {
 /*!
  * \brief The electric and magnetic parts of the Weyl tensor from the
@@ -55,6 +62,31 @@ WeylCurvature weyl_curvature(
     const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi,
     const tnsr::iaa<DataVector, 3, Frame::Inertial>& d_pi,
     const tnsr::ijaa<DataVector, 3, Frame::Inertial>& d_phi);
+
+/// The 3+1 quantities, the Weyl curvature and the outward unit normal on one
+/// face of an element, from the evolved variables in the volume
+struct FaceCurvature {
+  tnsr::ii<DataVector, 3, Frame::Inertial> spatial_metric;
+  tnsr::II<DataVector, 3, Frame::Inertial> inverse_spatial_metric;
+  Scalar<DataVector> lapse;
+  tnsr::I<DataVector, 3, Frame::Inertial> shift;
+  tnsr::ii<DataVector, 3, Frame::Inertial> electric;
+  tnsr::ii<DataVector, 3, Frame::Inertial> magnetic;
+  tnsr::i<DataVector, 3, Frame::Inertial> unit_normal_covector;
+};
+
+/// \brief `weyl_curvature()` of the element volume, sliced to the face in
+/// `direction`, with the face's outward unit normal covector (normalized with
+/// the inverse spatial metric). The derivatives of \f$\Pi\f$ and \f$\Phi\f$
+/// are taken in the volume, so the face curvature is the one the boundary
+/// condition sees.
+FaceCurvature face_curvature(
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const Direction<3>& direction);
 
 /*!
  * \brief The Kretschmann scalar \f$K = C_{abcd} C^{abcd}\f$ of a vacuum

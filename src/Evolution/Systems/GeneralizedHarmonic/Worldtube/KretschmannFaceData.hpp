@@ -13,6 +13,7 @@
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "Domain/Structure/Direction.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Psi4Fit.hpp"
 
 /// \cond
 template <size_t Dim>
@@ -66,6 +67,13 @@ struct KretschmannFaceData {
   /// difference
   double previous_time{std::numeric_limits<double>::signaling_NaN()};
   Scalar<DataVector> previous_kretschmann{};
+  /// The tidal moments the order-two model imposes: the instantaneous fit on
+  /// the face relaxed on the boundary condition's `MomentRelaxationTime`
+  /// (see `update_filtered_tidal_moments()`), and the time they were last
+  /// advanced to. Unset until the first fit, or when no order-two condition
+  /// is applied on the face.
+  std::optional<gr::np::TidalMoments> filtered_moments{};
+  double filtered_moments_time{std::numeric_limits<double>::signaling_NaN()};
 
   // NOLINTNEXTLINE(google-runtime-references)
   void pup(PUP::er& p);
@@ -125,6 +133,47 @@ void update_kretschmann_face_data(
     const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
         mesh_velocity,
     double time);
+
+/*!
+ * \brief Advance the relaxed tidal moments toward the instantaneous fit
+ * `raw`: \f$dm/dt = (m_{\rm raw} - m)/\tau\f$ by a forward Euler step over
+ * the time since the last update (the step is capped at one relaxation
+ * time).
+ *
+ * \details Without `relaxation_time`, or without a history, or when time has
+ * run backwards (a self-start reset), the moments are set to `raw`. A
+ * repeated evaluation at the same time leaves them unchanged.
+ */
+void relax_tidal_moments(
+    gsl::not_null<std::optional<gr::np::TidalMoments>*> moments,
+    gsl::not_null<double*> moments_time, const gr::np::TidalMoments& raw,
+    double time, const std::optional<double>& relaxation_time);
+
+/*!
+ * \brief Fit the instantaneous tidal moments of the order-two model on the
+ * excision face and relax the stored `filtered_moments` toward them, see
+ * `relax_tidal_moments()`.
+ *
+ * \details The face curvature is `face_curvature()` of the current evolved
+ * variables and the fit is the one of `evaluate_matching()` with
+ * `PhysicalModel::Quadrupole`, using the Kretschmann data of `data`, which
+ * must therefore be current: call after `update_kretschmann_face_data()`.
+ * Relaxing the moments breaks the feedback loop of the order-two condition
+ * through the leaving mode (the injected \f$\Psi_0\f$ returns as
+ * \f$\Psi_4\f$ at the face, is read as a tide and re-emitted amplified by
+ * the boost factor), which grows on the light-crossing time of the excision
+ * while a tide varies on the orbital time. Only implemented for `Dim == 3`.
+ */
+template <size_t Dim>
+void update_filtered_tidal_moments(
+    gsl::not_null<KretschmannFaceData<Dim>*> data,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
+    const Mesh<Dim>& mesh,
+    const InverseJacobian<DataVector, Dim, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    double mass, const std::optional<double>& relaxation_time, double time);
 
 namespace Tags {
 /// The `gh::worldtube::KretschmannFaceData` of the element

@@ -88,7 +88,10 @@ struct MatchingEvaluation {
  * `model` selects the value of \f$\Psi_0\f$, see `PhysicalModel`. For
  * `PhysicalModel::Quadrupole` the `mass`, the `lapse`, the `shift` and the
  * `face_data` (with the point count of the face) are required; they are
- * ignored otherwise. `PhysicalModel::None` is not a model and is rejected.
+ * ignored otherwise. With `imposed_moments` the tidal fit is skipped and the
+ * target is built from these moments, e.g. the relaxed moments of
+ * `KretschmannFaceData::filtered_moments` the boundary condition imposes.
+ * `PhysicalModel::None` is not a model and is rejected.
  *
  * The construction consumes the interior \f$\Psi_0\f$ through the invariants
  * and the type-D solve, so an evolution imposing the result is the fixed
@@ -102,7 +105,8 @@ MatchingEvaluation evaluate_matching(
     const tnsr::i<DataVector, 3, Frame::Inertial>& unit_normal_covector,
     const Scalar<DataVector>& lapse,
     const tnsr::I<DataVector, 3, Frame::Inertial>& shift,
-    const KretschmannFaceData<3>* face_data);
+    const KretschmannFaceData<3>* face_data,
+    const std::optional<gr::np::TidalMoments>& imposed_moments = std::nullopt);
 }  // namespace gh::worldtube
 
 template <>

@@ -102,6 +102,8 @@ DomainCreator:
         # Quadrupole: order two, needs Mass.
         PhysicalModel: TypeD
         Mass: None
+        # Quadrupole only: low-pass on the fitted tidal moments, several M
+        MomentRelaxationTime: None
     OuterBoundaryCondition:
       ConstraintPreservingBjorhus:
         Type: ConstraintPreservingPhysical

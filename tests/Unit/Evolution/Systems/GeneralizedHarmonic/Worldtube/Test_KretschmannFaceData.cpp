@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <optional>
 
 #include "DataStructures/DataVector.hpp"
@@ -20,12 +21,15 @@
 #include "Domain/Tags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matching.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/WeylCurvature.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/WorldtubeTestHelpers.hpp"
 #include "Framework/TestHelpers.hpp"
 #include "NumericalAlgorithms/Spectral/Basis.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "NumericalAlgorithms/Spectral/QuadratureWeights.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Psi4Fit.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "Utilities/Gsl.hpp"
 
@@ -208,6 +212,104 @@ void test_update_on_boosted_kerr_schild() {
   CHECK_FALSE(outer_data.direction.has_value());
   CHECK(outer_data == KretschmannFaceData<3>{});
 }
+
+void test_relax_tidal_moments() {
+  using gh::worldtube::relax_tidal_moments;
+  const gr::np::TidalMoments raw{
+      {{1., 0.}, {0., 2.}, {3., 0.}, {0., 4.}, {5., 5.}}};
+  const gr::np::TidalMoments other{
+      {{2., 0.}, {0., 0.}, {1., 1.}, {0., 0.}, {0., 0.}}};
+  std::optional<gr::np::TidalMoments> moments{};
+  double moments_time = std::numeric_limits<double>::signaling_NaN();
+  // First call initializes with the raw fit, whatever the relaxation time
+  relax_tidal_moments(make_not_null(&moments), make_not_null(&moments_time),
+                      raw, 1., 10.);
+  REQUIRE(moments.has_value());
+  CHECK(*moments == raw);
+  CHECK(moments_time == 1.);
+  // Forward Euler over the elapsed time
+  relax_tidal_moments(make_not_null(&moments), make_not_null(&moments_time),
+                      other, 3., 10.);
+  for (size_t a = 0; a < 5; ++a) {
+    CHECK(gsl::at(*moments, a) ==
+          gsl::at(raw, a) + 0.2 * (gsl::at(other, a) - gsl::at(raw, a)));
+  }
+  CHECK(moments_time == 3.);
+  // Same time: unchanged
+  const auto saved = *moments;
+  relax_tidal_moments(make_not_null(&moments), make_not_null(&moments_time),
+                      raw, 3., 10.);
+  CHECK(*moments == saved);
+  // A step longer than the relaxation time is capped at one relaxation time
+  relax_tidal_moments(make_not_null(&moments), make_not_null(&moments_time),
+                      raw, 100., 10.);
+  CHECK(*moments == raw);
+  // Time running backwards resets
+  relax_tidal_moments(make_not_null(&moments), make_not_null(&moments_time),
+                      other, 50., 10.);
+  CHECK(*moments == other);
+  CHECK(moments_time == 50.);
+  // No relaxation time: always the raw fit
+  relax_tidal_moments(make_not_null(&moments), make_not_null(&moments_time),
+                      raw, 51., std::nullopt);
+  CHECK(*moments == raw);
+}
+
+void test_update_filtered_tidal_moments() {
+  const std::array<double, 3> velocity{{0.2, -0.1, 0.15}};
+  const auto setup = helpers::wedge_element(12, velocity);
+  const auto vars = setup.evolved_variables(0.);
+  KretschmannFaceData<3> data{};
+  const auto update = [&setup, &vars, &data](const double time) {
+    gh::worldtube::update_kretschmann_face_data(
+        make_not_null(&data),
+        get<gr::Tags::SpacetimeMetric<DataVector, 3>>(vars),
+        get<gh::Tags::Pi<DataVector, 3>>(vars),
+        get<gh::Tags::Phi<DataVector, 3>>(vars), setup.mesh,
+        setup.inverse_jacobian, setup.element, setup.domain.excision_spheres(),
+        std::optional<tnsr::I<DataVector, 3, Frame::Inertial>>{}, time);
+  };
+  // Static history so that dt K is the comoving estimate, as in a real run
+  update(-1.e-3);
+  update(0.);
+  CHECK_FALSE(data.filtered_moments.has_value());
+  gh::worldtube::update_filtered_tidal_moments(
+      make_not_null(&data), get<gr::Tags::SpacetimeMetric<DataVector, 3>>(vars),
+      get<gh::Tags::Pi<DataVector, 3>>(vars),
+      get<gh::Tags::Phi<DataVector, 3>>(vars), setup.mesh,
+      setup.inverse_jacobian, 1.0, 10.0, 0.);
+  REQUIRE(data.filtered_moments.has_value());
+  CHECK(data.filtered_moments_time == 0.);
+  // The moments are the instantaneous fit on the face curvature
+  const gh::worldtube::FaceCurvature face = gh::worldtube::face_curvature(
+      get<gr::Tags::SpacetimeMetric<DataVector, 3>>(vars),
+      get<gh::Tags::Pi<DataVector, 3>>(vars),
+      get<gh::Tags::Phi<DataVector, 3>>(vars), setup.mesh,
+      setup.inverse_jacobian, *data.direction);
+  const auto raw = gh::worldtube::evaluate_matching(
+      gh::worldtube::PhysicalModel::Quadrupole, 1.0, face.electric,
+      face.magnetic, face.spatial_metric, face.unit_normal_covector, face.lapse,
+      face.shift, &data);
+  CHECK(*data.filtered_moments == raw.second_order->fit.components);
+  // The exact type-D hole carries no tide: the moments are truncation error
+  for (size_t a = 0; a < 5; ++a) {
+    CHECK(std::abs(gsl::at(*data.filtered_moments, a)) < 1.e-3);
+  }
+  // A repeated update at a later time with the same state relaxes toward the
+  // same fit and leaves the moments unchanged
+  const auto saved = *data.filtered_moments;
+  gh::worldtube::update_filtered_tidal_moments(
+      make_not_null(&data), get<gr::Tags::SpacetimeMetric<DataVector, 3>>(vars),
+      get<gh::Tags::Pi<DataVector, 3>>(vars),
+      get<gh::Tags::Phi<DataVector, 3>>(vars), setup.mesh,
+      setup.inverse_jacobian, 1.0, 10.0, 1.);
+  for (size_t a = 0; a < 5; ++a) {
+    CHECK(std::abs(gsl::at(*data.filtered_moments, a) - gsl::at(saved, a)) <
+          1.e-12);
+  }
+  CHECK(data.filtered_moments_time == 1.);
+  CHECK(serialize_and_deserialize(data) == data);
+}
 }  // namespace
 
 SPECTRE_TEST_CASE(
@@ -215,4 +317,6 @@ SPECTRE_TEST_CASE(
     "[Unit][Evolution]") {
   test_quadrature_weights();
   test_update_on_boosted_kerr_schild();
+  test_relax_tidal_moments();
+  test_update_filtered_tidal_moments();
 }

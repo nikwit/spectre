@@ -14,22 +14,14 @@
 #include <vector>
 
 #include "DataStructures/ComplexDataVector.hpp"
-#include "DataStructures/DataBox/Tag.hpp"
 #include "DataStructures/DataVector.hpp"
-#include "DataStructures/SliceTensorToVariables.hpp"
-#include "DataStructures/Tensor/EagerMath/Magnitude.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
-#include "DataStructures/Variables.hpp"
 #include "Domain/Domain.hpp"
-#include "Domain/FaceNormal.hpp"
 #include "Domain/Structure/Direction.hpp"
 #include "Domain/Structure/Element.hpp"
-#include "Domain/Structure/IndexToSliceAt.hpp"
-#include "Domain/Tags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matching.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/WeylCurvature.hpp"
-#include "NumericalAlgorithms/LinearOperators/PartialDerivatives.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Psi4Fit.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/RestFrame.hpp"
@@ -39,13 +31,6 @@
 
 namespace gh::worldtube::Events {
 namespace {
-struct ElectricTag : db::SimpleTag {
-  using type = tnsr::ii<DataVector, 3, Frame::Inertial>;
-};
-struct MagneticTag : db::SimpleTag {
-  using type = tnsr::ii<DataVector, 3, Frame::Inertial>;
-};
-
 double frobenius_max(const tnsr::ii<DataVector, 3, Frame::Inertial>& tensor,
                      const tnsr::II<DataVector, 3, Frame::Inertial>& inverse) {
   DataVector square_norm(get_size(get<0, 0>(tensor)), 0.);
@@ -112,7 +97,8 @@ std::vector<std::string> ObserveWorldtubeMatching::legend() {
           "MinRapidity",
           "MaxRapidity",
           "MinMeasuredRadius",
-          "MaxMeasuredRadius"};
+          "MaxMeasuredRadius",
+          "MaxAbsPsi0QuadrupoleImposed"};
 }
 
 std::optional<MatchingReductionData>
@@ -135,43 +121,19 @@ ObserveWorldtubeMatching::compute_reduction_data(
   const size_t fixed_index = index_to_slice_at(mesh.extents(), *direction);
   const Mesh<2> face_mesh = mesh.slice_away(sliced_dim);
 
-  // Curvature in the volume, sliced to the face
-  const auto d_pi = partial_derivative(pi, mesh, inverse_jacobian);
-  const auto d_phi = partial_derivative(phi, mesh, inverse_jacobian);
-  const WeylCurvature curvature =
-      weyl_curvature(spacetime_metric, pi, phi, d_pi, d_phi);
-  const auto face = data_on_slice<
-      gr::Tags::SpatialMetric<DataVector, 3>,
-      gr::Tags::InverseSpatialMetric<DataVector, 3>,
-      gr::Tags::Lapse<DataVector>, gr::Tags::Shift<DataVector, 3>, ElectricTag,
-      MagneticTag,
-      domain::Tags::InverseJacobian<3, Frame::ElementLogical, Frame::Inertial>>(
-      mesh.extents(), sliced_dim, fixed_index, curvature.spatial_metric,
-      curvature.inverse_spatial_metric, curvature.lapse, curvature.shift,
-      curvature.electric, curvature.magnetic, inverse_jacobian);
-  const auto& spatial_metric =
-      get<gr::Tags::SpatialMetric<DataVector, 3>>(face);
-  const auto& inverse_spatial_metric =
-      get<gr::Tags::InverseSpatialMetric<DataVector, 3>>(face);
-  const auto& electric = get<ElectricTag>(face);
-  const auto& magnetic = get<MagneticTag>(face);
+  const FaceCurvature face = face_curvature(spacetime_metric, pi, phi, mesh,
+                                            inverse_jacobian, *direction);
+  const auto& spatial_metric = face.spatial_metric;
+  const auto& inverse_spatial_metric = face.inverse_spatial_metric;
+  const auto& electric = face.electric;
+  const auto& magnetic = face.magnetic;
+  const auto& normal_covector = face.unit_normal_covector;
+  const auto& lapse = face.lapse;
+  const auto& shift = face.shift;
 
-  // Outward unit normal covector of the face
-  auto normal_covector = unnormalized_face_normal(
-      face_mesh,
-      get<domain::Tags::InverseJacobian<3, Frame::ElementLogical,
-                                        Frame::Inertial>>(face),
-      *direction);
-  const DataVector normal_magnitude =
-      get(magnitude(normal_covector, inverse_spatial_metric));
-  for (size_t i = 0; i < 3; ++i) {
-    normal_covector.get(i) /= normal_magnitude;
-  }
-
-  const MatchingEvaluation type_d = evaluate_matching(
-      PhysicalModel::TypeD, std::nullopt, electric, magnetic, spatial_metric,
-      normal_covector, get<gr::Tags::Lapse<DataVector>>(face),
-      get<gr::Tags::Shift<DataVector, 3>>(face), nullptr);
+  const MatchingEvaluation type_d =
+      evaluate_matching(PhysicalModel::TypeD, std::nullopt, electric, magnetic,
+                        spatial_metric, normal_covector, lapse, shift, nullptr);
 
   constexpr double nan = std::numeric_limits<double>::quiet_NaN();
   double max_abs_psi0_quadrupole = nan;
@@ -182,6 +144,7 @@ ObserveWorldtubeMatching::compute_reduction_data(
   double max_rapidity = nan;
   double min_radius = nan;
   double max_radius = nan;
+  double max_abs_psi0_imposed = nan;
   if (mass_.has_value()) {
     // Face data of the observed state: the backward difference against the
     // stored history, at the observation time
@@ -194,8 +157,6 @@ ObserveWorldtubeMatching::compute_reduction_data(
     // not, so check first
     const gr::np::FrameRegistration registration =
         gr::np::register_frame(type_d.psi, type_d.adapted_rotation, *mass_);
-    const auto& lapse = get<gr::Tags::Lapse<DataVector>>(face);
-    const auto& shift = get<gr::Tags::Shift<DataVector, 3>>(face);
     max_abs_tanh_rapidity = max(abs(get(gr::np::invariant_tanh_rapidity(
         registration.member, type_d.adapted_rotation, spatial_metric, lapse,
         shift, current_face_data.d_kretschmann,
@@ -212,6 +173,16 @@ ObserveWorldtubeMatching::compute_reduction_data(
       fit_residual = quadrupole.second_order->fit.relative_residual;
       min_rapidity = min(get(*quadrupole.rapidity));
       max_rapidity = max(get(*quadrupole.rapidity));
+      // The target the boundary condition imposes when its moments are
+      // relaxed, from the stored moments of the last time-derivative
+      // evaluation
+      if (face_data.filtered_moments.has_value()) {
+        const MatchingEvaluation imposed = evaluate_matching(
+            PhysicalModel::Quadrupole, mass_, electric, magnetic,
+            spatial_metric, normal_covector, lapse, shift, &current_face_data,
+            face_data.filtered_moments);
+        max_abs_psi0_imposed = max_abs(get(imposed.psi0_target));
+      }
     }
   }
 
@@ -234,7 +205,8 @@ ObserveWorldtubeMatching::compute_reduction_data(
       min_rapidity,
       max_rapidity,
       min_radius,
-      max_radius};
+      max_radius,
+      max_abs_psi0_imposed};
 }
 
 void ObserveWorldtubeMatching::pup(PUP::er& p) {

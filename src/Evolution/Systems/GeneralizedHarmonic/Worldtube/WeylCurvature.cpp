@@ -5,11 +5,21 @@
 
 #include <cstddef>
 
+#include "DataStructures/DataBox/Tag.hpp"
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/SliceTensorToVariables.hpp"
 #include "DataStructures/Tensor/EagerMath/Determinant.hpp"
 #include "DataStructures/Tensor/EagerMath/DeterminantAndInverse.hpp"
+#include "DataStructures/Tensor/EagerMath/Magnitude.hpp"
 #include "DataStructures/Tensor/EagerMath/RaiseOrLowerIndex.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
+#include "DataStructures/Variables.hpp"
+#include "Domain/FaceNormal.hpp"
+#include "Domain/Structure/Direction.hpp"
+#include "Domain/Structure/IndexToSliceAt.hpp"
+#include "Domain/Tags.hpp"
+#include "NumericalAlgorithms/LinearOperators/PartialDerivatives.hpp"
+#include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Christoffel.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/CovariantDerivOfExtrinsicCurvature.hpp"
 #include "PointwiseFunctions/GeneralRelativity/GeneralizedHarmonic/ExtrinsicCurvature.hpp"
@@ -18,6 +28,7 @@
 #include "PointwiseFunctions/GeneralRelativity/Lapse.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Shift.hpp"
 #include "PointwiseFunctions/GeneralRelativity/SpacetimeNormalVector.hpp"
+#include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "PointwiseFunctions/GeneralRelativity/WeylElectric.hpp"
 #include "PointwiseFunctions/GeneralRelativity/WeylMagnetic.hpp"
 #include "Utilities/Gsl.hpp"
@@ -90,6 +101,58 @@ WeylCurvature weyl_curvature(
                          spacetime_unit_normal_vector, result.spatial_metric,
                          result.inverse_spatial_metric, extrinsic_curvature,
                          inverse_spacetime_metric);
+  return result;
+}
+
+namespace {
+struct ElectricTag : db::SimpleTag {
+  using type = tnsr::ii<DataVector, 3, Frame::Inertial>;
+};
+struct MagneticTag : db::SimpleTag {
+  using type = tnsr::ii<DataVector, 3, Frame::Inertial>;
+};
+}  // namespace
+
+FaceCurvature face_curvature(
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const Direction<3>& direction) {
+  const size_t sliced_dim = direction.dimension();
+  const size_t fixed_index = index_to_slice_at(mesh.extents(), direction);
+  const auto d_pi = partial_derivative(pi, mesh, inverse_jacobian);
+  const auto d_phi = partial_derivative(phi, mesh, inverse_jacobian);
+  const WeylCurvature volume =
+      weyl_curvature(spacetime_metric, pi, phi, d_pi, d_phi);
+  auto face = data_on_slice<
+      gr::Tags::SpatialMetric<DataVector, 3>,
+      gr::Tags::InverseSpatialMetric<DataVector, 3>,
+      gr::Tags::Lapse<DataVector>, gr::Tags::Shift<DataVector, 3>, ElectricTag,
+      MagneticTag,
+      domain::Tags::InverseJacobian<3, Frame::ElementLogical, Frame::Inertial>>(
+      mesh.extents(), sliced_dim, fixed_index, volume.spatial_metric,
+      volume.inverse_spatial_metric, volume.lapse, volume.shift,
+      volume.electric, volume.magnetic, inverse_jacobian);
+  FaceCurvature result{};
+  result.spatial_metric = get<gr::Tags::SpatialMetric<DataVector, 3>>(face);
+  result.inverse_spatial_metric =
+      get<gr::Tags::InverseSpatialMetric<DataVector, 3>>(face);
+  result.lapse = get<gr::Tags::Lapse<DataVector>>(face);
+  result.shift = get<gr::Tags::Shift<DataVector, 3>>(face);
+  result.electric = get<ElectricTag>(face);
+  result.magnetic = get<MagneticTag>(face);
+  result.unit_normal_covector = unnormalized_face_normal(
+      mesh.slice_away(sliced_dim),
+      get<domain::Tags::InverseJacobian<3, Frame::ElementLogical,
+                                        Frame::Inertial>>(face),
+      direction);
+  const DataVector normal_magnitude = get(
+      magnitude(result.unit_normal_covector, result.inverse_spatial_metric));
+  for (size_t i = 0; i < 3; ++i) {
+    result.unit_normal_covector.get(i) /= normal_magnitude;
+  }
   return result;
 }
 

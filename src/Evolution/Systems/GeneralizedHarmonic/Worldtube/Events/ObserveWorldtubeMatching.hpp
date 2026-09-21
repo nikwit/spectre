@@ -73,6 +73,8 @@ using MatchingReductionData = Parallel::ReductionData<
     Parallel::ReductionDatum<double, funcl::Max<>>,
     // Min, max measured radius
     Parallel::ReductionDatum<double, funcl::Min<>>,
+    Parallel::ReductionDatum<double, funcl::Max<>>,
+    // Max |Psi0| of the order-two target from the relaxed moments
     Parallel::ReductionDatum<double, funcl::Max<>>>;
 
 /*!
@@ -112,6 +114,10 @@ using MatchingReductionData = Parallel::ReductionData<
  *   pulled-back \f$\Psi_4\f$ over the face, the largest over the faces
  * - MinRapidity, MaxRapidity: the range of the invariant boost rapidity
  * - MinMeasuredRadius, MaxMeasuredRadius: the range of
+ * - MaxAbsPsi0QuadrupoleImposed: the largest order-two target built from the
+ *   relaxed moments the boundary condition imposes
+ *   (`KretschmannFaceData::filtered_moments`, NaN when the face carries no
+ *   order-two condition), as opposed to the instantaneous fit above
  * \f$(-M/\Psi_2^K)^{1/3}\f$
  *
  * Elements abutting no excision sphere neither register nor contribute.

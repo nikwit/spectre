@@ -57,7 +57,8 @@ MatchingEvaluation evaluate_matching(
     const tnsr::i<DataVector, 3, Frame::Inertial>& unit_normal_covector,
     const Scalar<DataVector>& lapse,
     const tnsr::I<DataVector, 3, Frame::Inertial>& shift,
-    const KretschmannFaceData<3>* const face_data) {
+    const KretschmannFaceData<3>* const face_data,
+    const std::optional<gr::np::TidalMoments>& imposed_moments) {
   const size_t num_points = get_size(get<0>(unit_normal_covector));
   MatchingEvaluation result{};
   // The adapted triad takes the Euclidean direction of the normal covector;
@@ -116,7 +117,7 @@ MatchingEvaluation evaluate_matching(
               : std::nullopt;
       result.second_order = gr::np::evaluate_second_order(
           *result.registration, *result.rapidity, result.adapted_rotation,
-          *mass, weights);
+          *mass, weights, imposed_moments);
       result.psi0_target = result.second_order->psi0_target;
       break;
     }

@@ -290,8 +290,26 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
         "(tidal radial profiles and the areal radius of the worldtube), None "
         "otherwise."};
   };
-  using options = tmpl::list<ConstraintPreservingSector, PhysicalSector,
-                             GaugeSector, PhysicalModel, Mass>;
+  /// \brief Relaxation time of the fitted tidal moments of `PhysicalModel:
+  /// Quadrupole`, a first-order low-pass that breaks the feedback loop of
+  /// the order-two condition through the leaving mode.
+  struct MomentRelaxationTime {
+    using type = Options::Auto<double, Options::AutoLabel::None>;
+    static constexpr Options::String help{
+        "PhysicalModel: Quadrupole only. Relax the five fitted tidal moments "
+        "toward the instantaneous fit on this timescale (first-order "
+        "low-pass) before they enter the target. Without it the condition "
+        "is unstable: the Psi0 it injects returns as Psi4 at the face, is "
+        "read as a tide and re-emitted amplified by the boost factor "
+        "((1+v)/(1-v))^2 of the slice, about one e-folding per M for a hole "
+        "excised at 2.5M. Choose it long compared to the light-crossing "
+        "time of the excision (several M) and short compared to the tidal "
+        "timescale; a first-order filter lags the tide by atan(2 Omega tau). "
+        "None imposes the instantaneous fit."};
+  };
+  using options =
+      tmpl::list<ConstraintPreservingSector, PhysicalSector, GaugeSector,
+                 PhysicalModel, Mass, MomentRelaxationTime>;
   static constexpr Options::String help{
       "Bjorhus-type boundary condition for the inner boundary of a worldtube "
       "around a black hole. Each of the three characteristic sectors of "
@@ -309,6 +327,7 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
       detail::SectorImposition gauge_sector,
       detail::PhysicalModel physical_model,
       std::optional<double> mass = std::nullopt,
+      std::optional<double> moment_relaxation_time = std::nullopt,
       const Options::Context& context = {});
 
   WorldtubeTypeD() = default;
@@ -416,6 +435,9 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   detail::SectorImposition gauge_sector() const { return gauge_sector_; }
   detail::PhysicalModel physical_model() const { return physical_model_; }
   const std::optional<double>& mass() const { return mass_; }
+  const std::optional<double>& moment_relaxation_time() const {
+    return moment_relaxation_time_;
+  }
 
  private:
   detail::SectorImposition constraint_v_psi_{detail::SectorImposition::Bjorhus};
@@ -428,6 +450,7 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
       detail::SectorImposition::SommerfeldAbsorbing};
   detail::PhysicalModel physical_model_{detail::PhysicalModel::None};
   std::optional<double> mass_{};
+  std::optional<double> moment_relaxation_time_{};
 };
 
 template <size_t Dim>

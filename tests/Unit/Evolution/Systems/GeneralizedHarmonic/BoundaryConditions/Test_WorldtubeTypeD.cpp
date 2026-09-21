@@ -298,7 +298,8 @@ void test_option_parsing_and_serialization() {
         "  PhysicalSector: Frozen\n"
         "  GaugeSector: SommerfeldAbsorbing\n"
         "  PhysicalModel: None\n"
-        "  Mass: None");
+        "  Mass: None\n"
+        "  MomentRelaxationTime: None");
     const auto* const worldtube = dynamic_cast<const Worldtube*>(created.get());
     REQUIRE(worldtube != nullptr);
     CHECK(worldtube->constraint_v_psi() == Imposition::Bjorhus);
@@ -327,7 +328,8 @@ void test_option_parsing_and_serialization() {
         "  PhysicalSector: Bjorhus\n"
         "  GaugeSector: Frozen\n"
         "  PhysicalModel: None\n"
-        "  Mass: None");
+        "  Mass: None\n"
+        "  MomentRelaxationTime: None");
     const auto* const worldtube = dynamic_cast<const Worldtube*>(created.get());
     REQUIRE(worldtube != nullptr);
     CHECK(worldtube->constraint_v_psi() == Imposition::Frozen);
@@ -346,6 +348,55 @@ void test_option_parsing_and_serialization() {
                               Worldtube>(
       Imposition::Bjorhus, Imposition::Bjorhus, Imposition::Frozen,
       Model::Quadrupole, std::optional<double>{1.0});
+  test_serialization_via_base<gh::BoundaryConditions::BoundaryCondition<Dim>,
+                              Worldtube>(
+      Imposition::Bjorhus, Imposition::Bjorhus, Imposition::Frozen,
+      Model::Quadrupole, std::optional<double>{1.0},
+      std::optional<double>{10.0});
+  {
+    const auto created = TestHelpers::test_creation<
+        std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+        Metavariables>(
+        "WorldtubeTypeD:\n"
+        "  ConstraintPreservingSector: Bjorhus\n"
+        "  PhysicalSector: Bjorhus\n"
+        "  GaugeSector: Frozen\n"
+        "  PhysicalModel: Quadrupole\n"
+        "  Mass: 1.0\n"
+        "  MomentRelaxationTime: 10.0");
+    const auto* const worldtube = dynamic_cast<const Worldtube*>(created.get());
+    REQUIRE(worldtube != nullptr);
+    CHECK(worldtube->moment_relaxation_time() == std::optional<double>{10.0});
+    CHECK(*worldtube == Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                                  Imposition::Frozen, Model::Quadrupole, 1.0,
+                                  10.0});
+    CHECK(*worldtube != Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                                  Imposition::Frozen, Model::Quadrupole, 1.0});
+  }
+  CHECK_THROWS_WITH(
+      (TestHelpers::test_creation<
+          std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+          Metavariables>("WorldtubeTypeD:\n"
+                         "  ConstraintPreservingSector: Bjorhus\n"
+                         "  PhysicalSector: Bjorhus\n"
+                         "  GaugeSector: Frozen\n"
+                         "  PhysicalModel: TypeD\n"
+                         "  Mass: None\n"
+                         "  MomentRelaxationTime: 10.0")),
+      Catch::Matchers::ContainsSubstring(
+          "MomentRelaxationTime is only used by"));
+  CHECK_THROWS_WITH(
+      (TestHelpers::test_creation<
+          std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+          Metavariables>("WorldtubeTypeD:\n"
+                         "  ConstraintPreservingSector: Bjorhus\n"
+                         "  PhysicalSector: Bjorhus\n"
+                         "  GaugeSector: Frozen\n"
+                         "  PhysicalModel: Quadrupole\n"
+                         "  Mass: 1.0\n"
+                         "  MomentRelaxationTime: 0.0")),
+      Catch::Matchers::ContainsSubstring(
+          "MomentRelaxationTime must be positive"));
 
   CHECK_THROWS_WITH(
       (TestHelpers::test_creation<
@@ -355,7 +406,8 @@ void test_option_parsing_and_serialization() {
                          "  PhysicalSector: Bjorhus\n"
                          "  GaugeSector: Bjorhus\n"
                          "  PhysicalModel: None\n"
-                         "  Mass: None")),
+                         "  Mass: None\n"
+                         "  MomentRelaxationTime: None")),
       Catch::Matchers::ContainsSubstring("GaugeSector: Bjorhus is not"));
   CHECK_THROWS_WITH(
       (TestHelpers::test_creation<
@@ -365,7 +417,8 @@ void test_option_parsing_and_serialization() {
                          "  PhysicalSector: SommerfeldAbsorbing\n"
                          "  GaugeSector: Frozen\n"
                          "  PhysicalModel: None\n"
-                         "  Mass: None")),
+                         "  Mass: None\n"
+                         "  MomentRelaxationTime: None")),
       Catch::Matchers::ContainsSubstring(
           "PhysicalSector: the Sommerfeld conditions apply only"));
   CHECK_THROWS_WITH(
@@ -376,7 +429,8 @@ void test_option_parsing_and_serialization() {
                          "  PhysicalSector: Bjorhus\n"
                          "  GaugeSector: Frozen\n"
                          "  PhysicalModel: None\n"
-                         "  Mass: None")),
+                         "  Mass: None\n"
+                         "  MomentRelaxationTime: None")),
       Catch::Matchers::ContainsSubstring("Must be one of Bjorhus, Frozen"));
   CHECK_THROWS_WITH(
       (TestHelpers::test_creation<
@@ -386,7 +440,8 @@ void test_option_parsing_and_serialization() {
                          "  PhysicalSector: Frozen\n"
                          "  GaugeSector: Frozen\n"
                          "  PhysicalModel: TypeD\n"
-                         "  Mass: None")),
+                         "  Mass: None\n"
+                         "  MomentRelaxationTime: None")),
       Catch::Matchers::ContainsSubstring("Use PhysicalSector: Bjorhus"));
   {
     const auto created = TestHelpers::test_creation<
@@ -397,7 +452,8 @@ void test_option_parsing_and_serialization() {
         "  PhysicalSector: Bjorhus\n"
         "  GaugeSector: SommerfeldAbsorbing\n"
         "  PhysicalModel: TypeD\n"
-        "  Mass: None");
+        "  Mass: None\n"
+        "  MomentRelaxationTime: None");
     const auto* const worldtube = dynamic_cast<const Worldtube*>(created.get());
     REQUIRE(worldtube != nullptr);
     CHECK(worldtube->physical_model() == Model::TypeD);
@@ -412,7 +468,8 @@ void test_option_parsing_and_serialization() {
         "  PhysicalSector: Bjorhus\n"
         "  GaugeSector: SommerfeldAbsorbing\n"
         "  PhysicalModel: Quadrupole\n"
-        "  Mass: 1.0");
+        "  Mass: 1.0\n"
+        "  MomentRelaxationTime: None");
     const auto* const worldtube = dynamic_cast<const Worldtube*>(created.get());
     REQUIRE(worldtube != nullptr);
     CHECK(worldtube->physical_model() == Model::Quadrupole);
@@ -432,7 +489,8 @@ void test_option_parsing_and_serialization() {
                          "  PhysicalSector: Bjorhus\n"
                          "  GaugeSector: Frozen\n"
                          "  PhysicalModel: Quadrupole\n"
-                         "  Mass: None")),
+                         "  Mass: None\n"
+                         "  MomentRelaxationTime: None")),
       Catch::Matchers::ContainsSubstring("Quadrupole needs the mass"));
   CHECK_THROWS_WITH(
       (TestHelpers::test_creation<
@@ -442,7 +500,8 @@ void test_option_parsing_and_serialization() {
                          "  PhysicalSector: Bjorhus\n"
                          "  GaugeSector: Frozen\n"
                          "  PhysicalModel: TypeD\n"
-                         "  Mass: 1.0")),
+                         "  Mass: 1.0\n"
+                         "  MomentRelaxationTime: None")),
       Catch::Matchers::ContainsSubstring("Mass is only used by"));
   CHECK_THROWS_WITH(
       (TestHelpers::test_creation<
@@ -452,7 +511,8 @@ void test_option_parsing_and_serialization() {
                          "  PhysicalSector: Bjorhus\n"
                          "  GaugeSector: Frozen\n"
                          "  PhysicalModel: Quadrupole\n"
-                         "  Mass: -1.0")),
+                         "  Mass: -1.0\n"
+                         "  MomentRelaxationTime: None")),
       Catch::Matchers::ContainsSubstring("Mass must be positive"));
 }
 
@@ -1094,6 +1154,38 @@ void test_quadrupole_model_on_boosted_kerr_schild() {
                                fd_approx);
   CHECK_ITERABLE_CUSTOM_APPROX(with_quadrupole.dt_phi, with_type_d.dt_phi,
                                fd_approx);
+
+  // With the fitted moments stored as the relaxed moments of the face data,
+  // the condition skips the fit and imposes them: the same corrections
+  {
+    gh::worldtube::KretschmannFaceData<Dim> with_moments = face_data;
+    with_moments.filtered_moments = quadrupole.second_order->fit.components;
+    with_moments.filtered_moments_time = 0.;
+    const auto imposed = gh::worldtube::evaluate_matching(
+        Model::Quadrupole, 1.0, electric, magnetic, spatial_metric,
+        data.normal_covector, data.lapse, data.shift, &with_moments,
+        with_moments.filtered_moments);
+    CHECK(imposed.second_order->fit.components ==
+          quadrupole.second_order->fit.components);
+    CHECK(imposed.second_order->fit.relative_residual ==
+          approx(quadrupole.second_order->fit.relative_residual));
+    CHECK_ITERABLE_APPROX(get(imposed.psi0_target),
+                          get(quadrupole.psi0_target));
+    const auto with_stored_moments = apply_worldtube(
+        Worldtube{Imposition::Bjorhus, Imposition::Bjorhus, Imposition::Frozen,
+                  Model::Quadrupole, 1.0, 10.0},
+        data, 0., sphere.domain, sphere.element, sphere.functions_of_time,
+        with_moments);
+    check_corrections_equal(with_stored_moments, with_quadrupole);
+    // Zero moments impose the type-D target
+    with_moments.filtered_moments = gr::np::TidalMoments{};
+    const auto zero_moments = gh::worldtube::evaluate_matching(
+        Model::Quadrupole, 1.0, electric, magnetic, spatial_metric,
+        data.normal_covector, data.lapse, data.shift, &with_moments,
+        with_moments.filtered_moments);
+    CHECK_ITERABLE_CUSTOM_APPROX(get(zero_moments.psi0_target),
+                                 get(type_d.psi0_target), fd_approx);
+  }
 
   // The order-two model needs the face data of the element
   CHECK_THROWS_WITH(

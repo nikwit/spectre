@@ -20,8 +20,12 @@ namespace gr::np {
  * H_{23})\f$ of \f$H = E + iB\f$ fitted from the pulled-back
  * \f$\Psi_4\f$, eq. `psi4-fit`. Mirrors `wplus.DirectPsi4Fit`.
  */
+/// The five complex components \f$E + iB\f$ of a quadrupole in the STF
+/// component basis of `stf_from_components()`
+using TidalMoments = std::array<std::complex<double>, 5>;
+
 struct DirectPsi4Fit {
-  std::array<std::complex<double>, 5> components;
+  TidalMoments components;
   /// \f$|Z x - d| / |d|\f$ of the (weighted) design
   double relative_residual;
   std::array<double, 5> electric() const;
@@ -91,11 +95,26 @@ struct SecondOrderEvaluation {
   Scalar<ComplexDataVector> psi0_target;
 };
 
+/// \brief The weighted relative residual of given tidal `components`
+/// against `measured_psi4`, \f$\|\sum_a c_a Z_a - d\| / \|d\|\f$, the
+/// quantity `fit_psi4()` minimizes.
+double relative_fit_residual(
+    const Scalar<ComplexDataVector>& measured_psi4,
+    const std::array<Scalar<ComplexDataVector>, 5>& projected_columns,
+    const TidalMoments& components,
+    const std::optional<DataVector>& point_weights = std::nullopt);
+
 /// \brief Fit the pulled-back \f$\Psi_4\f$ and construct the NR
 /// \f$\Psi_0\f$ target for a registered frame and the type-III `rapidity`
 /// of its rest frame. Mirrors `wplus.evaluate_second_order`.
+///
+/// With `imposed_components` the fit is skipped: the target is built from
+/// these moments (e.g. the relaxed moments a boundary condition imposes),
+/// and `fit.relative_residual` reports their residual against the current
+/// pulled-back \f$\Psi_4\f$.
 SecondOrderEvaluation evaluate_second_order(
     const FrameRegistration& registration, const Scalar<DataVector>& rapidity,
     const RealMatrix& adapted_rotation, double mass,
-    const std::optional<DataVector>& fit_point_weights = std::nullopt);
+    const std::optional<DataVector>& fit_point_weights = std::nullopt,
+    const std::optional<TidalMoments>& imposed_components = std::nullopt);
 }  // namespace gr::np

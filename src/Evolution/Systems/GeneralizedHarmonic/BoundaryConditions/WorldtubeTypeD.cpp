@@ -151,7 +151,9 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
     const detail::SectorImposition physical_sector,
     const detail::SectorImposition gauge_sector,
     const detail::PhysicalModel physical_model,
-    const std::optional<double> mass, const Options::Context& context)
+    const std::optional<double> mass,
+    const std::optional<double> moment_relaxation_time,
+    const Options::Context& context)
     : constraint_v_psi_(
           resolve_constraint_sectors(constraint_preserving_sector).v_psi),
       constraint_v_zero_(
@@ -161,7 +163,8 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
       physical_sector_(physical_sector),
       gauge_sector_(gauge_sector),
       physical_model_(physical_model),
-      mass_(mass) {
+      mass_(mass),
+      moment_relaxation_time_(moment_relaxation_time) {
   if (gauge_sector_ == detail::SectorImposition::Bjorhus) {
     PARSE_ERROR(context,
                 "GaugeSector: Bjorhus is not implemented. A relaxation towards "
@@ -209,6 +212,19 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
                 "PhysicalModel is "
                     << physical_model_ << ". Set Mass: None.");
   }
+  if (moment_relaxation_time_.has_value()) {
+    if (physical_model_ != detail::PhysicalModel::Quadrupole) {
+      PARSE_ERROR(context,
+                  "MomentRelaxationTime is only used by PhysicalModel: "
+                  "Quadrupole, but PhysicalModel is "
+                      << physical_model_
+                      << ". Set MomentRelaxationTime: None.");
+    }
+    if (*moment_relaxation_time_ <= 0.) {
+      PARSE_ERROR(context, "MomentRelaxationTime must be positive, not "
+                               << *moment_relaxation_time_);
+    }
+  }
   if constexpr (Dim != 3) {
     if (physical_model_ != detail::PhysicalModel::None) {
       PARSE_ERROR(context,
@@ -238,6 +254,7 @@ void WorldtubeTypeD<Dim>::pup(PUP::er& p) {
   p | gauge_sector_;
   p | physical_model_;
   p | mass_;
+  p | moment_relaxation_time_;
 }
 
 template <size_t Dim>
@@ -395,7 +412,10 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
         incoming_mode =
             worldtube::evaluate_matching(
                 physical_model_, mass_, electric, magnetic, spatial_metric,
-                normal_covector, lapse, shift, &face_data)
+                normal_covector, lapse, shift, &face_data,
+                // The relaxed moments maintained by UpdateKretschmannFaceData,
+                // if the face has them; the instantaneous fit otherwise
+                face_data.filtered_moments)
                 .incoming_mode;
       } else {
         (void)face_data;
@@ -468,7 +488,8 @@ bool operator==(const WorldtubeTypeD<Dim>& lhs,
          lhs.physical_sector() == rhs.physical_sector() and
          lhs.gauge_sector() == rhs.gauge_sector() and
          lhs.physical_model() == rhs.physical_model() and
-         lhs.mass() == rhs.mass();
+         lhs.mass() == rhs.mass() and
+         lhs.moment_relaxation_time() == rhs.moment_relaxation_time();
 }
 
 template <size_t Dim>

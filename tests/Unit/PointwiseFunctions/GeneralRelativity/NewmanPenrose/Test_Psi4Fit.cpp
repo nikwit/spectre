@@ -128,6 +128,29 @@ void test_second_order_on_manufactured_slice() {
   const SecondOrderEvaluation evaluation = evaluate_second_order(
       registration, rapidity, geometry.rotation, slice.mass);
 
+  // Imposing the fitted components reproduces the fit; other components give
+  // the corresponding residual and a target linear in them
+  {
+    const SecondOrderEvaluation imposed = evaluate_second_order(
+        registration, rapidity, geometry.rotation, slice.mass, std::nullopt,
+        evaluation.fit.components);
+    CHECK(imposed.fit.components == evaluation.fit.components);
+    CHECK(imposed.fit.relative_residual ==
+          approx(evaluation.fit.relative_residual));
+    CHECK_ITERABLE_APPROX(get(imposed.psi0_target),
+                          get(evaluation.psi0_target));
+    const SecondOrderEvaluation zero =
+        evaluate_second_order(registration, rapidity, geometry.rotation,
+                              slice.mass, std::nullopt, TidalMoments{});
+    CHECK(zero.fit.relative_residual == approx(1.));
+    ComplexDataVector expected = get(zero.psi0_target);
+    for (size_t a = 0; a < 5; ++a) {
+      expected += gsl::at(evaluation.fit.components, a) *
+                  gsl::at(evaluation.direct_columns, a).get(0);
+    }
+    CHECK_ITERABLE_APPROX(get(evaluation.psi0_target), expected);
+  }
+
   const auto psi_list = helpers::pack_scalars(slice.psi);
   const auto reals = helpers::pack_reals(geometry);
   Approx custom_approx = Approx::custom().epsilon(1.e-9).scale(1.);

@@ -44,6 +44,7 @@
 #include "Parallel/PhaseDependentActionList.hpp"
 #include "Parallel/Reduction.hpp"
 #include "ParallelAlgorithms/EventsAndTriggers/Event.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Psi4Fit.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "Time/Tags/Time.hpp"
 #include "Utilities/ConstantExpressions.hpp"
@@ -211,6 +212,8 @@ run_event(
           setup.domain.excision_spheres(),
           std::optional<tnsr::I<DataVector, 3, Frame::Inertial>>{},
           previous_time);
+      face_data.filtered_moments = gr::np::TidalMoments{};
+      face_data.filtered_moments_time = previous_time;
     }
     auto box = db::create<tag_list>(
         Metavariables{}, 0.0, setup.evolved_variables(0.), setup.mesh,
@@ -304,6 +307,9 @@ void test_observe() {
   CHECK(std::get<15>(data) <= std::get<16>(data));
   CHECK(std::get<17>(data) > 2.5 * 0.99);
   CHECK(std::get<18>(data) < 2.5 * lorentz_factor * 1.01);
+  // Zero relaxed moments were stored in the face data: the imposed target is
+  // the type-D one
+  CHECK(std::get<19>(data) == approx(std::get<9>(data)).epsilon(1.e-6));
 
   // Without a mass the order-two columns are not evaluated
   const auto without_mass = run_event(
@@ -315,6 +321,7 @@ void test_observe() {
   CHECK(std::isnan(std::get<11>(data_without_mass)));
   CHECK(std::isnan(std::get<13>(data_without_mass)));
   CHECK(std::isnan(std::get<14>(data_without_mass)));
+  CHECK(std::isnan(std::get<19>(data_without_mass)));
   CHECK(std::isnan(std::get<18>(data_without_mass)));
 
   // An element off the excision sphere contributes nothing
@@ -362,6 +369,7 @@ void test_static_hole_on_spherical_shell() {
   CHECK(std::get<16>(data) == approx(-std::atanh(2. / radius)).epsilon(1.e-3));
   CHECK(std::get<17>(data) == approx(radius).epsilon(1.e-6));
   CHECK(std::get<18>(data) == approx(radius).epsilon(1.e-6));
+  CHECK(std::isnan(std::get<19>(data)));
 }
 }  // namespace
 

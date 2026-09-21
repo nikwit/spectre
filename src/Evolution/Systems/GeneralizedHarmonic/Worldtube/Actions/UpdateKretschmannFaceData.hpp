@@ -4,17 +4,24 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 #include <optional>
+#include <vector>
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
+#include "Domain/BoundaryConditions/BoundaryCondition.hpp"
 #include "Domain/Creators/Tags/Domain.hpp"
+#include "Domain/Creators/Tags/ExternalBoundaryConditions.hpp"
 #include "Domain/Domain.hpp"
+#include "Domain/Structure/DirectionMap.hpp"
 #include "Domain/Structure/Element.hpp"
 #include "Domain/Tags.hpp"
 #include "Domain/TagsTimeDependent.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/WorldtubeTypeD.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matching.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "Time/Tags/Time.hpp"
@@ -63,7 +70,8 @@ struct UpdateKretschmannFaceData {
                  domain::Tags::InverseJacobian<Dim, Frame::ElementLogical,
                                                Frame::Inertial>,
                  domain::Tags::Element<Dim>, domain::Tags::Domain<Dim>,
-                 domain::Tags::MeshVelocity<Dim>, ::Tags::Time>;
+                 domain::Tags::MeshVelocity<Dim>, ::Tags::Time,
+                 domain::Tags::ExternalBoundaryConditions<Dim>>;
 
   static void apply(
       const gsl::not_null<worldtube::KretschmannFaceData<Dim>*> data,
@@ -76,10 +84,34 @@ struct UpdateKretschmannFaceData {
       const Element<Dim>& element, const Domain<Dim>& domain,
       const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
           mesh_velocity,
-      const double time) {
+      const double time,
+      const std::vector<DirectionMap<
+          Dim, std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>>>&
+          external_boundary_conditions) {
     update_kretschmann_face_data(
         data, spacetime_metric, pi, phi, mesh, inverse_jacobian, element,
         domain.excision_spheres(), mesh_velocity, time);
+    if constexpr (Dim == 3) {
+      // The relaxed tidal moments are only needed, and only defined, when the
+      // excision face carries the order-two worldtube condition
+      if (data->direction.has_value()) {
+        const auto& conditions =
+            external_boundary_conditions[element.id().block_id()];
+        const auto* const worldtube =
+            dynamic_cast<const BoundaryConditions::WorldtubeTypeD<Dim>*>(
+                conditions.at(*data->direction).get());
+        if (worldtube != nullptr and
+            worldtube->physical_model() == PhysicalModel::Quadrupole) {
+          update_filtered_tidal_moments(
+              data, spacetime_metric, pi, phi, mesh, inverse_jacobian,
+              *worldtube->mass(), worldtube->moment_relaxation_time(), time);
+          return;
+        }
+      }
+      data->filtered_moments.reset();
+    } else {
+      (void)external_boundary_conditions;
+    }
   }
 };
 }  // namespace gh::worldtube

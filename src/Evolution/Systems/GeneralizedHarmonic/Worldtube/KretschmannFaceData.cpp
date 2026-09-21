@@ -3,6 +3,7 @@
 
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <numbers>
@@ -22,6 +23,7 @@
 #include "Domain/Structure/Direction.hpp"
 #include "Domain/Structure/Element.hpp"
 #include "Domain/Structure/IndexToSliceAt.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matching.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/WeylCurvature.hpp"
 #include "NumericalAlgorithms/LinearOperators/PartialDerivatives.hpp"
 #include "NumericalAlgorithms/Spectral/Basis.hpp"
@@ -58,6 +60,8 @@ void KretschmannFaceData<Dim>::pup(PUP::er& p) {
   p | quadrature_weights;
   p | previous_time;
   p | previous_kretschmann;
+  p | filtered_moments;
+  p | filtered_moments_time;
 }
 
 template <size_t Dim>
@@ -74,7 +78,9 @@ bool operator==(const KretschmannFaceData<Dim>& lhs,
          lhs.dt_kretschmann == rhs.dt_kretschmann and
          lhs.quadrature_weights == rhs.quadrature_weights and
          same_time(lhs.previous_time, rhs.previous_time) and
-         lhs.previous_kretschmann == rhs.previous_kretschmann;
+         lhs.previous_kretschmann == rhs.previous_kretschmann and
+         lhs.filtered_moments == rhs.filtered_moments and
+         same_time(lhs.filtered_moments_time, rhs.filtered_moments_time);
 }
 
 template <size_t Dim>
@@ -224,6 +230,67 @@ void update_kretschmann_face_data(
   }
 }
 
+void relax_tidal_moments(
+    const gsl::not_null<std::optional<gr::np::TidalMoments>*> moments,
+    const gsl::not_null<double*> moments_time, const gr::np::TidalMoments& raw,
+    const double time, const std::optional<double>& relaxation_time) {
+  if (not relaxation_time.has_value() or not moments->has_value() or
+      not(time >= *moments_time)) {
+    *moments = raw;
+    *moments_time = time;
+    return;
+  }
+  if (time == *moments_time) {
+    return;
+  }
+  const double factor = std::min((time - *moments_time) / *relaxation_time, 1.);
+  for (size_t a = 0; a < 5; ++a) {
+    gsl::at(**moments, a) += factor * (gsl::at(raw, a) - gsl::at(**moments, a));
+  }
+  *moments_time = time;
+}
+
+template <size_t Dim>
+void update_filtered_tidal_moments(
+    const gsl::not_null<KretschmannFaceData<Dim>*> data,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
+    const Mesh<Dim>& mesh,
+    const InverseJacobian<DataVector, Dim, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const double mass, const std::optional<double>& relaxation_time,
+    const double time) {
+  if constexpr (Dim != 3) {
+    (void)data;
+    (void)spacetime_metric;
+    (void)pi;
+    (void)phi;
+    (void)mesh;
+    (void)inverse_jacobian;
+    (void)mass;
+    (void)relaxation_time;
+    (void)time;
+    ERROR("The order-two worldtube model is only implemented in 3 dimensions.");
+  } else {
+    if (not data->direction.has_value()) {
+      ERROR(
+          "The tidal moments can only be updated on an element that abuts an "
+          "excision sphere; update the Kretschmann face data first.");
+    }
+    const FaceCurvature face = face_curvature(
+        spacetime_metric, pi, phi, mesh, inverse_jacobian, *data->direction);
+    const MatchingEvaluation raw = evaluate_matching(
+        PhysicalModel::Quadrupole, mass, face.electric, face.magnetic,
+        face.spatial_metric, face.unit_normal_covector, face.lapse, face.shift,
+        &*data, std::nullopt);
+    relax_tidal_moments(make_not_null(&data->filtered_moments),
+                        make_not_null(&data->filtered_moments_time),
+                        raw.second_order->fit.components, time,
+                        relaxation_time);
+  }
+}
+
 #define DIM(data) BOOST_PP_TUPLE_ELEM(0, data)
 
 #define INSTANTIATION(r, data)                                               \
@@ -238,6 +305,15 @@ void update_kretschmann_face_data(
       const Element<DIM(data)>& element);                                    \
   template DataVector face_quadrature_weights<DIM(data)>(                    \
       const Mesh<DIM(data) - 1>& face_mesh);                                 \
+  template void update_filtered_tidal_moments(                               \
+      gsl::not_null<KretschmannFaceData<DIM(data)>*>,                        \
+      const tnsr::aa<DataVector, DIM(data), Frame::Inertial>&,               \
+      const tnsr::aa<DataVector, DIM(data), Frame::Inertial>&,               \
+      const tnsr::iaa<DataVector, DIM(data), Frame::Inertial>&,              \
+      const Mesh<DIM(data)>&,                                                \
+      const InverseJacobian<DataVector, DIM(data), Frame::ElementLogical,    \
+                            Frame::Inertial>&,                               \
+      double, const std::optional<double>&, double);                         \
   template void update_kretschmann_face_data(                                \
       gsl::not_null<KretschmannFaceData<DIM(data)>*>,                        \
       const tnsr::aa<DataVector, DIM(data), Frame::Inertial>&,               \
