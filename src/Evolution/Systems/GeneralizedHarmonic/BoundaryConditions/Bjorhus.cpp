@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/EagerMath/DotProduct.hpp"
@@ -36,15 +37,23 @@ convert_constraint_preserving_bjorhus_type_from_yaml(
 }
 }  // namespace detail
 
+IncomingWave::IncomingWave(
+    std::unique_ptr<::MathFunction<1, Frame::Inertial>> envelope_in,
+    const std::array<double, 6>& components_in)
+    : envelope(std::move(envelope_in)), components(components_in) {}
+
 template <size_t Dim>
 ConstraintPreservingBjorhus<Dim>::ConstraintPreservingBjorhus(
     const detail::ConstraintPreservingBjorhusType type,
-    std::optional<std::unique_ptr<::MathFunction<1, Frame::Inertial>>>
-        incoming_wave_profile)
+    std::optional<IncomingWave> incoming_wave)
     : type_(type),
-      incoming_wave_profile_(incoming_wave_profile.has_value()
-                                 ? std::move(incoming_wave_profile.value())
-                                 : nullptr) {
+      incoming_wave_profile_(incoming_wave.has_value()
+                                 ? std::move(incoming_wave->envelope)
+                                 : nullptr),
+      incoming_wave_components_(
+          incoming_wave.has_value()
+              ? incoming_wave->components
+              : Bjorhus::default_incoming_wave_components) {
   if constexpr (Dim < 3) {
     if (incoming_wave_profile_ != nullptr) {
       ERROR(
@@ -61,7 +70,8 @@ ConstraintPreservingBjorhus<Dim>::ConstraintPreservingBjorhus(
       type_(rhs.type_),
       incoming_wave_profile_(rhs.incoming_wave_profile_ != nullptr
                                  ? rhs.incoming_wave_profile_->get_clone()
-                                 : nullptr) {}
+                                 : nullptr),
+      incoming_wave_components_(rhs.incoming_wave_components_) {}
 
 template <size_t Dim>
 ConstraintPreservingBjorhus<Dim>& ConstraintPreservingBjorhus<Dim>::operator=(
@@ -73,6 +83,7 @@ ConstraintPreservingBjorhus<Dim>& ConstraintPreservingBjorhus<Dim>::operator=(
   incoming_wave_profile_ = rhs.incoming_wave_profile_ != nullptr
                                ? rhs.incoming_wave_profile_->get_clone()
                                : nullptr;
+  incoming_wave_components_ = rhs.incoming_wave_components_;
   return *this;
 }
 
@@ -92,6 +103,7 @@ void ConstraintPreservingBjorhus<Dim>::pup(PUP::er& p) {
   BoundaryCondition<Dim>::pup(p);
   p | type_;
   p | incoming_wave_profile_;
+  p | incoming_wave_components_;
 }
 
 template <size_t Dim>
@@ -201,7 +213,8 @@ std::optional<std::string> ConstraintPreservingBjorhus<Dim>::dg_time_derivative(
         inverse_spacetime_metric, three_index_constraint,
         vars.char_projected_rhs_dt_v_psi, vars.char_projected_rhs_dt_v_minus,
         vars.constraint_char_zero_plus, vars.constraint_char_zero_minus, phi,
-        d_phi, d_pi, vars.char_speeds, incoming_wave_profile_.get());
+        d_phi, d_pi, vars.char_speeds, incoming_wave_profile_.get(),
+        incoming_wave_components_);
   } else {
     ERROR(
         "Failed to set dtVMinus. Input option must be one of "

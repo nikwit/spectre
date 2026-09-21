@@ -76,8 +76,7 @@ void test() {
             "dt_phi_" + bc_type},
         "ConstraintPreservingBjorhus:\n"
         "  Type: " +
-            bc_string +
-            (Dim == 3 ? "\n  IncomingWaveProfile: None" : ""),
+            bc_string + (Dim == 3 ? "\n  IncomingWaveProfile: None" : ""),
         Index<Dim - 1>{Dim == 1 ? 1 : 5}, box_of_gridless_data,
         tuples::TaggedTuple<
             helpers::Tags::Range<gr::Tags::Lapse<DataVector>>,
@@ -113,10 +112,12 @@ void test_incoming_wave_profile_option_parsing_and_dim_guard() {
         "ConstraintPreservingBjorhus:\n"
         "  Type: ConstraintPreservingPhysical\n"
         "  IncomingWaveProfile:\n"
-        "    Sinusoid:\n"
-        "      Amplitude: 1.2\n"
-        "      Wavenumber: 0.7\n"
-        "      Phase: 0.4");
+        "    Envelope:\n"
+        "      Sinusoid:\n"
+        "        Amplitude: 1.2\n"
+        "        Wavenumber: 0.7\n"
+        "        Phase: 0.4\n"
+        "    Components: [1.0, 0.6, 0.3, -0.4, 0.2, -0.6]");
     CHECK(dynamic_cast<
               const gh::BoundaryConditions::ConstraintPreservingBjorhus<3>*>(
               created.get()) != nullptr);
@@ -128,10 +129,12 @@ void test_incoming_wave_profile_option_parsing_and_dim_guard() {
           Metavariables<1>>("ConstraintPreservingBjorhus:\n"
                             "  Type: ConstraintPreservingPhysical\n"
                             "  IncomingWaveProfile:\n"
-                            "    Sinusoid:\n"
-                            "      Amplitude: 1.2\n"
-                            "      Wavenumber: 0.7\n"
-                            "      Phase: 0.4")),
+                            "    Envelope:\n"
+                            "      Sinusoid:\n"
+                            "        Amplitude: 1.2\n"
+                            "        Wavenumber: 0.7\n"
+                            "        Phase: 0.4\n"
+                            "    Components: [1.0, 0.0, 0.0, 1.0, 0.0, -2.0]")),
       Catch::Matchers::ContainsSubstring(
           "Option 'IncomingWaveProfile' is not a valid option."));
 
@@ -141,10 +144,12 @@ void test_incoming_wave_profile_option_parsing_and_dim_guard() {
           Metavariables<2>>("ConstraintPreservingBjorhus:\n"
                             "  Type: ConstraintPreservingPhysical\n"
                             "  IncomingWaveProfile:\n"
-                            "    Sinusoid:\n"
-                            "      Amplitude: 1.2\n"
-                            "      Wavenumber: 0.7\n"
-                            "      Phase: 0.4")),
+                            "    Envelope:\n"
+                            "      Sinusoid:\n"
+                            "        Amplitude: 1.2\n"
+                            "        Wavenumber: 0.7\n"
+                            "        Phase: 0.4\n"
+                            "    Components: [1.0, 0.0, 0.0, 1.0, 0.0, -2.0]")),
       Catch::Matchers::ContainsSubstring(
           "Option 'IncomingWaveProfile' is not a valid option."));
 }

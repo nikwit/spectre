@@ -40,15 +40,15 @@ struct CoulombDecode {
 /// The radius of the turning point of \f$B(r)\f$ in units of the mass
 constexpr double coulomb_decode_turning_point_over_mass = 2.25;
 
-/// \brief \f$B(r) = \sqrt{1 - 2M/r}\, 3M/r^4\f$, the proper radial
-/// derivative of the Coulomb scalar of a hole at rest. Mirrors
-/// `coulomb.background_radial_derivative`.
+/// \brief The background derivative \f$B(r) = \sqrt{1 - 2M/r}\, 3M/r^4\f$,
+/// the proper radial derivative of the Coulomb scalar of a hole at rest.
+/// Mirrors `coulomb.background_radial_derivative`.
 DataVector background_radial_derivative(const DataVector& radius, double mass);
 
-/// \brief \f$\cosh\eta\, (\hat r\cdot s) + \sinh\eta\, \Gamma\, (w\cdot s)\f$:
-/// the component along the sphere normal of the rest-frame radial unit
-/// vector, for the tangent member in adapted-triad components. Mirrors
-/// `coulomb.normal_derivative_factor`.
+/// \brief The factor \f$\cosh\eta\, (\hat r\cdot s) + \sinh\eta\, \Gamma\,
+/// (w\cdot s)\f$: the component along the sphere normal of the rest-frame
+/// radial unit vector, for the tangent member in adapted-triad components.
+/// Mirrors `coulomb.normal_derivative_factor`.
 DataVector normal_derivative_factor(const TangentBoostMember& member,
                                     const Scalar<DataVector>& rapidity);
 
@@ -76,14 +76,14 @@ RadiusSolve radius_from_normal_derivative(
  * unit moments: the five electric direct components, then the five magnetic
  * ones. Mirrors `coulomb.coulomb_tide_columns`.
  *
- * \details \f$-3J/I\f$ is a tetrad invariant, so the tide's contribution to
- * it is the rest-frame value \f$\tfrac12 Q(\hat R, \hat R) = \tfrac12 e_L
- * H(\hat R, \hat R)\f$ along the rest-frame radial direction, with no boost
- * mixing: a boost rearranges the scalars between the slots of a tetrad, not
- * the invariant. `radial_direction` is the measured radial direction in the
- * Cholesky frame, which the tidal model identifies with the rest-frame
- * radial direction; `radius` enters only through the profile \f$e_L\f$
- * (which is 1 for the quadrupole).
+ * \details The scalar \f$-3J/I\f$ is a tetrad invariant, so the tide's
+ * contribution to it is the rest-frame value \f$\tfrac12 Q(\hat R, \hat R) =
+ * \tfrac12 e_L H(\hat R, \hat R)\f$ along the rest-frame radial direction, with
+ * no boost mixing: a boost rearranges the scalars between the slots of a
+ * tetrad, not the invariant. `radial_direction` is the measured radial
+ * direction in the Cholesky frame, which the tidal model identifies with the
+ * rest-frame radial direction; `radius` enters only through the profile
+ * \f$e_L\f$ (which is 1 for the quadrupole).
  */
 std::array<Scalar<ComplexDataVector>, 10> coulomb_tide_columns(
     const TriadVector& radial_direction, const Scalar<DataVector>& radius,

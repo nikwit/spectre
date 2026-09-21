@@ -432,6 +432,7 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
         inverse_spacetime_metric, three_index_constraint,
         vars.char_projected_rhs_dt_v_minus, phi, d_phi, d_pi, vars.char_speeds,
         std::numeric_limits<double>::signaling_NaN(), nullptr,
+        Bjorhus::default_incoming_wave_components,
         incoming_mode.has_value() ? &*incoming_mode : nullptr);
   }
   Bjorhus::detail::add_physical_sector_projection(

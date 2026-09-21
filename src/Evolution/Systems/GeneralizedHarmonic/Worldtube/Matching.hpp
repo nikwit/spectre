@@ -96,8 +96,8 @@ struct MatchingEvaluation {
  * \brief The derivative of the real part of the Coulomb scalar along the
  * sphere normal from the Kretschmann data on the face.
  *
- * \details \f$K = 16\,\mathrm{Re}\, I = 48\,\mathrm{Re}\,\Psi_2^2\f$ up to
- * terms quadratic in the tide, so
+ * \details We have \f$K = 16\,\mathrm{Re}\, I = 48\,\mathrm{Re}\,\Psi_2^2\f$
+ * up to terms quadratic in the tide, so
  * \f$\partial_s K = 96\,\mathrm{Re}(\Psi_2 \partial_s \Psi_2)\f$ and, for a
  * Coulomb scalar with a small imaginary part (a slowly spinning hole),
  * \f$\partial_s \mathrm{Re}\,\Psi_2 = \partial_s K /

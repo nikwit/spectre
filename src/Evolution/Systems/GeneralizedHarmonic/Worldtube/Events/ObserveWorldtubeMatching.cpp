@@ -122,10 +122,6 @@ ObserveWorldtubeMatching::compute_reduction_data(
   if (not direction.has_value()) {
     return std::nullopt;
   }
-  const size_t sliced_dim = direction->dimension();
-  const size_t fixed_index = index_to_slice_at(mesh.extents(), *direction);
-  const Mesh<2> face_mesh = mesh.slice_away(sliced_dim);
-
   const FaceCurvature face = face_curvature(spacetime_metric, pi, phi, mesh,
                                             inverse_jacobian, *direction);
   const auto& spatial_metric = face.spatial_metric;
