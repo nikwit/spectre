@@ -47,7 +47,7 @@ Evolution:
 
 Amr:
   Criteria:
-  EnableInBlocks: All
+  EnableInBlocks: []
   Policies:
     EnforceTwoToOneBalanceInNormalDirection: true
     Isotropy: Anisotropic
@@ -141,8 +141,11 @@ SpatialDiscretization:
     Formulation: StrongInertial
     Quadrature: GaussLobatto
     Filtering:
+      # Filter settings found stable over 200M of a single hole on these
+      # shells: a weak radial exponential filter and the top four angular
+      # modes removed, no exponential angular filter.
       - Hypercube:
-          HalfPower: 64
+          HalfPower: 200
           Enable: true
           BlocksToFilter: All
           VolumeFilterOnSubstep: true
@@ -150,9 +153,9 @@ SpatialDiscretization:
           VolumeFilterEveryNSteps: None
           BoundaryCorrectionFilterEveryNSteps: None
       - SphericalShell:
-          NumModesToKill: 1
-          AngularHalfPower: 64
-          RadialHalfPower: 64
+          NumModesToKill: 4
+          AngularHalfPower: None
+          RadialHalfPower: None
           Enable: true
           BlocksToFilter: All
           VolumeFilterOnSubstep: true
