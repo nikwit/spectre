@@ -56,19 +56,20 @@ convert_constraint_preserving_bjorhus_type_from_yaml(
 namespace gh::BoundaryConditions {
 /*!
  * \brief The wave injected through the outer boundary by
- * `ConstraintPreservingBjorhus`: the envelope \f$f(t)\f$ whose derivative is
- * the injected strain rate, and the constant tensor \f$h_{ij}\f$ it
- * multiplies. See that class for the formula.
+ * `ConstraintPreservingBjorhus`: its strain \f$g(t)\f$ at the boundary and
+ * the constant tensor \f$h_{ij}\f$ it multiplies. See that class for the
+ * formula.
  */
 struct IncomingWave {
-  struct Envelope {
+  struct Strain {
     using type = std::unique_ptr<::MathFunction<1, Frame::Inertial>>;
     static constexpr Options::String help{
-        "Envelope f(t) of the injected wave. The injected strain rate is its "
-        "DERIVATIVE, f'(t), so a Gaussian envelope gives a bipolar pulse "
-        "whose strain returns to zero; injecting f itself would leave a "
-        "permanent offset. Choose the peak time >= 4 widths so the envelope "
-        "is negligible at the initial time."};
+        "Strain g(t) of the incoming wave at the boundary. The boundary "
+        "condition injects -2 g''(t) h_ij as the incoming Weyl mode, which is "
+        "what an incoming plane wave of strain g(t) h_ij carries, so the "
+        "strain, its rate and the curvature all follow g and return to zero "
+        "once a pulse has passed. Choose the peak time >= 4 widths so the "
+        "strain is negligible at the initial time."};
   };
   struct Components {
     using type = std::array<double, 6>;
@@ -81,17 +82,17 @@ struct IncomingWave {
         "pattern and reaches essentially only m = 0; populating all five "
         "independent components spans the whole l = 2 multiplet."};
   };
-  using options = tmpl::list<Envelope, Components>;
+  using options = tmpl::list<Strain, Components>;
   static constexpr Options::String help{
-      "An l = 2 gravitational wave injected through the boundary: the envelope "
-      "f(t), whose derivative is the injected strain rate, and the components "
-      "of the constant tensor h_ij it multiplies."};
+      "An l = 2 gravitational wave injected through the boundary: its strain "
+      "g(t) at the boundary and the components of the constant tensor h_ij it "
+      "multiplies."};
 
   IncomingWave() = default;
-  IncomingWave(std::unique_ptr<::MathFunction<1, Frame::Inertial>> envelope_in,
+  IncomingWave(std::unique_ptr<::MathFunction<1, Frame::Inertial>> strain_in,
                const std::array<double, 6>& components_in);
 
-  std::unique_ptr<::MathFunction<1, Frame::Inertial>> envelope{};
+  std::unique_ptr<::MathFunction<1, Frame::Inertial>> strain{};
   std::array<double, 6> components{Bjorhus::default_incoming_wave_components};
 };
 
@@ -130,21 +131,30 @@ struct IncomingWave {
  * all the above conditions are also imposed on characteristic modes with speeds
  * exactly zero.
  *
- * An optional injected incoming-wave contribution can be specified through
- * `IncomingWaveProfile`, which is either `None` or an `Envelope` together
- * with `Components`. The injected strain-rate tensor is
+ * An optional injected incoming wave can be specified through
+ * `IncomingWaveProfile`, which is either `None` or a `Strain` \f$g(t)\f$
+ * together with `Components` \f$h_{ij}\f$. The physical correction drives
+ * the incoming Weyl mode \f$U^{8-}_{ij}\f$ of the face data towards the
+ * injected value instead of zero. For an incoming transverse-traceless plane
+ * wave \f$h_{ij}(t + x)\f$ through a boundary with outward normal
+ * \f$\hat x\f$ and unit lapse,
  * \f[
- *   \dot{h}_{ij} = f'(t)\, h_{ij},
+ *   E_{ij} = -\tfrac12 \ddot h_{ij}, \qquad
+ *   n^m \nabla_m K_{ij} = -\tfrac12 \ddot h_{ij}, \qquad
+ *   U^{8-}_{ij} = E_{ij} + n^m \nabla_m K_{ij} = -\ddot h_{ij},
  * \f]
- * where `Envelope` is \f$f(t)\f$ and the injection uses its *derivative*.
- * With a Gaussian envelope \f$f(t) = A \exp[-(t - t_p)^2 / w^2]\f$ this
- * makes the pulse bipolar, so the strain returns to zero once the pulse has
- * passed; injecting \f$f\f$ itself would leave a permanent offset, a step
- * rather than a pulse. Choose \f$t_p \gtrsim 4 w\f$ so the profile is
- * negligible at the initial time. \f$h_{ij}\f$ is the constant symmetric
- * spatial tensor given by `Components` in the order
- * \f$(xx, xy, xz, yy, yz, zz)\f$. Only the spatial block is set; the
- * correction enters \f$\partial_t u^-_{ab}\f$ through the
+ * and \f$U^{8+}_{ij} = 0\f$. The correction compares \f$2 U^{8-}_{ij}\f$
+ * with the injected tensor, so the injected tensor is
+ * \f[
+ *   -2\, g''(t)\, h_{ij},
+ * \f]
+ * which makes the strain of the injected wave at the boundary
+ * \f$g(t) h_{ij}\f$: for a Gaussian \f$g\f$ the strain, its rate and the
+ * curvature all return to zero once the pulse has passed. Choose the peak time
+ * \f$t_p \gtrsim 4 w\f$ so the strain is negligible at the initial time.
+ * \f$h_{ij}\f$ is the constant symmetric spatial tensor given by `Components`
+ * in the order \f$(xx, xy, xz, yy, yz, zz)\f$. Only the spatial block is set;
+ * the correction enters \f$\partial_t u^-_{ab}\f$ through the
  * transverse-traceless projection
  * \f$P^c{}_a P^d{}_b - \frac{1}{2} P_{ab} P^{cd}\f$, so \f$h_{ij}\f$ need be
  * neither transverse nor trace free -- whatever is not transverse and trace
@@ -159,9 +169,9 @@ struct IncomingWave {
  * better choice when the point is to probe a boundary condition rather than
  * to reproduce that reference.
  *
- * When comparing pulse *shapes*, note that the peak of \f$\dot{f}\f$ scales as
- * \f$A/w\f$ for a Gaussian of amplitude \f$A\f$ and width \f$w\f$: hold
- * \f$A/w\f$ and the Frobenius norm of \f$h_{ij}\f$ fixed, or the comparison
+ * When comparing pulse *shapes*, note that the peak curvature of a Gaussian
+ * strain of amplitude \f$A\f$ and width \f$w\f$ scales as \f$A/w^2\f$: hold
+ * \f$A/w^2\f$ and the Frobenius norm of \f$h_{ij}\f$ fixed, or the comparison
  * confounds strength with shape.
  *
  * It should be considered an approximate perturbation rather than an exact
@@ -203,9 +213,9 @@ class ConstraintPreservingBjorhus final : public BoundaryCondition<Dim> {
     using type = Options::Auto<IncomingWave, Options::AutoLabel::None>;
     static std::string name() { return "IncomingWaveProfile"; }
     static constexpr Options::String help{
-        "The physical wave injected through the boundary: `None`, or an "
-        "Envelope f(t) whose derivative is the injected strain rate together "
-        "with the Components of the constant tensor h_ij it multiplies. See "
+        "The physical wave injected through the boundary: `None`, or its "
+        "Strain g(t) at the boundary together with the Components of the "
+        "constant tensor h_ij it multiplies. See "
         "the ConstraintPreservingBjorhus class documentation for the "
         "injected-wave formula. This option is only supported in 3D."};
   };

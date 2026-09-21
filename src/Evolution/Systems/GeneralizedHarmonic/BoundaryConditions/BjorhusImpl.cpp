@@ -553,12 +553,13 @@ void add_physical_terms_to_dt_v_minus(
 
   if (incoming_wave_profile != nullptr) {
     if constexpr (VolumeDim == 3) {
-      // The configured profile is the envelope f(t); the injected strain rate
-      // is its derivative. With a Gaussian envelope this makes the pulse
-      // bipolar, so the strain returns to zero once it has passed. Using f
-      // itself would leave a permanent offset -- a step rather than a pulse.
+      // The configured profile is the strain g(t) of the incoming wave at the
+      // boundary. The slot below is the incoming Weyl mode 2 U^{8-}, which
+      // for an incoming plane wave is -2 d^2 h/dt^2, so the injected tensor
+      // is -2 g''(t) h_ij: the strain, its rate and the curvature all follow
+      // g and return to zero once a pulse has passed.
       const double injected_wave_profile_value =
-          incoming_wave_profile->first_deriv(time);
+          -2. * incoming_wave_profile->second_deriv(time);
       // The spatial block of the injected wave, in the storage order
       // (xx, xy, xz, yy, yz, zz). The transverse-traceless projection applied
       // below keeps only the part that is transverse and trace free with

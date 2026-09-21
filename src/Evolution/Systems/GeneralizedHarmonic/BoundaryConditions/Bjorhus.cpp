@@ -38,9 +38,9 @@ convert_constraint_preserving_bjorhus_type_from_yaml(
 }  // namespace detail
 
 IncomingWave::IncomingWave(
-    std::unique_ptr<::MathFunction<1, Frame::Inertial>> envelope_in,
+    std::unique_ptr<::MathFunction<1, Frame::Inertial>> strain_in,
     const std::array<double, 6>& components_in)
-    : envelope(std::move(envelope_in)), components(components_in) {}
+    : strain(std::move(strain_in)), components(components_in) {}
 
 template <size_t Dim>
 ConstraintPreservingBjorhus<Dim>::ConstraintPreservingBjorhus(
@@ -48,7 +48,7 @@ ConstraintPreservingBjorhus<Dim>::ConstraintPreservingBjorhus(
     std::optional<IncomingWave> incoming_wave)
     : type_(type),
       incoming_wave_profile_(incoming_wave.has_value()
-                                 ? std::move(incoming_wave->envelope)
+                                 ? std::move(incoming_wave->strain)
                                  : nullptr),
       incoming_wave_components_(
           incoming_wave.has_value()

@@ -1275,7 +1275,7 @@ tnsr::aa<DataVector, VolumeDim, Frame::Inertial> wrapper_func_cpgp_v_minus(
   return dt_v_minus;
 }
 
-void test_incoming_wave_profile_uses_profile_derivative_in_3d() {
+void test_incoming_wave_profile_injects_second_derivative_in_3d() {
   constexpr size_t local_volume_dim = 3;
   const size_t num_points = 2;
   const double time = 0.37;
@@ -1388,14 +1388,19 @@ void test_incoming_wave_profile_uses_profile_derivative_in_3d() {
           get(gamma2), 0.0);
 
   auto incoming_wave_profile =
-      std::make_unique<MathFunctions::Sinusoid<1, Frame::Inertial>>(1.4, 0.7,
+      std::make_unique<MathFunctions::Sinusoid<1, Frame::Inertial>>(1.4, 1.3,
                                                                     0.2);
-  // The injection uses f'(t), not f(t). These differ by more than any
-  // plausible tolerance for this profile, so the check below would fail if the
-  // implementation reverted to using the value.
+  // The injection uses -2 g''(t), the incoming Weyl mode of a plane wave of
+  // strain g(t): neither the value g nor the first derivative g' would do.
+  // For this sinusoid the three differ by more than any plausible tolerance,
+  // so the check below fails if the implementation uses the value or the
+  // first derivative instead.
   const double profile_value = incoming_wave_profile->operator()(time);
   const double profile_derivative = incoming_wave_profile->first_deriv(time);
-  CHECK(std::abs(profile_value - profile_derivative) > 1.0e-3);
+  const double injected_profile =
+      -2. * incoming_wave_profile->second_deriv(time);
+  CHECK(std::abs(profile_value - injected_profile) > 1.0e-3);
+  CHECK(std::abs(profile_derivative - injected_profile) > 1.0e-3);
 
   // Deliberately generic: neither diagonal, nor trace free, nor transverse to
   // the boundary normal (which is x^ here, so a transverse tensor would have
@@ -1450,7 +1455,7 @@ void test_incoming_wave_profile_uses_profile_derivative_in_3d() {
   for (size_t i = 0; i < local_volume_dim; ++i) {
     for (size_t j = i; j < local_volume_dim; ++j) {
       injected_wave.get(i + 1, j + 1) =
-          gsl::at(wave_components, component) * profile_derivative;
+          gsl::at(wave_components, component) * injected_profile;
       ++component;
     }
   }
@@ -1953,7 +1958,7 @@ SPECTRE_TEST_CASE("Unit.Evolution.Systems.GeneralizedHarmonic.BCBjorhus.VZero",
 SPECTRE_TEST_CASE(
     "Unit.Evolution.Systems.GeneralizedHarmonic.BCBjorhus.IncomingWave",
     "[Unit][Evolution]") {
-  test_incoming_wave_profile_uses_profile_derivative_in_3d();
+  test_incoming_wave_profile_injects_second_derivative_in_3d();
   test_incoming_wave_profile_throws_for_non_3d<1>();
   test_incoming_wave_profile_throws_for_non_3d<2>();
 }
