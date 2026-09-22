@@ -102,7 +102,8 @@ DomainCreator:
         # Quadrupole: order two, tide from the leaving mode Psi4; needs Mass
         #   and MomentRelaxationTime (feeds back on itself otherwise).
         # QuadrupoleCoulomb: order two, tide from the Coulomb scalar and its
-        #   normal derivative; no feedback through Psi4; needs Mass and the
+        #   normal derivative; no feedback through Psi4 but a slow residual
+        #   loop (0.03/M at 3M): needs Mass, MomentRelaxationTime and the
         #   excision outside about 2.4M.
         PhysicalModel: TypeD
         Mass: None

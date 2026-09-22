@@ -280,9 +280,11 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
         "the gradient of the Kretschmann scalar; needs Mass and the "
         "UpdateKretschmannFaceData action) or QuadrupoleCoulomb (order two "
         "with the tide read from the Coulomb scalar and its normal "
-        "derivative instead of Psi4, which removes the feedback of the "
-        "condition on itself through the leaving mode; same needs, and the "
-        "excision outside about 2.4M). Requires PhysicalSector: Bjorhus."};
+        "derivative instead of Psi4, which removes the fast feedback of the "
+        "condition on itself through the leaving mode but leaves a slow "
+        "one, growth about 0.03/M at a 3M excision, so it still needs "
+        "MomentRelaxationTime; same needs, and the excision outside about "
+        "2.4M). Requires PhysicalSector: Bjorhus."};
   };
   /// \brief The mass of the excised hole, needed by `PhysicalModel:
   /// Quadrupole` for the tidal profiles and the background radius.
@@ -293,9 +295,9 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
         "Quadrupole and QuadrupoleCoulomb (tidal radial profiles and the "
         "areal radius of the worldtube), None otherwise."};
   };
-  /// \brief Relaxation time of the fitted tidal moments of `PhysicalModel:
-  /// Quadrupole`, a first-order low-pass that breaks the feedback loop of
-  /// the order-two condition through the leaving mode.
+  /// \brief Relaxation time of the fitted tidal moments of the order-two
+  /// models, a first-order low-pass that breaks the feedback loop of the
+  /// order-two condition on itself.
   struct MomentRelaxationTime {
     using type = Options::Auto<double, Options::AutoLabel::None>;
     static constexpr Options::String help{
@@ -308,7 +310,10 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
         "excised at 2.5M. Choose it long compared to the light-crossing "
         "time of the excision (several M) and short compared to the tidal "
         "timescale; a first-order filter lags the tide by atan(2 Omega tau). "
-        "None imposes the instantaneous fit."};
+        "QuadrupoleCoulomb has no loop through Psi4 but a slow one with gain "
+        "just above one (its target sits 0.1-1% above the face Psi0, growth "
+        "about 0.03/M at 3M); 10M removes it. None imposes the "
+        "instantaneous fit."};
   };
   using options =
       tmpl::list<ConstraintPreservingSector, PhysicalSector, GaugeSector,

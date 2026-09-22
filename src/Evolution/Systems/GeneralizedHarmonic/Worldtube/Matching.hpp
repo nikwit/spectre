@@ -55,8 +55,11 @@ enum class PhysicalModel {
   /// Coulomb excess over \f$-M/r^3\f$
   /// (`gr::np::decode_tidal_moments_from_coulomb()`). The radiative modes
   /// enter only through the invariants, quadratically, so the condition does
-  /// not feed back on itself through \f$\Psi_4\f$. Needs the same inputs as
-  /// `Quadrupole` and the excision outside about \f$2.4M\f$.
+  /// not feed back on itself through \f$\Psi_4\f$. A slow loop remains: the
+  /// imposed target sits 0.1 to 1% above the face \f$\Psi_0\f$ and a
+  /// static-like mode grows at about 0.03/M for an excision at 3M, which the
+  /// moment relaxation removes. Needs the same inputs as `Quadrupole` and
+  /// the excision outside about \f$2.4M\f$.
   QuadrupoleCoulomb
 };
 

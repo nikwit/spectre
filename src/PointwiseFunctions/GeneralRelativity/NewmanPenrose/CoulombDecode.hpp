@@ -106,8 +106,10 @@ std::array<Scalar<ComplexDataVector>, 10> coulomb_tide_columns(
  * tide is the pointwise excess \f$\Psi_2^K + M/r^3\f$, fitted to
  * `coulomb_tide_columns()` with \f$l = 0, 1\f$ nuisance terms by weighted
  * least squares. The radiative modes enter only through the invariants,
- * quadratically, which is what makes this decode usable in a boundary
- * condition where the \f$\Psi_4\f$ fit feeds back on itself.
+ * quadratically, which removes the fast feedback of a boundary condition
+ * built on the \f$\Psi_4\f$ fit. A slow residual loop remains (growth of
+ * about 0.03/M for an excision at 3M) and is handled by relaxing the
+ * moments in time.
  *
  * The map \f$r \to B(r)\f$ turns at \f$r = 9M/4\f$, so the sphere must lie
  * outside about \f$2.4M\f$; the sensitivity is \f$1/|(M/r)/f - 4|\f$.
