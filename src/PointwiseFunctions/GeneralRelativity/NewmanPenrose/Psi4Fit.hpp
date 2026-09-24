@@ -81,13 +81,14 @@ FrameRegistration register_frame(const WeylScalars& psi,
                                  double mass);
 
 /*!
- * \brief One evaluation of the minimal second-order construction. Mirrors
- * `wplus.SecondOrderEvaluation`.
+ * \brief One evaluation of the second-order construction through Psi4.
  *
  * \details `psi0_target` is the boundary value of \f$\Psi_0\f$ in the NR
- * tetrad, eq. `psi0-nr` in its exact-composition form: the Kinnersley
- * scalars pushed forward to the NR tetrad, plus the fitted transverse tide
- * read off in the NR tetrad.
+ * tetrad, eq. `psi0-nr`: replace only the incoming scalar in the measured
+ * leading Kinnersley frame by the fitted transverse tide, retain measured
+ * slots 1 through 4, and push the five-vector back to the NR tetrad. The
+ * leading frame is not exactly transverse, so its measured Psi1 and Psi3
+ * must not be discarded.
  */
 struct SecondOrderEvaluation {
   std::array<WeylScalars, 5> direct_columns;
@@ -106,10 +107,12 @@ double relative_fit_residual(
 
 /// \brief Fit the pulled-back \f$\Psi_4\f$ and construct the NR
 /// \f$\Psi_0\f$ target for a registered frame and the type-III `rapidity`
-/// of its rest frame. Mirrors `wplus.evaluate_second_order`.
+/// of its rest frame. Uses the leading type-D frame without Newton
+/// corrections, retaining its measured longitudinal residuals in the target.
 ///
 /// With `imposed_components` the fit is skipped: the target is built from
-/// these moments (e.g. the relaxed moments a boundary condition imposes),
+/// these moments (e.g. the relaxed moments a boundary condition imposes)
+/// and the measured pulled-back slots 1 through 4,
 /// and `fit.relative_residual` reports their residual against the current
 /// pulled-back \f$\Psi_4\f$.
 SecondOrderEvaluation evaluate_second_order(

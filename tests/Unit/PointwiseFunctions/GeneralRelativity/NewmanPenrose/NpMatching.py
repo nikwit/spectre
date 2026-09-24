@@ -299,8 +299,8 @@ def _evaluate_second_order(psi_list, reals, mass, rapidity):
     """wplus.evaluate_second_order without Newton corrections and with the
     type-III rapidity supplied instead of fitted: the leading type-D map,
     the tangent member, the direct columns pulled back through the same map,
-    the complex fit of the pulled-back Psi4, and the exact-composition
-    target."""
+    the complex fit of the pulled-back Psi4, and the note's target retaining
+    measured pulled-back slots 1 through 4."""
     gamma, rotation, lapse, shift, _ = _unpack_reals(reals)
     psi = _unpack_psi(psi_list)
     frame = wplus.measure_qk_map(psi, newton_steps=0)
@@ -326,10 +326,12 @@ def _evaluate_second_order(psi_list, reals, mass, rapidity):
     projected = frame.apply(direct_columns)
     fit = wplus.fit_psi4(frame.psi_qk[..., 4], projected)
     fitted_tide = np.einsum("a,a...->...", fit.components, direct_columns)
-    kinematic = frame.inverse(kinnersley.kinnersley_scalars(frame.coulomb))
+    replacement = frame.psi_qk.copy()
+    replacement[..., 0] = frame.apply(fitted_tide)[..., 0]
+    target = frame.inverse(replacement)[..., 0]
     return SimpleNamespace(
         components=fit.components,
-        psi0_target=kinematic[..., 0] + fitted_tide[..., 0],
+        psi0_target=target,
         measured_radius=measured_radius,
     )
 
@@ -357,6 +359,36 @@ def register_frame_radius(psi_list, reals, mass):
 def manufactured_psi(seed, n):
     data, _ = manufactured_wplus._manufactured_slice(seed=int(seed), n=int(n))
     return [data.psi[0][:, a] for a in range(5)]
+
+
+def manufactured_background_psi(seed, n):
+    """Known zero-tide background of manufactured_wplus, with the same boost.
+
+    This does not infer the Coulomb field or frame from perturbed curvature.
+    Subtracting it from manufactured_psi isolates the linear tidal signal
+    for an amplitude-scaling regression of the C++ target.
+    """
+    data, _ = manufactured_wplus._manufactured_slice(seed=int(seed), n=int(n))
+    direction = data.adapted_rotation[0][:, 0, :]
+    velocity = (
+        0.22 * np.asarray([0.5, -0.8, 0.3]) / np.linalg.norm([0.5, -0.8, 0.3])
+    )
+    radial_speed = direction @ velocity
+    transverse = velocity[None, :] - radial_speed[:, None] * direction
+    rapidity = np.arctanh(
+        radial_speed / np.sqrt(1.0 - np.sum(transverse**2, axis=-1))
+    )
+    boost = psi0.rest_to_slice_map(direction, transverse, rapidity)
+    q_rest = (
+        data.mass
+        / 0.5**3
+        * (np.eye(3) - 3.0 * direction[:, :, None] * direction[:, None, :])
+    )
+    q_slice = np.einsum("nik,nkl,njl->nij", boost, q_rest, boost)
+    fields = scalars.psi_from_q(
+        scalars.rotate_symmetric(q_slice, data.adapted_rotation[0])
+    )
+    return [fields[:, a] for a in range(5)]
 
 
 def manufactured_reals(seed, n):

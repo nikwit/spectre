@@ -129,7 +129,8 @@ void test_second_order_on_manufactured_slice() {
       registration, rapidity, geometry.rotation, slice.mass);
 
   // Imposing the fitted components reproduces the fit; other components give
-  // the corresponding residual and a target linear in them
+  // the corresponding residual and a target affine in them. All measured
+  // pulled-back slots 1..4 remain fixed, including the unfitted Psi4 residual.
   {
     const SecondOrderEvaluation imposed = evaluate_second_order(
         registration, rapidity, geometry.rotation, slice.mass, std::nullopt,
@@ -143,10 +144,20 @@ void test_second_order_on_manufactured_slice() {
         evaluate_second_order(registration, rapidity, geometry.rotation,
                               slice.mass, std::nullopt, TidalMoments{});
     CHECK(zero.fit.relative_residual == approx(1.));
-    ComplexDataVector expected = get(zero.psi0_target);
+    // Independent scalar-ladder expression of eq. psi0-nr, in the unboosted
+    // pulled-back frame. The type-III factors are in the model columns.
+    const auto& b = get(registration.rotation.b);
+    const auto& measured = registration.pulled_back;
+    ComplexDataVector expected =
+        4. * b * measured.get(1) + 6. * b * b * measured.get(2) +
+        4. * b * b * b * measured.get(3) + b * b * b * b * measured.get(4);
+    CHECK_ITERABLE_APPROX(get(zero.psi0_target), expected);
     for (size_t a = 0; a < 5; ++a) {
-      expected += gsl::at(evaluation.fit.components, a) *
-                  gsl::at(evaluation.direct_columns, a).get(0);
+      expected +=
+          gsl::at(evaluation.fit.components, a) *
+          pull_back(gsl::at(evaluation.direct_columns, a),
+                    registration.rotation.a_bar, registration.rotation.b)
+              .get(0);
     }
     CHECK_ITERABLE_APPROX(get(evaluation.psi0_target), expected);
   }
@@ -178,11 +189,9 @@ void test_second_order_on_manufactured_slice() {
   // quadrupole tide of relative size 1e-3 and a boost of speed 0.22. The
   // radius is 0.5 up to the O(eps^2) tidal contamination of the leading-order
   // measurement, the fitted moments are the manufactured ones up to the
-  // O(eps^4) remainder, and the held-out Psi0 is reproduced. The leading
-  // type-D frame leaves O(eps^2) longitudinal residuals in the pulled-back
-  // Psi1 and Psi3, which contaminate the target at 4e-4 relative here; the
-  // quasi-Kinnersley Newton correction of the reference brings that to 1e-6
-  // and is not part of this library.
+  // O(eps^4) remainder, and the held-out Psi0 is reproduced. Retaining the
+  // measured longitudinal residuals of the leading type-D frame avoids
+  // discarding O(eps^2) terms; no quasi-Kinnersley correction is needed.
   Approx loose = Approx::custom().epsilon(1.e-3).scale(1.);
   CHECK_ITERABLE_CUSTOM_APPROX(get(registration.measured_radius),
                                DataVector(num_points, 0.5), loose);
@@ -193,7 +202,7 @@ void test_second_order_on_manufactured_slice() {
           1.e-3 * std::abs(gsl::at(slice.truth, 5 + a)) + 1.e-9);
   }
   CHECK(relative_l2(get(evaluation.psi0_target) - slice.psi.get(0),
-                    slice.psi.get(0)) < 1.e-3);
+                    slice.psi.get(0)) < 1.e-5);
 
   // Blind fixed point: with Psi0 hidden from the frame measurement the
   // iteration Psi0 <- target converges onto the held-out value
@@ -210,7 +219,43 @@ void test_second_order_on_manufactured_slice() {
   }
   CHECK(change < 1.e-10);
   CHECK(relative_l2(working.get(0) - slice.psi.get(0), slice.psi.get(0)) <
-        1.e-3);
+        1.e-5);
+}
+
+// At fixed, nonzero boost the target error must be quadratic in the tidal
+// amplitude A = eps^2. Comparing only to total Psi0 can hide a tide-level
+// error behind the boosted Coulomb background. Dropping measured Psi1/Psi3
+// gives a first-order error and a factor of two, rather than four, below.
+void test_second_order_tidal_amplitude_scaling() {
+  const size_t num_points = 240;
+  const auto slice = helpers::manufactured_slice(71, num_points);
+  const auto background = pypp::call<std::vector<ComplexDataVector>>(
+      module, "manufactured_background_psi", 71, num_points);
+  const Scalar<DataVector> rapidity{
+      pypp::call<DataVector>(module, "manufactured_rapidity", 71, num_points)};
+  double previous_error = 0.;
+  for (const double amplitude : {1., 0.5, 0.25}) {
+    CAPTURE(amplitude);
+    WeylScalars fields = slice.psi;
+    for (size_t a = 0; a < 5; ++a) {
+      fields.get(a) =
+          background[a] + amplitude * (slice.psi.get(a) - background[a]);
+    }
+    const auto evaluation = evaluate_second_order(
+        register_frame(fields, slice.geometry.rotation, slice.mass), rapidity,
+        slice.geometry.rotation, slice.mass);
+    // Use a fixed tidal reference norm so an O(A^2) error scales as A^2.
+    const double error =
+        relative_l2(get(evaluation.psi0_target) - fields.get(0),
+                    slice.psi.get(0) - background[0]);
+    CHECK(error > 0.);
+    CHECK(error < 1.e-3 * amplitude * amplitude);
+    if (previous_error > 0.) {
+      CHECK(previous_error / error > 3.8);
+      CHECK(previous_error / error < 4.2);
+    }
+    previous_error = error;
+  }
 }
 }  // namespace
 
@@ -220,5 +265,6 @@ SPECTRE_TEST_CASE("Unit.PointwiseFunctions.Gr.NewmanPenrose.Psi4Fit",
       "PointwiseFunctions/GeneralRelativity/NewmanPenrose/"};
   test_fit_psi4();
   test_second_order_on_manufactured_slice();
+  test_second_order_tidal_amplitude_scaling();
 }
 }  // namespace gr::np

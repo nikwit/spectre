@@ -176,11 +176,13 @@ SecondOrderEvaluation evaluate_second_order(
       registration.radial_direction, registration.transverse_velocity, rapidity,
       registration.measured_radius, adapted_rotation, mass);
   std::array<Scalar<ComplexDataVector>, 5> projected_psi4{};
+  std::array<Scalar<ComplexDataVector>, 5> projected_psi0{};
   for (size_t a = 0; a < 5; ++a) {
-    get(gsl::at(projected_psi4, a)) =
+    const WeylScalars column =
         pull_back(gsl::at(evaluation.direct_columns, a),
-                  registration.rotation.a_bar, registration.rotation.b)
-            .get(4);
+                  registration.rotation.a_bar, registration.rotation.b);
+    get(gsl::at(projected_psi4, a)) = column.get(4);
+    get(gsl::at(projected_psi0, a)) = column.get(0);
   }
   const Scalar<ComplexDataVector> pulled_back_psi4{
       registration.pulled_back.get(4)};
@@ -193,16 +195,20 @@ SecondOrderEvaluation evaluate_second_order(
     evaluation.fit =
         fit_psi4(pulled_back_psi4, projected_psi4, fit_point_weights);
   }
-  // Psi0 target: Kinnersley scalars pushed forward to the NR tetrad, plus the
-  // fitted transverse tide in the NR tetrad
-  const WeylScalars kinematic_nr =
-      push_forward(kinnersley_scalars(registration.coulomb),
-                   registration.rotation.a_bar, registration.rotation.b);
-  get(evaluation.psi0_target) = kinematic_nr.get(0);
+  // Replace only the incoming scalar in the measured leading Kinnersley
+  // frame. The measured slots 1..4 are retained by eq. psi0-nr, including
+  // the longitudinal residuals that this leading frame does not remove.
+  // The model columns already carry the radial type-III boost.
+  WeylScalars replacement = registration.pulled_back;
+  replacement.get(0) = 0.;
   for (size_t a = 0; a < 5; ++a) {
-    get(evaluation.psi0_target) += gsl::at(evaluation.fit.components, a) *
-                                   gsl::at(evaluation.direct_columns, a).get(0);
+    replacement.get(0) +=
+        gsl::at(evaluation.fit.components, a) * get(gsl::at(projected_psi0, a));
   }
+  get(evaluation.psi0_target) =
+      push_forward(replacement, registration.rotation.a_bar,
+                   registration.rotation.b)
+          .get(0);
   return evaluation;
 }
 }  // namespace gr::np
