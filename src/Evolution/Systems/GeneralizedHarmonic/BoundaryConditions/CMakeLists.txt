@@ -17,6 +17,8 @@ spectre_target_headers(
   ${LIBRARY}
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
+  AlgebraicGauge.hpp
+  SchwarzschildReference.hpp
   Bjorhus.hpp
   BjorhusImpl.hpp
   BoundaryCondition.hpp

@@ -5,6 +5,7 @@ spectre_target_sources(
   ${LIBRARY}
   PRIVATE
   Events/ObserveWorldtubeMatching.cpp
+  FaceReplay.cpp
   KretschmannFaceData.cpp
   Matching.cpp
   WeylCurvature.cpp
@@ -16,7 +17,9 @@ spectre_target_headers(
   HEADERS
   Actions/UpdateKretschmannFaceData.hpp
   Events/ObserveWorldtubeMatching.hpp
+  FaceReplay.hpp
   KretschmannFaceData.hpp
+  RadialGauge.hpp
   Matching.hpp
   WeylCurvature.hpp
   )

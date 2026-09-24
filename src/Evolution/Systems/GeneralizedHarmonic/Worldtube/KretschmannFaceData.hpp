@@ -13,18 +13,17 @@
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "Domain/Structure/Direction.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/FaceReplay.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/RadialGauge.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Psi4Fit.hpp"
 
 /// \cond
-template <size_t Dim>
-class Element;
-template <size_t Dim>
-class ExcisionSphere;
-template <size_t Dim>
-class Mesh;
+template <size_t Dim> class Element;
+template <size_t Dim> class ExcisionSphere;
+template <size_t Dim> class Mesh;
 namespace PUP {
 class er;
-}  // namespace PUP
+} // namespace PUP
 /// \endcond
 
 namespace gh::worldtube {
@@ -57,8 +56,7 @@ enum class PhysicalModel;
  * weights of the unit-sphere measure, so the least-squares fit of the
  * matching becomes a modal fit.
  */
-template <size_t Dim>
-struct KretschmannFaceData {
+template <size_t Dim> struct KretschmannFaceData {
   std::optional<Direction<Dim>> direction{};
   double time{std::numeric_limits<double>::signaling_NaN()};
   Scalar<DataVector> kretschmann{};
@@ -77,24 +75,36 @@ struct KretschmannFaceData {
   std::optional<gr::np::TidalMoments> filtered_moments{};
   double filtered_moments_time{std::numeric_limits<double>::signaling_NaN()};
 
+  /// Initial q_minus - q_plus = -2 l^b n^i Phi_iab. Captured once,
+  /// preserved across time-step self-start resets and serialized on migration.
+  /// Fixed face resolution only; a field-only restart starts a new datum.
+  std::optional<tnsr::a<DataVector, Dim, Frame::Inertial>>
+      initial_gauge_difference{};
+
+  /// Current and initial radial gauge data on a fixed spherical face.
+  std::optional<RadialGaugeFaceData> radial_gauge{};
+
+  /// Donor trace and receiver lifting geometry, refreshed before each RHS.
+  std::optional<FaceReplayData<Dim>> replay{};
+
   // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er& p);
+  void pup(PUP::er &p);
 };
 
 template <size_t Dim>
-bool operator==(const KretschmannFaceData<Dim>& lhs,
-                const KretschmannFaceData<Dim>& rhs);
+bool operator==(const KretschmannFaceData<Dim> &lhs,
+                const KretschmannFaceData<Dim> &rhs);
 template <size_t Dim>
-bool operator!=(const KretschmannFaceData<Dim>& lhs,
-                const KretschmannFaceData<Dim>& rhs);
+bool operator!=(const KretschmannFaceData<Dim> &lhs,
+                const KretschmannFaceData<Dim> &rhs);
 
 /// \brief The direction of the excision face of the element, if it abuts an
 /// excision sphere.
 template <size_t Dim>
 std::optional<Direction<Dim>> excision_face_direction(
-    const std::unordered_map<std::string, ExcisionSphere<Dim>>&
-        excision_spheres,
-    const Element<Dim>& element);
+    const std::unordered_map<std::string, ExcisionSphere<Dim>>
+        &excision_spheres,
+    const Element<Dim> &element);
 
 /*!
  * \brief Quadrature weights of a face collocation grid, normalized to unit
@@ -107,7 +117,7 @@ std::optional<Direction<Dim>> excision_face_direction(
  * unit-sphere area element on a spherical-harmonic face.
  */
 template <size_t Dim>
-DataVector face_quadrature_weights(const Mesh<Dim - 1>& face_mesh);
+DataVector face_quadrature_weights(const Mesh<Dim - 1> &face_mesh);
 
 /*!
  * \brief Update the Kretschmann face data of an element from its evolved
@@ -122,18 +132,18 @@ DataVector face_quadrature_weights(const Mesh<Dim - 1>& face_mesh);
  */
 template <size_t Dim>
 void update_kretschmann_face_data(
-    gsl::not_null<KretschmannFaceData<Dim>*> data,
-    const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
-    const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
-    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
-    const Mesh<Dim>& mesh,
+    gsl::not_null<KretschmannFaceData<Dim> *> data,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial> &spacetime_metric,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial> &pi,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial> &phi,
+    const Mesh<Dim> &mesh,
     const InverseJacobian<DataVector, Dim, Frame::ElementLogical,
-                          Frame::Inertial>& inverse_jacobian,
-    const Element<Dim>& element,
-    const std::unordered_map<std::string, ExcisionSphere<Dim>>&
-        excision_spheres,
-    const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
-        mesh_velocity,
+                          Frame::Inertial> &inverse_jacobian,
+    const Element<Dim> &element,
+    const std::unordered_map<std::string, ExcisionSphere<Dim>>
+        &excision_spheres,
+    const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>
+        &mesh_velocity,
     double time);
 
 /*!
@@ -147,9 +157,9 @@ void update_kretschmann_face_data(
  * repeated evaluation at the same time leaves them unchanged.
  */
 void relax_tidal_moments(
-    gsl::not_null<std::optional<gr::np::TidalMoments>*> moments,
-    gsl::not_null<double*> moments_time, const gr::np::TidalMoments& raw,
-    double time, const std::optional<double>& relaxation_time);
+    gsl::not_null<std::optional<gr::np::TidalMoments> *> moments,
+    gsl::not_null<double *> moments_time, const gr::np::TidalMoments &raw,
+    double time, const std::optional<double> &relaxation_time);
 
 /*!
  * \brief Fit the instantaneous tidal moments of the order-two model on the
@@ -169,21 +179,20 @@ void relax_tidal_moments(
  */
 template <size_t Dim>
 void update_filtered_tidal_moments(
-    gsl::not_null<KretschmannFaceData<Dim>*> data,
-    const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
-    const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
-    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
-    const Mesh<Dim>& mesh,
+    gsl::not_null<KretschmannFaceData<Dim> *> data,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial> &spacetime_metric,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial> &pi,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial> &phi,
+    const Mesh<Dim> &mesh,
     const InverseJacobian<DataVector, Dim, Frame::ElementLogical,
-                          Frame::Inertial>& inverse_jacobian,
+                          Frame::Inertial> &inverse_jacobian,
     PhysicalModel model, double mass,
-    const std::optional<double>& relaxation_time, double time);
+    const std::optional<double> &relaxation_time, double time);
 
 namespace Tags {
 /// The `gh::worldtube::KretschmannFaceData` of the element
-template <size_t Dim>
-struct KretschmannFaceData : db::SimpleTag {
+template <size_t Dim> struct KretschmannFaceData : db::SimpleTag {
   using type = worldtube::KretschmannFaceData<Dim>;
 };
-}  // namespace Tags
-}  // namespace gh::worldtube
+} // namespace Tags
+} // namespace gh::worldtube

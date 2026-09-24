@@ -24,7 +24,9 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matching.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
+#include "PointwiseFunctions/ConstraintDamping/GaussianPlusConstant.hpp"
 #include "Time/Tags/Time.hpp"
+#include "Time/Tags/TimeStepId.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -71,7 +73,10 @@ struct UpdateKretschmannFaceData {
                                                Frame::Inertial>,
                  domain::Tags::Element<Dim>, domain::Tags::Domain<Dim>,
                  domain::Tags::MeshVelocity<Dim>, ::Tags::Time,
-                 domain::Tags::ExternalBoundaryConditions<Dim>>;
+                 domain::Tags::ExternalBoundaryConditions<Dim>,
+                 domain::Tags::Coordinates<Dim, Frame::Inertial>, ::Tags::TimeStepId,
+                 gh::Tags::DampingFunctionGamma2<Dim, Frame::Grid>,
+                 domain::Tags::FunctionsOfTime>;
 
   static void apply(
       const gsl::not_null<worldtube::KretschmannFaceData<Dim>*> data,
@@ -87,7 +92,11 @@ struct UpdateKretschmannFaceData {
       const double time,
       const std::vector<DirectionMap<
           Dim, std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>>>&
-          external_boundary_conditions) {
+          external_boundary_conditions,
+      const tnsr::I<DataVector,Dim,Frame::Inertial>& coordinates,
+      const TimeStepId& time_id,
+      const ConstraintDamping::DampingFunction<Dim, Frame::Grid>& damping_gamma2,
+      const domain::FunctionsOfTimeMap& functions_of_time) {
     update_kretschmann_face_data(
         data, spacetime_metric, pi, phi, mesh, inverse_jacobian, element,
         domain.excision_spheres(), mesh_velocity, time);
@@ -100,6 +109,33 @@ struct UpdateKretschmannFaceData {
         const auto* const worldtube =
             dynamic_cast<const BoundaryConditions::WorldtubeTypeD<Dim>*>(
                 conditions.at(*data->direction).get());
+        if (worldtube != nullptr and worldtube->radial_response().has_value()) {
+          if (mesh_velocity.has_value() or domain.blocks()[element.id().block_id()].is_time_dependent() or
+              element.id().refinement_levels() != std::array<size_t,Dim>{}) {
+            ERROR("RadialResponse requires a static unrefined spherical-shell element.");
+          }
+          if (dynamic_cast<const ConstraintDamping::Constant<Dim,Frame::Grid>*>(&damping_gamma2) == nullptr and
+              dynamic_cast<const ConstraintDamping::GaussianPlusConstant<Dim,Frame::Grid>*>(&damping_gamma2) == nullptr) {
+            ERROR("RadialResponse requires time-independent gamma2.");
+          }
+          const auto center = BoundaryConditions::detail::excision_sphere_center(
+              domain.excision_spheres(), element.id(), time, functions_of_time);
+          tnsr::I<DataVector,Dim,Frame::Grid> grid_coordinates(mesh.number_of_grid_points(),0.);
+          for(size_t i=0;i<Dim;++i) { grid_coordinates.get(i)=coordinates.get(i); }
+          Scalar<DataVector> gamma2(mesh.number_of_grid_points(),0.);
+          damping_gamma2(make_not_null(&gamma2),grid_coordinates,time,functions_of_time);
+          update_radial_gauge_face_data(make_not_null(&data->radial_gauge),
+              spacetime_metric,pi,phi,gamma2,coordinates,center,mesh,inverse_jacobian,*data->direction,time);
+        }
+        if (worldtube != nullptr and worldtube->face_replay().has_value()) {
+          if (mesh_velocity.has_value() or element.id().refinement_levels() != std::array<size_t,Dim>{}) {
+            ERROR("Face replay requires a static unrefined spherical-shell element.");
+          }
+          update_face_replay(make_not_null(&data->replay), *worldtube->face_replay(),
+              spacetime_metric, pi, phi, coordinates, mesh, inverse_jacobian, time_id, time);
+        } else {
+          data->replay.reset();
+        }
         if (worldtube != nullptr and
             is_order_two(worldtube->physical_model())) {
           update_filtered_tidal_moments(

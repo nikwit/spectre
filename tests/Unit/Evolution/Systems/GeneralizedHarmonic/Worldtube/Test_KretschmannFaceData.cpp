@@ -37,6 +37,58 @@ namespace {
 namespace helpers = TestHelpers::gh_worldtube;
 using gh::worldtube::KretschmannFaceData;
 
+void test_radial_gauge_capture() {
+  const auto setup = helpers::shell_element(18, 5, {{0., 0., 0.}}, 2.5, 3.);
+  const size_t n = setup.mesh.number_of_grid_points();
+  tnsr::aa<DataVector, 3> metric(n, 0.), pi(n, 0.);
+  tnsr::iaa<DataVector, 3> phi(n, 0.);
+  get<0, 0>(metric) = -1.;
+  for (size_t i = 1; i < 4; ++i) {
+    metric.get(i, i) = 1.;
+  }
+  DataVector radius(n, 0.);
+  for (const auto& x : setup.inertial_coords) {
+    radius += square(x);
+  }
+  radius = sqrt(radius);
+  get<0, 0>(pi) = .03 * square(radius);
+  const Scalar<DataVector> gamma{DataVector{.2 + .01 * radius}};
+  std::optional<gh::worldtube::RadialGaugeFaceData> rd{};
+  const auto update = [&](double t) {
+    gh::worldtube::update_radial_gauge_face_data(
+        make_not_null(&rd), metric, pi, phi, gamma, setup.inertial_coords,
+        tnsr::I<double, 3>(0.), setup.mesh, setup.inverse_jacobian,
+        Direction<3>::lower_xi(), t);
+  };
+  update(0.);
+  REQUIRE(rd.has_value());
+  const auto initial_q = rd->q, initial_dr = rd->dr_q;
+  const size_t nf = setup.mesh.extents(1) * setup.mesh.extents(2);
+  CHECK_ITERABLE_APPROX(get<0>(rd->q),
+                        DataVector(nf, (.03 * 2.5 * 2.5 + .225) / sqrt(2.)));
+  CHECK_ITERABLE_CUSTOM_APPROX(get<0>(rd->dr_q),
+                               DataVector(nf, (.06 * 2.5 + .01) / sqrt(2.)),
+                               Approx::custom().epsilon(1.e-10).scale(1.));
+  for (size_t i = 0; i < 3; ++i) {
+    CHECK_ITERABLE_APPROX(
+        rd->q.get(i + 1),
+        DataVector{.225 / sqrt(2.) * rd->radial_direction.get(i)});
+    CHECK_ITERABLE_CUSTOM_APPROX(
+        rd->dr_q.get(i + 1),
+        DataVector{.01 / sqrt(2.) * rd->radial_direction.get(i)},
+        Approx::custom().epsilon(1.e-10).scale(1.));
+  }
+  get<0, 0>(pi) *= 1.7;
+  update(1.);
+  update(0.);  // An AB self-start reset must not re-capture.
+  CHECK_ITERABLE_APPROX(rd->initial_q, initial_q);
+  CHECK_ITERABLE_APPROX(rd->initial_dr_q, initial_dr);
+  CHECK(max(abs(get<0>(rd->q) - get<0>(initial_q))) > .01);
+  KretschmannFaceData<3> holder{};
+  holder.radial_gauge = rd;
+  CHECK(serialize_and_deserialize(holder) == holder);
+}
+
 void test_quadrature_weights() {
   // Spherical-harmonic face: Gauss-Legendre in cos(theta) times uniform phi,
   // theta varying fastest
@@ -51,7 +103,7 @@ void test_quadrature_weights() {
       gh::worldtube::face_quadrature_weights<3>(ylm_face);
   REQUIRE(weights.size() == n_theta * n_phi);
   CHECK(sum(weights) == approx(1.));
-  const DataVector& gauss =
+  const DataVector &gauss =
       Spectral::quadrature_weights<Spectral::Basis::Legendre,
                                    Spectral::Quadrature::Gauss>(n_theta);
   for (size_t i_phi = 0; i_phi < n_phi; ++i_phi) {
@@ -67,10 +119,10 @@ void test_quadrature_weights() {
       {{4, 5}}, Spectral::Basis::Legendre, Spectral::Quadrature::GaussLobatto};
   const DataVector lgl_weights =
       gh::worldtube::face_quadrature_weights<3>(lgl_face);
-  const DataVector& lgl_4 =
+  const DataVector &lgl_4 =
       Spectral::quadrature_weights<Spectral::Basis::Legendre,
                                    Spectral::Quadrature::GaussLobatto>(4);
-  const DataVector& lgl_5 =
+  const DataVector &lgl_5 =
       Spectral::quadrature_weights<Spectral::Basis::Legendre,
                                    Spectral::Quadrature::GaussLobatto>(5);
   for (size_t j = 0; j < 5; ++j) {
@@ -90,17 +142,17 @@ void test_quadrature_weights() {
 void test_update_on_boosted_kerr_schild() {
   const std::array<double, 3> velocity{{0.2, -0.1, 0.15}};
   const auto setup = helpers::wedge_element(12, velocity);
-  const auto& excision_spheres = setup.domain.excision_spheres();
+  const auto &excision_spheres = setup.domain.excision_spheres();
   REQUIRE(excision_spheres.size() == 1);
   const auto evolved_at = [&setup](const double time) {
     return setup.evolved_variables(time);
   };
   const auto update =
       [&setup, &excision_spheres](
-          const gsl::not_null<KretschmannFaceData<3>*> data,
-          const helpers::EvolvedVariables& vars,
-          const std::optional<tnsr::I<DataVector, 3, Frame::Inertial>>&
-              mesh_velocity,
+          const gsl::not_null<KretschmannFaceData<3> *> data,
+          const helpers::EvolvedVariables &vars,
+          const std::optional<tnsr::I<DataVector, 3, Frame::Inertial>>
+              &mesh_velocity,
           const double time) {
         gh::worldtube::update_kretschmann_face_data(
             data, get<gr::Tags::SpacetimeMetric<DataVector, 3>>(vars),
@@ -116,7 +168,7 @@ void test_update_on_boosted_kerr_schild() {
   REQUIRE(data.direction.has_value());
   CHECK(data.direction == excision_spheres.begin()->second.abutting_direction(
                               setup.element.id()));
-  const Direction<3>& direction = *data.direction;
+  const Direction<3> &direction = *data.direction;
   const size_t sliced_dim = direction.dimension();
   const size_t fixed_index = index_to_slice_at(setup.mesh.extents(), direction);
   const size_t num_face_points =
@@ -128,6 +180,10 @@ void test_update_on_boosted_kerr_schild() {
   CHECK(sum(data.quadrature_weights) == approx(1.));
   CHECK(data.time == 0.);
   CHECK(data.previous_time == 0.);
+  REQUIRE(data.initial_gauge_difference.has_value());
+  const auto initial_gauge = *data.initial_gauge_difference;
+  CHECK(get<0>(initial_gauge).size() == num_face_points);
+  CHECK(max(abs(get<0>(initial_gauge))) > 0.);
 
   // The face is the inner boundary of the wedge, at coordinate radius 2.5
   const auto face_coords = get<domain::Tags::Coordinates<3, Frame::Inertial>>(
@@ -162,10 +218,10 @@ void test_update_on_boosted_kerr_schild() {
   CHECK(data.previous_time == time_step);
   const auto expected_later =
       helpers::boosted_kretschmann(face_coords, velocity, time_step);
-  CHECK_ITERABLE_CUSTOM_APPROX(
-      get(data.dt_kretschmann), get(expected_later.dt_kretschmann),
-      Approx::custom().epsilon(1.e-2).scale(
-          max(abs(get(expected_later.dt_kretschmann)))));
+  CHECK_ITERABLE_CUSTOM_APPROX(get(data.dt_kretschmann),
+                               get(expected_later.dt_kretschmann),
+                               Approx::custom().epsilon(1.e-2).scale(max(
+                                   abs(get(expected_later.dt_kretschmann)))));
   CHECK(get(data.previous_kretschmann) != get(saved_kretschmann));
 
   // Re-evaluation at the same time keeps the estimate and the history
@@ -192,6 +248,7 @@ void test_update_on_boosted_kerr_schild() {
   CHECK(data.previous_time == -1.);
   CHECK(max(abs(get(data.dt_kretschmann))) == 0.);
 
+  CHECK_ITERABLE_APPROX(*data.initial_gauge_difference, initial_gauge);
   CHECK(serialize_and_deserialize(data) == data);
   CHECK(data != KretschmannFaceData<3>{});
   CHECK(KretschmannFaceData<3>{} == KretschmannFaceData<3>{});
@@ -312,11 +369,12 @@ void test_update_filtered_tidal_moments() {
   CHECK(data.filtered_moments_time == 1.);
   CHECK(serialize_and_deserialize(data) == data);
 }
-}  // namespace
+} // namespace
 
 SPECTRE_TEST_CASE(
     "Unit.Evolution.Systems.GeneralizedHarmonic.Worldtube.KretschmannFaceData",
     "[Unit][Evolution]") {
+  test_radial_gauge_capture();
   test_quadrature_weights();
   test_update_on_boosted_kerr_schild();
   test_relax_tidal_moments();

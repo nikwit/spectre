@@ -22,6 +22,7 @@
 #include "Domain/Tags.hpp"
 #include "Evolution/BoundaryConditions/Type.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/BoundaryCondition.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/SchwarzschildReference.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matching.hpp"
@@ -37,14 +38,11 @@
 #include "Utilities/TMPL.hpp"
 
 /// \cond
-template <size_t Dim>
-class Domain;
-template <size_t Dim>
-class Element;
+template <size_t Dim> class Domain;
+template <size_t Dim> class Element;
 namespace domain::Tags {
-template <size_t Dim, typename Frame>
-struct Coordinates;
-}  // namespace domain::Tags
+template <size_t Dim, typename Frame> struct Coordinates;
+} // namespace domain::Tags
 /// \endcond
 
 namespace gh::BoundaryConditions::detail {
@@ -53,8 +51,8 @@ namespace gh::BoundaryConditions::detail {
 enum class SectorImposition {
   /// Through a Bjorhus time-derivative correction on this sector.
   Bjorhus,
-  /// Not at all: the sector is frozen, \f$\partial_t u^-|_{\rm sector} = 0\f$.
-  /// A diagnostic control that deliberately imposes no condition.
+  /// Freeze the characteristic RHS in this sector. This is a boundary
+  /// condition, not omission of a boundary correction.
   Frozen,
   /// Gauge sector only. Bayliss-Turkel \f$L=0\f$ condition in the form that
   /// annihilates an *ingoing* wave \f$g(t+r)/r\f$, i.e. one the hole absorbs:
@@ -66,7 +64,56 @@ enum class SectorImposition {
   /// \f$(\partial_t + \partial_r + 1/r)f = 0\f$. Provided so the two signs can
   /// be compared; at an inner boundary `SommerfeldAbsorbing` is the physically
   /// motivated one.
-  SommerfeldOutgoing
+  SommerfeldOutgoing,
+  /// Full coordinate derivative of l.u_minus, with optional decay to zero.
+  Algebraic,
+  /// Relax the incoming gauge data toward the outgoing data plus an initial
+  /// offset.
+  OutgoingDriven,
+  SchwarzschildReference,
+  /// Replace the time/radial incoming gauge derivative with an initial-profile Robin response.
+  RadialResponse
+};
+
+/// Experimental algebraic gauge condition on a fixed coordinate boundary.
+/// Gamma2 must be time-independent. A zero rate preserves the initial
+/// l.u_minus; a positive rate exponentially relaxes it towards homogeneous
+/// boundary data.
+struct AlgebraicGauge {
+  struct Algebraic {
+    using type = double;
+    static constexpr Options::String help{
+        "Nonnegative decay rate for d_t(l.u_minus) = -rate l.u_minus. "
+        "Includes derivatives of the null vector and unit face normal. "
+        "Zero preserves the initial value; positive values relax towards zero. "
+        "Requires a static mesh and time-independent gamma2."};
+    static double lower_bound() { return 0.; }
+  };
+  using options = tmpl::list<Algebraic>;
+  static constexpr Options::String help{
+      "Full algebraic incoming-gauge condition, including basis derivatives."};
+  AlgebraicGauge() = default;
+  explicit AlgebraicGauge(double rate_in) : rate(rate_in) {}
+  double rate{0.};
+};
+
+/// Fixed-mesh outgoing-driven gauge condition. The initial difference is
+/// stored in the element face data, not in this shared boundary object.
+struct OutgoingDrivenGauge {
+  struct OutgoingDriven {
+    using type = double;
+    static constexpr Options::String help{
+        "Nonnegative rate sigma for dt q_minus = "
+        "-sigma (q_minus - q_plus - initial_difference). "
+        "Both q fields use the same outgoing null vector. Requires a static "
+        "mesh, fixed face resolution and time-independent gamma2."};
+    static double lower_bound() { return 0.; }
+  };
+  using options = tmpl::list<OutgoingDriven>;
+  static constexpr Options::String help{"Outgoing-driven incoming gauge data."};
+  OutgoingDrivenGauge() = default;
+  explicit OutgoingDrivenGauge(double value) : rate(value) {}
+  double rate{0.};
 };
 
 /// Whether an imposition is one of the two Sommerfeld gauge conditions.
@@ -77,10 +124,10 @@ bool is_sommerfeld(SectorImposition imposition);
 /// outer-boundary form.
 double sommerfeld_one_over_r_sign(SectorImposition imposition);
 
-SectorImposition convert_sector_imposition_from_yaml(
-    const Options::Option& options);
+SectorImposition
+convert_sector_imposition_from_yaml(const Options::Option &options);
 
-std::ostream& operator<<(std::ostream& os, SectorImposition imposition);
+std::ostream &operator<<(std::ostream &os, SectorImposition imposition);
 
 /// The model of the radiation entering the domain through the physical
 /// sector, see `gh::worldtube::PhysicalModel`.
@@ -142,10 +189,10 @@ struct PerFieldConstraintSectors {
  */
 template <size_t Dim>
 tnsr::I<double, Dim, Frame::Inertial> excision_sphere_center(
-    const std::unordered_map<std::string, ExcisionSphere<Dim>>&
-        excision_spheres,
-    const ElementId<Dim>& element_id, double time,
-    const domain::FunctionsOfTimeMap& functions_of_time);
+    const std::unordered_map<std::string, ExcisionSphere<Dim>>
+        &excision_spheres,
+    const ElementId<Dim> &element_id, double time,
+    const domain::FunctionsOfTimeMap &functions_of_time);
 
 /*!
  * \brief The incoming Weyl mode \f$U^{8-}_{ij}\f$ of the type-D model, in
@@ -159,11 +206,11 @@ tnsr::I<double, Dim, Frame::Inertial> excision_sphere_center(
  * components.
  */
 tnsr::ii<DataVector, 3, Frame::Inertial> type_d_incoming_mode(
-    const tnsr::ii<DataVector, 3, Frame::Inertial>& electric,
-    const tnsr::ii<DataVector, 3, Frame::Inertial>& magnetic,
-    const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
-    const tnsr::i<DataVector, 3, Frame::Inertial>& unit_normal_covector);
-}  // namespace gh::BoundaryConditions::detail
+    const tnsr::ii<DataVector, 3, Frame::Inertial> &electric,
+    const tnsr::ii<DataVector, 3, Frame::Inertial> &magnetic,
+    const tnsr::ii<DataVector, 3, Frame::Inertial> &spatial_metric,
+    const tnsr::i<DataVector, 3, Frame::Inertial> &unit_normal_covector);
+} // namespace gh::BoundaryConditions::detail
 
 namespace gh::BoundaryConditions {
 /*!
@@ -227,7 +274,7 @@ namespace gh::BoundaryConditions {
  */
 template <size_t Dim>
 class WorldtubeTypeD final : public BoundaryCondition<Dim> {
- public:
+public:
   /// \brief How the constraint-preserving sector is imposed.
   ///
   /// Either one imposition for the whole sector, or a
@@ -256,15 +303,27 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   };
   /// \brief How the gauge sector of \f$u^-\f$ is imposed.
   struct GaugeSector {
-    using type = detail::SectorImposition;
+    using type = std::variant<detail::SectorImposition, detail::AlgebraicGauge,
+                              detail::OutgoingDrivenGauge,
+                              detail::SchwarzschildReferenceGauge, worldtube::ReferenceReplayGauge,
+                   worldtube::RadialResponseGauge>;
     static constexpr Options::String help{
-        "Imposition of the gauge sector of v_minus: Frozen (no condition at "
-        "all), or SommerfeldAbsorbing / SommerfeldOutgoing for a model-free "
+        "Imposition of the gauge sector of v_minus: Frozen (zero projected "
+        "characteristic RHS), or SommerfeldAbsorbing / SommerfeldOutgoing for "
+        "a model-free "
         "Bayliss-Turkel L=0 condition with the radius measured from the "
         "excision center. SommerfeldAbsorbing annihilates a wave falling into "
         "the hole and is the physically motivated sign at an inner boundary; "
         "SommerfeldOutgoing is the outer-boundary sign, provided for "
-        "comparison. Bjorhus is not implemented."};
+        "comparison. Alternatively use {Algebraic: rate} for a Bjorhus RHS "
+        "enforcing d_t(l.u_minus) = -rate l.u_minus with full basis "
+        "derivatives. "
+        "This requires a static mesh and time-independent gamma2. "
+        "RadialResponse: [Kt, Kr] replaces the radial derivative of the "
+        "time/radial gauge data, retaining live GH sources and an initial "
+        "profile. Tangential gauge data retain the zero-rate radiation condition. "
+        "This prototype requires static unrefined 3D spherical shells. "
+        "Bjorhus without a specified gauge prescription is not implemented."};
   };
   /// \brief Which model supplies the incoming radiation to the physical
   /// sector's Bjorhus term.
@@ -332,22 +391,26 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
       std::variant<detail::SectorImposition, detail::PerFieldConstraintSectors>
           constraint_preserving_sector,
       detail::SectorImposition physical_sector,
-      detail::SectorImposition gauge_sector,
+      std::variant<detail::SectorImposition, detail::AlgebraicGauge,
+                   detail::OutgoingDrivenGauge,
+                   detail::SchwarzschildReferenceGauge, worldtube::ReferenceReplayGauge,
+                   worldtube::RadialResponseGauge>
+          gauge_sector,
       detail::PhysicalModel physical_model,
       std::optional<double> mass = std::nullopt,
       std::optional<double> moment_relaxation_time = std::nullopt,
-      const Options::Context& context = {});
+      const Options::Context &context = {});
 
   WorldtubeTypeD() = default;
   /// \cond
-  WorldtubeTypeD(WorldtubeTypeD&&) = default;
-  WorldtubeTypeD& operator=(WorldtubeTypeD&&) = default;
-  WorldtubeTypeD(const WorldtubeTypeD&) = default;
-  WorldtubeTypeD& operator=(const WorldtubeTypeD&) = default;
+  WorldtubeTypeD(WorldtubeTypeD &&) = default;
+  WorldtubeTypeD &operator=(WorldtubeTypeD &&) = default;
+  WorldtubeTypeD(const WorldtubeTypeD &) = default;
+  WorldtubeTypeD &operator=(const WorldtubeTypeD &) = default;
   /// \endcond
   ~WorldtubeTypeD() override = default;
 
-  explicit WorldtubeTypeD(CkMigrateMessage* msg);
+  explicit WorldtubeTypeD(CkMigrateMessage *msg);
 
   WRAPPED_PUPable_decl_base_template(
       domain::BoundaryConditions::BoundaryCondition, WorldtubeTypeD);
@@ -358,7 +421,7 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   static constexpr evolution::BoundaryConditions::Type bc_type =
       evolution::BoundaryConditions::Type::TimeDerivative;
 
-  void pup(PUP::er& p) override;
+  void pup(PUP::er &p) override;
 
   using dg_interior_evolved_variables_tags =
       tmpl::list<gr::Tags::SpacetimeMetric<DataVector, Dim>,
@@ -386,49 +449,53 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   using dg_gridless_tags =
       tmpl::list<::Tags::Time, domain::Tags::Domain<Dim>,
                  domain::Tags::Element<Dim>, domain::Tags::FunctionsOfTime,
-                 worldtube::Tags::KretschmannFaceData<Dim>>;
+                 worldtube::Tags::KretschmannFaceData<Dim>,
+                 Tags::DampingFunctionGamma2<Dim, Frame::Grid>>;
 
   std::optional<std::string> dg_time_derivative(
-      gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
+      gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial> *>
           dt_spacetime_metric_correction,
-      gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
+      gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial> *>
           dt_pi_correction,
-      gsl::not_null<tnsr::iaa<DataVector, Dim, Frame::Inertial>*>
+      gsl::not_null<tnsr::iaa<DataVector, Dim, Frame::Inertial> *>
           dt_phi_correction,
-      const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
-          face_mesh_velocity,
-      const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_covector,
-      const tnsr::I<DataVector, Dim, Frame::Inertial>& /*normal_vector*/,
+      const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>
+          &face_mesh_velocity,
+      const tnsr::i<DataVector, Dim, Frame::Inertial> &normal_covector,
+      const tnsr::I<DataVector, Dim, Frame::Inertial> & /*normal_vector*/,
       // c.f. dg_interior_evolved_variables_tags
-      const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
-      const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
-      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
+      const tnsr::aa<DataVector, Dim, Frame::Inertial> &spacetime_metric,
+      const tnsr::aa<DataVector, Dim, Frame::Inertial> &pi,
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial> &phi,
       // c.f. dg_interior_temporary_tags
-      const tnsr::I<DataVector, Dim, Frame::Inertial>& coords,
-      const Scalar<DataVector>& gamma1, const Scalar<DataVector>& gamma2,
-      const Scalar<DataVector>& lapse,
-      const tnsr::I<DataVector, Dim, Frame::Inertial>& shift,
-      const tnsr::AA<DataVector, Dim, Frame::Inertial>&
-          inverse_spacetime_metric,
-      const tnsr::A<DataVector, Dim, Frame::Inertial>&
-          spacetime_unit_normal_vector,
-      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& three_index_constraint,
-      const tnsr::a<DataVector, Dim, Frame::Inertial>& gauge_source,
-      const tnsr::ab<DataVector, Dim, Frame::Inertial>&
-          spacetime_deriv_gauge_source,
+      const tnsr::I<DataVector, Dim, Frame::Inertial> &coords,
+      const Scalar<DataVector> &gamma1, const Scalar<DataVector> &gamma2,
+      const Scalar<DataVector> &lapse,
+      const tnsr::I<DataVector, Dim, Frame::Inertial> &shift,
+      const tnsr::AA<DataVector, Dim, Frame::Inertial>
+          &inverse_spacetime_metric,
+      const tnsr::A<DataVector, Dim, Frame::Inertial>
+          &spacetime_unit_normal_vector,
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial> &three_index_constraint,
+      const tnsr::a<DataVector, Dim, Frame::Inertial> &gauge_source,
+      const tnsr::ab<DataVector, Dim, Frame::Inertial>
+          &spacetime_deriv_gauge_source,
       // c.f. dg_interior_dt_vars_tags
-      const tnsr::aa<DataVector, Dim, Frame::Inertial>&
-          logical_dt_spacetime_metric,
-      const tnsr::aa<DataVector, Dim, Frame::Inertial>& logical_dt_pi,
-      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& logical_dt_phi,
+      const tnsr::aa<DataVector, Dim, Frame::Inertial>
+          &logical_dt_spacetime_metric,
+      const tnsr::aa<DataVector, Dim, Frame::Inertial> &logical_dt_pi,
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial> &logical_dt_phi,
       // c.f. dg_interior_deriv_vars_tags
-      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_spacetime_metric,
-      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_pi,
-      const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi,
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial> &d_spacetime_metric,
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial> &d_pi,
+      const tnsr::ijaa<DataVector, Dim, Frame::Inertial> &d_phi,
       // c.f. dg_gridless_tags
-      double time, const Domain<Dim>& domain, const Element<Dim>& element,
-      const domain::FunctionsOfTimeMap& functions_of_time,
-      const worldtube::KretschmannFaceData<Dim>& face_data) const;
+      double time, const Domain<Dim> &domain, const Element<Dim> &element,
+      const domain::FunctionsOfTimeMap &functions_of_time,
+      const worldtube::KretschmannFaceData<Dim> &face_data,
+      const ConstraintDamping::DampingFunction<Dim, Frame::Grid>
+          &damping_gamma2 = ConstraintDamping::Constant<Dim, Frame::Grid>{
+              0.}) const;
 
   detail::SectorImposition constraint_v_psi() const {
     return constraint_v_psi_;
@@ -441,13 +508,20 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   }
   detail::SectorImposition physical_sector() const { return physical_sector_; }
   detail::SectorImposition gauge_sector() const { return gauge_sector_; }
+  double algebraic_gauge_rate() const { return algebraic_gauge_rate_; }
+  double outgoing_gauge_rate() const { return outgoing_gauge_rate_; }
+  const auto& radial_response() const { return radial_response_; }
+  const auto &schwarzschild_reference() const {
+    return schwarzschild_reference_;
+  }
+  const std::optional<worldtube::FaceReplayParameters>& face_replay() const { return face_replay_; }
   detail::PhysicalModel physical_model() const { return physical_model_; }
-  const std::optional<double>& mass() const { return mass_; }
-  const std::optional<double>& moment_relaxation_time() const {
+  const std::optional<double> &mass() const { return mass_; }
+  const std::optional<double> &moment_relaxation_time() const {
     return moment_relaxation_time_;
   }
 
- private:
+private:
   detail::SectorImposition constraint_v_psi_{detail::SectorImposition::Bjorhus};
   detail::SectorImposition constraint_v_zero_{
       detail::SectorImposition::Bjorhus};
@@ -456,23 +530,29 @@ class WorldtubeTypeD final : public BoundaryCondition<Dim> {
   detail::SectorImposition physical_sector_{detail::SectorImposition::Bjorhus};
   detail::SectorImposition gauge_sector_{
       detail::SectorImposition::SommerfeldAbsorbing};
+  double algebraic_gauge_rate_{0.};
+  double outgoing_gauge_rate_{0.};
+  std::optional<std::array<double, 2>> radial_response_{};
+  std::optional<detail::SchwarzschildReferenceParameters>
+      schwarzschild_reference_{};
+  std::optional<worldtube::FaceReplayParameters> face_replay_{};
   detail::PhysicalModel physical_model_{detail::PhysicalModel::None};
   std::optional<double> mass_{};
   std::optional<double> moment_relaxation_time_{};
 };
 
 template <size_t Dim>
-bool operator==(const WorldtubeTypeD<Dim>& lhs, const WorldtubeTypeD<Dim>& rhs);
+bool operator==(const WorldtubeTypeD<Dim> &lhs, const WorldtubeTypeD<Dim> &rhs);
 template <size_t Dim>
-bool operator!=(const WorldtubeTypeD<Dim>& lhs, const WorldtubeTypeD<Dim>& rhs);
-}  // namespace gh::BoundaryConditions
+bool operator!=(const WorldtubeTypeD<Dim> &lhs, const WorldtubeTypeD<Dim> &rhs);
+} // namespace gh::BoundaryConditions
 
 template <>
 struct Options::create_from_yaml<
     gh::BoundaryConditions::detail::SectorImposition> {
   template <typename Metavariables>
-  static typename gh::BoundaryConditions::detail::SectorImposition create(
-      const Options::Option& options) {
+  static typename gh::BoundaryConditions::detail::SectorImposition
+  create(const Options::Option &options) {
     return gh::BoundaryConditions::detail::convert_sector_imposition_from_yaml(
         options);
   }
