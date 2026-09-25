@@ -18,5 +18,6 @@ if(Boost_VERSION VERSION_GREATER_EQUAL 1.81.0)
     "Unit.IO.Exporter.Python.ModalSpacetimeInterpolator"
     Test_ModalSpacetimeInterpolator.py
     "unit;python"
-    PyExporter)
+    PyExporter
+    TIMEOUT 10)
 endif()

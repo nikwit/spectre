@@ -169,6 +169,28 @@ def _validation_metadata(filename, subfile_name):
     show_default=True,
 )
 @click.option(
+    "--observation-batch-size",
+    type=click.IntRange(min=1),
+    default=16,
+    show_default=True,
+    help="Observations staged together for contiguous modal-history writes.",
+)
+@click.option(
+    "--save-interpolator",
+    type=click.Path(dir_okay=False, writable=True),
+    help="Save immediately after construction, before starting validation.",
+)
+@click.option(
+    "--load-interpolator",
+    type=click.Path(exists=True, dir_okay=False, readable=True),
+    help="Load a saved interpolator instead of reading training data.",
+)
+@click.option(
+    "--build-only",
+    is_flag=True,
+    help="Construct and save without validation. Requires --save-interpolator.",
+)
+@click.option(
     "--output",
     "output_filename",
     type=click.Path(dir_okay=False, writable=True),
@@ -187,22 +209,49 @@ def validate_modal_spacetime_interpolator_command(
     max_validation_observations,
     verbosity,
     output_filename,
+    observation_batch_size,
+    save_interpolator,
+    load_interpolator,
+    build_only,
 ):
     """Compare modal spacetime interpolation with held-out observations.
 
-    For cluster-scale data, invoke this command once per node-written H5 file
-    in a job array. The CSV contains sums of squares and maxima that can be
-    reduced across shards.
+    Pass all node-written H5 files to construct one interpolator. Save it with
+    --save-interpolator before validation, or use --build-only to stop after
+    saving. Later runs can use --load-interpolator with different validation
+    samples or a subset of the saved components, without reading training data.
+    Saved files are intended for reuse with the same SpECTRE build.
     """
+    if load_interpolator and (save_interpolator or build_only):
+        raise click.UsageError(
+            "--load-interpolator cannot be combined with "
+            "--save-interpolator or --build-only."
+        )
+    if load_interpolator and (start_time is not None or end_time is not None):
+        raise click.UsageError(
+            "Training time bounds cannot be changed when loading an"
+            " interpolator."
+        )
+    if build_only and not save_interpolator:
+        raise click.UsageError("--build-only requires --save-interpolator.")
+    if save_interpolator:
+        save_path = Path(save_interpolator)
+        if save_path.exists() or Path(str(save_path) + ".partial").exists():
+            raise click.ClickException(
+                f"Refusing to overwrite '{save_path}' or its partial file."
+            )
+        save_path.parent.mkdir(parents=True, exist_ok=True)
     h5_files = _resolve_files(h5_files_or_globs)
     training_subfiles = list(map(_subfile_path, training_subfiles))
     validation_subfile = _subfile_path(validation_subfile)
     output_path = Path(output_filename)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    observation_ids, observation_times, available_components = (
-        _validation_metadata(h5_files[0], validation_subfile)
-    )
+    (
+        observation_ids,
+        observation_times,
+        available_components,
+    ) = _validation_metadata(h5_files[0], validation_subfile)
     coordinate_components = [
         "InertialCoordinates_x",
         "InertialCoordinates_y",
@@ -214,6 +263,20 @@ def validate_modal_spacetime_interpolator_command(
             "The validation subfile is missing coordinate components: "
             + ", ".join(sorted(missing_coordinates))
         )
+    interpolator = None
+    construction_seconds = 0.0
+    load_seconds = 0.0
+    serialization_seconds = 0.0
+    if load_interpolator:
+        click.echo(
+            f"Loading interpolator from {load_interpolator}...", err=True
+        )
+        load_start = time.perf_counter()
+        interpolator = ModalSpacetimeInterpolator[3].load(load_interpolator)
+        load_seconds = time.perf_counter() - load_start
+        click.echo(f"Loaded in {load_seconds:.1f} s.", err=True)
+        if not tensor_components:
+            tensor_components = interpolator.tensor_components()
     if tensor_components:
         tensor_components = list(tensor_components)
     else:
@@ -253,31 +316,85 @@ def validate_modal_spacetime_interpolator_command(
                 + ", ".join(sorted(missing))
             )
 
-    click.echo(
-        (
-            f"Constructing interpolator for {len(h5_files)} file(s), "
-            f"{len(tensor_components)} component(s), and subfiles "
-            f"{training_subfiles}..."
-        ),
-        err=True,
-    )
-    construction_start = time.perf_counter()
-    interpolator = ModalSpacetimeInterpolator[3](
-        h5_files,
-        subfiles_in_priority_order=training_subfiles,
-        tensor_components=tensor_components,
-        start_time=start_time,
-        end_time=end_time,
-        verbosity=getattr(Verbosity, verbosity.capitalize()),
-    )
-    construction_seconds = time.perf_counter() - construction_start
-    click.echo(
-        (
-            f"Interpolator constructed in {construction_seconds:.1f} s; "
-            f"valid on {interpolator.time_bounds()}."
-        ),
-        err=True,
-    )
+    if interpolator is None:
+        click.echo(
+            (
+                f"Constructing interpolator for {len(h5_files)} file(s), "
+                f"{len(tensor_components)} component(s), and subfiles "
+                f"{training_subfiles}..."
+            ),
+            err=True,
+        )
+        construction_start = time.perf_counter()
+        interpolator = ModalSpacetimeInterpolator[3](
+            h5_files,
+            subfiles_in_priority_order=training_subfiles,
+            tensor_components=tensor_components,
+            start_time=start_time,
+            end_time=end_time,
+            verbosity=getattr(Verbosity, verbosity.capitalize()),
+            observation_batch_size=observation_batch_size,
+        )
+        construction_seconds = time.perf_counter() - construction_start
+        click.echo(
+            (
+                f"Interpolator constructed in {construction_seconds:.1f} s; "
+                f"valid on {interpolator.time_bounds()}."
+            ),
+            err=True,
+        )
+
+    stored_components = list(interpolator.tensor_components())
+    missing = set(tensor_components) - set(stored_components)
+    if missing:
+        raise click.ClickException(
+            "The saved interpolator is missing requested components: "
+            + ", ".join(sorted(missing))
+        )
+    component_indices = [stored_components.index(c) for c in tensor_components]
+    if save_interpolator:
+        click.echo(f"Saving interpolator to {save_interpolator}...", err=True)
+        save_start = time.perf_counter()
+        interpolator.save(save_interpolator)
+        serialization_seconds = time.perf_counter() - save_start
+        save_metadata = {
+            "h5_files": h5_files,
+            "training_subfiles": training_subfiles,
+            "tensor_components": stored_components,
+            "time_bounds": list(interpolator.time_bounds()),
+            "construction_seconds": construction_seconds,
+            "observation_batch_size": observation_batch_size,
+            "serialization_seconds": serialization_seconds,
+            "file_size_bytes": Path(save_interpolator).stat().st_size,
+            "python_executable": sys.executable,
+            "format": (
+                "SpECTRE native PUP v1; use the same build and architecture"
+            ),
+        }
+        Path(str(save_interpolator) + ".json").write_text(
+            json.dumps(save_metadata, indent=2) + "\n"
+        )
+        click.echo(
+            (
+                f"Saved interpolator in {serialization_seconds:.1f} s "
+                f"({save_metadata['file_size_bytes'] / 1024**3:.3f} GiB)."
+            ),
+            err=True,
+        )
+    if build_only:
+        return
+
+    time_bounds = interpolator.time_bounds()
+    outside_times = [
+        value
+        for value in observation_times
+        if not time_bounds[0] <= value <= time_bounds[1]
+    ]
+    if outside_times:
+        raise click.ClickException(
+            f"Validation times {outside_times} are outside the interpolator "
+            f"time bounds {time_bounds}."
+        )
 
     fieldnames = [
         "time",
@@ -317,7 +434,15 @@ def validate_modal_spacetime_interpolator_command(
             references = [[] for _ in tensor_components]
             results = [[] for _ in tensor_components]
             locations = []
-            for filename in h5_files:
+            for file_number, filename in enumerate(h5_files, start=1):
+                file_start = time.perf_counter()
+                click.echo(
+                    (
+                        "  Reading validation file"
+                        f" {file_number}/{len(h5_files)}: {filename}..."
+                    ),
+                    err=True,
+                )
                 with spectre_h5.H5File(filename, "r") as h5file:
                     volfile = h5file.get_vol(validation_subfile)
                     grid_names = list(volfile.get_grid_names(observation_id))
@@ -341,7 +466,9 @@ def validate_modal_spacetime_interpolator_command(
                         for component in tensor_components
                     ]
                     offset = 0
-                    for grid_name, grid_extents in zip(grid_names, extents):
+                    for element_number, (grid_name, grid_extents) in enumerate(
+                        zip(grid_names, extents), start=1
+                    ):
                         local_indices = _interior_collapsed_indices(
                             grid_extents,
                             samples_per_element,
@@ -365,7 +492,7 @@ def validate_modal_spacetime_interpolator_command(
                                     component_data[global_index]
                                 )
                                 results[component_index].append(
-                                    result[component_index]
+                                    result[component_indices[component_index]]
                                 )
                             locations.append(
                                 (
@@ -376,11 +503,36 @@ def validate_modal_spacetime_interpolator_command(
                                 )
                             )
                         offset += math.prod(grid_extents)
+                        if element_number == len(grid_names) or (
+                            verbosity in ("verbose", "debug")
+                            and element_number % 250 == 0
+                        ):
+                            click.echo(
+                                (
+                                    "  Evaluated"
+                                    f" {element_number}/{len(grid_names)} "
+                                    "elements in file"
+                                    f" {file_number}/{len(h5_files)}; "
+                                    "elapsed "
+                                    f"{time.perf_counter() - file_start:.1f}"
+                                    " s."
+                                ),
+                                err=True,
+                            )
 
             for component_index, component in enumerate(tensor_components):
                 reference = np.asarray(references[component_index])
                 result = np.asarray(results[component_index])
                 summary = _summarize(reference, result)
+                click.echo(
+                    (
+                        f"  {component}: RMS={summary['rms_abs_error']:.6e}, "
+                        f"relative L2={summary['relative_l2_error']:.6e}, "
+                        f"max={summary['max_abs_error']:.6e} "
+                        f"({summary['sample_count']} samples)"
+                    ),
+                    err=True,
+                )
                 worst_index = summary.pop("worst_index")
                 (
                     worst_file,
@@ -418,6 +570,13 @@ def validate_modal_spacetime_interpolator_command(
         "training_time_bounds": list(interpolator.time_bounds()),
         "validation_times": observation_times,
         "construction_seconds": construction_seconds,
+        "observation_batch_size": (
+            observation_batch_size if not load_interpolator else None
+        ),
+        "load_seconds": load_seconds,
+        "serialization_seconds": serialization_seconds,
+        "saved_interpolator": save_interpolator,
+        "loaded_interpolator": load_interpolator,
         "validation_seconds": validation_seconds,
         "max_rss_mib": _max_rss_mib(),
         "csv_output": str(output_path),
