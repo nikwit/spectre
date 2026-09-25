@@ -171,6 +171,7 @@ void test_compress_to_tolerance() {
                             values[i]));
     }
     CHECK(max_deviation <= tolerance);
+    CHECK(max_error == max_deviation);
   }
 
   {
@@ -196,6 +197,28 @@ void test_compress_to_tolerance() {
         intrp::compress_to_tolerance(values, start_time, time_step, 1.0e-300);
     CHECK(interpolant.values() == values);
     CHECK(max_error > 0.0);
+    // Early rejection must still report the full maximum of the final
+    // rejected grid (768 samples for a 1001-sample input).
+    const intrp::UniformCardinalBSpline reference{values, start_time,
+                                                  time_step};
+    const double coarse_step =
+        time_step * static_cast<double>(num_samples - 1) / 767.0;
+    std::vector<double> coarse_values(768);
+    for (size_t i = 0; i < coarse_values.size(); ++i) {
+      coarse_values[i] =
+          reference(start_time + static_cast<double>(i) * coarse_step);
+    }
+    const intrp::UniformCardinalBSpline last_candidate{std::move(coarse_values),
+                                                       start_time, coarse_step};
+    double expected_error = 0.0;
+    for (size_t i = 0; i < num_samples; ++i) {
+      expected_error =
+          std::max(expected_error,
+                   std::abs(last_candidate(start_time +
+                                           static_cast<double>(i) * time_step) -
+                            values[i]));
+    }
+    CHECK(max_error == expected_error);
   }
 
   {

@@ -186,20 +186,24 @@ std::pair<UniformCardinalBSpline, double> compress_to_tolerance(
                                   resampled_time_step};
   };
   const auto max_error_at_samples =
-      [&values, &start_time, &time_step,
-       num_samples](const UniformCardinalBSpline& candidate) {
+      [&values, &start_time, &time_step, num_samples](
+          const UniformCardinalBSpline& candidate, const double stop_above) {
         double max_error = 0.0;
         for (size_t i = 0; i < num_samples; ++i) {
           const double time = start_time + static_cast<double>(i) * time_step;
           max_error =
               std::max(max_error, std::abs(candidate(time) - values[i]));
+          // Failed candidates do not need a complete error scan.
+          if (max_error > stop_above) {
+            break;
+          }
         }
         return max_error;
       };
 
   size_t num_points = 6;
   auto candidate = resampled_interpolant(num_points);
-  double max_error = max_error_at_samples(candidate);
+  double max_error = max_error_at_samples(candidate, absolute_tolerance);
   while (max_error > absolute_tolerance and num_points < num_samples) {
     num_points = std::min(2 * num_points, num_samples);
     if (num_points == num_samples) {
@@ -207,10 +211,14 @@ std::pair<UniformCardinalBSpline, double> compress_to_tolerance(
       // return the original samples. Their deviation at the sample times
       // vanishes by construction, so report the error of the last coarser
       // candidate as a conservative estimate.
-      return {std::move(reference_interpolant), max_error};
+      // Preserve the exact maximum error reported for the final rejected
+      // candidate, even though intermediate candidates use early rejection.
+      return {std::move(reference_interpolant),
+              max_error_at_samples(candidate,
+                                   std::numeric_limits<double>::infinity())};
     }
     candidate = resampled_interpolant(num_points);
-    max_error = max_error_at_samples(candidate);
+    max_error = max_error_at_samples(candidate, absolute_tolerance);
   }
   return {std::move(candidate), max_error};
 }
