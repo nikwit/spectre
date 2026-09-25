@@ -47,9 +47,11 @@ namespace spectre::Exporter {
  * heuristic. It does not bound the total reconstructed field error and does
  * not detect temporal undersampling in the original volume data.
  *
- * Construction reads one element's modal time series at a time, so the raw
- * volume data is not loaded into memory as a whole. The compressed
- * interpolants accumulated for all elements remain in memory.
+ * Construction buffers one tensor component's modal time series for one
+ * subfile and one volume file at a time. Each observation's component dataset
+ * is read once for all elements in that file. The buffer is released after
+ * compression; compressed interpolants and validated mesh offsets remain in
+ * memory across file and component passes.
  *
  * The observation times in each subfile must be uniformly spaced, but the
  * subfiles may have different time steps and nonaligned observation times.
@@ -75,6 +77,9 @@ namespace spectre::Exporter {
 template <size_t Dim, typename Frame = ::Frame::Inertial>
 class ModalSpacetimeInterpolator {
  public:
+  /// For deserialization only.
+  ModalSpacetimeInterpolator() = default;
+
   /*!
    * \brief Construct from one or more volume files and nested volume
    * subfiles.
@@ -92,6 +97,8 @@ class ModalSpacetimeInterpolator {
    * \param end_time Optional upper bound used to select observations from
    *     every subfile.
    * \param verbosity Controls diagnostic output during construction.
+   * \param observation_batch_size Observations staged for contiguous writes
+   *     to modal histories. Must be positive.
    */
   ModalSpacetimeInterpolator(
       const std::variant<std::vector<std::string>, std::string>&
@@ -100,7 +107,8 @@ class ModalSpacetimeInterpolator {
       std::vector<std::string> tensor_components,
       std::optional<double> start_time = std::nullopt,
       std::optional<double> end_time = std::nullopt,
-      Verbosity verbosity = Verbosity::Quiet);
+      Verbosity verbosity = Verbosity::Quiet,
+      size_t observation_batch_size = 16);
 
   ModalSpacetimeInterpolator(ModalSpacetimeInterpolator&&) = default;
   ModalSpacetimeInterpolator& operator=(ModalSpacetimeInterpolator&&) = default;
@@ -124,6 +132,23 @@ class ModalSpacetimeInterpolator {
                             std::optional<gsl::not_null<std::vector<size_t>*>>
                                 block_order = std::nullopt) const;
 
+  /*!
+   * \brief Save the constructed interpolator without its training data.
+   *
+   * Streams to `filename + ".partial"`, then renames the completed file to
+   * `filename`. Existing files are not overwritten. The native PUP format is
+   * intended for reuse with the same SpECTRE build and architecture, not as a
+   * portable archival format. Only load trusted files.
+   */
+  void save(const std::string& filename) const;
+
+  /// Load a saved interpolator, including its domain and functions of time.
+  /// Restores splines from retained samples without repeating compression.
+  static ModalSpacetimeInterpolator load(const std::string& filename);
+
+  // NOLINTNEXTLINE(google-runtime-references)
+  void pup(PUP::er& p);
+
   /// Tensor components in the order returned by `interpolate_to_point()`
   const std::vector<std::string>& tensor_components() const {
     return tensor_components_;
@@ -139,6 +164,9 @@ class ModalSpacetimeInterpolator {
     Mesh<Dim> mesh{};
     // Indexed by [component][mode on the final mesh]
     std::vector<std::vector<ModeInterpolant>> interpolants{};
+
+    // NOLINTNEXTLINE(google-runtime-references)
+    void pup(PUP::er& p);
   };
 
   std::vector<std::string> tensor_components_{};

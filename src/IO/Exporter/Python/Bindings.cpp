@@ -103,12 +103,20 @@ void bind_modal_spacetime_interpolator_impl(py::module& m) {
       m, ("ModalSpacetimeInterpolator" + std::to_string(Dim) + "D").c_str())
       .def(py::init<const std::variant<std::vector<std::string>, std::string>&,
                     std::vector<std::string>, std::vector<std::string>,
-                    std::optional<double>, std::optional<double>, Verbosity>(),
+                    std::optional<double>, std::optional<double>, Verbosity,
+                    size_t>(),
            py::arg("volume_files_or_glob"),
            py::arg("subfiles_in_priority_order"), py::arg("tensor_components"),
            py::arg("start_time") = std::nullopt,
            py::arg("end_time") = std::nullopt,
-           py::arg("verbosity") = Verbosity::Quiet)
+           py::arg("verbosity") = Verbosity::Quiet,
+           py::arg("observation_batch_size") = 16)
+      .def(
+          "save", &ModalSpacetimeInterpolator::save, py::arg("filename"),
+          "Save to a new native binary file for reuse with this SpECTRE build.")
+      .def_static("load", &ModalSpacetimeInterpolator::load,
+                  py::arg("filename"),
+                  "Load a trusted saved interpolator without training data.")
       .def("time_bounds", &ModalSpacetimeInterpolator::time_bounds)
       .def("tensor_components", &ModalSpacetimeInterpolator::tensor_components)
       .def(

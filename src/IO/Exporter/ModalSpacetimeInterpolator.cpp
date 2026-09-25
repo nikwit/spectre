@@ -4,9 +4,15 @@
 #include "IO/Exporter/ModalSpacetimeInterpolator.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <filesystem>
 #include <limits>
+#include <memory>
+#include <pup.h>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -34,6 +40,7 @@
 #include "Utilities/GetOutput.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Overloader.hpp"
+#include "Utilities/Serialization/PupStlCpp17.hpp"
 #include "Utilities/Serialization/Serialize.hpp"
 
 namespace spectre::Exporter {
@@ -182,39 +189,30 @@ void validate_functions_of_time(
 }
 
 template <size_t Dim>
-void validate_series(const typename ModalTimeSeriesReader<Dim>::Series& series,
-                     const Mesh<Dim>& mesh, const size_t num_components,
-                     const size_t num_observations,
-                     const ElementId<Dim>& element_id,
-                     const std::vector<std::string>& tensor_components,
-                     const std::string& subfile_name) {
-  ASSERT(series.size() == num_components,
-         "ModalTimeSeriesReader returned "
-             << series.size() << " components, but " << num_components
-             << " were requested.");
+void validate_component_series(
+    const typename ModalTimeSeriesReader<Dim>::ComponentSeries& series,
+    const Mesh<Dim>& mesh, const size_t num_observations,
+    const ElementId<Dim>& element_id, const std::string& tensor_component,
+    const std::string& subfile_name) {
   const size_t num_modes = mesh.number_of_grid_points();
-  for (size_t component_index = 0; component_index < num_components;
-       ++component_index) {
-    const auto& component_series = series[component_index];
-    ASSERT(component_series.size() == num_modes,
+  ASSERT(series.size() == num_modes,
+         "ModalTimeSeriesReader returned "
+             << series.size() << " modes for element " << element_id
+             << ", but its mesh has " << num_modes << " points.");
+  for (size_t mode = 0; mode < num_modes; ++mode) {
+    const auto& values = series[mode];
+    ASSERT(values.size() == num_observations,
            "ModalTimeSeriesReader returned "
-               << component_series.size() << " modes for element " << element_id
-               << ", but its mesh has " << num_modes << " points.");
-    for (size_t mode = 0; mode < num_modes; ++mode) {
-      const auto& values = component_series[mode];
-      ASSERT(values.size() == num_observations,
-             "ModalTimeSeriesReader returned "
-                 << values.size() << " observations for element " << element_id
-                 << ", but " << num_observations << " were expected.");
-      if (const auto non_finite_it = alg::find_if(
-              values,
-              [](const double value) { return not std::isfinite(value); });
-          non_finite_it != values.end()) {
-        ERROR_NO_TRACE("Non-finite modal data found for element "
-                       << element_id << ", tensor component '"
-                       << tensor_components[component_index] << "', mode "
-                       << mode << " in subfile '" << subfile_name << "'.");
-      }
+               << values.size() << " observations for element " << element_id
+               << ", but " << num_observations << " were expected.");
+    if (const auto non_finite_it = alg::find_if(
+            values,
+            [](const double value) { return not std::isfinite(value); });
+        non_finite_it != values.end()) {
+      ERROR_NO_TRACE("Non-finite modal data found for element "
+                     << element_id << ", tensor component '" << tensor_component
+                     << "', mode " << mode << " in subfile '" << subfile_name
+                     << "'.");
     }
   }
 }
@@ -228,7 +226,8 @@ ModalSpacetimeInterpolator<Dim, Frame>::ModalSpacetimeInterpolator(
     std::vector<std::string> subfiles_in_priority_order,
     std::vector<std::string> tensor_components,
     const std::optional<double> start_time,
-    const std::optional<double> end_time, const Verbosity verbosity)
+    const std::optional<double> end_time, const Verbosity verbosity,
+    const size_t observation_batch_size)
     : tensor_components_(std::move(tensor_components)),
       time_bounds_{{-std::numeric_limits<double>::infinity(),
                     std::numeric_limits<double>::infinity()}} {
@@ -252,7 +251,15 @@ ModalSpacetimeInterpolator<Dim, Frame>::ModalSpacetimeInterpolator(
   readers.reserve(subfiles_in_priority_order.size());
   for (const auto& subfile_name : subfiles_in_priority_order) {
     readers.emplace_back(filenames, subfile_name, tensor_components_,
-                         start_time, end_time);
+                         start_time, end_time, verbosity,
+                         observation_batch_size);
+    if (verbosity >= Verbosity::Verbose) {
+      Parallel::printf(
+          "Metadata ready for subfile %s: %zu elements, %zu "
+          "observations.\n",
+          subfile_name.c_str(), readers.back().elements().size(),
+          readers.back().num_observations());
+    }
   }
   if (readers.front().num_observations() < 9) {
     ERROR_NO_TRACE(
@@ -284,6 +291,9 @@ ModalSpacetimeInterpolator<Dim, Frame>::ModalSpacetimeInterpolator(
         << time_bounds_ << ".");
   }
 
+  if (verbosity >= Verbosity::Verbose) {
+    Parallel::printf("Loading and checking domain and functions of time...\n");
+  }
   // The finest subfile defines the domain used for point location. Check that
   // the other subfiles describe the same domain.
   {
@@ -334,6 +344,9 @@ ModalSpacetimeInterpolator<Dim, Frame>::ModalSpacetimeInterpolator(
     meshes_by_subfile.push_back(element_meshes(reader));
   }
   validate_nested_meshes(meshes_by_subfile, subfiles_in_priority_order);
+  if (verbosity >= Verbosity::Verbose) {
+    Parallel::printf("Domain and meshes checked; allocating mode storage...\n");
+  }
 
   const size_t num_components = tensor_components_.size();
   std::vector<ElementId<Dim>> element_ids{};
@@ -379,85 +392,101 @@ ModalSpacetimeInterpolator<Dim, Frame>::ModalSpacetimeInterpolator(
   size_t dropped_modes = 0;
   size_t stored_samples = 0;
   size_t source_samples = 0;
-  for (size_t subfile_index = 0; subfile_index < readers.size();
-       ++subfile_index) {
-    auto& reader = readers[subfile_index];
-    for (const auto& [element_id, source_mesh] : reader.elements()) {
-      auto series = reader.modal_time_series(element_id);
-      validate_series(series, source_mesh, num_components,
-                      reader.num_observations(), element_id, tensor_components_,
-                      subfiles_in_priority_order[subfile_index]);
-      auto& tolerances = error_tolerances.at(element_id);
-      if (subfile_index == 0) {
-        for (size_t component_index = 0; component_index < num_components;
-             ++component_index) {
-          tolerances[component_index] = intrp::estimate_interpolation_error(
-              series[component_index][0], reader.start_time(),
-              reader.time_step());
-        }
-      }
-
-      auto& destination = element_data_.at(element_id);
-      auto& element_assigned_modes = assigned_modes.at(element_id);
-      const auto& source_extents = source_mesh.extents();
-      const auto& destination_extents = destination.mesh.extents();
-      const size_t num_source_modes = source_mesh.number_of_grid_points();
-      for (size_t component_index = 0; component_index < num_components;
-           ++component_index) {
-        const double tolerance = tolerances[component_index];
-        if (not std::isfinite(tolerance) or tolerance < 0.0) {
-          ERROR_NO_TRACE("Invalid inferred error tolerance "
-                         << tolerance << " for element " << element_id
-                         << " and component '"
-                         << tensor_components_[component_index]
-                         << "'. The modal data may be too large to estimate "
-                            "an interpolation error safely.");
-        }
-        for (size_t source_mode = 0; source_mode < num_source_modes;
-             ++source_mode) {
-          const auto multi_index =
-              expanded_index<Dim>(source_mode, source_extents);
-          const size_t destination_mode =
-              collapsed_index<Dim>(multi_index, destination_extents);
-          if (element_assigned_modes[component_index][destination_mode]) {
-            continue;
+  for (size_t component_index = 0; component_index < num_components;
+       ++component_index) {
+    for (size_t subfile_index = 0; subfile_index < readers.size();
+         ++subfile_index) {
+      auto& reader = readers[subfile_index];
+      for (size_t file_index = 0; file_index < reader.num_files();
+           ++file_index) {
+        // This buffer is released before reading the next file or component.
+        const auto file_series =
+            reader.component_modal_time_series(file_index, component_index);
+        const auto compression_start = std::chrono::steady_clock::now();
+        size_t processed_elements = 0;
+        for (const auto& [element_id, series] : file_series) {
+          const auto& source_mesh =
+              meshes_by_subfile[subfile_index].at(element_id);
+          validate_component_series(series, source_mesh,
+                                    reader.num_observations(), element_id,
+                                    tensor_components_[component_index],
+                                    subfiles_in_priority_order[subfile_index]);
+          auto& tolerances = error_tolerances.at(element_id);
+          if (subfile_index == 0) {
+            tolerances[component_index] = intrp::estimate_interpolation_error(
+                series[0], reader.start_time(), reader.time_step());
           }
-          element_assigned_modes[component_index][destination_mode] = true;
-          const auto& values = series[component_index][source_mode];
-          const auto max_abs_it =
-              std::max_element(values.begin(), values.end(),
-                               [](const double lhs, const double rhs) {
-                                 return std::abs(lhs) < std::abs(rhs);
-                               });
-          ASSERT(max_abs_it != values.end(),
-                 "Modal time series unexpectedly contains no values.");
-          if (std::abs(*max_abs_it) <= tolerance) {
-            ++dropped_modes;
-            continue;
+          auto& destination = element_data_.at(element_id);
+          auto& element_assigned_modes = assigned_modes.at(element_id);
+          const auto& source_extents = source_mesh.extents();
+          const auto& destination_extents = destination.mesh.extents();
+          const size_t num_source_modes = source_mesh.number_of_grid_points();
+          const double tolerance = tolerances[component_index];
+          if (not std::isfinite(tolerance) or tolerance < 0.0) {
+            ERROR_NO_TRACE("Invalid inferred error tolerance "
+                           << tolerance << " for element " << element_id
+                           << " and component '"
+                           << tensor_components_[component_index]
+                           << "'. The modal data may be too large to estimate "
+                              "an interpolation error safely.");
           }
-          source_samples += values.size();
-          auto [interpolant, last_coarser_error] = intrp::compress_to_tolerance(
-              values, reader.start_time(), reader.time_step(), tolerance);
-          stored_samples += interpolant.values().size();
-          destination.interpolants[component_index][destination_mode] =
-              std::move(interpolant);
-          ++retained_modes;
-          if (verbosity >= Verbosity::Debug and
-              last_coarser_error > tolerance) {
+          for (size_t source_mode = 0; source_mode < num_source_modes;
+               ++source_mode) {
+            const auto multi_index =
+                expanded_index<Dim>(source_mode, source_extents);
+            const size_t destination_mode =
+                collapsed_index<Dim>(multi_index, destination_extents);
+            if (element_assigned_modes[component_index][destination_mode]) {
+              continue;
+            }
+            element_assigned_modes[component_index][destination_mode] = true;
+            const auto& values = series[source_mode];
+            const auto max_abs_it =
+                std::max_element(values.begin(), values.end(),
+                                 [](const double lhs, const double rhs) {
+                                   return std::abs(lhs) < std::abs(rhs);
+                                 });
+            ASSERT(max_abs_it != values.end(),
+                   "Modal time series unexpectedly contains no values.");
+            if (std::abs(*max_abs_it) <= tolerance) {
+              ++dropped_modes;
+              continue;
+            }
+            source_samples += values.size();
+            auto [interpolant, last_coarser_error] =
+                intrp::compress_to_tolerance(values, reader.start_time(),
+                                             reader.time_step(), tolerance);
+            stored_samples += interpolant.values().size();
+            destination.interpolants[component_index][destination_mode] =
+                std::move(interpolant);
+            ++retained_modes;
+            if (verbosity >= Verbosity::Debug and
+                last_coarser_error > tolerance) {
+              Parallel::printf(
+                  "For element %s, component %s, mode %zu, retained all "
+                  "samples; the last coarser candidate had error %.3e above "
+                  "the tolerance %.3e.\n",
+                  get_output(element_id).c_str(),
+                  tensor_components_[component_index].c_str(), destination_mode,
+                  last_coarser_error, tolerance);
+            }
+          }
+          ++processed_elements;
+          if (verbosity >= Verbosity::Verbose and
+              (processed_elements == 1 or processed_elements % 100 == 0 or
+               processed_elements == file_series.size())) {
             Parallel::printf(
-                "For element %s, component %s, mode %zu, retained all "
-                "samples; the last coarser candidate had error %.3e above "
-                "the tolerance %.3e.\n",
-                get_output(element_id).c_str(),
-                tensor_components_[component_index].c_str(), destination_mode,
-                last_coarser_error, tolerance);
+                "Compressed %zu/%zu elements for component %s, subfile %s, "
+                "file %zu/%zu in %.2f s.\n",
+                processed_elements, file_series.size(),
+                tensor_components_[component_index].c_str(),
+                subfiles_in_priority_order[subfile_index].c_str(),
+                file_index + 1, reader.num_files(),
+                std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                              compression_start)
+                    .count());
           }
         }
-      }
-      if (verbosity >= Verbosity::Verbose) {
-        Parallel::printf("Processed element %s from subfile %s.\n",
-                         get_output(element_id).c_str(),
-                         subfiles_in_priority_order[subfile_index].c_str());
       }
     }
   }
@@ -532,6 +561,103 @@ void ModalSpacetimeInterpolator<Dim, Frame>::interpolate_to_point(
     (*result)[component_index] = Spectral::evaluate_legendre_series<Dim>(
         modal_values, element_data.mesh, logical_coords);
   }
+}
+
+template <size_t Dim, typename Frame>
+void ModalSpacetimeInterpolator<Dim, Frame>::ElementData::pup(PUP::er& p) {
+  p | mesh;
+  p | interpolants;
+}
+
+template <size_t Dim, typename Frame>
+void ModalSpacetimeInterpolator<Dim, Frame>::pup(PUP::er& p) {
+  p | tensor_components_;
+  p | time_bounds_;
+  p | domain_;
+  p | functions_of_time_;
+  p | element_data_;
+  if (p.isUnpacking()) {
+    std::vector<ElementId<Dim>> element_ids{};
+    element_ids.reserve(element_data_.size());
+    for (const auto& [element_id, data] : element_data_) {
+      element_ids.push_back(element_id);
+    }
+    element_search_trees_ = domain::index_element_ids(element_ids);
+  }
+}
+
+template <size_t Dim, typename Frame>
+void ModalSpacetimeInterpolator<Dim, Frame>::save(
+    const std::string& filename) const {
+  if (std::filesystem::exists(filename)) {
+    ERROR_NO_TRACE("Refusing to overwrite saved interpolator '" << filename
+                                                                << "'.");
+  }
+  const std::string temporary_filename = filename + ".partial";
+  std::unique_ptr<FILE, int (*)(FILE*)> file(
+      std::fopen(temporary_filename.c_str(), "wbx"), &std::fclose);
+  if (file == nullptr) {
+    ERROR_NO_TRACE("Cannot create interpolator file '" << temporary_filename
+                                                       << "'.");
+  }
+  // A fixed header rejects incorrect formats/dimensions before unpacking.
+  const std::string header =
+      "SpectreModalSpacetimeInterpolator v1 dim=" + std::to_string(Dim) + "\n";
+  const uint64_t payload_size = size_of_object_in_bytes(*this);
+  if (std::fwrite(header.data(), 1, header.size(), file.get()) !=
+          header.size() or
+      std::fwrite(&payload_size, sizeof(payload_size), 1, file.get()) != 1) {
+    ERROR_NO_TRACE("Failed writing interpolator header to '" << filename
+                                                             << "'.");
+  }
+  PUP::toDisk writer(file.get());
+  // PUP's packing interface is non-const, but does not mutate the object.
+  writer | const_cast<ModalSpacetimeInterpolator&>(*this);  // NOLINT
+  if (writer.checkError() or std::ferror(file.get()) != 0) {
+    ERROR_NO_TRACE("Failed writing interpolator to '" << filename << "'.");
+  }
+  if (std::fclose(file.release()) != 0) {
+    ERROR_NO_TRACE("Failed closing interpolator file '" << temporary_filename
+                                                        << "'.");
+  }
+  std::filesystem::rename(temporary_filename, filename);
+}
+
+template <size_t Dim, typename Frame>
+ModalSpacetimeInterpolator<Dim, Frame>
+ModalSpacetimeInterpolator<Dim, Frame>::load(const std::string& filename) {
+  std::unique_ptr<FILE, int (*)(FILE*)> file(std::fopen(filename.c_str(), "rb"),
+                                             &std::fclose);
+  if (file == nullptr) {
+    ERROR_NO_TRACE("Cannot open saved interpolator '" << filename << "'.");
+  }
+  const std::string expected_header =
+      "SpectreModalSpacetimeInterpolator v1 dim=" + std::to_string(Dim) + "\n";
+  std::string header(expected_header.size(), '\0');
+  uint64_t payload_size = 0;
+  if (std::fread(header.data(), 1, header.size(), file.get()) !=
+          header.size() or
+      header != expected_header or
+      std::fread(&payload_size, sizeof(payload_size), 1, file.get()) != 1) {
+    ERROR_NO_TRACE("Invalid interpolator header or dimension in '" << filename
+                                                                   << "'.");
+  }
+  const auto file_size = std::filesystem::file_size(filename);
+  if (payload_size != file_size - header.size() - sizeof(payload_size)) {
+    ERROR_NO_TRACE("Saved interpolator '" << filename
+                                          << "' has an incorrect file size "
+                                             "(possibly truncated).");
+  }
+  domain::creators::register_derived_with_charm();
+  domain::creators::time_dependence::register_derived_with_charm();
+  domain::FunctionsOfTime::register_derived_with_charm();
+  PUP::fromDisk reader(file.get());
+  ModalSpacetimeInterpolator result{};
+  reader | result;
+  if (std::ferror(file.get()) != 0 or std::feof(file.get()) != 0) {
+    ERROR_NO_TRACE("Failed reading saved interpolator '" << filename << "'.");
+  }
+  return result;
 }
 
 // Explicit instantiations

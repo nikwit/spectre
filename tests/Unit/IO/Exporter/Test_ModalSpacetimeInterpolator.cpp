@@ -200,6 +200,19 @@ void test_interpolation_and_ownership() {
   CHECK(interpolator.time_bounds()[0] == approx(0.125));
   CHECK(interpolator.time_bounds()[1] == approx(4.0));
 
+  const std::string saved_filename{"TestModalSpacetimeInterpolator.bin"};
+  file_system::rm(saved_filename, true);
+  file_system::rm(saved_filename + ".partial", true);
+  interpolator.save(saved_filename);
+  const auto restored = Interpolator::load(saved_filename);
+  const auto round_trip = serialize_and_deserialize(interpolator);
+  CHECK(restored.tensor_components() == interpolator.tensor_components());
+  CHECK(restored.time_bounds() == interpolator.time_bounds());
+  CHECK_THROWS_WITH(
+      interpolator.save(saved_filename),
+      Catch::Matchers::ContainsSubstring("Refusing to overwrite"));
+  file_system::rm(saved_filename, true);
+
   const std::array<tnsr::I<double, dim, Frame::ElementLogical>, 2>
       logical_points{
           {tnsr::I<double, dim, Frame::ElementLogical>{{-0.35, 0.2}},
@@ -217,6 +230,13 @@ void test_interpolation_and_ownership() {
       std::vector<double> result{};
       interpolator.interpolate_to_point(make_not_null(&result), inertial_point,
                                         time);
+      std::vector<double> restored_result{};
+      restored.interpolate_to_point(make_not_null(&restored_result),
+                                    inertial_point, time);
+      CHECK_ITERABLE_APPROX(restored_result, result);
+      round_trip.interpolate_to_point(make_not_null(&restored_result),
+                                      inertial_point, time);
+      CHECK_ITERABLE_APPROX(restored_result, result);
       REQUIRE(result.size() == 2);
       for (size_t component = 0; component < result.size(); ++component) {
         const double expected = Spectral::evaluate_legendre_series<dim>(

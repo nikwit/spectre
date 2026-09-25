@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "Domain/Structure/ElementId.hpp"
+#include "IO/Logging/Verbosity.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 
 namespace spectre::Exporter {
@@ -22,10 +23,13 @@ namespace spectre::Exporter {
  *
  * This class reads tensor components written by multiple observations of a
  * volume data subfile, transforms the nodal data of each element to modal
- * coefficients, and returns the time series of every modal coefficient one
- * element at a time. Reading element-by-element keeps memory usage low: only
- * a single element's time series is held in memory at once, so the volume
- * data never has to be loaded into memory as a whole.
+ * coefficients, and returns their time series. Use
+ * `component_modal_time_series()` to read one component for all elements in
+ * one file, reading each observation's component dataset only once. The
+ * returned buffer holds one component's modal history for that file. The
+ * per-element `modal_time_series()` API uses less memory but reads every
+ * observation of a tensor component from disk once per element residing in
+ * the file.
  *
  * Request the time series with `modal_time_series()`, e.g.:
  *
@@ -51,16 +55,19 @@ namespace spectre::Exporter {
 template <size_t Dim>
 class ModalTimeSeriesReader {
  public:
-  /// Modal coefficient time series of a single element, indexed as
-  /// `series[component][mode][observation]`. Modes are ordered by the
-  /// collapsed index of the element's mesh.
-  using Series = std::vector<std::vector<std::vector<double>>>;
+  /// One component's modal histories, indexed by mode, then observation.
+  /// Modes are ordered by the collapsed index of the element's mesh.
+  using ComponentSeries = std::vector<std::vector<double>>;
+  /// A single element's histories, indexed by component, mode, observation.
+  using Series = std::vector<ComponentSeries>;
+  /// One component's modal histories for all elements in a file.
+  using FileSeries = std::vector<std::pair<ElementId<Dim>, ComponentSeries>>;
 
   /*!
    * \brief Construct from one or more volume files.
    *
    * Reads and validates metadata from all files. The volume data itself is
-   * only read when calling `modal_time_series()`.
+   * only read when calling either time-series accessor.
    *
    * \param volume_files_or_glob A list of volume H5 files, or a glob string
    *     that resolves to volume files. The files can distribute elements of
@@ -71,13 +78,18 @@ class ModalTimeSeriesReader {
    *     must exist in every file at every observation.
    * \param start_time Optional lower bound to restrict observations.
    * \param end_time Optional upper bound to restrict observations.
+   * \param verbosity Controls metadata and file-cache progress output.
+   * \param observation_batch_size Number of observations staged for contiguous
+   *     history writes. Uses this many additional component-sized buffers.
    */
   ModalTimeSeriesReader(const std::variant<std::vector<std::string>,
                                            std::string>& volume_files_or_glob,
                         std::string subfile_name,
                         std::vector<std::string> tensor_components,
                         std::optional<double> start_time = std::nullopt,
-                        std::optional<double> end_time = std::nullopt);
+                        std::optional<double> end_time = std::nullopt,
+                        Verbosity verbosity = Verbosity::Silent,
+                        size_t observation_batch_size = 16);
 
   ModalTimeSeriesReader(ModalTimeSeriesReader&&);
   ModalTimeSeriesReader& operator=(ModalTimeSeriesReader&&);
@@ -103,9 +115,7 @@ class ModalTimeSeriesReader {
   /*!
    * \brief All elements in the volume files and their meshes.
    *
-   * The elements are grouped by the volume file they reside in. Requesting
-   * the `modal_time_series()` in this order avoids re-reading per-file
-   * metadata.
+   * The elements are grouped by the volume file they reside in.
    */
   const std::vector<std::pair<ElementId<Dim>, Mesh<Dim>>>& elements() const {
     return elements_;
@@ -115,28 +125,49 @@ class ModalTimeSeriesReader {
    * \brief The time series of all modal coefficients of all tensor
    * components of the given element.
    *
-   * Metadata of the file in which the element resides is cached between
-   * calls, so requesting elements in the order of `elements()` is most
-   * efficient (this is also why this function is not const). Only the subset
-   * of each tensor component dataset belonging to this element is read.
+   * Metadata is cached between calls to either accessor. Reading the volume
+   * data is not optimized: each tensor component dataset is read as a whole
+   * and only this element's subset is kept. Prefer
+   * `component_modal_time_series()` to read all elements in a file.
    */
   Series modal_time_series(const ElementId<Dim>& element_id);
 
+  /// Number of volume files, in the order supplied to the constructor (or
+  /// resolved by the glob).
+  size_t num_files() const { return filenames_.size(); }
+
+  /*!
+   * \brief Read one component's modal histories for all elements in a file.
+   *
+   * Indices refer to the input files and `tensor_components()`. Each selected
+   * observation's entire component dataset is read once, transformed element
+   * by element, and scattered into histories indexed by mode and observation.
+   * Elements are returned in their order in `elements()`. Mesh metadata and
+   * offsets are validated once per file and reused across component passes.
+   */
+  FileSeries component_modal_time_series(size_t file_index,
+                                         size_t component_index);
+
  private:
   struct FileCache;
+  FileCache& file_cache(size_t file_index);
 
   std::vector<std::string> filenames_;
   std::string subfile_name_;
   std::vector<std::string> tensor_components_;
   std::vector<std::pair<size_t, double>> obs_ids_and_times_;
   double time_step_{};
+  Verbosity verbosity_ = Verbosity::Silent;
+  size_t observation_batch_size_ = 16;
   /// Elements grouped by file, in the order they appear in the files
   std::vector<std::pair<ElementId<Dim>, Mesh<Dim>>> elements_;
   /// Mesh and file index of each element for fast lookup
   std::unordered_map<ElementId<Dim>, std::pair<Mesh<Dim>, size_t>>
       element_info_;
-  /// Metadata of the most recently accessed file
-  std::unique_ptr<FileCache> file_cache_;
+  std::vector<std::vector<std::pair<ElementId<Dim>, Mesh<Dim>>>>
+      elements_by_file_;
+  /// Validated offsets for every accessed file, retained across components.
+  std::vector<std::unique_ptr<FileCache>> file_caches_;
 };
 
 }  // namespace spectre::Exporter

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -50,14 +51,15 @@ void write_3d_test_file(const std::string& filename,
                         const std::vector<std::pair<size_t, double>>& obs,
                         const std::vector<std::string>& grid_names,
                         const std::vector<size_t>& element_indices,
-                        const Mesh<3>& mesh) {
-  const size_t num_points = mesh.number_of_grid_points();
+                        const std::vector<Mesh<3>>& meshes) {
   h5::H5File<h5::AccessType::ReadWrite> h5file{filename, true};
   auto& volfile = h5file.insert<h5::VolumeData>(subfile_name, 0);
   for (const auto& [obs_id, time] : obs) {
     std::vector<ElementVolumeData> elements{};
     elements.reserve(grid_names.size());
     for (size_t i = 0; i < grid_names.size(); ++i) {
+      const auto& mesh = meshes[i];
+      const size_t num_points = mesh.number_of_grid_points();
       const auto psi = nodal_data(element_indices[i], num_points, time);
       // Store the second component in single precision to test the
       // float codepath
@@ -69,6 +71,10 @@ void write_3d_test_file(const std::string& filename,
           ElementId<3>(grid_names[i]),
           {TensorComponent{"Psi", psi}, TensorComponent{"Phi", std::move(phi)}},
           mesh});
+    }
+    // Offsets must follow each observation, not just the reference order.
+    if (obs_id % 2 == 0) {
+      std::reverse(elements.begin(), elements.end());
     }
     volfile.write_volume_data(obs_id, time, elements);
   }
@@ -105,9 +111,12 @@ void test_streaming() {
   file_system::rm(filename_2, true);
   const std::string subfile_name{"/VolumeData"};
 
-  const Mesh<3> mesh{3, Spectral::Basis::Legendre,
-                     Spectral::Quadrature::GaussLobatto};
-  const size_t num_points = mesh.number_of_grid_points();
+  const Mesh<3> uniform_mesh{3, Spectral::Basis::Legendre,
+                             Spectral::Quadrature::GaussLobatto};
+  const Mesh<3> other_mesh{
+      {2, 4, 3}, Spectral::Basis::Legendre, Spectral::Quadrature::Gauss};
+  const std::vector<Mesh<3>> meshes{uniform_mesh, other_mesh, other_mesh,
+                                    uniform_mesh};
   // Elements split across two files
   const std::vector<std::string> grid_names_1{"[B0,(L1I0,L0I0,L0I0)]",
                                               "[B0,(L1I1,L0I0,L0I0)]"};
@@ -120,8 +129,10 @@ void test_streaming() {
   for (size_t i = 0; i < num_observations; ++i) {
     obs.emplace_back(i, start_time + static_cast<double>(i) * time_step);
   }
-  write_3d_test_file(filename_1, subfile_name, obs, grid_names_1, {0, 1}, mesh);
-  write_3d_test_file(filename_2, subfile_name, obs, grid_names_2, {2, 3}, mesh);
+  write_3d_test_file(filename_1, subfile_name, obs, grid_names_1, {0, 1},
+                     {meshes[0], meshes[1]});
+  write_3d_test_file(filename_2, subfile_name, obs, grid_names_2, {2, 3},
+                     {meshes[2], meshes[3]});
 
   // Construct from a glob to test glob resolution
   ModalTimeSeriesReader<3> reader{
@@ -137,8 +148,8 @@ void test_streaming() {
   for (size_t i = 0; i < 2; ++i) {
     CHECK(reader.elements()[i].first == ElementId<3>(grid_names_1[i]));
     CHECK(reader.elements()[i + 2].first == ElementId<3>(grid_names_2[i]));
-    CHECK(reader.elements()[i].second == mesh);
-    CHECK(reader.elements()[i + 2].second == mesh);
+    CHECK(reader.elements()[i].second == meshes[i]);
+    CHECK(reader.elements()[i + 2].second == meshes[i + 2]);
   }
 
   const auto element_index_for = [&grid_names_1,
@@ -157,10 +168,12 @@ void test_streaming() {
   };
 
   const auto check_series =
-      [&mesh, &num_points, &obs, &element_index_for](
+      [&meshes, &obs, &element_index_for](
           const ElementId<3>& element_id,
           const ModalTimeSeriesReader<3>::Series& series) {
         const size_t element_index = element_index_for(element_id);
+        const auto& mesh = meshes[element_index];
+        const size_t num_points = mesh.number_of_grid_points();
         REQUIRE(series.size() == 2);
         REQUIRE(series[0].size() == num_points);
         REQUIRE(series[0][0].size() == obs.size());
@@ -198,16 +211,76 @@ void test_streaming() {
     const auto series = reader.modal_time_series(element_id);
     // ... process the time series of this element ...
     // [modal_time_series_reader_example]
-    CHECK(element_mesh == mesh);
+    CHECK(element_mesh == meshes[element_index_for(element_id)]);
     check_series(element_id, series);
   }
 
-  // Out-of-order access across files re-reads the file metadata but returns
-  // the same data
+  // Out-of-order access across files reuses metadata and returns the same data
   const auto& last_element_id = reader.elements().back().first;
   check_series(last_element_id, reader.modal_time_series(last_element_id));
   const auto& first_element_id = reader.elements().front().first;
   check_series(first_element_id, reader.modal_time_series(first_element_id));
+
+  // Bulk reads must give the same histories despite varying element meshes,
+  // observation ordering, file ordering, and float/double dataset storage.
+  // Use a fresh reader so this also tests the bulk accessor's cache creation.
+  ModalTimeSeriesReader<3> bulk_reader{
+      std::vector<std::string>{filename_1, filename_2},
+      subfile_name,
+      {"Psi", "Phi"},
+      std::nullopt,
+      std::nullopt,
+      Verbosity::Silent,
+      4};
+  REQUIRE(bulk_reader.num_files() == 2);
+  for (const size_t component : {size_t{0}, size_t{1}, size_t{0}}) {
+    for (const size_t file : {size_t{1}, size_t{0}}) {
+      const auto bulk =
+          bulk_reader.component_modal_time_series(file, component);
+      REQUIRE(bulk.size() == 2);
+      for (size_t i = 0; i < bulk.size(); ++i) {
+        const auto& [id, series] = bulk[i];
+        CHECK(id == reader.elements()[2 * file + i].first);
+        CHECK(series == reader.modal_time_series(id)[component]);
+      }
+    }
+  }
+  CHECK_THROWS_WITH(bulk_reader.component_modal_time_series(2, 0),
+                    Catch::Matchers::ContainsSubstring(
+                        "Volume file index 2 is out of range"));
+  CHECK_THROWS_WITH(bulk_reader.component_modal_time_series(0, 2),
+                    Catch::Matchers::ContainsSubstring(
+                        "Tensor component index 2 is out of range"));
+
+  // Exercise both single-observation batches and a batch larger than the
+  // time series, in addition to the partial final batch tested above.
+  for (const size_t batch_size : {size_t{1}, size_t{16}}) {
+    ModalTimeSeriesReader<3> batched_reader{
+        std::vector<std::string>{filename_1, filename_2},
+        subfile_name,
+        {"Psi", "Phi"},
+        std::nullopt,
+        std::nullopt,
+        Verbosity::Silent,
+        batch_size};
+    for (size_t component = 0; component < 2; ++component) {
+      for (size_t file = 0; file < 2; ++file) {
+        for (const auto& [id, series] :
+             batched_reader.component_modal_time_series(file, component)) {
+          CHECK(series == reader.modal_time_series(id)[component]);
+        }
+      }
+    }
+  }
+  CHECK_THROWS_WITH(
+      (ModalTimeSeriesReader<3>{std::vector<std::string>{filename_1},
+                                subfile_name,
+                                {"Psi"},
+                                std::nullopt,
+                                std::nullopt,
+                                Verbosity::Silent,
+                                0}),
+      Catch::Matchers::ContainsSubstring("batch size must be positive"));
 
   // Unknown element
   CHECK_THROWS_WITH(
@@ -215,7 +288,7 @@ void test_streaming() {
       Catch::Matchers::ContainsSubstring("does not exist in the volume"));
 
   // Restrict the time interval
-  const ModalTimeSeriesReader<3> restricted_reader{
+  ModalTimeSeriesReader<3> restricted_reader{
       std::vector<std::string>{filename_1, filename_2},
       subfile_name,
       {"Psi"},
@@ -225,6 +298,18 @@ void test_streaming() {
   CHECK(restricted_reader.num_observations() == 6);
   CHECK(restricted_reader.start_time() == approx(1.25));
   CHECK(restricted_reader.time_step() == approx(time_step));
+  for (size_t file = 0; file < restricted_reader.num_files(); ++file) {
+    for (const auto& [id, series] :
+         restricted_reader.component_modal_time_series(file, 0)) {
+      const auto full_series = reader.modal_time_series(id)[0];
+      REQUIRE(series.size() == full_series.size());
+      for (size_t mode = 0; mode < series.size(); ++mode) {
+        CHECK(series[mode] ==
+              std::vector<double>(full_series[mode].begin() + 2,
+                                  full_series[mode].begin() + 8));
+      }
+    }
+  }
 
   file_system::rm(filename_1, true);
   file_system::rm(filename_2, true);
@@ -312,8 +397,8 @@ void test_errors() {
                        {{{"[B0,(L0I0)]", 4}}, {{"[B0,(L0I0)]", 4}}});
     write_3d_test_file(filename_2, "/MismatchedFileDim", {{0, 0.0}, {1, 1.0}},
                        {"[B1,(L0I0,L0I0,L0I0)]"}, {0},
-                       Mesh<3>{2, Spectral::Basis::Legendre,
-                               Spectral::Quadrature::GaussLobatto});
+                       {Mesh<3>{2, Spectral::Basis::Legendre,
+                                Spectral::Quadrature::GaussLobatto}});
     CHECK_THROWS_WITH(
         (ModalTimeSeriesReader<1>{
             std::vector<std::string>{filename_1, filename_2},
@@ -350,6 +435,9 @@ void test_errors() {
     CHECK_THROWS_WITH(make_reader("/ChangingNumElements")
                           .modal_time_series(ElementId<1>("[B0,(L1I0)]")),
                       Catch::Matchers::ContainsSubstring("are not supported"));
+    CHECK_THROWS_WITH(
+        make_reader("/ChangingNumElements").component_modal_time_series(0, 0),
+        Catch::Matchers::ContainsSubstring("are not supported"));
   }
   {
     // Same number of elements but an element is missing at an earlier
@@ -360,6 +448,9 @@ void test_errors() {
     CHECK_THROWS_WITH(make_reader("/MigratedElement")
                           .modal_time_series(ElementId<1>("[B0,(L1I1)]")),
                       Catch::Matchers::ContainsSubstring("is missing in file"));
+    CHECK_THROWS_WITH(
+        make_reader("/MigratedElement").component_modal_time_series(0, 0),
+        Catch::Matchers::ContainsSubstring("is missing in file"));
   }
   {
     // Mesh changes between observations (p-refinement)
@@ -368,6 +459,9 @@ void test_errors() {
     CHECK_THROWS_WITH(
         make_reader("/ChangingMesh")
             .modal_time_series(ElementId<1>("[B0,(L0I0)]")),
+        Catch::Matchers::ContainsSubstring("Mesh changes between"));
+    CHECK_THROWS_WITH(
+        make_reader("/ChangingMesh").component_modal_time_series(0, 0),
         Catch::Matchers::ContainsSubstring("Mesh changes between"));
   }
   {
