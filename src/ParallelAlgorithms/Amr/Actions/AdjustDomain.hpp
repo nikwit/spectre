@@ -252,7 +252,7 @@ struct AdjustDomain {
 
         if (verbosity >= Verbosity::Debug) {
           Parallel::printf(
-              "Increasing order of element %s: %s -> %s\n", element_id,
+              "Changing order of element %s: %s -> %s\n", element_id,
               old_mesh.extents(),
               db::get<::domain::Tags::Mesh<volume_dim>>(box).extents());
         }
