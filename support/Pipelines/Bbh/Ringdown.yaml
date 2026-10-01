@@ -87,12 +87,6 @@ DomainCreator:
         Type: ConstraintPreservingPhysical
         IncomingWaveProfile: None
 
-# Online worldtube matching is off for ringdowns. Set this group to fit the
-# analytic frame parameters on an excision sphere (see
-# gh::Worldtube::MatcherConfig), which requires a worldtube boundary
-# condition on that excision.
-WorldtubeMatcher: None
-
 Evolution:
   InitialTime: *InitialTime
   InitialTimeStep: 0.0001
@@ -378,7 +372,6 @@ InterpolationTargets:
     Center: [0., 0., 0.]
     Radius: *InnerRadius
     AngularOrdering: "Strahlkorper"
-  ControlSystemGaussBonnetCenter: *ExBdry
   ControlSystemCharSpeedExcision: *ExBdry
 
 Cce:

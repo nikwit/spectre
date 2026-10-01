@@ -217,12 +217,6 @@ DomainCreator:
       GridCenters: None
 {% endif %}
 
-# Online worldtube matching is off for standard inspirals. Set this group to
-# fit the analytic frame parameters on an excision sphere (see
-# gh::Worldtube::MatcherConfig), which requires a worldtube boundary
-# condition on that excision.
-WorldtubeMatcher: None
-
 Evolution:
   InitialTime: *InitialTime
   InitialTimeStep: 0.0002
