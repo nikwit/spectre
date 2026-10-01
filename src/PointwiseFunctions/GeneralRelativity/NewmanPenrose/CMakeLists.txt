@@ -8,6 +8,7 @@ add_spectre_library(${LIBRARY})
 spectre_target_sources(
   ${LIBRARY}
   PRIVATE
+  GeometricTide.cpp
   CoulombDecode.cpp
   NullRotations.cpp
   Psi4Fit.cpp
@@ -21,6 +22,7 @@ spectre_target_headers(
   ${LIBRARY}
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
+  GeometricTide.hpp
   CoulombDecode.hpp
   NullRotations.hpp
   Psi4Fit.hpp
@@ -37,6 +39,7 @@ target_link_libraries(
   DataStructures
   Utilities
   PRIVATE
+  GSL::gsl
   ErrorHandling
   LinearSolver
   )

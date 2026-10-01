@@ -60,7 +60,12 @@ enum class PhysicalModel {
   /// static-like mode grows at about 0.03/M for an excision at 3M, which the
   /// moment relaxation removes. Needs the same inputs as `Quadrupole` and
   /// the excision outside about \f$2.4M\f$.
-  QuadrupoleCoulomb
+  QuadrupoleCoulomb,
+  /// Order two with common tidal axes from the screen-metric Laplace
+  /// eigenmap and polar transport of the registered complex dyad.
+  /// Currently requires a fixed, centered coordinate sphere and a complete
+  /// spherical-harmonic face. Radius, boost and fit frame match Quadrupole.
+  QuadrupoleGeometric
 };
 
 /// Whether the model is one of the order-two models, which need the mass
