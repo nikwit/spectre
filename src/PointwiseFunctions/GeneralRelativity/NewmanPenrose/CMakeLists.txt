@@ -15,6 +15,7 @@ spectre_target_sources(
   RestFrame.cpp
   Tetrad.cpp
   TidalResponse.cpp
+  ThirdOrderTide.cpp
   TypeD.cpp
   )
 
@@ -29,6 +30,7 @@ spectre_target_headers(
   RestFrame.hpp
   Tetrad.hpp
   TidalResponse.hpp
+  ThirdOrderTide.hpp
   TypeD.hpp
   Types.hpp
   )

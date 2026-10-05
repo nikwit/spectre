@@ -133,7 +133,7 @@ struct UpdateKretschmannFaceData {
           for (size_t i = 0; i < Dim; ++i) {
             grid_coordinates.get(i) = coordinates.get(i);
           }
-          Scalar<DataVector> gamma2(mesh.number_of_grid_points(),0.);
+          Scalar<DataVector> gamma2(mesh.number_of_grid_points(), 0.);
           damping_gamma2(make_not_null(&gamma2), grid_coordinates, time,
                          functions_of_time);
           update_radial_gauge_face_data(
@@ -155,6 +155,14 @@ struct UpdateKretschmannFaceData {
         } else {
           data->replay.reset();
         }
+        if (worldtube != nullptr and
+            worldtube->physical_model() == PhysicalModel::ThirdOrderGeometric) {
+          update_third_order_matching(
+              data, spacetime_metric, pi, phi, mesh, inverse_jacobian,
+              coordinates, mesh_velocity, *worldtube->mass(), time, time_id);
+          return;
+        }
+        data->third_order.reset();
         if (worldtube != nullptr and
             is_order_two(worldtube->physical_model())) {
           if (worldtube->physical_model() ==

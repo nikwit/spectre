@@ -67,7 +67,12 @@ enum class PhysicalModel {
   /// spherical-harmonic face. Translation, rotation and uniform expansion are
   /// allowed; non-spherical shape maps are rejected. Radius, boost and fit
   /// frame match Quadrupole.
-  QuadrupoleGeometric
+  QuadrupoleGeometric,
+  /// Geometric third-order tide: octupoles and causal, transported dotted
+  /// quadrupoles, including induction, near-zone and slice-time terms.
+  /// Same round-sphere restriction as QuadrupoleGeometric. Requires the
+  /// face-data action and MomentRelaxationTime: None.
+  ThirdOrderGeometric
 };
 
 /// Whether the model is one of the order-two models, which need the mass

@@ -11,6 +11,7 @@ set(LIBRARY_SOURCES
   Test_RestFrame.cpp
   Test_Tetrad.cpp
   Test_TidalResponse.cpp
+  Test_ThirdOrderTide.cpp
   Test_TypeD.cpp
   )
 

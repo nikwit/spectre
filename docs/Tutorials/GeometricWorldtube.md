@@ -4,8 +4,9 @@ See LICENSE.txt for details.
 \endcond
 # Geometric NP matching for a BBH worldtube
 
-This experimental branch adds `PhysicalModel: QuadrupoleGeometric` to the
-curvature-based `WorldtubeTypeD` boundary condition. It is based on
+This experimental branch adds `PhysicalModel: QuadrupoleGeometric` and
+`ThirdOrderGeometric` to the curvature-based `WorldtubeTypeD` boundary
+condition. It is based on
 `worldtube-radial-response-gauge` (`ba2e805ad6`), with per-object
 spherical-harmonic shells and their radial-orientation, shape-transition and
 distorted-frame fixes. It does not include the older `q8-worldtube-cluster`
@@ -53,6 +54,88 @@ selects the instantaneous tidal fit. Changing only `QuadrupoleGeometric` to
 timestep or gauge simultaneously for that comparison. The single-hole
 `ReferenceReplay` and `RadialResponse` gauge prototypes require a static mesh
 and must not be copied to a moving binary run.
+
+## Third-order matching
+
+Use the following settings to add the documented third-order terms:
+
+```yaml
+PhysicalModel: ThirdOrderGeometric
+Mass: 0.2                 # mass of this hole, in simulation units
+MomentRelaxationTime: None
+```
+
+The complete example input selects this model. Replace it with
+`QuadrupoleGeometric` for the second-order control, keeping the mass, gauge,
+mesh and time-step settings fixed. Both models have the round inertial-sphere
+restriction below. The third-order model currently requires forward time
+evolution and `MomentRelaxationTime: None`; the older component-wise filter
+is not a consistently transported third-order history.
+
+At each RHS evaluation, the third-order model uses the same leading NP
+registration, invariant radius/boost, screen eigenmap and polar-transported
+dyad. It adds the electric and magnetic octupoles, the induction and near-zone
+responses of the dotted quadrupoles, and the cut correction
+`delta_t * (Edot + i Bdot)`. The near-zone profiles use the offline horizon
+calibration, `e1 = -92/15`, `b1 = -76/15`. Only transverse model components
+enter Psi0/Psi4; measured longitudinal channels remain in the registration.
+
+The undotted fit has 24 real components (five electric and five magnetic
+quadrupoles, seven of each octupole). It uses a column-scaled real SVD of
+measured Psi4. The ten dotted components are supplied from history, not fitted
+independently to the same sphere. Rank-deficient designs are rejected.
+
+The causal construction is:
+
+1. Fit quadrupoles and octupoles with the dotted terms temporarily zero.
+   Retain these preliminary quadrupoles and the geometric directions at
+   full-step RHS states. Differentiating their third-order bias changes the
+   model only at fourth order under the slow-tide expansion.
+2. Use the current sample and up to four strictly past full-step samples for
+   a backward polynomial derivative on the actual, possibly nonuniform times.
+   At the first sample the dotted terms are zero (quadrupole plus octupole
+   only); the derivative order increases from one to four as history fills.
+3. Reconstruct the no-screen flow `W = d/dT + V^A d_A`. Measure the rigid
+   angular velocity from `W N`, where `N` is the inferred angular map.
+   Subtract the rotation commutator `[Omega,H]` from both tensor derivatives
+   before dividing by the model-time clock rate. This distinguishes rotating
+   grid labels or auxiliary axes from a physically changing tide.
+4. Reconstruct the model-time covector `tau = -u_flat/sqrt(1-2M/r)`.
+   Its tangential potential is a small linear least-squares solve in the
+   eight nonconstant `l<=2` scalar harmonics, equivalent to the offline
+   linear/quadratic potential space. Fix its mean using geometric area
+   weights. This gives `delta_t`; the weighted clock rate is `tau(W)` and
+   must be positive at every face point.
+5. With these dotted moments fixed, refit the 24 undotted components to
+   Psi4, predict the incoming slot and transform back to the NR tetrad.
+   The cached target enters the same `wminus/2` conversion and Bjorhus
+   correction as second order.
+
+The history and target live on the face-owning element and are PUP serialized
+for migration and checkpoints made with this executable. Intermediate
+integrator stages may evaluate the target but never enter the retained
+history. Repeated full-step calls replace the endpoint, and backward-time
+self-start resets or angular resolution changes clear the history. A fresh
+volume-data start therefore has a short derivative warmup. Avoid AMR for the
+first comparison; the implementation does not transfer history between faces.
+
+The state retains the derivative order, clock rate, tilt-fit residual and
+outgoing-fit residual/condition for inspection in a checkpoint. Existing
+`ObserveWorldtubeMatching` output remains a passive legacy-model calculation;
+it does not report the third-order target. Compare evolved curvature from
+volume data. The potential residual measures truncation or nonclosure of the
+measured time covector; no exact time-coordinate integrability is assumed.
+
+Native tests compare every radial sector to independent offline Python
+fixtures, recover held-out Psi0 for a manufactured time-dependent tide, and
+check nonuniform causal history, rotating axes/grid labels, repeated calls,
+rollback, serialization and the GH face-data integration. This is an
+implementation check, not a demonstrated improvement in live BBH accuracy.
+Temporal differentiation may amplify noisy fits; verify timestep and angular
+resolution sensitivity in a controlled evolution. The underlying Kretschmann
+time derivative retains its existing first-order backward estimate, so the
+fourth-order moment stencil does not establish fourth-order accuracy of the
+whole matching method.
 
 ## Required sphere and grid configuration
 
@@ -156,7 +239,7 @@ also includes the BBH domain and mortar consistency tests:
 cmake --build build --target Test_NewmanPenrose Test_GeneralizedHarmonic \
   Test_DomainCreators Test_NumericalDiscontinuousGalerkin -j 10
 ctest --test-dir build --output-on-failure \
-  -R 'NP.GeometricTide|Worldtube|BinaryCompactObject|DG.MortarInterpolator'
+  -R 'NP.*Tide|Worldtube|BinaryCompactObject|DG.MortarInterpolator'
 build/bin/EvolveGhBinaryBlackHole --input-file Bbh.yaml --check-options
 ```
 

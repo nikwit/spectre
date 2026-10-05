@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <optional>
+#include <utility>
 
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Psi4Fit.hpp"
 
@@ -34,6 +35,33 @@ struct GeometricTideEvaluation {
   EigenSphereMap map;
   double maximum_dyad_error{};
 };
+
+/// Angular identification and temporal data shared by both tidal orders.
+/// screen uses unit coordinate-radius tangents in the adapted NR tetrad.
+/// observer is the invariant rest observer in that same tetrad; boost is
+/// the total type-III rapidity relative to registration.pulled_back.
+struct GeometricFrame {
+  EigenSphereMap map;
+  std::array<ComplexDataVector, 3> dyad;
+  std::array<AdaptedFourVector, 2> screen;
+  AdaptedFourVector observer;
+  DataVector boost;
+  double maximum_dyad_error{};
+};
+
+GeometricFrame geometric_frame(
+    const FrameRegistration& registration, const Scalar<DataVector>& rapidity,
+    const RealMatrix& adapted_rotation,
+    const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
+    const TriadVector& label_directions, const DataVector& label_weights,
+    double mass, size_t l_max);
+
+/// Least-squares potential of a tangential covector on the label sphere.
+/// The constant is fixed by the weighted mean; residual measures nonclosure
+/// and truncation. The two gradient components use dTheta, dPhi/sinTheta.
+std::pair<DataVector, double> sphere_gradient_potential(
+    const TriadVector& labels, const DataVector& weights,
+    const std::array<DataVector, 2>& gradient, size_t l_max);
 
 /// Geometric quadrupole on a round coordinate sphere. label_directions
 /// point away from its center, unlike the domain-outward inner normal.

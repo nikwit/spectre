@@ -342,7 +342,10 @@ public:
         "UpdateKretschmannFaceData action), QuadrupoleGeometric (the same tide "
         "with common angular axes and dyad transport from the screen-metric "
         "Laplace eigenmap; requires a complete spherical-harmonic face on a "
-        "round coordinate sphere), or QuadrupoleCoulomb (order two "
+        "round coordinate sphere), ThirdOrderGeometric (adds electric and "
+        "magnetic octupoles and causal, transported quadrupole derivatives; "
+        "same sphere requirements, MomentRelaxationTime: None), or "
+        "QuadrupoleCoulomb (order two "
         "with the tide read from the Coulomb scalar and its normal "
         "derivative instead of Psi4, which removes the fast feedback of the "
         "condition on itself through the leaving mode but leaves a slow "
@@ -356,7 +359,8 @@ public:
     using type = Options::Auto<double, Options::AutoLabel::None>;
     static constexpr Options::String help{
         "The mass of the excised hole. Required by the order-two models "
-        "Quadrupole, QuadrupoleGeometric and QuadrupoleCoulomb (tidal radial "
+        "Quadrupole, QuadrupoleGeometric, ThirdOrderGeometric and "
+        "QuadrupoleCoulomb (tidal radial "
         "profiles and the "
         "areal radius of the worldtube), None otherwise."};
   };

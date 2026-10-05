@@ -2,8 +2,8 @@
 // See LICENSE.txt for details.
 
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/WorldtubeTypeD.hpp"
-#include "Evolution/Systems/GeneralizedHarmonic/BoundaryCorrections/AveragedUpwindPenalty.hpp"
 #include "DataStructures/Tensor/EagerMath/DeterminantAndInverse.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryCorrections/AveragedUpwindPenalty.hpp"
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Formulation.hpp"
 
 #include <algorithm>
@@ -162,15 +162,15 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
                        detail::PerFieldConstraintSectors>
         constraint_preserving_sector,
     const detail::SectorImposition physical_sector,
-    const std::variant<detail::SectorImposition, detail::AlgebraicGauge,
-                       detail::OutgoingDrivenGauge,
-                       detail::SchwarzschildReferenceGauge, worldtube::ReferenceReplayGauge,
-                   worldtube::RadialResponseGauge>
+    const std::variant<
+        detail::SectorImposition, detail::AlgebraicGauge,
+        detail::OutgoingDrivenGauge, detail::SchwarzschildReferenceGauge,
+        worldtube::ReferenceReplayGauge, worldtube::RadialResponseGauge>
         gauge_sector,
     const detail::PhysicalModel physical_model,
     const std::optional<double> mass,
     const std::optional<double> moment_relaxation_time,
-    const Options::Context &context)
+    const Options::Context& context)
     : constraint_v_psi_(
           resolve_constraint_sectors(constraint_preserving_sector).v_psi),
       constraint_v_zero_(
@@ -181,9 +181,10 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
       gauge_sector_(
           std::holds_alternative<worldtube::RadialResponseGauge>(gauge_sector)
               ? detail::SectorImposition::RadialResponse
-              : std::holds_alternative<worldtube::ReferenceReplayGauge>(gauge_sector)
+          : std::holds_alternative<worldtube::ReferenceReplayGauge>(
+                gauge_sector)
               ? detail::SectorImposition::Algebraic
-              : std::holds_alternative<detail::AlgebraicGauge>(gauge_sector)
+          : std::holds_alternative<detail::AlgebraicGauge>(gauge_sector)
               ? detail::SectorImposition::Algebraic
               : (std::holds_alternative<detail::OutgoingDrivenGauge>(
                      gauge_sector)
@@ -201,9 +202,12 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
           std::holds_alternative<detail::OutgoingDrivenGauge>(gauge_sector)
               ? std::get<detail::OutgoingDrivenGauge>(gauge_sector).rate
               : 0.),
-      radial_response_(std::holds_alternative<worldtube::RadialResponseGauge>(gauge_sector)
-          ? std::optional{std::get<worldtube::RadialResponseGauge>(gauge_sector).coefficients}
-          : std::nullopt),
+      radial_response_(
+          std::holds_alternative<worldtube::RadialResponseGauge>(gauge_sector)
+              ? std::optional{std::get<worldtube::RadialResponseGauge>(
+                                  gauge_sector)
+                                  .coefficients}
+              : std::nullopt),
       schwarzschild_reference_(
           std::holds_alternative<detail::SchwarzschildReferenceGauge>(
               gauge_sector)
@@ -211,13 +215,19 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
                                   gauge_sector)
                                   .parameters}
               : std::nullopt),
-      physical_model_(physical_model), mass_(mass),
+      physical_model_(physical_model),
+      mass_(mass),
       moment_relaxation_time_(moment_relaxation_time) {
   if (std::holds_alternative<worldtube::ReferenceReplayGauge>(gauge_sector)) {
-    face_replay_ = std::get<worldtube::ReferenceReplayGauge>(gauge_sector).parameters;
+    face_replay_ =
+        std::get<worldtube::ReferenceReplayGauge>(gauge_sector).parameters;
     schwarzschild_reference_ = face_replay_->reference;
-    gauge_sector_ = schwarzschild_reference_.has_value() ? detail::SectorImposition::SchwarzschildReference : detail::SectorImposition::Algebraic;
-    if constexpr (Dim != 3) { PARSE_ERROR(context,"Face replay requires three dimensions."); }
+    gauge_sector_ = schwarzschild_reference_.has_value()
+                        ? detail::SectorImposition::SchwarzschildReference
+                        : detail::SectorImposition::Algebraic;
+    if constexpr (Dim != 3) {
+      PARSE_ERROR(context, "Face replay requires three dimensions.");
+    }
   }
   if constexpr (Dim != 3) {
     if (schwarzschild_reference_.has_value()) {
@@ -225,9 +235,13 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
     }
   }
   if (radial_response_.has_value()) {
-    if constexpr (Dim != 3) { PARSE_ERROR(context, "RadialResponse requires three dimensions."); }
+    if constexpr (Dim != 3) {
+      PARSE_ERROR(context, "RadialResponse requires three dimensions.");
+    }
     for (const auto k : *radial_response_) {
-      if (not std::isfinite(k)) { PARSE_ERROR(context, "RadialResponse coefficients must be finite."); }
+      if (not std::isfinite(k)) {
+        PARSE_ERROR(context, "RadialResponse coefficients must be finite.");
+      }
     }
   }
   if (not std::isfinite(outgoing_gauge_rate_) or outgoing_gauge_rate_ < 0.) {
@@ -280,7 +294,8 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
                        "sector, but PhysicalSector is "
                     << physical_sector_ << ". Use PhysicalSector: Bjorhus.");
   }
-  if (worldtube::is_order_two(physical_model_)) {
+  if (worldtube::is_order_two(physical_model_) or
+      physical_model_ == detail::PhysicalModel::ThirdOrderGeometric) {
     if (not mass_.has_value()) {
       PARSE_ERROR(context, "PhysicalModel: "
                                << physical_model_
@@ -295,6 +310,13 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
                 "Mass is only used by the order-two models Quadrupole and "
                 "QuadrupoleCoulomb, but PhysicalModel is "
                     << physical_model_ << ". Set Mass: None.");
+  }
+  if (physical_model_ == detail::PhysicalModel::ThirdOrderGeometric and
+      moment_relaxation_time_.has_value()) {
+    PARSE_ERROR(context,
+                "ThirdOrderGeometric requires MomentRelaxationTime: None. "
+                "The component-wise order-two filter is not a transported "
+                "third-order moment history.");
   }
   if (moment_relaxation_time_.has_value()) {
     if (not worldtube::is_order_two(physical_model_)) {
@@ -410,7 +432,8 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
       (not face_data.radial_gauge.has_value() or
        get<0>(face_data.radial_gauge->q).size() != num_points or
        face_data.radial_gauge->time != time)) {
-    return "RadialResponse requires current fixed-resolution radial gauge face data.";
+    return "RadialResponse requires current fixed-resolution radial gauge face "
+           "data.";
   }
   Bjorhus::IntermediateVariables<Dim> vars{num_points};
   Bjorhus::compute_intermediate_variables(
@@ -423,7 +446,8 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
 
   if (face_replay_.has_value() and face_replay_->record and
       Bjorhus::min_characteristic_speed(vars.char_speeds) < 0.) {
-    return "The recording donor must have pure outflow at its excision boundary.";
+    return "The recording donor must have pure outflow at its excision "
+           "boundary.";
   }
   // If no point on the boundary has any incoming characteristic, return here
   if (Bjorhus::min_characteristic_speed(vars.char_speeds) >= 0.) {
@@ -644,30 +668,41 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
       tnsr::a<DataVector, 3> old_q(num_points, 0.);
       for (size_t a = 0; a < 4; ++a) {
         for (size_t b = 0; b < 4; ++b) {
-          old_q.get(a) += vars.outgoing_null_vector.get(b) * bc_dt_v_minus.get(a, b);
+          old_q.get(a) +=
+              vars.outgoing_null_vector.get(b) * bc_dt_v_minus.get(a, b);
         }
       }
       for (size_t i = 0; i < 3; ++i) {
         speed -= rd.radial_direction.get(i) *
-                 (shift.get(i) + get(lapse) * vars.unit_interface_normal_vector.get(i));
-        delta_r += rd.radial_direction.get(i) * (rd.q.get(i+1) - rd.initial_q.get(i+1));
-        dr_r += rd.radial_direction.get(i) * (rd.dr_q.get(i+1) - rd.initial_dr_q.get(i+1));
+                 (shift.get(i) +
+                  get(lapse) * vars.unit_interface_normal_vector.get(i));
+        delta_r += rd.radial_direction.get(i) *
+                   (rd.q.get(i + 1) - rd.initial_q.get(i + 1));
+        dr_r += rd.radial_direction.get(i) *
+                (rd.dr_q.get(i + 1) - rd.initial_dr_q.get(i + 1));
         old_r += rd.radial_direction.get(i) * old_q.get(i+1);
       }
       tnsr::a<DataVector, 3> extra(num_points, 0.);
       get<0>(extra) = speed * (get<0>(rd.dr_q) - get<0>(rd.initial_dr_q) -
-                              (*radial_response_)[0] * (get<0>(rd.q) - get<0>(rd.initial_q))) - get<0>(old_q);
+                               (*radial_response_)[0] *
+                                   (get<0>(rd.q) - get<0>(rd.initial_q))) -
+                      get<0>(old_q);
       for (size_t i = 0; i < 3; ++i) {
-        extra.get(i+1) = rd.radial_direction.get(i) *
-                        (speed * (dr_r - (*radial_response_)[1] * delta_r) - old_r);
+        extra.get(i + 1) =
+            rd.radial_direction.get(i) *
+            (speed * (dr_r - (*radial_response_)[1] * delta_r) - old_r);
       }
       DataVector ell_extra(num_points, 0.);
-      for (size_t a = 0; a < 4; ++a) { ell_extra += vars.outgoing_null_vector.get(a) * extra.get(a); }
+      for (size_t a = 0; a < 4; ++a) {
+        ell_extra += vars.outgoing_null_vector.get(a) * extra.get(a);
+      }
       for (size_t a = 0; a < 4; ++a) {
         for (size_t b = a; b < 4; ++b) {
-          bc_dt_v_minus.get(a,b) -= vars.incoming_null_one_form.get(a) * extra.get(b) +
+          bc_dt_v_minus.get(a, b) -=
+              vars.incoming_null_one_form.get(a) * extra.get(b) +
               vars.incoming_null_one_form.get(b) * extra.get(a) +
-              vars.incoming_null_one_form.get(a) * vars.incoming_null_one_form.get(b) * ell_extra;
+              vars.incoming_null_one_form.get(a) *
+                  vars.incoming_null_one_form.get(b) * ell_extra;
         }
       }
     }
@@ -679,32 +714,43 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
       make_not_null(&bc_dt_v_plus), make_not_null(&bc_dt_v_minus),
       vars.char_speeds, gamma2, normal_covector);
 
-  if (face_replay_.has_value() and not face_replay_->record and face_replay_->model_sector != "All") {
+  if (face_replay_.has_value() and not face_replay_->record and
+      face_replay_->model_sector != "All") {
     if constexpr (Dim == 3) {
       if (face_mesh_velocity.has_value() or not face_data.replay.has_value())
-        return "Face replay requires static-mesh donor data refreshed before this RHS.";
+        return "Face replay requires static-mesh donor data refreshed before "
+               "this RHS.";
       for(size_t p=0;p<num_points;++p) {
-        if(vars.char_speeds[0][p]<0. or vars.char_speeds[1][p]<0. or vars.char_speeds[2][p]<0. or vars.char_speeds[3][p]>=0.)
+        if (vars.char_speeds[0][p] < 0. or vars.char_speeds[1][p] < 0. or
+            vars.char_speeds[2][p] < 0. or vars.char_speeds[3][p] >= 0.)
           return "Diagnostic face replay requires only u-minus to be incoming.";
       }
       const auto& donor=*face_data.replay;
       tnsr::ii<DataVector,3> spatial(num_points,0.);
-      for(size_t i=0;i<3;++i)for(size_t j=i;j<3;++j)spatial.get(i,j)=donor.metric.get(i+1,j+1);
+      for (size_t i = 0; i < 3; ++i)
+        for (size_t j = i; j < 3; ++j)
+          spatial.get(i, j) = donor.metric.get(i + 1, j + 1);
       const auto inv_donor=determinant_and_inverse(spatial).second;
       DataVector mag(num_points,0.),donor_mag(num_points,0.);
       for(size_t i=0;i<3;++i)for(size_t j=0;j<3;++j){
-        mag+=donor.raw_normal.get(i)*vars.inverse_spatial_metric.get(i,j)*donor.raw_normal.get(j);
-        donor_mag+=donor.raw_normal.get(i)*inv_donor.get(i,j)*donor.raw_normal.get(j);
+          mag += donor.raw_normal.get(i) *
+                 vars.inverse_spatial_metric.get(i, j) *
+                 donor.raw_normal.get(j);
+          donor_mag += donor.raw_normal.get(i) * inv_donor.get(i, j) *
+                       donor.raw_normal.get(j);
       }
       mag=sqrt(mag);donor_mag=sqrt(donor_mag);
       tnsr::i<DataVector,3> donor_normal(num_points,0.);
-      for(size_t i=0;i<3;++i)donor_normal.get(i)=-donor.raw_normal.get(i)/donor_mag;
+      for (size_t i = 0; i < 3; ++i)
+        donor_normal.get(i) = -donor.raw_normal.get(i) / donor_mag;
       tnsr::aa<DataVector,3> rg(num_points,0.),rp(num_points,0.);
       tnsr::iaa<DataVector,3> rphi(num_points,0.);
       const tnsr::I<DataVector,3> velocity(num_points,0.);
       gh::BoundaryCorrections::AveragedUpwindPenalty<3>{}.dg_boundary_terms(
-          make_not_null(&rg),make_not_null(&rp),make_not_null(&rphi),spacetime_metric,pi,phi,gamma1,gamma2,normal_covector,velocity,
-          donor.metric,donor.pi,donor.phi,gamma1,gamma2,donor_normal,velocity,dg::Formulation::StrongInertial);
+          make_not_null(&rg), make_not_null(&rp), make_not_null(&rphi),
+          spacetime_metric, pi, phi, gamma1, gamma2, normal_covector, velocity,
+          donor.metric, donor.pi, donor.phi, gamma1, gamma2, donor_normal,
+          velocity, dg::Formulation::StrongInertial);
       const double nr=static_cast<double>(donor.radial_points);
       const DataVector lift=-.5*nr*(nr-1.)*mag;
       for(auto& c:rg)c*=lift;for(auto& c:rp)c*=lift;for(auto& c:rphi)c*=lift;
@@ -712,21 +758,41 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
       // characteristic parts of the reference numerical interface unchanged.
       auto difference=*dt_pi_correction;
       for(size_t a=0;a<4;++a)for(size_t b=a;b<4;++b){
-        difference.get(a,b)-=rp.get(a,b)+get(gamma2)*((*dt_spacetime_metric_correction).get(a,b)-rg.get(a,b));
-        for(size_t i=0;i<3;++i)difference.get(a,b)-=vars.unit_interface_normal_vector.get(i)*((*dt_phi_correction).get(i,a,b)-rphi.get(i,a,b));
+          difference.get(a, b) -=
+              rp.get(a, b) +
+              get(gamma2) *
+                  ((*dt_spacetime_metric_correction).get(a, b) - rg.get(a, b));
+          for (size_t i = 0; i < 3; ++i)
+            difference.get(a, b) -=
+                vars.unit_interface_normal_vector.get(i) *
+                ((*dt_phi_correction).get(i, a, b) - rphi.get(i, a, b));
       }
-      tnsr::aa<DataVector,3> selected(num_points,0.);const DataVector one(num_points,1.);
+      tnsr::aa<DataVector, 3> selected(num_points, 0.);
+      const DataVector one(num_points, 1.);
       if(face_replay_->model_sector=="Gauge")
-        Bjorhus::detail::add_gauge_sector_projection(make_not_null(&selected),one,vars.incoming_null_one_form,vars.outgoing_null_one_form,vars.incoming_null_vector,vars.outgoing_null_vector,vars.projection_Ab,difference);
-      if(face_replay_->model_sector=="CP" or face_replay_->model_sector=="CPAndPhysical")
-        Bjorhus::detail::add_constraint_sector_projection(make_not_null(&selected),one,vars.outgoing_null_one_form,vars.incoming_null_vector,vars.projection_ab,vars.projection_Ab,vars.projection_AB,difference);
-      if(face_replay_->model_sector=="Physical" or face_replay_->model_sector=="CPAndPhysical")
-        Bjorhus::detail::add_physical_sector_projection(make_not_null(&selected),one,vars.projection_ab,vars.projection_Ab,vars.projection_AB,difference);
+        Bjorhus::detail::add_gauge_sector_projection(
+            make_not_null(&selected), one, vars.incoming_null_one_form,
+            vars.outgoing_null_one_form, vars.incoming_null_vector,
+            vars.outgoing_null_vector, vars.projection_Ab, difference);
+      if (face_replay_->model_sector == "CP" or
+          face_replay_->model_sector == "CPAndPhysical")
+        Bjorhus::detail::add_constraint_sector_projection(
+            make_not_null(&selected), one, vars.outgoing_null_one_form,
+            vars.incoming_null_vector, vars.projection_ab, vars.projection_Ab,
+            vars.projection_AB, difference);
+      if (face_replay_->model_sector == "Physical" or
+          face_replay_->model_sector == "CPAndPhysical")
+        Bjorhus::detail::add_physical_sector_projection(
+            make_not_null(&selected), one, vars.projection_ab,
+            vars.projection_Ab, vars.projection_AB, difference);
       for(size_t a=0;a<4;++a)for(size_t b=a;b<4;++b){
         rp.get(a,b)+=.5*selected.get(a,b);
-        for(size_t i=0;i<3;++i)rphi.get(i,a,b)-=.5*normal_covector.get(i)*selected.get(a,b);
+        for (size_t i = 0; i < 3; ++i)
+          rphi.get(i, a, b) -= .5 * normal_covector.get(i) * selected.get(a, b);
       }
-      *dt_spacetime_metric_correction=std::move(rg);*dt_pi_correction=std::move(rp);*dt_phi_correction=std::move(rphi);
+      *dt_spacetime_metric_correction = std::move(rg);
+      *dt_pi_correction = std::move(rp);
+      *dt_phi_correction = std::move(rphi);
     }
   }
   // No veto of a mesh velocity along the outward normal here: at an inner
@@ -740,7 +806,8 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
 template <size_t Dim>
 bool operator==(const WorldtubeTypeD<Dim> &lhs,
                 const WorldtubeTypeD<Dim> &rhs) {
-  return lhs.face_replay() == rhs.face_replay() and lhs.constraint_v_psi() == rhs.constraint_v_psi() and
+  return lhs.face_replay() == rhs.face_replay() and
+         lhs.constraint_v_psi() == rhs.constraint_v_psi() and
          lhs.constraint_v_zero() == rhs.constraint_v_zero() and
          lhs.constraint_v_minus() == rhs.constraint_v_minus() and
          lhs.physical_sector() == rhs.physical_sector() and

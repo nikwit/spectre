@@ -37,12 +37,15 @@ PhysicalModel convert_physical_model_from_yaml(const Options::Option& options) {
     return PhysicalModel::Quadrupole;
   } else if (read == "QuadrupoleGeometric") {
     return PhysicalModel::QuadrupoleGeometric;
+  } else if (read == "ThirdOrderGeometric") {
+    return PhysicalModel::ThirdOrderGeometric;
   } else if (read == "QuadrupoleCoulomb") {
     return PhysicalModel::QuadrupoleCoulomb;
   }
   PARSE_ERROR(options.context(),
               "Failed to convert input option to a physical model. Must be "
-              "one of None, TypeD, Quadrupole, QuadrupoleGeometric or "
+              "one of None, TypeD, Quadrupole, QuadrupoleGeometric, "
+              "ThirdOrderGeometric or "
               "QuadrupoleCoulomb.");
 }
 
@@ -56,6 +59,8 @@ std::ostream& operator<<(std::ostream& os, const PhysicalModel model) {
       return os << "Quadrupole";
     case PhysicalModel::QuadrupoleGeometric:
       return os << "QuadrupoleGeometric";
+    case PhysicalModel::ThirdOrderGeometric:
+      return os << "ThirdOrderGeometric";
     case PhysicalModel::QuadrupoleCoulomb:
       return os << "QuadrupoleCoulomb";
     default:
@@ -108,6 +113,17 @@ MatchingEvaluation evaluate_matching(
       electric, magnetic, spatial_metric, directions);
 
   switch (model) {
+    case PhysicalModel::ThirdOrderGeometric: {
+      if (face_data == nullptr or not face_data->third_order.has_value() or
+          face_data->third_order->time != face_data->time or
+          get(face_data->third_order->psi0_target).size() != num_points) {
+        ERROR(
+            "ThirdOrderGeometric needs its current target from "
+            "UpdateKretschmannFaceData before the boundary condition");
+      }
+      result.psi0_target = face_data->third_order->psi0_target;
+      break;
+    }
     case PhysicalModel::TypeD: {
       result.coulomb = gr::np::coulomb_scalar(gr::np::invariant_i(result.psi),
                                               gr::np::invariant_j(result.psi));

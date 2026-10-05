@@ -252,18 +252,69 @@ EigenSphereMap laplace_eigenmap(const TriadVector& labels,
   return result;
 }
 
-GeometricTideEvaluation evaluate_geometric_second_order(
+std::pair<DataVector, double> sphere_gradient_potential(
+    const TriadVector& labels, const DataVector& weights,
+    const std::array<DataVector, 2>& gradient, const size_t lm) {
+  const Basis basis(labels, lm);
+  const size_t np = weights.size(), n = basis.n - 1;
+  std::vector<double> normal(n * n, 0.), rhs(n, 0.), coefficients(n);
+  for (size_t p = 0; p < np; ++p) {
+    for (size_t a = 0; a < n; ++a) {
+      const double ta = basis.dt[p * basis.n + a + 1];
+      const double pa = basis.dp[p * basis.n + a + 1];
+      rhs[a] += weights[p] * (ta * gradient[0][p] + pa * gradient[1][p]);
+      for (size_t b = 0; b < n; ++b) {
+        normal[a * n + b] += weights[p] * (ta * basis.dt[p * basis.n + b + 1] +
+                                           pa * basis.dp[p * basis.n + b + 1]);
+      }
+    }
+  }
+  auto matrix = gsl_matrix_view_array(normal.data(), n, n);
+  auto right = gsl_vector_view_array(rhs.data(), n);
+  auto solution = gsl_vector_view_array(coefficients.data(), n);
+  if (gsl_linalg_cholesky_decomp(&matrix.matrix) != 0 or
+      gsl_linalg_cholesky_solve(&matrix.matrix, &right.vector,
+                                &solution.vector) != 0) {
+    ERROR("Slice-time potential solve failed");
+  }
+  DataVector potential(np, 0.);
+  double mean = 0., area = 0., error = 0., norm = 0.;
+  for (size_t p = 0; p < np; ++p) {
+    std::array<double, 2> fitted{};
+    for (size_t a = 0; a < n; ++a) {
+      potential[p] += coefficients[a] * basis.y[p * basis.n + a + 1];
+      fitted[0] += coefficients[a] * basis.dt[p * basis.n + a + 1];
+      fitted[1] += coefficients[a] * basis.dp[p * basis.n + a + 1];
+    }
+    mean += weights[p] * potential[p];
+    area += weights[p];
+    for (size_t a = 0; a < 2; ++a) {
+      error += weights[p] * pow(fitted[a] - gradient[a][p], 2);
+      norm += weights[p] * pow(gradient[a][p], 2);
+    }
+  }
+  potential -= mean / area;
+  return {std::move(potential), sqrt(error / std::max(norm, 1.e-300))};
+}
+
+GeometricFrame geometric_frame(
     const FrameRegistration& registration, const Scalar<DataVector>& rapidity,
     const RealMatrix& rotation_matrix,
     const tnsr::ii<DataVector, 3, Frame::Inertial>& metric,
     const TriadVector& labels, const DataVector& weights, double mass,
-    size_t lm, const std::optional<TidalMoments>& imposed) {
+    size_t lm) {
   const size_t np = weights.size();
   const double is2 = 1. / sqrt(2.);
   const auto lower = cholesky_factor(metric);
   std::vector<std::array<V4, 2>> screen(np);
   std::vector<C4> dyad(np);
-  std::vector<double> eta(np);
+  GeometricFrame result{};
+  result.boost = DataVector(np);
+  result.observer = AdaptedFourVector(np, 0.);
+  for (auto& field : result.screen)
+    field = AdaptedFourVector(np, 0.);
+  for (auto& field : result.dyad)
+    field = ComplexDataVector(np, 0.);
   std::array<DataVector, 3> gram{
       {DataVector(np), DataVector(np), DataVector(np)}},
       h = gram;
@@ -287,11 +338,14 @@ GeometricTideEvaluation evaluate_geometric_second_order(
     }
     emm = nm;
     dyad[p] = emm;
-    eta[p] = .5 * log(kay[0].real() / ell[0].real()) + get(rapidity)[p];
+    result.boost[p] =
+        .5 * log(kay[0].real() / ell[0].real()) + get(rapidity)[p];
     V4 l{}, k{};
     for (size_t j = 0; j < 4; ++j) {
       l[j] = ell[j].real();
       k[j] = kay[j].real();
+      result.observer.get(j)[p] =
+          is2 * (exp(result.boost[p]) * l[j] + exp(-result.boost[p]) * k[j]);
     }
     const V3 n{{labels.get(0)[p], labels.get(1)[p], labels.get(2)[p]}};
     const double st = std::hypot(n[0], n[1]);
@@ -305,23 +359,22 @@ GeometricTideEvaluation evaluate_geometric_second_order(
             x[i + 1] +=
                 rotation_matrix.get(i, j)[p] * lower.get(z, j)[p] * tangent[z];
       const double lx = dot4(l, x), kx = dot4(k, x);
-      for (size_t j = 0; j < 4; ++j)
+      for (size_t j = 0; j < 4; ++j) {
         screen[p][A][j] = x[j] + l[j] * kx + k[j] * lx;
+        result.screen[A].get(j)[p] = screen[p][A][j];
+      }
     }
     gram[0][p] = dot4(screen[p][0], screen[p][0]);
     gram[1][p] = dot4(screen[p][0], screen[p][1]);
     gram[2][p] = dot4(screen[p][1], screen[p][1]);
     const double rr = get(registration.measured_radius)[p];
+    if (not(mass > 0. and rr > 2. * mass and std::isfinite(rr))) {
+      ERROR("Geometric tide requires positive mass and radius outside 2M");
+    }
     for (size_t j = 0; j < 3; ++j)
       h[j][p] = gram[j][p] / (rr * rr);
   }
-  GeometricTideEvaluation result{};
   result.map = laplace_eigenmap(labels, weights, h, lm);
-  std::array<Scalar<ComplexDataVector>, 5> c0{}, c4{};
-  for (size_t a = 0; a < 5; ++a) {
-    get(c0[a]) = ComplexDataVector(np, 0.);
-    get(c4[a]) = ComplexDataVector(np, 0.);
-  }
   for (size_t p = 0; p < np; ++p) {
     const double g0 = sqrt(gram[0][p]), ratio = gram[1][p] / gram[0][p];
     const double g1 = sqrt(gram[2][p] - gram[1][p] * ratio);
@@ -353,11 +406,38 @@ GeometricTideEvaluation evaluate_geometric_second_order(
     for (size_t i = 0; i < 3; ++i) {
       mu[i] =
           (i00 * z0[i] + i01 * z1[i]) * m0 + (i01 * z0[i] + i11 * z1[i]) * m1;
+      result.dyad[i][p] = mu[i];
       null += mu[i] * mu[i];
       norm += std::norm(mu[i]);
     }
     result.maximum_dyad_error = std::max(
         {result.maximum_dyad_error, std::abs(null), std::abs(norm - 1.)});
+  }
+  if (result.maximum_dyad_error > 1.e-9)
+    ERROR("Polar dyad normalization failed: " << result.maximum_dyad_error);
+  return result;
+}
+
+GeometricTideEvaluation evaluate_geometric_second_order(
+    const FrameRegistration& registration, const Scalar<DataVector>& rapidity,
+    const RealMatrix& rotation_matrix,
+    const tnsr::ii<DataVector, 3, Frame::Inertial>& metric,
+    const TriadVector& labels, const DataVector& weights, double mass,
+    size_t lm, const std::optional<TidalMoments>& imposed) {
+  const size_t np = weights.size();
+  auto frame = geometric_frame(registration, rapidity, rotation_matrix, metric,
+                               labels, weights, mass, lm);
+  GeometricTideEvaluation result{};
+  result.map = std::move(frame.map);
+  result.maximum_dyad_error = frame.maximum_dyad_error;
+  std::array<Scalar<ComplexDataVector>, 5> c0{}, c4{};
+  for (size_t a = 0; a < 5; ++a) {
+    get(c0[a]) = ComplexDataVector(np, 0.);
+    get(c4[a]) = ComplexDataVector(np, 0.);
+  }
+  for (size_t p = 0; p < np; ++p) {
+    const std::array<std::complex<double>, 3> mu{
+        {frame.dyad[0][p], frame.dyad[1][p], frame.dyad[2][p]}};
     const std::array<std::complex<double>, 5> contraction{
         {mu[0] * mu[0] - mu[2] * mu[2], mu[1] * mu[1] - mu[2] * mu[2],
          2. * mu[0] * mu[1], 2. * mu[0] * mu[2], 2. * mu[1] * mu[2]}};
@@ -365,12 +445,10 @@ GeometricTideEvaluation evaluate_geometric_second_order(
     if (not(f > 0.))
       ERROR("Geometric tide requires an outside-horizon radius");
     for (size_t a = 0; a < 5; ++a) {
-      get(c0[a])[p] = f * exp(-2. * eta[p]) * contraction[a];
-      get(c4[a])[p] = f * exp(2. * eta[p]) * std::conj(contraction[a]);
+      get(c0[a])[p] = f * exp(-2. * frame.boost[p]) * contraction[a];
+      get(c4[a])[p] = f * exp(2. * frame.boost[p]) * std::conj(contraction[a]);
     }
   }
-  if (result.maximum_dyad_error > 1.e-9)
-    ERROR("Polar dyad normalization failed: " << result.maximum_dyad_error);
   auto& ev = result.second_order;
   const Scalar<ComplexDataVector> data{registration.pulled_back.get(4)};
   if (imposed) {

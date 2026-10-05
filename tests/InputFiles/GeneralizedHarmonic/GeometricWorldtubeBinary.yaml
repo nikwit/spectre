@@ -1,6 +1,7 @@
 # Distributed under the MIT License.
 # See LICENSE.txt for details.
-# Parse-only geometric-worldtube BBH example (equal masses 0.5).
+# Parse-only third-order geometric-worldtube BBH example (equal masses 0.5).
+# Select QuadrupoleGeometric for the second-order comparison.
 # Supply real volume initial data before any evolution. Prescribed domain
 # motion, all horizon-dependent controls disabled; not a tested inspiral.
 # See docs/Tutorials/GeometricWorldtube.md.
@@ -59,7 +60,7 @@ DomainCreator:
             ConstraintPreservingSector: Bjorhus
             PhysicalSector: Bjorhus
             GaugeSector: SommerfeldAbsorbing
-            PhysicalModel: QuadrupoleGeometric
+            PhysicalModel: ThirdOrderGeometric
             Mass: 0.5
             MomentRelaxationTime: None
       UseLogarithmicMap: true
