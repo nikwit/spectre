@@ -63,8 +63,10 @@ enum class PhysicalModel {
   QuadrupoleCoulomb,
   /// Order two with common tidal axes from the screen-metric Laplace
   /// eigenmap and polar transport of the registered complex dyad.
-  /// Currently requires a fixed, centered coordinate sphere and a complete
-  /// spherical-harmonic face. Radius, boost and fit frame match Quadrupole.
+  /// Requires a round inertial-coordinate sphere and a complete
+  /// spherical-harmonic face. Translation, rotation and uniform expansion are
+  /// allowed; non-spherical shape maps are rejected. Radius, boost and fit
+  /// frame match Quadrupole.
   QuadrupoleGeometric
 };
 

@@ -4,6 +4,7 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <numbers>
@@ -31,6 +32,7 @@
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "NumericalAlgorithms/Spectral/QuadratureWeights.hpp"
+#include "Utilities/ConstantExpressions.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
 #include "Utilities/Gsl.hpp"
@@ -48,6 +50,65 @@ template <size_t Dim> struct MeshVelocityTag : db::SimpleTag {
   using type = tnsr::I<DataVector, Dim, Frame::Inertial>;
 };
 } // namespace
+
+void validate_geometric_matching_face(
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const Direction<3>& direction) {
+  if (direction != Direction<3>::lower_xi() or
+      mesh.basis(1) != Spectral::Basis::SphericalHarmonic or
+      mesh.basis(2) != Spectral::Basis::SphericalHarmonic or
+      mesh.quadrature(1) != Spectral::Quadrature::Gauss or
+      mesh.quadrature(2) != Spectral::Quadrature::Equiangular or
+      mesh.extents(2) != 2 * mesh.extents(1) - 1) {
+    ERROR(
+        "QuadrupoleGeometric requires a complete spherical-harmonic inner "
+        "face. Enable UseSphericalHarmonics on the worldtube object.");
+  }
+  const auto weights = face_quadrature_weights<3>(mesh.slice_away(0));
+  const size_t nr = mesh.extents(0), np = weights.size();
+  std::array<double, 3> center{};
+  for (size_t p = 0; p < np; ++p) {
+    for (size_t i = 0; i < 3; ++i) {
+      center[i] += weights[p] * coordinates.get(i)[nr * p];
+    }
+  }
+  DataVector radius(np, 0.);
+  double mean_radius = 0.;
+  for (size_t p = 0; p < np; ++p) {
+    for (size_t i = 0; i < 3; ++i) {
+      radius[p] += square(coordinates.get(i)[nr * p] - center[i]);
+    }
+    radius[p] = sqrt(radius[p]);
+    mean_radius += weights[p] * radius[p];
+  }
+  if (not(mean_radius > 0. and std::isfinite(mean_radius))) {
+    ERROR("QuadrupoleGeometric requires a finite nonzero coordinate radius.");
+  }
+  for (size_t p = 0; p < np; ++p) {
+    double normal_norm = 0.;
+    for (size_t i = 0; i < 3; ++i) {
+      normal_norm += square(inverse_jacobian.get(0, i)[nr * p]);
+    }
+    normal_norm = sqrt(normal_norm);
+    if (not(normal_norm > 0. and std::isfinite(normal_norm)) or
+        not(std::abs(radius[p] / mean_radius - 1.) < 1.e-9)) {
+      ERROR(
+          "QuadrupoleGeometric requires a round inertial-coordinate sphere; "
+          "disable non-spherical shape/skew deformations on the worldtube.");
+    }
+    for (size_t i = 0; i < 3; ++i) {
+      if (not(std::abs(inverse_jacobian.get(0, i)[nr * p] / normal_norm -
+                       (coordinates.get(i)[nr * p] - center[i]) / radius[p]) <
+              1.e-9)) {
+        ERROR(
+            "QuadrupoleGeometric requires radial coordinate-normal covectors.");
+      }
+    }
+  }
+}
 
 template <size_t Dim> void KretschmannFaceData<Dim>::pup(PUP::er &p) {
   p | direction;
@@ -73,7 +134,8 @@ bool operator==(const KretschmannFaceData<Dim> &lhs,
   const auto same_time = [](const double a, const double b) {
     return (std::isnan(a) and std::isnan(b)) or a == b;
   };
-  return lhs.replay == rhs.replay and lhs.direction == rhs.direction and same_time(lhs.time, rhs.time) and
+  return lhs.replay == rhs.replay and lhs.direction == rhs.direction and
+         same_time(lhs.time, rhs.time) and
          lhs.kretschmann == rhs.kretschmann and
          lhs.d_kretschmann == rhs.d_kretschmann and
          lhs.dt_kretschmann == rhs.dt_kretschmann and

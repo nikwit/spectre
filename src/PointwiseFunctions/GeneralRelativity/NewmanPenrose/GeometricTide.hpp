@@ -35,7 +35,7 @@ struct GeometricTideEvaluation {
   double maximum_dyad_error{};
 };
 
-/// Geometric quadrupole on a fixed coordinate sphere. label_directions
+/// Geometric quadrupole on a round coordinate sphere. label_directions
 /// point away from its center, unlike the domain-outward inner normal.
 /// Retains the legacy leading-frame fit, radius, boost, and incoming-slot
 /// replacement; only the common angular axes, dyad transport and area

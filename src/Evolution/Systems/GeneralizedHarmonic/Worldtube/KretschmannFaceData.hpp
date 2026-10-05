@@ -119,6 +119,17 @@ std::optional<Direction<Dim>> excision_face_direction(
 template <size_t Dim>
 DataVector face_quadrature_weights(const Mesh<Dim - 1> &face_mesh);
 
+/// Check the geometry required by QuadrupoleGeometric: a complete spherical-
+/// harmonic face whose inertial coordinates form a round sphere with radial
+/// normal covectors. Translation, rotation and uniform expansion are allowed.
+/// Fail before fitting if a shape/skew map violates this assumption.
+void validate_geometric_matching_face(
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const Direction<3>& direction);
+
 /*!
  * \brief Update the Kretschmann face data of an element from its evolved
  * variables at time `time`.

@@ -37,6 +37,50 @@ namespace {
 namespace helpers = TestHelpers::gh_worldtube;
 using gh::worldtube::KretschmannFaceData;
 
+void test_geometric_face_geometry() {
+  const auto setup = helpers::shell_element(10, 8, {{0., 0., 0.}}, 2.5, 3.);
+  const double angle = .31, scale = 1.7;
+  auto coordinates = setup.inertial_coords;
+  auto inverse_jacobian = setup.inverse_jacobian;
+  // x' = scale R x + center; J'^{-1} = J^{-1} R^T / scale.
+  const std::array<double, 3> center{{-12., 3., .7}};
+  const std::array<std::array<double, 3>, 3> rotation{
+      {{{cos(angle), 0., sin(angle)}},
+       {{0., 1., 0.}},
+       {{-sin(angle), 0., cos(angle)}}}};
+  for (size_t i = 0; i < 3; ++i) {
+    coordinates.get(i) = center[i];
+    for (size_t j = 0; j < 3; ++j) {
+      coordinates.get(i) +=
+          scale * rotation[i][j] * setup.inertial_coords.get(j);
+      inverse_jacobian.get(j, i) = 0.;
+      for (size_t k = 0; k < 3; ++k) {
+        inverse_jacobian.get(j, i) +=
+            setup.inverse_jacobian.get(j, k) * rotation[i][k] / scale;
+      }
+    }
+  }
+  const auto validate = [&]() {
+    gh::worldtube::validate_geometric_matching_face(
+        coordinates, setup.mesh, inverse_jacobian, Direction<3>::lower_xi());
+  };
+  CHECK_NOTHROW(validate());
+  const auto good_coordinates = coordinates;
+  coordinates.get(0) = center[0] + 1.01 * (coordinates.get(0) - center[0]);
+  CHECK_THROWS_WITH(validate(), Catch::Matchers::ContainsSubstring(
+                                    "round inertial-coordinate sphere"));
+  coordinates = good_coordinates;
+  inverse_jacobian.get(0, 0) += .01;
+  CHECK_THROWS_WITH(validate(), Catch::Matchers::ContainsSubstring(
+                                    "radial coordinate-normal"));
+  const auto wedge = helpers::wedge_element(5, {{0., 0., 0.}});
+  CHECK_THROWS_WITH(gh::worldtube::validate_geometric_matching_face(
+                        wedge.inertial_coords, wedge.mesh,
+                        wedge.inverse_jacobian, Direction<3>::lower_zeta()),
+                    Catch::Matchers::ContainsSubstring(
+                        "complete spherical-harmonic inner face"));
+}
+
 void test_radial_gauge_capture() {
   const auto setup = helpers::shell_element(18, 5, {{0., 0., 0.}}, 2.5, 3.);
   const size_t n = setup.mesh.number_of_grid_points();
@@ -374,6 +418,7 @@ void test_update_filtered_tidal_moments() {
 SPECTRE_TEST_CASE(
     "Unit.Evolution.Systems.GeneralizedHarmonic.Worldtube.KretschmannFaceData",
     "[Unit][Evolution]") {
+  test_geometric_face_geometry();
   test_radial_gauge_capture();
   test_quadrature_weights();
   test_update_on_boosted_kerr_schild();

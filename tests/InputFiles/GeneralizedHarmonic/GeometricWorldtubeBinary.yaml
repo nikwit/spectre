@@ -1,0 +1,497 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+# Parse-only geometric-worldtube BBH example (equal masses 0.5).
+# Supply real volume initial data before any evolution. Prescribed domain
+# motion, all horizon-dependent controls disabled; not a tested inspiral.
+# See docs/Tutorials/GeometricWorldtube.md.
+Executable: EvolveGhBinaryBlackHole
+Testing:
+  Check: parse
+  Priority: High
+  Timeout: 30
+---
+Parallelization:
+  ElementDistribution: NumGridPointsAndGridSpacing
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.0002
+  MinimumTimeStep: 1e-7
+  InitialSlabSize: 0.25
+  LocalTimeStepping: Conservative
+  VariableOrderAlgorithm:
+    GoalOrder: 3
+  LtsStepChoosers:
+  - LimitIncrease:
+      Factor: 2
+  - PreventRapidIncrease
+  - ElementSizeCfl:
+      SafetyFactor: 0.5
+  - ErrorControl:
+      AbsoluteTolerance: 1e-8
+      RelativeTolerance: 1e-6
+      MaxFactor: 2
+      MinFactor: 0.25
+      SafetyFactor: 0.95
+  TimeStepper:
+    AdamsBashforth:
+      Order: 5
+DomainCreator:
+  BinaryCompactObject:
+    ObjectA:
+      InnerRadius: 0.45825
+      OuterRadius: 2.0
+      XCoord: 7.683
+      Interior:
+        ExciseWithBoundaryCondition:
+          DemandOutgoingCharSpeeds: null
+      UseLogarithmicMap: true
+      UseSphericalHarmonics: false
+    ObjectB:
+      InnerRadius: 1.25
+      OuterRadius: 3.0
+      XCoord: -7.683
+      Interior:
+        ExciseWithBoundaryCondition:
+          WorldtubeTypeD:
+            ConstraintPreservingSector: Bjorhus
+            PhysicalSector: Bjorhus
+            GaugeSector: SommerfeldAbsorbing
+            PhysicalModel: QuadrupoleGeometric
+            Mass: 0.5
+            MomentRelaxationTime: None
+      UseLogarithmicMap: true
+      UseSphericalHarmonics: true
+    CenterOfMassOffset:
+    - 0.0
+    - 0.0
+    Envelope:
+      Radius: 40.0
+      RadialDistribution: Projective
+    OuterShell:
+      Radius: 300.0
+      RadialPartitioning: []
+      RadialDistribution: Linear
+      OpeningAngle: 120.0
+      UseSphericalHarmonics: false
+      BoundaryCondition:
+        ConstraintPreservingBjorhus:
+          Type: ConstraintPreservingPhysical
+          IncomingWaveProfile: None
+    InitialRefinement:
+      ObjectAShell:
+      - 0
+      - 0
+      - 0
+      ObjectACube:
+      - 0
+      - 0
+      - 0
+      ObjectBShell: 0
+      ObjectBCube:
+      - 0
+      - 0
+      - 0
+      Envelope:
+      - 0
+      - 0
+      - 0
+      OuterShell0:
+      - 0
+      - 0
+      - 0
+    InitialGridPoints:
+      ObjectAShell:
+      - 8
+      - 8
+      - 8
+      ObjectACube:
+      - 8
+      - 8
+      - 8
+      ObjectBShell:
+      - 12
+      - 8
+      ObjectBCube:
+      - 8
+      - 8
+      - 8
+      Envelope:
+      - 8
+      - 8
+      - 8
+      OuterShell0:
+      - 8
+      - 8
+      - 8
+    UseWorldtube: false
+    TimeDependentMaps:
+      InitialTime: 0.0
+      ExpansionMap:
+        InitialValues:
+        - 1.0
+        - -4.61484576462e-05
+        - 0.0
+        AsymptoticVelocityOuterBoundary: -1.0e-06
+        DecayTimescaleOuterBoundary: 50.0
+      RotationMap:
+        InitialAngularVelocity:
+        - 0.0
+        - 0.0
+        - 0.015264577062
+      TranslationMap:
+        InitialValues:
+        - - 0.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 0.0
+        - - 0.0
+          - 0.0
+          - 0.0
+      SkewMap: None
+      ShapeMapA: None
+      ShapeMapB: None
+      GridCenters: None
+    CubeScale: 1.0
+    UseEquiangularMap: true
+EventsAndDenseTriggers: null
+EventsRunAtCleanup:
+  ObservationValue: -1000.0
+  Events:
+  - ObserveTimeStepVolume:
+      SubfileName: FailureTimeStep
+      FloatingPointType: Double
+      CoordinatesFloatingPointType: Float
+EvolutionSystem:
+  GeneralizedHarmonic:
+    GaugeCondition:
+      DampedHarmonic:
+        SpatialDecayWidth: 17.0152695482514
+        Amplitudes:
+        - 1.0
+        - 1.0
+        - 1.0
+        Exponents:
+        - 2
+        - 2
+        - 2
+    DampingFunctionGamma0:
+      TimeDependentTripleGaussian:
+        Constant: 0.001
+        Gaussian1:
+          Amplitude: 8.0
+          Width: 3.5
+          Center:
+          - 7.683
+          - 0.0
+          - 0.0
+        Gaussian2:
+          Amplitude: 8.0
+          Width: 3.5
+          Center:
+          - -7.683
+          - 0.0
+          - 0.0
+        Gaussian3:
+          Amplitude: 0.075
+          Width: 38.415
+          Center:
+          - 0.0
+          - 0.0
+          - 0.0
+        MovementMethod: ExpansionFactor
+    DampingFunctionGamma1:
+      GaussianPlusConstant:
+        Constant: -0.999
+        Amplitude: 0.999
+        Width: 153.66
+        Center:
+        - 0.0
+        - 0.0
+        - 0.0
+    DampingFunctionGamma2:
+      TimeDependentTripleGaussian:
+        Constant: 0.001
+        Gaussian1:
+          Amplitude: 8.0
+          Width: 3.5
+          Center:
+          - 7.683
+          - 0.0
+          - 0.0
+        Gaussian2:
+          Amplitude: 8.0
+          Width: 3.5
+          Center:
+          - -7.683
+          - 0.0
+          - 0.0
+        Gaussian3:
+          Amplitude: 0.075
+          Width: 38.415
+          Center:
+          - 0.0
+          - 0.0
+          - 0.0
+        MovementMethod: ExpansionFactor
+Amr:
+  Criteria:
+  - TruncationError:
+      VariablesToMonitor:
+      - SpacetimeMetric
+      AbsoluteTarget: 1.0e-06
+      RelativeTarget: 1.0e-06
+  - Persson:
+      VariablesToMonitor:
+      - SpacetimeMetric
+      NumHighestModes: 2
+      Exponent: 4
+      AbsoluteTolerance: 0
+      CoarseningFactor: 0.1
+  EnableInBlocks: All
+  Policies:
+    EnforceTwoToOneBalanceInNormalDirection: true
+    Isotropy: Anisotropic
+    Limits:
+      RefinementLevel: Auto
+      NumGridPoints: Auto
+      ErrorBeyondLimits: false
+    AllowCoarsening: true
+  Verbosity: Quiet
+PhaseChangeAndTriggers:
+- Trigger:
+    Slabs:
+      EvenlySpaced:
+        Interval: 10
+        Offset: 0
+  PhaseChanges:
+  - CheckpointAndExitAfterWallclock:
+      WallclockHours: 23.5
+- Trigger:
+    Slabs:
+      EvenlySpaced:
+        Interval: 200
+        Offset: 40
+  PhaseChanges:
+  - VisitAndReturn(EvaluateAmrCriteria)
+  - VisitAndReturn(AdjustDomain)
+  - VisitAndReturn(CheckDomain)
+SpatialDiscretization:
+  BoundaryCorrection:
+    AveragedUpwindPenalty: null
+  DiscontinuousGalerkin:
+    Formulation: StrongInertial
+    Quadrature: GaussLobatto
+    Filtering:
+    - Hypercube:
+        HalfPower: 24
+        Enable: false
+        BlocksToFilter: All
+        VolumeFilterOnSubstep: true
+        BoundaryCorrectionFilterOnSubstep: false
+        VolumeFilterEveryNSteps: None
+        BoundaryCorrectionFilterEveryNSteps: None
+EventsAndTriggersAtCheckpoints: null
+EventsAndTriggersAtSlabs:
+- Trigger:
+    Slabs:
+      EvenlySpaced:
+        Interval: 1
+        Offset: 0
+  Events:
+  - ObserveNorms:
+      SubfileName: Norms
+      TensorsToObserve:
+      - Name: Lapse
+        NormType: L2Norm
+        Components: Individual
+      - Name: PointwiseL2Norm(GaugeConstraint)
+        NormType: L2Norm
+        Components: Sum
+      - Name: PointwiseL2Norm(ThreeIndexConstraint)
+        NormType: L2Norm
+        Components: Sum
+      - Name: PointwiseL2Norm(FourIndexConstraint)
+        NormType: L2Norm
+        Components: Sum
+- Trigger:
+    Slabs:
+      EvenlySpaced:
+        Interval: 20
+        Offset: 0
+  Events:
+  - ObserveFields:
+      SubfileName: VolumeData
+      VariablesToObserve:
+      - Lapse
+      - Shift
+      - PointwiseL2Norm(GaugeConstraint)
+      - PointwiseL2Norm(ThreeIndexConstraint)
+      - PointwiseL2Norm(FourIndexConstraint)
+      - SpacetimeMetric
+      - Pi
+      - Phi
+      InterpolateToMesh: None
+      ProjectToMesh: None
+      CoordinatesFloatingPointType: Double
+      FloatingPointTypes:
+      - Double
+      BlocksToObserve: All
+- Trigger:
+    Slabs:
+      EvenlySpaced:
+        Interval: 100
+        Offset: 0
+  Events:
+  - MonitorMemory:
+      ComponentsToMonitor: All
+- Trigger:
+    TimeCompares:
+      Comparison: GreaterThan
+      Value: 0.02
+  Events:
+  - Completion
+- Trigger:
+    Slabs:
+      EvenlySpaced:
+        Interval: 100
+        Offset: 30
+  Events:
+  - RefineMesh
+EventsAndTriggersAtSteps: null
+BbhCompletionCriteria:
+  MinCommonHorizonSuccessesBeforeChecks: 8
+  MaxCommonHorizonSuccesses: 100
+  GaugeConstraintLinfThreshold: 1.0
+  ThreeIndexConstraintLinfThreshold: 1.0
+  CommonHorizonLMaxThreshold: 8
+  ConstraintCheckVerbose: false
+Observers:
+  VolumeFileName: GhBinaryBlackHoleVolumeData
+  ReductionFileName: GhBinaryBlackHoleReductionData
+  SurfaceFileName: GhBinaryBlackHoleSurfacesData
+Interpolator:
+  Verbosity: Silent
+ApparentHorizons:
+  LMax: 20
+  ObservationAhA: &id002
+    Criteria: null
+    InitialGuess:
+      InitialL: 10
+      InitialShape:
+        Sphere:
+          Radius: 2.2
+          Center:
+          - 7.683
+          - 0.0
+          - 0.0
+    FastFlow: &id001
+      Flow: Fast
+      Alpha: 1.0
+      Beta: 0.5
+      AbsTol: 1e-12
+      TruncationTol: 1e-2
+      DivergenceTol: 1.2
+      DivergenceIter: 5
+      MaxIts: 100
+    Verbosity: Verbose
+    MaxComputeCoordsRetries: 3
+    BlocksForHorizonFind: All
+  ObservationAhB: &id003
+    Criteria: null
+    InitialGuess:
+      InitialL: 10
+      InitialShape:
+        Sphere:
+          Radius: 2.2
+          Center:
+          - -7.683
+          - 0.0
+          - 0.0
+    FastFlow: *id001
+    Verbosity: Verbose
+    MaxComputeCoordsRetries: 3
+    BlocksForHorizonFind: All
+  ObservationAhC:
+    Criteria: null
+    InitialGuess:
+      InitialL: 20
+      InitialShape:
+        Sphere:
+          Radius: 10.0
+          Center:
+          - 0.0
+          - 0.0
+          - 0.0
+    FastFlow: *id001
+    Verbosity: Verbose
+    MaxComputeCoordsRetries: 3
+    BlocksForHorizonFind: All
+  ControlSystemAhA: *id002
+  ControlSystemAhB: *id003
+  ControlSystemCharSpeedAhA: *id002
+  ControlSystemCharSpeedAhB: *id003
+InterpolationTargets:
+  BondiSachsInterpolation:
+    LMax: 16
+    Radius:
+    - 100
+    - 150
+    - 200
+    Center:
+    - 0
+    - 0
+    - 0
+    AngularOrdering: Cce
+  ObservationExcisionBoundaryA: &id004
+    LMax: 10
+    Radius: 0.45825
+    Center:
+    - 7.683
+    - 0.0
+    - 0.0
+    AngularOrdering: Strahlkorper
+  ObservationExcisionBoundaryB: &id005
+    LMax: 10
+    Radius: 0.45825
+    Center:
+    - -7.683
+    - 0.0
+    - 0.0
+    AngularOrdering: Strahlkorper
+  ControlSystemCharSpeedExcisionA: *id004
+  ControlSystemCharSpeedExcisionB: *id005
+Cce:
+  BondiSachsOutputFilePrefix: BondiSachs
+ControlSystems:
+  WriteDataToDisk: true
+  MeasurementsPerUpdate: 4
+  DelayUpdate: true
+  Verbosity: Silent
+  Expansion: None
+  Rotation: None
+  Translation: None
+  Skew: None
+  ShapeA: None
+  ShapeB: None
+  SizeA: None
+  SizeB: None
+InitialData:
+  NumericInitialData:
+    VolumeData:
+      FileGlob: /path/to/initial_data.h5
+      Subgroup: VolumeData
+      ObservationValue: Last
+      ObservationValueEpsilon: Auto
+      ElementsAreIdentical: false
+      ExtrapolateIntoExcisions: false
+      NumThreads: 1
+    Variables:
+      Lapse: Lapse
+      Shift: ShiftExcess
+      SpatialMetric: SpatialMetric
+      ExtrinsicCurvature: ExtrinsicCurvature

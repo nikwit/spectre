@@ -61,6 +61,7 @@
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/DemandOutgoingCharSpeeds.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/DirichletMinkowski.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/Factory.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/WorldtubeTypeD.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryCorrections/Factory.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Characteristics.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Equations.hpp"
@@ -534,6 +535,7 @@ struct EvolutionMetavars {
             tmpl::list<
                 gh::BoundaryConditions::ConstraintPreservingBjorhus<volume_dim>,
                 gh::BoundaryConditions::DirichletMinkowski<volume_dim>,
+                gh::BoundaryConditions::WorldtubeTypeD<volume_dim>,
                 gh::BoundaryConditions::DemandOutgoingCharSpeeds<volume_dim>>>,
         tmpl::pair<
             gh::gauges::GaugeCondition,

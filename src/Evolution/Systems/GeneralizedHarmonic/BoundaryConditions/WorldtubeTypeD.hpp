@@ -71,7 +71,8 @@ enum class SectorImposition {
   /// offset.
   OutgoingDriven,
   SchwarzschildReference,
-  /// Replace the time/radial incoming gauge derivative with an initial-profile Robin response.
+  /// Replace the time/radial incoming gauge derivative with an initial-profile
+  /// Robin response.
   RadialResponse
 };
 
@@ -303,10 +304,10 @@ public:
   };
   /// \brief How the gauge sector of \f$u^-\f$ is imposed.
   struct GaugeSector {
-    using type = std::variant<detail::SectorImposition, detail::AlgebraicGauge,
-                              detail::OutgoingDrivenGauge,
-                              detail::SchwarzschildReferenceGauge, worldtube::ReferenceReplayGauge,
-                   worldtube::RadialResponseGauge>;
+    using type = std::variant<
+        detail::SectorImposition, detail::AlgebraicGauge,
+        detail::OutgoingDrivenGauge, detail::SchwarzschildReferenceGauge,
+        worldtube::ReferenceReplayGauge, worldtube::RadialResponseGauge>;
     static constexpr Options::String help{
         "Imposition of the gauge sector of v_minus: Frozen (zero projected "
         "characteristic RHS), or SommerfeldAbsorbing / SommerfeldOutgoing for "
@@ -321,7 +322,8 @@ public:
         "This requires a static mesh and time-independent gamma2. "
         "RadialResponse: [Kt, Kr] replaces the radial derivative of the "
         "time/radial gauge data, retaining live GH sources and an initial "
-        "profile. Tangential gauge data retain the zero-rate radiation condition. "
+        "profile. Tangential gauge data retain the zero-rate radiation "
+        "condition. "
         "This prototype requires static unrefined 3D spherical shells. "
         "Bjorhus without a specified gauge prescription is not implemented."};
   };
@@ -337,7 +339,10 @@ public:
         "Quadrupole (order two: the type-D hole carries a quadrupolar tide "
         "fitted to Psi4 over the face, in the invariant rest frame fixed by "
         "the gradient of the Kretschmann scalar; needs Mass and the "
-        "UpdateKretschmannFaceData action) or QuadrupoleCoulomb (order two "
+        "UpdateKretschmannFaceData action), QuadrupoleGeometric (the same tide "
+        "with common angular axes and dyad transport from the screen-metric "
+        "Laplace eigenmap; requires a complete spherical-harmonic face on a "
+        "round coordinate sphere), or QuadrupoleCoulomb (order two "
         "with the tide read from the Coulomb scalar and its normal "
         "derivative instead of Psi4, which removes the fast feedback of the "
         "condition on itself through the leaving mode but leaves a slow "
@@ -351,7 +356,8 @@ public:
     using type = Options::Auto<double, Options::AutoLabel::None>;
     static constexpr Options::String help{
         "The mass of the excised hole. Required by the order-two models "
-        "Quadrupole and QuadrupoleCoulomb (tidal radial profiles and the "
+        "Quadrupole, QuadrupoleGeometric and QuadrupoleCoulomb (tidal radial "
+        "profiles and the "
         "areal radius of the worldtube), None otherwise."};
   };
   /// \brief Relaxation time of the fitted tidal moments of the order-two
@@ -391,15 +397,15 @@ public:
       std::variant<detail::SectorImposition, detail::PerFieldConstraintSectors>
           constraint_preserving_sector,
       detail::SectorImposition physical_sector,
-      std::variant<detail::SectorImposition, detail::AlgebraicGauge,
-                   detail::OutgoingDrivenGauge,
-                   detail::SchwarzschildReferenceGauge, worldtube::ReferenceReplayGauge,
-                   worldtube::RadialResponseGauge>
+      std::variant<
+          detail::SectorImposition, detail::AlgebraicGauge,
+          detail::OutgoingDrivenGauge, detail::SchwarzschildReferenceGauge,
+          worldtube::ReferenceReplayGauge, worldtube::RadialResponseGauge>
           gauge_sector,
       detail::PhysicalModel physical_model,
       std::optional<double> mass = std::nullopt,
       std::optional<double> moment_relaxation_time = std::nullopt,
-      const Options::Context &context = {});
+      const Options::Context& context = {});
 
   WorldtubeTypeD() = default;
   /// \cond
@@ -514,7 +520,9 @@ public:
   const auto &schwarzschild_reference() const {
     return schwarzschild_reference_;
   }
-  const std::optional<worldtube::FaceReplayParameters>& face_replay() const { return face_replay_; }
+  const std::optional<worldtube::FaceReplayParameters>& face_replay() const {
+    return face_replay_;
+  }
   detail::PhysicalModel physical_model() const { return physical_model_; }
   const std::optional<double> &mass() const { return mass_; }
   const std::optional<double> &moment_relaxation_time() const {
