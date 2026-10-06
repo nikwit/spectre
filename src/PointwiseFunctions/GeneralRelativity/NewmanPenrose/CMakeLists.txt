@@ -10,6 +10,7 @@ spectre_target_sources(
   PRIVATE
   GeometricTideTransport.cpp
   GeometricTide.cpp
+  GeometricTideFixedPoint.cpp
   CoulombDecode.cpp
   NullRotations.cpp
   Psi4Fit.cpp
@@ -26,6 +27,7 @@ spectre_target_headers(
   HEADERS
   GeometricTideTransport.hpp
   GeometricTide.hpp
+  GeometricTideFixedPoint.hpp
   CoulombDecode.hpp
   NullRotations.hpp
   Psi4Fit.hpp

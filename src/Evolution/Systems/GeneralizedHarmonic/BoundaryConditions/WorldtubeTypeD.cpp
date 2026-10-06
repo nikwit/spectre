@@ -167,7 +167,8 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
         detail::OutgoingDrivenGauge, detail::SchwarzschildReferenceGauge,
         worldtube::ReferenceReplayGauge, worldtube::RadialResponseGauge>
         gauge_sector,
-    const detail::PhysicalModel physical_model,
+    const std::variant<detail::PhysicalModel, detail::GeometricFixedPoint>
+        physical_model,
     const std::optional<double> mass,
     const detail::MomentRelaxation moment_relaxation_time,
     const Options::Context& context)
@@ -215,7 +216,10 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
                                   gauge_sector)
                                   .parameters}
               : std::nullopt),
-      physical_model_(physical_model),
+      physical_model_(
+          std::holds_alternative<detail::PhysicalModel>(physical_model)
+              ? std::get<detail::PhysicalModel>(physical_model)
+              : detail::PhysicalModel::QuadrupoleGeometric),
       mass_(mass),
       moment_relaxation_time_(
           not moment_relaxation_time
@@ -231,8 +235,30 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
           moment_relaxation_time and
           std::holds_alternative<detail::ModelTimeRelaxation>(
               *moment_relaxation_time)) {
+  if (std::holds_alternative<detail::GeometricFixedPoint>(physical_model)) {
+    psi0_fixed_point_ =
+        std::get<detail::GeometricFixedPoint>(physical_model).settings;
+    const auto& s = *psi0_fixed_point_;
+    if (not(std::isfinite(s.relative_tolerance) and
+            s.relative_tolerance >= 0. and
+            std::isfinite(s.absolute_tolerance) and
+            s.absolute_tolerance >= 0. and
+            (s.relative_tolerance > 0. or s.absolute_tolerance > 0.) and
+            s.max_iterations > 0 and std::isfinite(s.damping) and
+            s.damping > 0. and s.damping <= 1.)) {
+      PARSE_ERROR(context,
+                  "Invalid geometric Psi0 fixed-point settings: tolerances "
+                  "must be finite and nonnegative with at least one positive, "
+                  "MaxIterations positive, and Damping in (0,1]");
+    }
+    if (moment_relaxation_time_) {
+      PARSE_ERROR(
+          context,
+          "QuadrupoleGeometricFixedPoint requires MomentRelaxationTime: None");
+    }
+  }
   if (moment_relaxation_uses_model_time_ and
-      physical_model != detail::PhysicalModel::QuadrupoleGeometric) {
+      physical_model_ != detail::PhysicalModel::QuadrupoleGeometric) {
     PARSE_ERROR(context, "ModelTime relaxation requires QuadrupoleGeometric");
   }
   if (std::holds_alternative<worldtube::ReferenceReplayGauge>(gauge_sector)) {
@@ -383,6 +409,7 @@ template <size_t Dim> void WorldtubeTypeD<Dim>::pup(PUP::er &p) {
   p | mass_;
   p | moment_relaxation_time_;
   p | moment_relaxation_uses_model_time_;
+  p | psi0_fixed_point_;
   p | face_replay_;
 }
 
@@ -574,13 +601,18 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
             d_pi, spacetime_unit_normal_vector, spatial_metric,
             vars.inverse_spatial_metric, vars.extrinsic_curvature,
             inverse_spacetime_metric);
+        if (psi0_fixed_point_ and face_data.time != time) {
+          ERROR(
+              "Geometric Psi0 fixed-point face data is stale for the boundary "
+              "time");
+        }
         incoming_mode =
             worldtube::evaluate_matching(
                 physical_model_, mass_, electric, magnetic, spatial_metric,
                 normal_covector, lapse, shift, &face_data,
                 // The relaxed moments maintained by UpdateKretschmannFaceData,
                 // if the face has them; the instantaneous fit otherwise
-                face_data.filtered_moments)
+                face_data.filtered_moments, psi0_fixed_point_.has_value())
                 .incoming_mode;
       } else {
         (void)face_data;
@@ -825,7 +857,8 @@ std::optional<std::string> WorldtubeTypeD<Dim>::dg_time_derivative(
 template <size_t Dim>
 bool operator==(const WorldtubeTypeD<Dim> &lhs,
                 const WorldtubeTypeD<Dim> &rhs) {
-  return lhs.face_replay() == rhs.face_replay() and
+  return lhs.psi0_fixed_point() == rhs.psi0_fixed_point() and
+         lhs.face_replay() == rhs.face_replay() and
          lhs.constraint_v_psi() == rhs.constraint_v_psi() and
          lhs.constraint_v_zero() == rhs.constraint_v_zero() and
          lhs.constraint_v_minus() == rhs.constraint_v_minus() and

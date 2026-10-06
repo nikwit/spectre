@@ -20,6 +20,7 @@
 #include "Domain/Structure/SegmentId.hpp"
 #include "Domain/Tags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Actions/UpdateKretschmannFaceData.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matching.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/WeylCurvature.hpp"
@@ -29,6 +30,7 @@
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "NumericalAlgorithms/Spectral/QuadratureWeights.hpp"
+#include "PointwiseFunctions/ConstraintDamping/Constant.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Psi4Fit.hpp"
 #include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "Time/Slab.hpp"
@@ -139,6 +141,94 @@ void test_geometric_relaxation_face() {
       face.shift, &data, data.filtered_moments);
   CHECK(target.second_order->fit.components == *data.filtered_moments);
   CHECK(max(abs(get(target.psi0_target))) > 1.e-5);
+}
+
+void test_fixed_point_face() {
+  const auto setup = helpers::shell_element(16, 8, {{0., 0., 0.}}, 2.5, 3.);
+  const auto vars = setup.evolved_variables(0.);
+  const auto& metric = get<gr::Tags::SpacetimeMetric<DataVector, 3>>(vars);
+  const auto& pi = get<gh::Tags::Pi<DataVector, 3>>(vars);
+  const auto& phi = get<gh::Tags::Phi<DataVector, 3>>(vars);
+  KretschmannFaceData<3> data{};
+  gh::worldtube::update_kretschmann_face_data<3>(
+      make_not_null(&data), metric, pi, phi, setup.mesh, setup.inverse_jacobian,
+      setup.element, setup.domain.excision_spheres(), std::nullopt, 0.);
+  const auto original_k = data.kretschmann;
+  const auto original_dt_k = data.dt_kretschmann;
+  data.filtered_moments = gr::np::TidalMoments{};
+  data.quadrupole_relaxation.emplace();
+  const auto update = [&]() {
+    gh::worldtube::update_geometric_fixed_point(
+        make_not_null(&data), metric, pi, phi, setup.mesh,
+        setup.inverse_jacobian, setup.inertial_coords, 1., data.time, {});
+  };
+  update();
+  REQUIRE(data.psi0_fixed_point.has_value());
+  CHECK_FALSE(data.filtered_moments.has_value());
+  CHECK_FALSE(data.quadrupole_relaxation.has_value());
+  CHECK(data.kretschmann == original_k);
+  CHECK(data.dt_kretschmann == original_dt_k);
+  CHECK(max(abs(get(data.psi0_fixed_point->psi0_target))) < 1.e-10);
+  CHECK(serialize_and_deserialize(data) == data);
+  const auto first = *data.psi0_fixed_point;
+  update();
+  CHECK(*data.psi0_fixed_point == first);
+  // Exercise the actual RHS action: it must bypass the old measured-Psi0
+  // moment fit, and clear this cache again when another model is selected.
+  using BC = gh::BoundaryConditions::WorldtubeTypeD<3>;
+  using Sector = gh::BoundaryConditions::detail::SectorImposition;
+  std::vector<DirectionMap<
+      3, std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>>>
+      conditions(1);
+  conditions[0][*data.direction] = std::make_unique<BC>(
+      Sector::Bjorhus, Sector::Bjorhus, Sector::Frozen,
+      gh::BoundaryConditions::detail::GeometricFixedPoint{}, 1.);
+  const Slab slab{0., .1};
+  const TimeStepId id{true, 0, slab.start()};
+  const auto action = [&]() {
+    gh::worldtube::UpdateKretschmannFaceData<3>::apply(
+        make_not_null(&data), metric, pi, phi, setup.mesh,
+        setup.inverse_jacobian, setup.element, setup.domain, std::nullopt, 0.,
+        conditions, setup.inertial_coords, id,
+        ConstraintDamping::Constant<3, Frame::Grid>{.5}, {});
+  };
+  data.filtered_moments = gr::np::TidalMoments{};
+  action();
+  CHECK_FALSE(data.filtered_moments.has_value());
+  CHECK(*data.psi0_fixed_point == first);
+  conditions[0][*data.direction] = std::make_unique<BC>(
+      Sector::Bjorhus, Sector::Bjorhus, Sector::Frozen,
+      gh::worldtube::PhysicalModel::QuadrupoleGeometric, 1.);
+  action();
+  CHECK_FALSE(data.psi0_fixed_point.has_value());
+  CHECK(data.filtered_moments.has_value());
+  update();
+  // Recompute at a stage and on rollback: no iteration history is reused.
+  data.time = .05;
+  update();
+  CHECK(data.psi0_fixed_point->psi0_target == first.psi0_target);
+  data.time = 0.;
+  update();
+  CHECK(*data.psi0_fixed_point == first);
+  const auto face = gh::worldtube::face_curvature(
+      metric, pi, phi, setup.mesh, setup.inverse_jacobian, *data.direction);
+  const auto matching = [&]() {
+    return gh::worldtube::evaluate_matching(
+        gh::worldtube::PhysicalModel::QuadrupoleGeometric, 1., face.electric,
+        face.magnetic, face.spatial_metric, face.unit_normal_covector,
+        face.lapse, face.shift, &data, data.filtered_moments, true);
+  };
+  CHECK(matching().psi0_target == first.psi0_target);
+  data.filtered_moments = gr::np::TidalMoments{};
+  CHECK_THROWS_WITH(matching(), Catch::Matchers::ContainsSubstring(
+                                    "without imposed moments"));
+  data.filtered_moments.reset();
+  data.time = .1;
+  CHECK_THROWS_WITH(matching(), Catch::Matchers::ContainsSubstring(
+                                    "current converged target"));
+  data.psi0_fixed_point.reset();
+  CHECK_THROWS_WITH(matching(), Catch::Matchers::ContainsSubstring(
+                                    "current converged target"));
 }
 
 void test_third_order_face() {
@@ -533,6 +623,7 @@ SPECTRE_TEST_CASE(
     "[Unit][Evolution]") {
   test_geometric_face_geometry();
   test_geometric_relaxation_face();
+  test_fixed_point_face();
   test_third_order_face();
   test_radial_gauge_capture();
   test_quadrature_weights();

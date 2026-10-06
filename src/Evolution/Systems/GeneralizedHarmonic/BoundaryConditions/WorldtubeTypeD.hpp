@@ -46,6 +46,54 @@ template <size_t Dim, typename Frame> struct Coordinates;
 /// \endcond
 
 namespace gh::BoundaryConditions::detail {
+/// Explicit opt-in without changing the existing PhysicalModel YAML strings.
+struct GeometricFixedPoint {
+  struct RelativeTolerance {
+    using type = double;
+    static constexpr Options::String help{
+        "Relative undamped RMS residual tolerance."};
+  };
+  struct AbsoluteTolerance {
+    using type = double;
+    static constexpr Options::String help{
+        "Absolute RMS residual tolerance in curvature units."};
+  };
+  struct MaxIterations {
+    using type = size_t;
+    static constexpr Options::String help{
+        "Maximum number of geometric target evaluations per RHS."};
+  };
+  struct Damping {
+    using type = double;
+    static constexpr Options::String help{
+        "Iteration damping in (0,1]; does not relax in physical time."};
+  };
+  struct Parameters {
+    using options = tmpl::list<RelativeTolerance, AbsoluteTolerance,
+                               MaxIterations, Damping>;
+    static constexpr Options::String help{
+        "Solve Psi0 = geometric quadrupole target, starting from zero."};
+    double relative_tolerance{};
+    double absolute_tolerance{};
+    size_t max_iterations{};
+    double damping{};
+  };
+  struct QuadrupoleGeometricFixedPoint {
+    using type = Parameters;
+    static constexpr Options::String help{
+        "Refit frame, boost, map and moments at each trial Psi0. Holds "
+        "measured dK and dtK fixed. Requires MomentRelaxationTime: None."};
+  };
+  using options = tmpl::list<QuadrupoleGeometricFixedPoint>;
+  static constexpr Options::String help{
+      "Geometric quadrupole with an inner Psi0 fixed-point solve."};
+  GeometricFixedPoint() = default;
+  explicit GeometricFixedPoint(Parameters p)
+      : settings{p.relative_tolerance, p.absolute_tolerance, p.max_iterations,
+                 p.damping} {}
+  gr::np::GeometricFixedPointOptions settings{};
+};
+
 /// Explicit alternative to the legacy numeric NR-time relaxation interval.
 struct ModelTimeRelaxation {
   struct Timescale {
@@ -358,7 +406,8 @@ public:
   /// \brief Which model supplies the incoming radiation to the physical
   /// sector's Bjorhus term.
   struct PhysicalModel {
-    using type = detail::PhysicalModel;
+    using type =
+        std::variant<detail::PhysicalModel, detail::GeometricFixedPoint>;
     static constexpr Options::String help{
         "The incoming radiation the physical Bjorhus term drives the boundary "
         "towards: None (no incoming radiation, the outer-boundary condition), "
@@ -370,7 +419,11 @@ public:
         "UpdateKretschmannFaceData action), QuadrupoleGeometric (the same tide "
         "with common angular axes and dyad transport from the screen-metric "
         "Laplace eigenmap; requires a complete spherical-harmonic face on a "
-        "round coordinate sphere), ThirdOrderGeometric (adds electric and "
+        "round coordinate sphere), QuadrupoleGeometricFixedPoint: "
+        "{RelativeTolerance, AbsoluteTolerance, MaxIterations, Damping} "
+        "(solves the geometric target without reading the measured Psi0 slot; "
+        "requires MomentRelaxationTime: None), ThirdOrderGeometric (adds "
+        "electric and "
         "magnetic octupoles and causal, transported quadrupole derivatives; "
         "same sphere requirements, MomentRelaxationTime: None), or "
         "QuadrupoleCoulomb (order two "
@@ -434,7 +487,8 @@ public:
           detail::OutgoingDrivenGauge, detail::SchwarzschildReferenceGauge,
           worldtube::ReferenceReplayGauge, worldtube::RadialResponseGauge>
           gauge_sector,
-      detail::PhysicalModel physical_model,
+      std::variant<detail::PhysicalModel, detail::GeometricFixedPoint>
+          physical_model,
       std::optional<double> mass = std::nullopt,
       detail::MomentRelaxation moment_relaxation_time = std::nullopt,
       const Options::Context& context = {});
@@ -563,6 +617,10 @@ public:
   bool moment_relaxation_uses_model_time() const {
     return moment_relaxation_uses_model_time_;
   }
+  const std::optional<gr::np::GeometricFixedPointOptions>& psi0_fixed_point()
+      const {
+    return psi0_fixed_point_;
+  }
 
 private:
   detail::SectorImposition constraint_v_psi_{detail::SectorImposition::Bjorhus};
@@ -583,6 +641,7 @@ private:
   std::optional<double> mass_{};
   std::optional<double> moment_relaxation_time_{};
   bool moment_relaxation_uses_model_time_{false};
+  std::optional<gr::np::GeometricFixedPointOptions> psi0_fixed_point_{};
 };
 
 template <size_t Dim>

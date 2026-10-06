@@ -7,6 +7,7 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <limits>
 #include <utility>
 
 #include "DataStructures/DataVector.hpp"
@@ -15,6 +16,8 @@
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "NumericalAlgorithms/Spectral/QuadratureWeights.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/GeometricTide.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/GeometricTideFixedPoint.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/RestFrame.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Tetrad.hpp"
 #include "Utilities/ConstantExpressions.hpp"
 
@@ -128,6 +131,70 @@ void test_prescribed_tide(const double tilt) {
       labels, weights, mass, 8, evaluation.second_order.fit.components);
   CHECK_ITERABLE_APPROX(get(imposed.second_order.psi0_target),
                         get(evaluation.second_order.psi0_target));
+
+  // Analytic stationary Kerr-Schild gradient, held fixed during the solve.
+  const Scalar<DataVector> lapse{DataVector(np, 1. / sqrt(1.8))};
+  TriadVector shift(np, 0.);
+  tnsr::i<DataVector, 3, Frame::Inertial> d_k(np, 0.);
+  const Scalar<DataVector> dt_k{DataVector(np, 0.)};
+  for (size_t i = 0; i < 3; ++i) {
+    shift.get(i) = .8 / 1.8 * labels.get(i);
+    d_k.get(i) = -288. / pow(radius, 7) * labels.get(i);
+  }
+  GeometricFixedPointOptions settings{1.e-12, 1.e-22, 60, 1.};
+  const auto solve = [&]() {
+    return geometric_tide_fixed_point(psi, rotation, metric, labels, weights,
+                                      mass, 8, lapse, shift, d_k, dt_k,
+                                      settings);
+  };
+  const auto fixed = solve();
+  CHECK(fixed.diagnostics.iterations >= 2);
+  CHECK(fixed.diagnostics.relative_residual < 2.e-12);
+  CHECK(max(abs(get(fixed.geometric.second_order.psi0_target) - truth)) <
+        1.e-15);
+  // Direct incoming-slot independence includes nonfinite measured values.
+  psi.get(0) = std::complex<double>{.3, -.2};
+  CHECK(solve().geometric.second_order.psi0_target ==
+        fixed.geometric.second_order.psi0_target);
+  psi.get(0) =
+      std::complex<double>{std::numeric_limits<double>::quiet_NaN(), 0.};
+  CHECK(solve().geometric.second_order.psi0_target ==
+        fixed.geometric.second_order.psi0_target);
+  settings.damping = .5;
+  const auto damped = solve();
+  CHECK(damped.diagnostics.iterations > fixed.diagnostics.iterations);
+  CHECK(max(abs(get(damped.geometric.second_order.psi0_target) - truth)) <
+        1.e-15);
+  settings.damping = 1.e-8;
+  settings.max_iterations = 2;
+  CHECK_THROWS_WITH(solve(),
+                    Catch::Matchers::ContainsSubstring("failed to converge"));
+  settings.damping = 0.;
+  CHECK_THROWS_WITH(solve(),
+                    Catch::Matchers::ContainsSubstring(
+                        "Invalid geometric Psi0 fixed-point settings"));
+  settings = {1.e-12, 1.e-22, 60, 1.};
+  // Nonzero mixed slots exercise registration and its changing invariant boost.
+  psi.get(1) = std::complex<double>{1.e-4, -2.e-5};
+  psi.get(3) = std::complex<double>{-3.e-5, 2.e-4};
+  const auto mixed = solve();
+  psi.get(0) = get(mixed.geometric.second_order.psi0_target);
+  const auto final_registration = register_frame(psi, rotation, mass);
+  const auto final_rapidity = invariant_rapidity(
+      final_registration.member, rotation, metric, lapse, shift, d_k, dt_k);
+  const auto repeated = evaluate_geometric_second_order(
+      final_registration, final_rapidity, rotation, metric, labels, weights,
+      mass, 8);
+  CHECK(max(abs(get(repeated.second_order.psi0_target) - psi.get(0))) <
+        1.e-10 * max(abs(psi.get(0))));
+  // Zero-radiation case terminates without a relative-norm division by zero.
+  psi.get(1) = 0.;
+  psi.get(3) = 0.;
+  psi.get(4) = 0.;
+  const auto zero = solve();
+  CHECK(zero.diagnostics.iterations == 1);
+  CHECK(zero.diagnostics.absolute_residual == 0.);
+  CHECK(zero.diagnostics.relative_residual == 0.);
 }
 }  // namespace
 }  // namespace gr::np

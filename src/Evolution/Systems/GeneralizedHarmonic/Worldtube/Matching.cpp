@@ -95,7 +95,14 @@ MatchingEvaluation evaluate_matching(
     const Scalar<DataVector>& lapse,
     const tnsr::I<DataVector, 3, Frame::Inertial>& shift,
     const KretschmannFaceData<3>* const face_data,
-    const std::optional<gr::np::TidalMoments>& imposed_moments) {
+    const std::optional<gr::np::TidalMoments>& imposed_moments,
+    const bool use_fixed_point) {
+  if (use_fixed_point and
+      (model != PhysicalModel::QuadrupoleGeometric or imposed_moments)) {
+    ERROR(
+        "Geometric Psi0 fixed point requires QuadrupoleGeometric without "
+        "imposed moments");
+  }
   const size_t num_points = get_size(get<0>(unit_normal_covector));
   MatchingEvaluation result{};
   // The adapted triad takes the Euclidean direction of the normal covector;
@@ -133,8 +140,22 @@ MatchingEvaluation evaluate_matching(
           gr::np::psi0_leading(result.coulomb, result.type_d_rotation.b);
       break;
     }
-    case PhysicalModel::Quadrupole:
     case PhysicalModel::QuadrupoleGeometric:
+      if (use_fixed_point) {
+        if (face_data == nullptr or not face_data->direction or
+            not face_data->psi0_fixed_point or
+            face_data->psi0_fixed_point->time != face_data->time or
+            get(face_data->psi0_fixed_point->psi0_target).size() !=
+                num_points) {
+          ERROR(
+              "Geometric Psi0 fixed point needs its current converged target "
+              "from UpdateKretschmannFaceData");
+        }
+        result.psi0_target = face_data->psi0_fixed_point->psi0_target;
+        break;
+      }
+      [[fallthrough]];
+    case PhysicalModel::Quadrupole:
     case PhysicalModel::QuadrupoleCoulomb: {
       if (not mass.has_value()) {
         ERROR("PhysicalModel: " << model << " needs the mass of the hole.");

@@ -115,6 +115,70 @@ void validate_geometric_matching_face(
   }
 }
 
+void GeometricFixedPointFaceData::pup(PUP::er& p) {
+  p | time;
+  p | psi0_target;
+  p | diagnostics;
+}
+bool operator==(const GeometricFixedPointFaceData& a,
+                const GeometricFixedPointFaceData& b) {
+  return a.time == b.time and a.psi0_target == b.psi0_target and
+         a.diagnostics == b.diagnostics;
+}
+
+void update_geometric_fixed_point(
+    const gsl::not_null<KretschmannFaceData<3>*> data,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const double mass, const double time,
+    const gr::np::GeometricFixedPointOptions& options) {
+  data->psi0_fixed_point.reset();
+  data->filtered_moments.reset();
+  data->quadrupole_relaxation.reset();
+  if (not data->direction or data->time != time) {
+    ERROR(
+        "Update the Kretschmann data before geometric Psi0 fixed-point "
+        "matching");
+  }
+  validate_geometric_matching_face(coordinates, mesh, inverse_jacobian,
+                                   *data->direction);
+  const auto face = face_curvature(spacetime_metric, pi, phi, mesh,
+                                   inverse_jacobian, *data->direction);
+  const size_t np = get(face.lapse).size();
+  if (data->quadrature_weights.size() != np) {
+    ERROR("Geometric Psi0 fixed point requires full-sphere quadrature weights");
+  }
+  gr::np::TriadVector inward(np, 0.), labels(np, 0.);
+  const auto& normal = face.unit_normal_covector;
+  const DataVector norm = sqrt(square(normal.get(0)) + square(normal.get(1)) +
+                               square(normal.get(2)));
+  for (size_t i = 0; i < 3; ++i) {
+    inward.get(i) = normal.get(i) / norm;
+    labels.get(i) = -inward.get(i);
+  }
+  const auto rotation = gr::np::adapted_triad(face.spatial_metric, inward);
+  const auto psi = gr::np::weyl_scalars_from_electric_magnetic(
+      face.electric, face.magnetic, face.spatial_metric, inward);
+  const size_t grid_lmax = mesh.extents(1) - 1;
+  const char* setting = std::getenv("NP_GEOMETRIC_LMAX");
+  const size_t lmax =
+      setting == nullptr ? std::min(size_t{8}, grid_lmax) : std::stoul(setting);
+  if (lmax < 2 or lmax > grid_lmax) {
+    ERROR("NP_GEOMETRIC_LMAX must lie between 2 and the grid l_max");
+  }
+  auto solution = gr::np::geometric_tide_fixed_point(
+      psi, rotation, face.spatial_metric, labels, data->quadrature_weights,
+      mass, lmax, face.lapse, face.shift, data->d_kretschmann,
+      data->dt_kretschmann, options);
+  data->psi0_fixed_point = GeometricFixedPointFaceData{
+      time, std::move(solution.geometric.second_order.psi0_target),
+      solution.diagnostics};
+}
+
 void ThirdOrderFaceData::pup(PUP::er& p) {
   p | history;
   p | time;
@@ -297,6 +361,7 @@ void KretschmannFaceData<Dim>::pup(PUP::er& p) {
   p | filtered_moments;
   p | filtered_moments_time;
   p | third_order;
+  p | psi0_fixed_point;
   p | quadrupole_relaxation;
   p | initial_gauge_difference;
   p | radial_gauge;
@@ -311,7 +376,8 @@ bool operator==(const KretschmannFaceData<Dim>& lhs,
   const auto same_time = [](const double a, const double b) {
     return (std::isnan(a) and std::isnan(b)) or a == b;
   };
-  return lhs.quadrupole_relaxation == rhs.quadrupole_relaxation and
+  return lhs.psi0_fixed_point == rhs.psi0_fixed_point and
+         lhs.quadrupole_relaxation == rhs.quadrupole_relaxation and
          lhs.third_order == rhs.third_order and lhs.replay == rhs.replay and
          lhs.direction == rhs.direction and same_time(lhs.time, rhs.time) and
          lhs.kretschmann == rhs.kretschmann and

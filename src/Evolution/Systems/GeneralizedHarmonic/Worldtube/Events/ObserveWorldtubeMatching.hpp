@@ -81,6 +81,15 @@ using MatchingReductionData = Parallel::ReductionData<
     Parallel::ReductionDatum<double, funcl::Max<>>,
     Parallel::ReductionDatum<double, funcl::Max<>>,
     Parallel::ReductionDatum<double, funcl::Min<>>,
+    Parallel::ReductionDatum<double, funcl::Max<>>,
+    // Cached fixed-point solve: count, age, evaluations, residuals, ratio,
+    // target
+    Parallel::ReductionDatum<size_t, funcl::Plus<>>,
+    Parallel::ReductionDatum<double, funcl::Max<>>,
+    Parallel::ReductionDatum<size_t, funcl::Max<>>,
+    Parallel::ReductionDatum<double, funcl::Max<>>,
+    Parallel::ReductionDatum<double, funcl::Max<>>,
+    Parallel::ReductionDatum<double, funcl::Max<>>,
     Parallel::ReductionDatum<double, funcl::Max<>>>;
 
 /*!
@@ -133,6 +142,13 @@ using MatchingReductionData = Parallel::ReductionData<
  * \f$(-M/\Psi_2^K)^{1/3}\f$
  *
  * Elements abutting no excision sphere neither register nor contribute.
+ * FixedPointFaces counts faces with a cached converged solve. The appended
+ * MaxFixedPointTargetAge (absolute observation-time minus cache-time),
+ * MaxFixedPointIterations, MaxFixedPointAbsoluteResidual,
+ * MaxFixedPointRelativeResidual, MaxFixedPointResidualRatio and
+ * MaxAbsPsi0FixedPoint describe that cached RHS target, not a new solve at
+ * the observation time. These columns are zero when FixedPointFaces is zero.
+ * A small inner residual is not evidence of stable coupled evolution.
  */
 class ObserveWorldtubeMatching : public Event {
  private:

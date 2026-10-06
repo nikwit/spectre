@@ -103,7 +103,14 @@ std::vector<std::string> ObserveWorldtubeMatching::legend() {
           "MaxAbsPsi0Coulomb",
           "CoulombFitResidual",
           "MinCoulombRadius",
-          "MaxCoulombRadius"};
+          "MaxCoulombRadius",
+          "FixedPointFaces",
+          "MaxFixedPointTargetAge",
+          "MaxFixedPointIterations",
+          "MaxFixedPointAbsoluteResidual",
+          "MaxFixedPointRelativeResidual",
+          "MaxFixedPointResidualRatio",
+          "MaxAbsPsi0FixedPoint"};
 }
 
 std::optional<MatchingReductionData>
@@ -250,7 +257,25 @@ ObserveWorldtubeMatching::compute_reduction_data(
       max_abs_psi0_coulomb,
       coulomb_fit_residual,
       min_coulomb_radius,
-      max_coulomb_radius};
+      max_coulomb_radius,
+      face_data.psi0_fixed_point ? size_t{1} : size_t{0},
+      face_data.psi0_fixed_point ? abs(time - face_data.psi0_fixed_point->time)
+                                 : 0.,
+      face_data.psi0_fixed_point
+          ? face_data.psi0_fixed_point->diagnostics.iterations
+          : size_t{0},
+      face_data.psi0_fixed_point
+          ? face_data.psi0_fixed_point->diagnostics.absolute_residual
+          : 0.,
+      face_data.psi0_fixed_point
+          ? face_data.psi0_fixed_point->diagnostics.relative_residual
+          : 0.,
+      face_data.psi0_fixed_point
+          ? face_data.psi0_fixed_point->diagnostics.residual_ratio
+          : 0.,
+      face_data.psi0_fixed_point
+          ? max_abs(get(face_data.psi0_fixed_point->psi0_target))
+          : 0.};
 }
 
 void ObserveWorldtubeMatching::pup(PUP::er& p) {

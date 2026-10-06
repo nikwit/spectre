@@ -55,6 +55,65 @@ timestep or gauge simultaneously for that comparison. The single-hole
 `ReferenceReplay` and `RadialResponse` gauge prototypes require a static mesh
 and must not be copied to a moving binary run.
 
+## Inner fixed-point solve for Psi0
+
+To remove the direct algebraic dependence on the measured incoming Weyl slot,
+select the following explicit alternative to the string-valued physical model:
+
+```yaml
+PhysicalModel:
+  QuadrupoleGeometricFixedPoint:
+    RelativeTolerance: 1.e-10
+    AbsoluteTolerance: 1.e-14
+    MaxIterations: 20
+    Damping: 1.0
+MomentRelaxationTime: None
+```
+
+Keep the hole's `Mass`, CP, gauge, gamma2 and numerical settings unchanged.
+The numbers above are solver settings to test, not calibrated evolution
+parameters. `AbsoluteTolerance` is in curvature units; it is not mass-rescaled.
+Combining this mode with moment relaxation is rejected. Existing model strings
+retain their behavior and require no new options.
+
+Each RHS evaluation starts with trial Psi0 equal to zero, keeps measured
+Psi1..4 and the metric fixed, and repeatedly registers the frame, reconstructs
+the invariant boost and geometric angular map, refits the quadrupole from
+Psi4, and assembles the same geometric second-order incoming target. Neither
+the old Python QK refinement nor third-order physical columns are introduced.
+The update is `z <- z + Damping * (F(z) - z)`. Damping acts on inner iterations,
+not physical time. Full steps, stages and repeated evaluations all start afresh;
+no previous target or moment history seeds the solve.
+
+Convergence uses the **undamped** residual in fixed label-quadrature RMS:
+```
+norm(F(z)-z) <= AbsoluteTolerance
+               + RelativeTolerance * max(norm(F(z)), norm(z))
+```
+
+Only a converged `F(z)` is cached for the boundary condition. The residual
+describes the last tested iterate `z`. Nonconvergence or invalid frame/boost/map
+data stop with an error; there is no fallback to measured Psi0 or an unconverged
+target. The boundary checks cache time and point count before consuming it.
+
+`ObserveWorldtubeMatching` appends `FixedPointFaces`,
+`MaxFixedPointTargetAge`, `MaxFixedPointIterations`,
+`MaxFixedPointAbsoluteResidual`, `MaxFixedPointRelativeResidual`,
+`MaxFixedPointResidualRatio`, and `MaxAbsPsi0FixedPoint`. These describe the
+last cached RHS solve, whose absolute age relative to the observation is
+reported; they do not trigger a second solve. Values are zero without a cached
+solve, as indicated by `FixedPointFaces`. The residual ratio is the last over
+the preceding absolute residual (zero when no ratio exists). The older
+quadrupole columns still describe their original legacy diagnostic evaluator.
+
+The measured spatial and time derivatives of K remain fixed **inside** the
+solve and still come from the evolving interior. Thus incoming-slot independence
+is conditional on those derivatives. Feedback through them or through Psi4
+remains, and a convergent inner solve does not guarantee stable GH evolution.
+The map and five-component fit are recomputed every iteration, increasing cost.
+The round-sphere/full-face restrictions remain. Added serialized fields require
+a fresh or compatible volume-data start when upgrading an older executable.
+
 ## Relaxation for an evolving quadrupole
 
 For `QuadrupoleGeometric`, a numeric `MomentRelaxationTime` keeps its existing

@@ -101,6 +101,7 @@ struct UpdateKretschmannFaceData {
         data, spacetime_metric, pi, phi, mesh, inverse_jacobian, element,
         domain.excision_spheres(), mesh_velocity, time);
     if constexpr (Dim == 3) {
+      data->psi0_fixed_point.reset();
       // The relaxed tidal moments are only needed, and only defined, when the
       // excision face carries the order-two worldtube condition
       if (data->direction.has_value()) {
@@ -168,6 +169,13 @@ struct UpdateKretschmannFaceData {
             is_order_two(worldtube->physical_model())) {
           if (worldtube->physical_model() ==
               PhysicalModel::QuadrupoleGeometric) {
+            if (worldtube->psi0_fixed_point()) {
+              update_geometric_fixed_point(data, spacetime_metric, pi, phi,
+                                           mesh, inverse_jacobian, coordinates,
+                                           *worldtube->mass(), time,
+                                           *worldtube->psi0_fixed_point());
+              return;
+            }
             validate_geometric_matching_face(
                 coordinates, mesh, inverse_jacobian, *data->direction);
             if (worldtube->moment_relaxation_time()) {

@@ -143,9 +143,11 @@ Scalar<DataVector> normal_derivative_of_coulomb(
  * `KretschmannFaceData::filtered_moments` the boundary condition imposes.
  * `PhysicalModel::None` is not a model and is rejected.
  *
- * The construction consumes the interior \f$\Psi_0\f$ through the invariants
- * and the type-D solve, so an evolution imposing the result is the fixed
- * point iteration of the note's circularity discussion.
+ * With `use_fixed_point`, QuadrupoleGeometric consumes the converged target
+ * cached by the face-data action. Imposed moments are rejected in this mode.
+ * Otherwise the construction consumes the interior \f$\Psi_0\f$ through the
+ * invariants and the type-D solve, so an evolution imposing the result is the
+ * fixed point iteration of the note's circularity discussion.
  */
 MatchingEvaluation evaluate_matching(
     PhysicalModel model, std::optional<double> mass,
@@ -156,7 +158,8 @@ MatchingEvaluation evaluate_matching(
     const Scalar<DataVector>& lapse,
     const tnsr::I<DataVector, 3, Frame::Inertial>& shift,
     const KretschmannFaceData<3>* face_data,
-    const std::optional<gr::np::TidalMoments>& imposed_moments = std::nullopt);
+    const std::optional<gr::np::TidalMoments>& imposed_moments = std::nullopt,
+    bool use_fixed_point = false);
 }  // namespace gh::worldtube
 
 template <>

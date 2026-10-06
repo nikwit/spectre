@@ -69,7 +69,10 @@ TypeDRotation solve_type_d_rotation(const WeylScalars& psi,
     }
     const std::complex<double> b =
         psi.get(1)[p] / (3. * (1. + 2. * x) * get(coulomb)[p]);
-    if (std::abs(b) == 0. and std::abs(x) > 0.) {
+    // Apply the same alignment tolerance as the a_bar branch below before
+    // rejecting a transverse tetrad. Otherwise an O(epsilon) invariant
+    // perturbation with exactly zero Psi1 errors instead of staying aligned.
+    if (std::abs(b) == 0. and std::abs(x) > alignment_threshold) {
       ERROR(
           "Psi1 vanishes while a_bar*b does not; the Psi1/Psi2 equation pair "
           "cannot fix the rotation at point "

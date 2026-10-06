@@ -605,6 +605,47 @@ void test_option_parsing_and_serialization() {
                    gh::BoundaryConditions::detail::ModelTimeRelaxation{1.}}),
         Catch::Matchers::ContainsSubstring("ModelTime relaxation requires"));
   }
+  {
+    const auto created = TestHelpers::test_creation<
+        std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+        Metavariables>(
+        "WorldtubeTypeD:\n"
+        "  ConstraintPreservingSector: Bjorhus\n"
+        "  PhysicalSector: Bjorhus\n"
+        "  GaugeSector: SommerfeldAbsorbing\n"
+        "  PhysicalModel:\n"
+        "    QuadrupoleGeometricFixedPoint:\n"
+        "      RelativeTolerance: 1.e-10\n"
+        "      AbsoluteTolerance: 1.e-14\n"
+        "      MaxIterations: 20\n"
+        "      Damping: 0.7\n"
+        "  Mass: 1.0\n"
+        "  MomentRelaxationTime: None");
+    const auto* worldtube = dynamic_cast<const Worldtube*>(created.get());
+    REQUIRE(worldtube != nullptr);
+    REQUIRE(worldtube->psi0_fixed_point().has_value());
+    CHECK(worldtube->physical_model() == Model::QuadrupoleGeometric);
+    CHECK(worldtube->psi0_fixed_point()->damping == .7);
+    CHECK(worldtube->psi0_fixed_point()->max_iterations == 20);
+    CHECK(serialize_and_deserialize(*worldtube) == *worldtube);
+    using Fixed = gh::BoundaryConditions::detail::GeometricFixedPoint;
+    CHECK_THROWS_WITH(
+        (Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                   Imposition::SommerfeldAbsorbing, Fixed{}, 1., 1.}),
+        Catch::Matchers::ContainsSubstring(
+            "requires MomentRelaxationTime: None"));
+    for (const Fixed::Parameters bad : {Fixed::Parameters{-1., 1.e-14, 20, 1.},
+                                        {0., 0., 20, 1.},
+                                        {1.e-10, 0., 0, 1.},
+                                        {1.e-10, 0., 20, 0.},
+                                        {1.e-10, 0., 20, 1.1}}) {
+      CHECK_THROWS_WITH(
+          (Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                     Imposition::SommerfeldAbsorbing, Fixed{bad}, 1.}),
+          Catch::Matchers::ContainsSubstring(
+              "Invalid geometric Psi0 fixed-point settings"));
+    }
+  }
   CHECK_THROWS_WITH(
       (Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
                  Imposition::SommerfeldAbsorbing, Model::ThirdOrderGeometric,
@@ -1591,6 +1632,20 @@ void test_quadrupole_model_on_boosted_kerr_schild() {
                                fd_approx);
   CHECK_ITERABLE_CUSTOM_APPROX(with_quadrupole.dt_phi, with_type_d.dt_phi,
                                fd_approx);
+
+  // The fixed-point boundary must consume the cached target with exactly the
+  // same Weyl normalization and Bjorhus projection, without another fit.
+  {
+    auto cached = face_data;
+    cached.psi0_fixed_point = gh::worldtube::GeometricFixedPointFaceData{
+        cached.time, quadrupole.psi0_target, {3, 1.e-15, 1.e-11, .1}};
+    const auto correction = apply_worldtube(
+        Worldtube{Imposition::Bjorhus, Imposition::Bjorhus, Imposition::Frozen,
+                  gh::BoundaryConditions::detail::GeometricFixedPoint{}, 1.},
+        data, 0., sphere.domain, sphere.element, sphere.functions_of_time,
+        cached);
+    check_corrections_equal(correction, with_quadrupole);
+  }
 
   // With the fitted moments stored as the relaxed moments of the face data,
   // the condition skips the fit and imposes them: the same corrections

@@ -15,6 +15,7 @@
 #include "Domain/Structure/Direction.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/FaceReplay.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/RadialGauge.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/GeometricTideFixedPoint.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Psi4Fit.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/ThirdOrderTide.hpp"
 
@@ -33,6 +34,16 @@ class er;
 
 namespace gh::worldtube {
 enum class PhysicalModel;
+
+/// Stateless inner solve, refreshed once per RHS before boundary evaluation.
+struct GeometricFixedPointFaceData {
+  double time{};
+  Scalar<ComplexDataVector> psi0_target;
+  gr::np::GeometricFixedPointDiagnostics diagnostics;
+  void pup(PUP::er& p);
+};
+bool operator==(const GeometricFixedPointFaceData& a,
+                const GeometricFixedPointFaceData& b);
 
 /// Cached third-order target and causal history, owned by the worldtube
 /// element and serialized for migration/checkpointing. Diagnostics describe
@@ -101,6 +112,7 @@ struct KretschmannFaceData {
   double filtered_moments_time{std::numeric_limits<double>::signaling_NaN()};
 
   std::optional<ThirdOrderFaceData> third_order{};
+  std::optional<GeometricFixedPointFaceData> psi0_fixed_point{};
   /// Transported quadrupole filter history; legacy models do not use it.
   std::optional<gr::np::GeometricRelaxationHistory> quadrupole_relaxation{};
 
@@ -123,6 +135,17 @@ struct KretschmannFaceData {
 template <size_t Dim>
 bool operator==(const KretschmannFaceData<Dim>& lhs,
                 const KretschmannFaceData<Dim>& rhs);
+
+/// Requires current K derivatives; never advances their history in the solve.
+void update_geometric_fixed_point(
+    gsl::not_null<KretschmannFaceData<3>*> data,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates, double mass,
+    double time, const gr::np::GeometricFixedPointOptions& options);
 template <size_t Dim>
 bool operator!=(const KretschmannFaceData<Dim>& lhs,
                 const KretschmannFaceData<Dim>& rhs);
