@@ -84,6 +84,63 @@ void test_geometric_face_geometry() {
                         "complete spherical-harmonic inner face"));
 }
 
+void test_geometric_relaxation_face() {
+  const auto setup = helpers::shell_element(16, 8, {{0., 0., 0.}}, 2.5, 3.);
+  const auto vars = setup.evolved_variables(0.);
+  const auto& metric = get<gr::Tags::SpacetimeMetric<DataVector, 3>>(vars);
+  const auto& pi = get<gh::Tags::Pi<DataVector, 3>>(vars);
+  const auto& phi = get<gh::Tags::Phi<DataVector, 3>>(vars);
+  KretschmannFaceData<3> data{};
+  const auto update = [&](const TimeStepId& id) {
+    const double time = id.substep_time();
+    gh::worldtube::update_kretschmann_face_data<3>(
+        make_not_null(&data), metric, pi, phi, setup.mesh,
+        setup.inverse_jacobian, setup.element, setup.domain.excision_spheres(),
+        std::nullopt, time);
+    gh::worldtube::update_geometric_quadrupole_relaxation(
+        make_not_null(&data), metric, pi, phi, setup.mesh,
+        setup.inverse_jacobian, setup.inertial_coords, std::nullopt, 1., .5,
+        true, time, id);
+  };
+  const Slab slab{0., .1};
+  const TimeStepId start{true, 0, slab.start()};
+  update(start);
+  REQUIRE(data.quadrupole_relaxation.has_value());
+  REQUIRE(data.filtered_moments.has_value());
+  CHECK_FALSE(data.third_order.has_value());
+  CHECK(data.quadrupole_relaxation->samples.size() == 1);
+  CHECK(data.quadrupole_relaxation->samples.back().clock_rate ==
+        Approx::custom().epsilon(1.e-8).scale(1.)(1.));
+  // Inject a previous physical tide. It should decay into the zero-tide
+  // Schwarzschild fit, and the imposed target must consume this history.
+  const auto initial_raw = *data.filtered_moments;
+  auto& initial = data.quadrupole_relaxation->samples.back();
+  initial.filtered[0] += .001;
+  initial.filtered[1] -= .001;
+  const auto anchor = *data.quadrupole_relaxation;
+  const auto stage = start.next_substep(slab.duration(), .5);
+  update(stage);
+  CHECK(*data.quadrupole_relaxation == anchor);
+  const auto staged = *data.filtered_moments;
+  update(stage);
+  CHECK_ITERABLE_APPROX(*data.filtered_moments, staged);
+  CHECK(*data.quadrupole_relaxation == anchor);
+  update(start.next_step(slab.duration()));
+  CHECK(data.quadrupole_relaxation->samples.size() == 2);
+  CHECK(data.filtered_moments_time == .1);
+  const auto expected = initial_raw[0] + .001 * exp(-.1 / .5);
+  CHECK(abs((*data.filtered_moments)[0] - expected) < 1.e-10);
+  CHECK(serialize_and_deserialize(data) == data);
+  const auto face = gh::worldtube::face_curvature(
+      metric, pi, phi, setup.mesh, setup.inverse_jacobian, *data.direction);
+  const auto target = gh::worldtube::evaluate_matching(
+      gh::worldtube::PhysicalModel::QuadrupoleGeometric, 1., face.electric,
+      face.magnetic, face.spatial_metric, face.unit_normal_covector, face.lapse,
+      face.shift, &data, data.filtered_moments);
+  CHECK(target.second_order->fit.components == *data.filtered_moments);
+  CHECK(max(abs(get(target.psi0_target))) > 1.e-5);
+}
+
 void test_third_order_face() {
   const auto setup = helpers::shell_element(16, 8, {{0., 0., 0.}}, 2.5, 3.);
   const auto vars = setup.evolved_variables(0.);
@@ -475,6 +532,7 @@ SPECTRE_TEST_CASE(
     "Unit.Evolution.Systems.GeneralizedHarmonic.Worldtube.KretschmannFaceData",
     "[Unit][Evolution]") {
   test_geometric_face_geometry();
+  test_geometric_relaxation_face();
   test_third_order_face();
   test_radial_gauge_capture();
   test_quadrature_weights();

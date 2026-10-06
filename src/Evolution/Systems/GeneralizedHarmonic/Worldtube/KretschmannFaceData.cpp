@@ -136,8 +136,14 @@ bool operator==(const ThirdOrderFaceData& a, const ThirdOrderFaceData& b) {
          a.fit_condition == b.fit_condition;
 }
 
-void update_third_order_matching(
-    const gsl::not_null<KretschmannFaceData<3>*> data,
+namespace {
+struct GeometricMatchingGeometry {
+  gr::np::FrameRegistration registration;
+  gr::np::GeometricFrame frame;
+  gr::np::GeometricTimeData temporal;
+};
+GeometricMatchingGeometry prepare_geometric_matching(
+    const KretschmannFaceData<3>* data,
     const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
     const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
     const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
@@ -147,10 +153,10 @@ void update_third_order_matching(
     const std::optional<tnsr::I<DataVector, 3, Frame::Inertial>>& velocity,
     const double mass, const double time, const TimeStepId& time_id) {
   if (not data->direction.has_value() or time != data->time) {
-    ERROR("Update the Kretschmann data before third-order matching");
+    ERROR("Update the Kretschmann data before geometric matching");
   }
   if (not time_id.time_runs_forward()) {
-    ERROR("ThirdOrderGeometric supports forward evolution only");
+    ERROR("Geometric matching supports forward evolution only");
   }
   validate_geometric_matching_face(coordinates, mesh, inverse_jacobian,
                                    *data->direction);
@@ -184,7 +190,7 @@ void update_third_order_matching(
   const auto rotation = gr::np::adapted_triad(face.spatial_metric, inward);
   const auto psi = gr::np::weyl_scalars_from_electric_magnetic(
       face.electric, face.magnetic, face.spatial_metric, inward);
-  const auto registration = gr::np::register_frame(psi, rotation, mass);
+  auto registration = gr::np::register_frame(psi, rotation, mass);
   const auto rapidity = gr::np::invariant_rapidity(
       registration.member, rotation, face.spatial_metric, face.lapse,
       face.shift, data->d_kretschmann, data->dt_kretschmann);
@@ -195,12 +201,32 @@ void update_third_order_matching(
   if (lmax < 2 or lmax > grid_lmax) {
     ERROR("NP_GEOMETRIC_LMAX must lie between 2 and the grid l_max");
   }
-  const auto frame =
+  auto frame =
       gr::np::geometric_frame(registration, rapidity, rotation,
                               face.spatial_metric, labels, weights, mass, lmax);
   const auto temporal = gr::np::geometric_time_data(
       frame, labels, coordinate_radius, registration.measured_radius, mass,
       rotation, face.spatial_metric, face.lapse, face.shift, mesh_velocity);
+  return {std::move(registration), std::move(frame), temporal};
+}
+}  // namespace
+
+void update_third_order_matching(
+    const gsl::not_null<KretschmannFaceData<3>*> data,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const std::optional<tnsr::I<DataVector, 3, Frame::Inertial>>& velocity,
+    const double mass, const double time, const TimeStepId& time_id) {
+  const auto geometry = prepare_geometric_matching(
+      &*data, spacetime_metric, pi, phi, mesh, inverse_jacobian, coordinates,
+      velocity, mass, time, time_id);
+  const auto& registration = geometry.registration;
+  const auto& frame = geometry.frame;
+  const auto& temporal = geometry.temporal;
   const auto columns = gr::np::third_order_tide_columns(
       frame, registration.measured_radius, mass, temporal.slice_tilt);
   // This preliminary undotted fit is the same history variable as offline.
@@ -232,6 +258,32 @@ void update_third_order_matching(
   data->filtered_moments.reset();
 }
 
+void update_geometric_quadrupole_relaxation(
+    const gsl::not_null<KretschmannFaceData<3>*> data,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const std::optional<tnsr::I<DataVector, 3, Frame::Inertial>>& velocity,
+    const double mass, const double relaxation_time, const bool model_time,
+    const double time, const TimeStepId& time_id) {
+  const auto geometry = prepare_geometric_matching(
+      &*data, spacetime_metric, pi, phi, mesh, inverse_jacobian, coordinates,
+      velocity, mass, time, time_id);
+  const auto raw = gr::np::evaluate_geometric_second_order(
+      geometry.registration, geometry.frame, mass);
+  if (not data->quadrupole_relaxation)
+    data->quadrupole_relaxation.emplace();
+  data->filtered_moments = gr::np::relax_geometric_tidal_moments(
+      make_not_null(&*data->quadrupole_relaxation),
+      raw.second_order.fit.components, geometry.frame.map, geometry.temporal,
+      relaxation_time, model_time, time, time_id.step_time().value(),
+      time_id.substep() == 0);
+  data->filtered_moments_time = time;
+}
+
 template <size_t Dim>
 void KretschmannFaceData<Dim>::pup(PUP::er& p) {
   p | direction;
@@ -245,6 +297,7 @@ void KretschmannFaceData<Dim>::pup(PUP::er& p) {
   p | filtered_moments;
   p | filtered_moments_time;
   p | third_order;
+  p | quadrupole_relaxation;
   p | initial_gauge_difference;
   p | radial_gauge;
   p | replay;
@@ -258,7 +311,8 @@ bool operator==(const KretschmannFaceData<Dim>& lhs,
   const auto same_time = [](const double a, const double b) {
     return (std::isnan(a) and std::isnan(b)) or a == b;
   };
-  return lhs.third_order == rhs.third_order and lhs.replay == rhs.replay and
+  return lhs.quadrupole_relaxation == rhs.quadrupole_relaxation and
+         lhs.third_order == rhs.third_order and lhs.replay == rhs.replay and
          lhs.direction == rhs.direction and same_time(lhs.time, rhs.time) and
          lhs.kretschmann == rhs.kretschmann and
          lhs.d_kretschmann == rhs.d_kretschmann and

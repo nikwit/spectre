@@ -561,6 +561,7 @@ void test_option_parsing_and_serialization() {
     CHECK(worldtube->physical_model() == Model::QuadrupoleCoulomb);
     CHECK(worldtube->mass() == std::optional<double>{1.0});
     CHECK(worldtube->moment_relaxation_time() == std::optional<double>{5.0});
+    CHECK_FALSE(worldtube->moment_relaxation_uses_model_time());
   }
 
   {
@@ -579,6 +580,30 @@ void test_option_parsing_and_serialization() {
     CHECK(worldtube->physical_model() == Model::ThirdOrderGeometric);
     CHECK(worldtube->mass() == std::optional<double>{1.0});
     CHECK(serialize_and_deserialize(*worldtube) == *worldtube);
+  }
+  {
+    const auto created = TestHelpers::test_creation<
+        std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+        Metavariables>(
+        "WorldtubeTypeD:\n"
+        "  ConstraintPreservingSector: Bjorhus\n"
+        "  PhysicalSector: Bjorhus\n"
+        "  GaugeSector: SommerfeldAbsorbing\n"
+        "  PhysicalModel: QuadrupoleGeometric\n"
+        "  Mass: 1.0\n"
+        "  MomentRelaxationTime:\n"
+        "    ModelTime:\n"
+        "      Timescale: 1.5\n");
+    const auto* worldtube = dynamic_cast<const Worldtube*>(created.get());
+    REQUIRE(worldtube != nullptr);
+    CHECK(worldtube->moment_relaxation_time() == std::optional<double>{1.5});
+    CHECK(worldtube->moment_relaxation_uses_model_time());
+    CHECK(serialize_and_deserialize(*worldtube) == *worldtube);
+    CHECK_THROWS_WITH(
+        (Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                   Imposition::SommerfeldAbsorbing, Model::Quadrupole, 1.,
+                   gh::BoundaryConditions::detail::ModelTimeRelaxation{1.}}),
+        Catch::Matchers::ContainsSubstring("ModelTime relaxation requires"));
   }
   CHECK_THROWS_WITH(
       (Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,

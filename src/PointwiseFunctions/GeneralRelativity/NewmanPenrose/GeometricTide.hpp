@@ -30,6 +30,12 @@ EigenSphereMap laplace_eigenmap(const TriadVector& label_directions,
                                 const std::array<DataVector, 3>& h,
                                 size_t l_max);
 
+using SpatialRotation = std::array<std::array<double, 3>, 3>;
+/// Proper least-squares rotation mapping old directions to new directions.
+SpatialRotation sphere_map_rotation(const TriadVector& old_direction,
+                                    const TriadVector& new_direction,
+                                    const DataVector& weights);
+
 struct GeometricTideEvaluation {
   SecondOrderEvaluation second_order;
   EigenSphereMap map;
@@ -62,6 +68,12 @@ GeometricFrame geometric_frame(
 std::pair<DataVector, double> sphere_gradient_potential(
     const TriadVector& labels, const DataVector& weights,
     const std::array<DataVector, 2>& gradient, size_t l_max);
+
+/// Same quadrupole target using an already computed geometric frame.
+GeometricTideEvaluation evaluate_geometric_second_order(
+    const FrameRegistration& registration, const GeometricFrame& frame,
+    double mass,
+    const std::optional<TidalMoments>& imposed_components = std::nullopt);
 
 /// Geometric quadrupole on a round coordinate sphere. label_directions
 /// point away from its center, unlike the domain-outward inner normal.

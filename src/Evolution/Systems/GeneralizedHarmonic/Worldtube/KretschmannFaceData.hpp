@@ -101,6 +101,8 @@ struct KretschmannFaceData {
   double filtered_moments_time{std::numeric_limits<double>::signaling_NaN()};
 
   std::optional<ThirdOrderFaceData> third_order{};
+  /// Transported quadrupole filter history; legacy models do not use it.
+  std::optional<gr::np::GeometricRelaxationHistory> quadrupole_relaxation{};
 
   /// Initial q_minus - q_plus = -2 l^b n^i Phi_iab. Captured once,
   /// preserved across time-step self-start resets and serialized on migration.
@@ -156,6 +158,20 @@ void validate_geometric_matching_face(
     const InverseJacobian<DataVector, 3, Frame::ElementLogical,
                           Frame::Inertial>& inverse_jacobian,
     const Direction<3>& direction);
+
+/// Geometric quadrupole relaxation, using coordinates/mesh motion and step IDs
+/// to transport the boundary history independently of intermediate RHS calls.
+void update_geometric_quadrupole_relaxation(
+    gsl::not_null<KretschmannFaceData<3>*> data,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const std::optional<tnsr::I<DataVector, 3, Frame::Inertial>>& mesh_velocity,
+    double mass, double relaxation_time, bool model_time, double time,
+    const TimeStepId& time_id);
 
 /// Build and cache the third-order target once per RHS evaluation, after
 /// updating the curvature gradient. Only full-step samples enter history.

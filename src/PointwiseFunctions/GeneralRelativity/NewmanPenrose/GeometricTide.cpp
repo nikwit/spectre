@@ -122,6 +122,18 @@ V3 rotate(const M3& r, const V3& v) {
 }
 }  // namespace
 
+SpatialRotation sphere_map_rotation(const TriadVector& old_direction,
+                                    const TriadVector& new_direction,
+                                    const DataVector& weights) {
+  std::vector<V3> old(weights.size()), current(weights.size());
+  for (size_t p = 0; p < weights.size(); ++p)
+    for (size_t i = 0; i < 3; ++i) {
+      old[p][i] = old_direction.get(i)[p];
+      current[p][i] = new_direction.get(i)[p];
+    }
+  return rotation(old, current, weights);
+}
+
 EigenSphereMap laplace_eigenmap(const TriadVector& labels,
                                 const DataVector& weights,
                                 const std::array<DataVector, 3>& h, size_t lm) {
@@ -424,11 +436,17 @@ GeometricTideEvaluation evaluate_geometric_second_order(
     const tnsr::ii<DataVector, 3, Frame::Inertial>& metric,
     const TriadVector& labels, const DataVector& weights, double mass,
     size_t lm, const std::optional<TidalMoments>& imposed) {
-  const size_t np = weights.size();
-  auto frame = geometric_frame(registration, rapidity, rotation_matrix, metric,
-                               labels, weights, mass, lm);
+  const auto frame = geometric_frame(registration, rapidity, rotation_matrix,
+                                     metric, labels, weights, mass, lm);
+  return evaluate_geometric_second_order(registration, frame, mass, imposed);
+}
+
+GeometricTideEvaluation evaluate_geometric_second_order(
+    const FrameRegistration& registration, const GeometricFrame& frame,
+    const double mass, const std::optional<TidalMoments>& imposed) {
+  const size_t np = frame.map.weights.size();
   GeometricTideEvaluation result{};
-  result.map = std::move(frame.map);
+  result.map = frame.map;
   result.maximum_dyad_error = frame.maximum_dyad_error;
   std::array<Scalar<ComplexDataVector>, 5> c0{}, c4{};
   for (size_t a = 0; a < 5; ++a) {

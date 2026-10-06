@@ -157,6 +157,7 @@ struct UpdateKretschmannFaceData {
         }
         if (worldtube != nullptr and
             worldtube->physical_model() == PhysicalModel::ThirdOrderGeometric) {
+          data->quadrupole_relaxation.reset();
           update_third_order_matching(
               data, spacetime_metric, pi, phi, mesh, inverse_jacobian,
               coordinates, mesh_velocity, *worldtube->mass(), time, time_id);
@@ -169,7 +170,17 @@ struct UpdateKretschmannFaceData {
               PhysicalModel::QuadrupoleGeometric) {
             validate_geometric_matching_face(
                 coordinates, mesh, inverse_jacobian, *data->direction);
+            if (worldtube->moment_relaxation_time()) {
+              update_geometric_quadrupole_relaxation(
+                  data, spacetime_metric, pi, phi, mesh, inverse_jacobian,
+                  coordinates, mesh_velocity, *worldtube->mass(),
+                  *worldtube->moment_relaxation_time(),
+                  worldtube->moment_relaxation_uses_model_time(), time,
+                  time_id);
+              return;
+            }
           }
+          data->quadrupole_relaxation.reset();
           update_filtered_tidal_moments(
               data, spacetime_metric, pi, phi, mesh, inverse_jacobian,
               worldtube->physical_model(), *worldtube->mass(),
@@ -178,6 +189,7 @@ struct UpdateKretschmannFaceData {
         }
       }
       data->filtered_moments.reset();
+      data->quadrupole_relaxation.reset();
     } else {
       (void)external_boundary_conditions;
     }

@@ -21,9 +21,6 @@ using M3 = std::array<V3, 3>;
 using T3 = std::array<M3, 3>;
 using C3 = std::array<std::complex<double>, 3>;
 using V4 = std::array<double, 4>;
-double dot4(const V4& a, const V4& b) {
-  return -a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
-}
 V3 cross(const V3& a, const V3& b) {
   return {{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
            a[0] * b[1] - a[1] * b[0]}};
@@ -218,77 +215,6 @@ ThirdOrderFit fit_third_order_tide(const FrameRegistration& registration,
   return result;
 }
 
-GeometricTimeData geometric_time_data(
-    const GeometricFrame& frame, const TriadVector& labels, const double radius,
-    const Scalar<DataVector>& measured_radius, const double mass,
-    const RealMatrix& rotation,
-    const tnsr::ii<DataVector, 3, Frame::Inertial>& metric,
-    const Scalar<DataVector>& lapse, const TriadVector& shift,
-    const TriadVector& velocity) {
-  const size_t np = frame.map.weights.size();
-  const auto lower = cholesky_factor(metric);
-  GeometricTimeData result{};
-  result.minimum_clock_rate = std::numeric_limits<double>::infinity();
-  for (auto& component : result.flow)
-    component = DataVector(np, 0.);
-  std::array<DataVector, 2> gradient{{DataVector(np, 0.), DataVector(np, 0.)}};
-  double area = 0.;
-  for (size_t p = 0; p < np; ++p) {
-    const double f = 1. - 2. * mass / get(measured_radius)[p];
-    if (not(f > 0. and std::isfinite(f) and radius > 0.))
-      ERROR("Invalid geometric model clock geometry");
-    const double root_f = sqrt(f);
-    M3 transform{};
-    for (size_t i = 0; i < 3; ++i)
-      for (size_t j = 0; j < 3; ++j)
-        for (size_t k = 0; k < 3; ++k)
-          transform[i][j] += rotation.get(i, k)[p] * lower.get(j, k)[p];
-    V4 xi{{get(lapse)[p], 0., 0., 0.}}, observer{};
-    for (size_t i = 0; i < 4; ++i)
-      observer[i] = frame.observer.get(i)[p];
-    for (size_t i = 0; i < 3; ++i)
-      for (size_t j = 0; j < 3; ++j)
-        xi[i + 1] += transform[i][j] * (shift.get(j)[p] + velocity.get(j)[p]);
-    const V3 n{{labels.get(0)[p], labels.get(1)[p], labels.get(2)[p]}};
-    const double st = hypot(n[0], n[1]);
-    const V3 et{{n[2] * n[0] / st, n[2] * n[1] / st, -st}}, ep = cross(n, et);
-    std::array<V4, 2> screen{};
-    std::array<double, 2> covector{};
-    for (size_t a = 0; a < 2; ++a) {
-      const auto& tangent = a == 0 ? et : ep;
-      V4 original{};
-      for (size_t i = 0; i < 4; ++i)
-        screen[a][i] = radius * frame.screen[a].get(i)[p];
-      for (size_t i = 0; i < 3; ++i)
-        for (size_t j = 0; j < 3; ++j)
-          original[i + 1] += radius * transform[i][j] * tangent[j];
-      gradient[a][p] = -dot4(observer, original) / root_f;
-      covector[a] = dot4(screen[a], xi);
-    }
-    const double g00 = dot4(screen[0], screen[0]),
-                 g01 = dot4(screen[0], screen[1]),
-                 g11 = dot4(screen[1], screen[1]), det = g00 * g11 - g01 * g01;
-    if (not(det > 0.))
-      ERROR("Singular no-screen-flow metric");
-    result.flow[0][p] = (-g11 * covector[0] + g01 * covector[1]) / det;
-    result.flow[1][p] = (g01 * covector[0] - g00 * covector[1]) / det;
-    const double clock = -dot4(observer, xi) / root_f +
-                         result.flow[0][p] * gradient[0][p] +
-                         result.flow[1][p] * gradient[1][p];
-    if (not(clock > 0. and std::isfinite(clock)))
-      ERROR("Third-order matching requires a positive finite model clock");
-    result.minimum_clock_rate = std::min(result.minimum_clock_rate, clock);
-    result.clock_rate += frame.map.weights[p] * clock;
-    area += frame.map.weights[p];
-  }
-  result.clock_rate /= area;
-  auto potential =
-      sphere_gradient_potential(labels, frame.map.weights, gradient, 2);
-  result.slice_tilt = std::move(potential.first);
-  result.tilt_residual = potential.second;
-  return result;
-}
-
 void GeometricTideSample::pup(PUP::er& p) {
   p | time;
   p | quadrupole;
@@ -359,29 +285,8 @@ CausalTidalDerivative causal_tidal_derivative(
         direction_dt.get(i) += weights[a] * (nodes[a]->direction.get(i) -
                                              current.direction.get(i));
     }
-    M3 inertia{};
-    V3 rhs{};
-    for (size_t p = 0; p < np; ++p) {
-      V3 n{}, dn{};
-      for (size_t i = 0; i < 3; ++i) {
-        n[i] = current.direction.get(i)[p];
-        dn[i] = direction_dt.get(i)[p];
-        for (size_t a = 0; a < 2; ++a)
-          dn[i] += time_data.flow[a][p] * map.derivative[a].get(i)[p];
-      }
-      const auto angular = cross(n, dn);
-      for (size_t i = 0; i < 3; ++i) {
-        rhs[i] += map.weights[p] * angular[i];
-        for (size_t j = 0; j < 3; ++j)
-          inertia[i][j] += map.weights[p] * ((i == j ? 1. : 0.) - n[i] * n[j]);
-      }
-    }
-    auto aa = gsl_matrix_view_array(inertia[0].data(), 3, 3);
-    auto bb = gsl_vector_view_array(rhs.data(), 3);
-    auto xx = gsl_vector_view_array(result.angular_velocity.data(), 3);
-    if (gsl_linalg_cholesky_decomp(&aa.matrix) != 0 or
-        gsl_linalg_cholesky_solve(&aa.matrix, &bb.vector, &xx.vector) != 0)
-      ERROR("Geometric rotation connection solve failed");
+    result.angular_velocity =
+        geometric_rotation_rate(map, direction_dt, time_data.flow);
     M3 omega{};
     const auto& w = result.angular_velocity;
     omega[0][1] = -w[2];

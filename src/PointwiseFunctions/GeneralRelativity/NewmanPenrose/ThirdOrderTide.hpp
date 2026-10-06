@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <vector>
 
-#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/GeometricTide.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/GeometricTideTransport.hpp"
 #include "Utilities/Gsl.hpp"
 
 namespace PUP {
@@ -44,26 +44,6 @@ ThirdOrderFit fit_third_order_tide(const FrameRegistration& registration,
                                    const ThirdOrderColumns& columns,
                                    const DataVector& weights,
                                    const DottedTidalMoments& dots);
-
-struct GeometricTimeData {
-  /// Angular shift along the no-screen flow, in the label tangent basis.
-  std::array<DataVector, 2> flow;
-  DataVector slice_tilt;
-  double clock_rate{};
-  double minimum_clock_rate{};
-  double tilt_residual{};
-};
-
-/// Reconstruct tau = -u_flat/sqrt(f). Integrate its tangential part in
-/// l<=2 scalar harmonics (the offline linear/quadratic potential), fixing
-/// its mean with geometric weights. Clock rate follows the no-screen flow.
-GeometricTimeData geometric_time_data(
-    const GeometricFrame& frame, const TriadVector& labels,
-    double coordinate_radius, const Scalar<DataVector>& measured_radius,
-    double mass, const RealMatrix& adapted_rotation,
-    const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
-    const Scalar<DataVector>& lapse, const TriadVector& shift,
-    const TriadVector& mesh_velocity);
 
 struct GeometricTideSample {
   double time{};

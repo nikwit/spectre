@@ -46,6 +46,34 @@ template <size_t Dim, typename Frame> struct Coordinates;
 /// \endcond
 
 namespace gh::BoundaryConditions::detail {
+/// Explicit alternative to the legacy numeric NR-time relaxation interval.
+struct ModelTimeRelaxation {
+  struct Timescale {
+    using type = double;
+    static constexpr Options::String help{
+        "Positive relaxation interval in model-time units."};
+  };
+  struct Parameters {
+    using options = tmpl::list<Timescale>;
+    static constexpr Options::String help{"Model-time relaxation interval."};
+    double timescale{};
+  };
+  struct ModelTime {
+    using type = Parameters;
+    static constexpr Options::String help{"Use the geometric model clock."};
+  };
+  using options = tmpl::list<ModelTime>;
+  static constexpr Options::String help{
+      "Geometric quadrupole relaxation in the model clock."};
+  ModelTimeRelaxation() = default;
+  explicit ModelTimeRelaxation(Parameters parameters)
+      : timescale(parameters.timescale) {}
+  explicit ModelTimeRelaxation(double value) : timescale(value) {}
+  double timescale{};
+};
+using MomentRelaxation =
+    std::optional<std::variant<double, ModelTimeRelaxation>>;
+
 /// How one characteristic sector of the worldtube boundary condition is
 /// imposed.
 enum class SectorImposition {
@@ -365,24 +393,24 @@ public:
         "areal radius of the worldtube), None otherwise."};
   };
   /// \brief Relaxation time of the fitted tidal moments of the order-two
-  /// models, a first-order low-pass that breaks the feedback loop of the
-  /// order-two condition on itself.
+  /// models, a first-order low-pass intended to suppress rapid feedback.
   struct MomentRelaxationTime {
-    using type = Options::Auto<double, Options::AutoLabel::None>;
+    using type =
+        Options::Auto<std::variant<double, detail::ModelTimeRelaxation>,
+                      Options::AutoLabel::None>;
     static constexpr Options::String help{
-        "Order-two models only. Relax the five fitted tidal moments "
-        "toward the instantaneous fit on this timescale (first-order "
-        "low-pass) before they enter the target. Without it the condition "
-        "is unstable: the Psi0 it injects returns as Psi4 at the face, is "
-        "read as a tide and re-emitted amplified by the boost factor "
-        "((1+v)/(1-v))^2 of the slice, about one e-folding per M for a hole "
-        "excised at 2.5M. Choose it long compared to the light-crossing "
-        "time of the excision (several M) and short compared to the tidal "
-        "timescale; a first-order filter lags the tide by atan(2 Omega tau). "
-        "QuadrupoleCoulomb has no loop through Psi4 but a slow one with gain "
-        "just above one (its target sits 0.1-1% above the face Psi0, growth "
-        "about 0.03/M at 3M); 10M removes it. None imposes the "
-        "instantaneous fit."};
+        "A number uses NR-time units; ModelTime: {Timescale: value} uses the "
+        "geometric model clock (QuadrupoleGeometric only). The geometric "
+        "model transports moments between frames with full-step history. "
+        "None imposes the instantaneous fit. Order-two models only. Relax "
+        "the five complex STF tidal components toward the instantaneous "
+        "fit before they enter the target. The geometric model uses an "
+        "exponential step with linearly interpolated forcing; legacy models "
+        "retain their capped Euler update. For a physical harmonic at "
+        "frequency omega in the selected clock, the continuous filter "
+        "attenuates by 1/sqrt(1+(omega*tau)^2) and lags by atan(omega*tau). "
+        "Choose a timescale short compared with the physical tidal "
+        "timescale; relaxation alone does not guarantee coupled stability."};
   };
   using options =
       tmpl::list<ConstraintPreservingSector, PhysicalSector, GaugeSector,
@@ -408,7 +436,7 @@ public:
           gauge_sector,
       detail::PhysicalModel physical_model,
       std::optional<double> mass = std::nullopt,
-      std::optional<double> moment_relaxation_time = std::nullopt,
+      detail::MomentRelaxation moment_relaxation_time = std::nullopt,
       const Options::Context& context = {});
 
   WorldtubeTypeD() = default;
@@ -532,6 +560,9 @@ public:
   const std::optional<double> &moment_relaxation_time() const {
     return moment_relaxation_time_;
   }
+  bool moment_relaxation_uses_model_time() const {
+    return moment_relaxation_uses_model_time_;
+  }
 
 private:
   detail::SectorImposition constraint_v_psi_{detail::SectorImposition::Bjorhus};
@@ -551,6 +582,7 @@ private:
   detail::PhysicalModel physical_model_{detail::PhysicalModel::None};
   std::optional<double> mass_{};
   std::optional<double> moment_relaxation_time_{};
+  bool moment_relaxation_uses_model_time_{false};
 };
 
 template <size_t Dim>

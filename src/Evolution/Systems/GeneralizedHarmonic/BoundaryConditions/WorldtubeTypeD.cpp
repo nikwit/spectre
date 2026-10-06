@@ -169,7 +169,7 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
         gauge_sector,
     const detail::PhysicalModel physical_model,
     const std::optional<double> mass,
-    const std::optional<double> moment_relaxation_time,
+    const detail::MomentRelaxation moment_relaxation_time,
     const Options::Context& context)
     : constraint_v_psi_(
           resolve_constraint_sectors(constraint_preserving_sector).v_psi),
@@ -217,7 +217,24 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
               : std::nullopt),
       physical_model_(physical_model),
       mass_(mass),
-      moment_relaxation_time_(moment_relaxation_time) {
+      moment_relaxation_time_(
+          not moment_relaxation_time
+              ? std::nullopt
+              : std::optional<
+                    double>{std::holds_alternative<double>(
+                                *moment_relaxation_time)
+                                ? std::get<double>(*moment_relaxation_time)
+                                : std::get<detail::ModelTimeRelaxation>(
+                                      *moment_relaxation_time)
+                                      .timescale}),
+      moment_relaxation_uses_model_time_(
+          moment_relaxation_time and
+          std::holds_alternative<detail::ModelTimeRelaxation>(
+              *moment_relaxation_time)) {
+  if (moment_relaxation_uses_model_time_ and
+      physical_model != detail::PhysicalModel::QuadrupoleGeometric) {
+    PARSE_ERROR(context, "ModelTime relaxation requires QuadrupoleGeometric");
+  }
   if (std::holds_alternative<worldtube::ReferenceReplayGauge>(gauge_sector)) {
     face_replay_ =
         std::get<worldtube::ReferenceReplayGauge>(gauge_sector).parameters;
@@ -326,7 +343,8 @@ WorldtubeTypeD<Dim>::WorldtubeTypeD(
                       << physical_model_
                       << ". Set MomentRelaxationTime: None.");
     }
-    if (*moment_relaxation_time_ <= 0.) {
+    if (not(std::isfinite(*moment_relaxation_time_) and
+            *moment_relaxation_time_ > 0.)) {
       PARSE_ERROR(context, "MomentRelaxationTime must be positive, not "
                                << *moment_relaxation_time_);
     }
@@ -364,6 +382,7 @@ template <size_t Dim> void WorldtubeTypeD<Dim>::pup(PUP::er &p) {
   p | physical_model_;
   p | mass_;
   p | moment_relaxation_time_;
+  p | moment_relaxation_uses_model_time_;
   p | face_replay_;
 }
 
@@ -818,7 +837,9 @@ bool operator==(const WorldtubeTypeD<Dim> &lhs,
          lhs.schwarzschild_reference() == rhs.schwarzschild_reference() and
          lhs.physical_model() == rhs.physical_model() and
          lhs.mass() == rhs.mass() and
-         lhs.moment_relaxation_time() == rhs.moment_relaxation_time();
+         lhs.moment_relaxation_time() == rhs.moment_relaxation_time() and
+         lhs.moment_relaxation_uses_model_time() ==
+             rhs.moment_relaxation_uses_model_time();
 }
 
 template <size_t Dim>

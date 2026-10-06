@@ -55,6 +55,49 @@ timestep or gauge simultaneously for that comparison. The single-hole
 `ReferenceReplay` and `RadialResponse` gauge prototypes require a static mesh
 and must not be copied to a moving binary run.
 
+## Relaxation for an evolving quadrupole
+
+For `QuadrupoleGeometric`, a numeric `MomentRelaxationTime` keeps its existing
+NR-time units. Relaxation now transports the complex STF tensor `H = E + iB`
+into the current auxiliary axes before averaging it. Finite angular-map
+alignment, corrected by the no-screen flow at both endpoints, separates grid
+motion from physical tidal rotation. The shared clock/rotation machinery
+does not add third-order physical terms.
+
+To specify the interval in geometric model-time units instead, use:
+
+```yaml
+MomentRelaxationTime:
+  ModelTime:
+    Timescale: 1.5
+```
+
+The number is an example, not a calibrated stability choice. There is no
+automatic mass rescaling. `None` remains the instantaneous fit; the legacy
+`Quadrupole` and `QuadrupoleCoulomb` numeric filters remain unchanged.
+
+The transported filter uses an exponential step with linearly interpolated
+forcing and a trapezoidal model-clock integral. Smooth forcing and transport
+give second-order time accuracy without an explicit-Euler restriction on
+step size versus relaxation interval. A physical harmonic still experiences
+the low-pass attenuation and phase lag; the transport removes spurious lag
+due to axis/grid rotation, not the lag of a real binary tide.
+
+Six full-step anchors are retained and serialized. RHS stages leave them
+unchanged; repeated endpoints recompute from the preceding anchor. Rollback
+restores retained history. A new history, changed angular resolution or
+rollback before retained history initializes from the raw fit. Checkpoints
+from an older executable lack the added serialized fields: use a fresh or
+volume-data start, not an old binary checkpoint. The existing `dt K`
+geometry estimate is unchanged, so stage isolation of the filter is not a
+stage-independence claim for the entire frame reconstruction.
+
+Native tests cover independent axis/grid rotations, evolving electric and
+magnetic tides, a changing clock, analytic rotating-quadrupole response,
+second-order convergence, rollback, serialization and target consumption.
+Coupled BBH stability and an appropriate relaxation interval remain to be
+tested in evolution.
+
 ## Third-order matching
 
 Use the following settings to add the documented third-order terms:
@@ -69,8 +112,8 @@ The complete example input selects this model. Replace it with
 `QuadrupoleGeometric` for the second-order control, keeping the mass, gauge,
 mesh and time-step settings fixed. Both models have the round inertial-sphere
 restriction below. The third-order model currently requires forward time
-evolution and `MomentRelaxationTime: None`; the older component-wise filter
-is not a consistently transported third-order history.
+evolution and `MomentRelaxationTime: None`; the transported quadrupole filter
+does not supply a consistent filtered octupole/dotted-quadrupole history.
 
 At each RHS evaluation, the third-order model uses the same leading NP
 registration, invariant radius/boost, screen eigenmap and polar-transported
