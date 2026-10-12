@@ -9,6 +9,7 @@ spectre_python_add_module(
   MODULE_PATH "NumericalAlgorithms"
   SOURCES
   Bindings.cpp
+  Chalmers.cpp
   DefiniteIntegral.cpp
   PartialDerivatives.cpp
   PowerMonitors.cpp
@@ -20,6 +21,7 @@ spectre_python_headers(
   ${LIBRARY}
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
+  Chalmers.hpp
   DefiniteIntegral.hpp
   PartialDerivatives.hpp
   PowerMonitors.hpp

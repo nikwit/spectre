@@ -12,6 +12,7 @@ set(LIBRARY_SOURCES
   Filters/Test_SphericalShell.cpp
   Filters/Test_Tag.cpp
   Test_CoefficientTransforms.cpp
+  Test_Chalmers.cpp
   Test_DefiniteIntegral.cpp
   Test_Divergence.cpp
   Test_IndefiniteIntegral.cpp
