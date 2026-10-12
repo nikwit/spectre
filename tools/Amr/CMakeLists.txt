@@ -25,6 +25,7 @@ spectre_python_add_module(
   ChalmersCoarseningExperiment.py
   ChalmersSpecCoarsening.py
   ChalmersTiltedKerr.py
+  ChalmersBbh.py
   ChalmersGaugeRelaxationReference.py
   ChalmersSphericalReference.py
   ChalmersMeshHistory.py

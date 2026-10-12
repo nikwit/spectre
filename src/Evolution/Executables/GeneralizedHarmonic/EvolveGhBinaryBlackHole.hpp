@@ -62,6 +62,7 @@
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/DirichletMinkowski.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/Factory.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryCorrections/Factory.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/ChalmersWithSpecCoarsening.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Characteristics.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Equations.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Factory.hpp"
@@ -480,6 +481,7 @@ struct EvolutionMetavars {
             tmpl::push_back<
                 amr::Criteria::standard_criteria<
                     volume_dim, typename system::variables_tag::tags_list>,
+                gh::ChalmersWithSpecCoarsening,
                 amr::Criteria::Constraints<
                     volume_dim,
                     tmpl::list<gh::Tags::ThreeIndexConstraintCompute<
@@ -616,6 +618,7 @@ struct EvolutionMetavars {
           evolution::dg::Initialization::Domain<EvolutionMetavars,
                                                 use_control_systems>,
           ::amr::Initialization::Initialize<volume_dim, EvolutionMetavars>>,
+      Initialization::Actions::InitializeItems<gh::spec_amr::InitializeHistory>,
       Initialization::Actions::NonconservativeSystem<system>,
       Initialization::Actions::InitializeItems<
           Initialization::TimeStepperHistory<system>>,
@@ -717,6 +720,7 @@ struct EvolutionMetavars {
   struct amr : tt::ConformsTo<::amr::protocols::AmrMetavariables> {
     using element_array = gh_dg_element_array;
     using projectors = tmpl::list<
+        gh::spec_amr::ProjectHistory,
         Initialization::ProjectTimeStepping<volume_dim>,
         evolution::dg::Initialization::ProjectDomain<volume_dim>,
         ::amr::projectors::ProjectVariables<volume_dim,
