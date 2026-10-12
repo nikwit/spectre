@@ -76,8 +76,9 @@ namespace amr::Actions {
 /// - Evaluates each refinement criteria held by amr::Criteria::Tags::Criteria,
 ///   and in each dimension selects the amr::Flag with the highest
 ///   priority (i.e the highest integral value).  If
-///   Metavariables::amr::p_refine_only_in_event is true, only h-refinement
-///   criteria will be evaluated
+///   Metavariables::amr::p_refine_only_in_event is true, pure p-refinement
+///   criteria are skipped. Joint hp criteria always run here so their choice
+///   is made once, before either mesh change.
 /// - If necessary, changes the refinement decision in order to satisfy the
 ///   amr::Policies
 /// - An Element that is splitting in one dimension is not allowed to join
@@ -132,8 +133,10 @@ struct EvaluateRefinementCriteria {
             refinement_type == amr::Criteria::Type::p) {
           continue;
         }
-        auto decision = criterion->evaluate(observation_box, cache, element_id);
-        if constexpr (Metavariables::amr::p_refine_only_in_event) {
+        auto decision = criterion->evaluate_and_update(
+            make_not_null(&observation_box), cache, element_id);
+        if (Metavariables::amr::p_refine_only_in_event and
+            refinement_type == amr::Criteria::Type::h) {
           ASSERT(alg::none_of(decision,
                               [](amr::Flag flag) {
                                 return flag == amr::Flag::IncreaseResolution or
@@ -154,6 +157,26 @@ struct EvaluateRefinementCriteria {
         } else if (refinement_type == amr::Criteria::Type::h) {
           enforce_h_refinement_topology_restrictions(make_not_null(&decision),
                                                      topologies);
+        } else if (refinement_type == amr::Criteria::Type::hp) {
+          auto h_decision = decision;
+          auto p_decision = decision;
+          for (size_t d = 0; d < volume_dim; ++d) {
+            if (decision[d] == Flag::Split or decision[d] == Flag::Join) {
+              p_decision[d] = Flag::DoNothing;
+            } else {
+              h_decision[d] = Flag::DoNothing;
+            }
+          }
+          enforce_h_refinement_topology_restrictions(make_not_null(&h_decision),
+                                                     topologies);
+          enforce_p_refinement_topology_restrictions(make_not_null(&p_decision),
+                                                     topologies);
+          for (size_t d = 0; d < volume_dim; ++d) {
+            decision[d] = h_decision[d] == Flag::DoNothing ? p_decision[d]
+                          : p_decision[d] == Flag::DoNothing
+                              ? h_decision[d]
+                              : std::max(h_decision[d], p_decision[d]);
+          }
         } else {
           ERROR("Bad refinement type " << refinement_type);
         }

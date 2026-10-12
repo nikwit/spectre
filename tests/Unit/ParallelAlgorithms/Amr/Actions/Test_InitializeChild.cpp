@@ -50,7 +50,8 @@ struct Component {
   using simple_tags = tmpl::list<
       domain::Tags::Element<volume_dim>, domain::Tags::Mesh<volume_dim>,
       domain::Tags::NeighborMesh<volume_dim>, amr::Tags::Info<volume_dim>,
-      amr::Tags::NeighborInfo<volume_dim>>;
+      amr::Tags::NeighborInfo<volume_dim>,
+      amr::Tags::CriterionNeighborData<volume_dim>>;
   using phase_dependent_action_list = tmpl::list<Parallel::PhaseActions<
       Parallel::Phase::Initialization,
       tmpl::list<ActionTesting::InitializeDataBox<simple_tags>>>>;
@@ -109,9 +110,11 @@ void test() {
       amr::Info<2>{std::array{amr::Flag::DoNothing, amr::Flag::Split},
                    neighbor_mesh});
   const tuples::TaggedTuple<domain::Tags::Element<2>, domain::Tags::Mesh<2>,
-                            amr::Tags::Info<2>, amr::Tags::NeighborInfo<2>>
+                            amr::Tags::Info<2>, amr::Tags::NeighborInfo<2>,
+                            amr::Tags::CriterionNeighborData<2>>
       parent_items{std::move(parent), std::move(parent_mesh),
-                   std::move(parent_info), std::move(parent_neighbor_info)};
+                   std::move(parent_info), std::move(parent_neighbor_info),
+                   amr::CriterionNeighborData<2>{17, true, std::nullopt}};
 
   const ElementId<2> child_id{0, std::array{SegmentId{3, 3}, SegmentId{0, 0}}};
   const ElementId<2> expected_child_upper_neighbor_id_0{
@@ -161,6 +164,13 @@ void test() {
             .empty());
   ActionTesting::simple_action<array_component, amr::Actions::InitializeChild>(
       make_not_null(&runner), child_id, parent_items);
+  const auto& criterion_state =
+      ActionTesting::get_databox_tag<array_component,
+                                     amr::Tags::CriterionNeighborData<2>>(
+          runner, child_id);
+  CHECK(criterion_state.round == 17);
+  CHECK_FALSE(criterion_state.waiting);
+  CHECK_FALSE(criterion_state.sibling.has_value());
   CHECK(
       ActionTesting::get_databox_tag<array_component, domain::Tags::Element<2>>(
           runner, child_id) == expected_child);

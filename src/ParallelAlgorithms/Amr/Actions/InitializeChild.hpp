@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "DataStructures/DataBox/DataBox.hpp"
+#include "DataStructures/DataBox/TagTraits.hpp"
 #include "DataStructures/TaggedTuple.hpp"
 #include "Domain/Amr/Flag.hpp"
 #include "Domain/Amr/NeighborsOfChild.hpp"
@@ -25,6 +26,7 @@
 #include "Domain/Tags/NeighborMesh.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "Parallel/ElementRegistration.hpp"
+#include "ParallelAlgorithms/Amr/CriterionData.hpp"
 #include "ParallelAlgorithms/Amr/Projectors/Mesh.hpp"
 #include "ParallelAlgorithms/Amr/Tags.hpp"
 #include "ParallelAlgorithms/Initialization/MutateAssign.hpp"
@@ -74,6 +76,20 @@ struct InitializeChild {
         amr::projectors::mesh(parent_mesh, parent_info.flags);
     if (not domain::is_valid_dg_mesh(child_mesh, child)) {
       ERROR("Invalid mesh " << child_mesh << " for Element " << child);
+    }
+
+    if constexpr (db::tag_is_retrievable_v<
+                      amr::Tags::CriterionNeighborData<volume_dim>,
+                      db::DataBox<DbTagList>>) {
+      db::mutate<amr::Tags::CriterionNeighborData<volume_dim>>(
+          [&parent_items](const auto state) {
+            state->clear();
+            state->round =
+                tuples::get<amr::Tags::CriterionNeighborData<volume_dim>>(
+                    parent_items)
+                    .round;
+          },
+          make_not_null(&box));
     }
 
     // Default initialization of amr::Tags::Info and amr::Tags::NeighborInfo

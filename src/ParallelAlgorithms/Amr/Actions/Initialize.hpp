@@ -12,6 +12,7 @@
 #include "Domain/Amr/Tags/NeighborFlags.hpp"
 #include "IO/Observer/Tags.hpp"
 #include "Parallel/Tags/Section.hpp"
+#include "ParallelAlgorithms/Amr/CriterionData.hpp"
 #include "ParallelAlgorithms/Amr/Protocols/AmrMetavariables.hpp"
 #include "ParallelAlgorithms/Amr/Tags.hpp"
 #include "Utilities/Gsl.hpp"
@@ -37,7 +38,9 @@ struct Initialize {
   using argument_tags = tmpl::list<>;
   using return_tags = tmpl::list<amr::Tags::Info<Dim>>;
   using simple_tags = tmpl::append<
-      return_tags, tmpl::list<amr::Tags::NeighborInfo<Dim>>,
+      return_tags,
+      tmpl::list<amr::Tags::NeighborInfo<Dim>,
+                 amr::Tags::CriterionNeighborData<Dim>>,
       tmpl::conditional_t<
           Metavariables::amr::keep_coarse_grids,
           tmpl::list<

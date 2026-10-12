@@ -14,7 +14,8 @@
 
 namespace {
 std::vector<amr::Criteria::Type> known_amr_criteria_types() {
-  return std::vector{amr::Criteria::Type::h, amr::Criteria::Type::p};
+  return std::vector{amr::Criteria::Type::h, amr::Criteria::Type::p,
+                     amr::Criteria::Type::hp};
 }
 }  // namespace
 
@@ -27,6 +28,9 @@ std::ostream& operator<<(std::ostream& os, const Type& type) {
       break;
     case Type::p:
       os << "p";
+      break;
+    case Type::hp:
+      os << "hp";
       break;
     default:  // LCOV_EXCL_LINE
       // LCOV_EXCL_START

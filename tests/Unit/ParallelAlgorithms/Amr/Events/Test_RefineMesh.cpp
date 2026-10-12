@@ -56,6 +56,7 @@ static_assert(
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
+template <amr::Criteria::Type Type = amr::Criteria::Type::p>
 class BadCriterion : public amr::Criterion {
  public:
   using options = tmpl::list<>;
@@ -65,7 +66,7 @@ class BadCriterion : public amr::Criterion {
   using PUP::able::register_constructor;
   WRAPPED_PUPable_decl_template(BadCriterion);  // NOLINT
 
-  amr::Criteria::Type type() override { return amr::Criteria::Type::p; }
+  amr::Criteria::Type type() override { return Type; }
 
   std::string observation_name() override { return "BadCriterion"; }
 
@@ -82,7 +83,8 @@ class BadCriterion : public amr::Criterion {
   void pup(PUP::er& p) override { Criterion::pup(p); }
 };
 
-PUP::able::PUP_ID BadCriterion::my_PUP_ID = 0;  // NOLINT
+template <amr::Criteria::Type Type>
+PUP::able::PUP_ID BadCriterion<Type>::my_PUP_ID = 0;  // NOLINT
 #pragma GCC diagnostic pop
 
 template <typename Metavariables>
@@ -161,7 +163,8 @@ struct Metavariables {
         tmpl::pair<
             amr::Criterion,
             tmpl::list<
-                BadCriterion, amr::Criteria::IncreaseResolution<1>,
+                BadCriterion<>, BadCriterion<amr::Criteria::Type::hp>,
+                amr::Criteria::IncreaseResolution<1>,
                 amr::Criteria::DriveToTarget<1, amr::Criteria::Type::p>,
                 amr::Criteria::DriveToTarget<1, amr::Criteria::Type::h>>>>;
   };
@@ -213,6 +216,10 @@ void test(const Event& event, const Event& observe_event) {
     std::vector<std::unique_ptr<amr::Criterion>> criteria{};
     criteria.emplace_back(
         std::make_unique<amr::Criteria::IncreaseResolution<1>>());
+    // A joint hp criterion belongs exclusively to the domain-adjustment phase.
+    // Evaluating this here would incorrectly request a split in a p event.
+    criteria.emplace_back(
+        std::make_unique<BadCriterion<amr::Criteria::Type::hp>>());
     // this should be ignored...
     criteria.emplace_back(
         std::make_unique<
@@ -331,7 +338,7 @@ void test(const Event& event, const Event& observe_event) {
     INFO("Test h-refinement error");
     // Try to use a bad criterion
     std::vector<std::unique_ptr<amr::Criterion>> criteria{};
-    criteria.emplace_back(std::make_unique<BadCriterion>());
+    criteria.emplace_back(std::make_unique<BadCriterion<>>());
     ActionTesting::MockRuntimeSystem<Metavariables> runner{
         {std::move(criteria), ::Verbosity::Debug}};
     ActionTesting::emplace_group_component<observer_component>(&runner);

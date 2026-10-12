@@ -8,6 +8,7 @@
 #include <unordered_set>
 
 #include "DataStructures/DataBox/DataBox.hpp"
+#include "DataStructures/DataBox/TagTraits.hpp"
 #include "Domain/Amr/Flag.hpp"
 #include "Domain/Amr/Helpers.hpp"
 #include "Domain/Amr/NewNeighborIds.hpp"
@@ -34,6 +35,7 @@
 #include "Parallel/Tags/Section.hpp"
 #include "ParallelAlgorithms/Amr/Actions/CreateChild.hpp"
 #include "ParallelAlgorithms/Amr/Actions/CreateParent.hpp"
+#include "ParallelAlgorithms/Amr/CriterionData.hpp"
 #include "ParallelAlgorithms/Amr/Projectors/Mesh.hpp"
 #include "ParallelAlgorithms/Amr/Protocols/Projector.hpp"
 #include "ParallelAlgorithms/Amr/Tags.hpp"
@@ -107,6 +109,7 @@ struct AdjustDomain {
           typename ::Parallel::Tags::distributed_object_tags<
               Metavariables, ElementId<volume_dim>>;
       using tags_mutated_by_this_action = tmpl::list<
+          amr::Tags::CriterionNeighborData<volume_dim>,
           ::domain::Tags::Element<volume_dim>, ::domain::Tags::Mesh<volume_dim>,
           ::domain::Tags::NeighborMesh<volume_dim>, amr::Tags::Info<volume_dim>,
           amr::Tags::NeighborInfo<volume_dim>, amr::Tags::ParentId<volume_dim>,
@@ -279,6 +282,13 @@ struct AdjustDomain {
                     << e.what());
             }
           });
+
+      if constexpr (db::tag_is_retrievable_v<
+                        amr::Tags::CriterionNeighborData<volume_dim>,
+                        db::DataBox<DbTagList>>) {
+        db::mutate<amr::Tags::CriterionNeighborData<volume_dim>>(
+            [](const auto state) { state->clear(); }, make_not_null(&box));
+      }
 
       // Reset the AMR flags
       db::mutate<amr::Tags::Info<volume_dim>,

@@ -13,9 +13,10 @@
 SPECTRE_TEST_CASE("Unit.Amr.Criteria.Type", "[Unit][ParallelAlgorithms]") {
   CHECK(get_output(amr::Criteria::Type::h) == "h");
   CHECK(get_output(amr::Criteria::Type::p) == "p");
+  CHECK(get_output(amr::Criteria::Type::hp) == "hp");
 
-  const std::vector known_amr_types{amr::Criteria::Type::h,
-                                    amr::Criteria::Type::p};
+  const std::vector known_amr_types{
+      amr::Criteria::Type::h, amr::Criteria::Type::p, amr::Criteria::Type::hp};
 
   for (const auto type : known_amr_types) {
     CHECK(type ==

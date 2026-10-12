@@ -22,6 +22,7 @@ spectre_target_headers(
   ${LIBRARY}
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
+  Chalmers.hpp
   Constraints.hpp
   Criteria.hpp
   Criterion.hpp

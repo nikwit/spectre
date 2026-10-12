@@ -20,7 +20,8 @@ namespace amr::Criteria {
 /// \brief Type of mesh refinement
 enum class Type : uint8_t {
   h, /**< Used to split or join elements */
-  p  /**< used to change the extents of a Mesh in an Element */
+  p, /**< used to change the extents of a Mesh in an Element */
+  hp /**< jointly chooses h or p changes in the domain-adjustment phase */
 };
 
 /// Output operator for a Type.

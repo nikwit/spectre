@@ -59,7 +59,7 @@ auto wants_to_increase_resolution() {
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
-template <size_t Dim>
+template <size_t Dim, amr::Criteria::Type Type = amr::Criteria::Type::h>
 class BadCriterion : public amr::Criterion {
  public:
   using options = tmpl::list<>;
@@ -69,7 +69,7 @@ class BadCriterion : public amr::Criterion {
   using PUP::able::register_constructor;
   WRAPPED_PUPable_decl_template(BadCriterion);  // NOLINT
 
-  amr::Criteria::Type type() override { return amr::Criteria::Type::h; }
+  amr::Criteria::Type type() override { return Type; }
 
   std::string observation_name() override { return "BadCriterion"; }
 
@@ -81,21 +81,28 @@ class BadCriterion : public amr::Criterion {
       Parallel::GlobalCache<Metavariables>& /*cache*/,
       const ElementId<Metavariables::volume_dim>& /*element_id*/) const {
     if constexpr (Dim == 1) {
-      return std::array{amr::Flag::DecreaseResolution};
+      return std::array{Type == amr::Criteria::Type::hp
+                            ? amr::Flag::IncreaseResolution
+                            : amr::Flag::DecreaseResolution};
     } else if constexpr (Dim == 2) {
       return std::array{amr::Flag::DecreaseResolution,
                         amr::Flag::IncreaseResolution};
     } else {
-      return std::array{amr::Flag::DecreaseResolution,
-                        amr::Flag::IncreaseResolution, amr::Flag::DoNothing};
+      if constexpr (Type == amr::Criteria::Type::hp) {
+        return std::array{amr::Flag::Split, amr::Flag::DecreaseResolution,
+                          amr::Flag::IncreaseResolution};
+      } else {
+        return std::array{amr::Flag::DecreaseResolution,
+                          amr::Flag::IncreaseResolution, amr::Flag::DoNothing};
+      }
     }
   }
 
   void pup(PUP::er& p) override { Criterion::pup(p); }
 };
 
-template <size_t Dim>
-PUP::able::PUP_ID BadCriterion<Dim>::my_PUP_ID = 0;  // NOLINT
+template <size_t Dim, amr::Criteria::Type Type>
+PUP::able::PUP_ID BadCriterion<Dim, Type>::my_PUP_ID = 0;  // NOLINT
 #pragma GCC diagnostic pop
 
 template <typename Metavariables>
@@ -127,6 +134,7 @@ struct Metavariables {
         amr::Criterion,
         tmpl::list<
             BadCriterion<volume_dim>,
+            BadCriterion<volume_dim, amr::Criteria::Type::hp>,
             amr::Criteria::IncreaseResolution<volume_dim>,
             amr::Criteria::DriveToTarget<volume_dim, amr::Criteria::Type::h>,
             amr::Criteria::DriveToTarget<volume_dim, amr::Criteria::Type::p>>>>;
@@ -486,6 +494,50 @@ void check_topology_restrictions_enforced() {
   CHECK(ActionTesting::number_of_queued_simple_actions<my_component>(
             runner, self_id) == 0);
 }
+void check_joint_mixed_decisions() {
+  using metavariables = Metavariables<3, true>;
+  using component = Component<metavariables>;
+  const ElementId<3> id{0};
+  for (const bool spherical : {false, true}) {
+    CAPTURE(spherical);
+    const Mesh<3> mesh = spherical
+                             ? Mesh<3>{std::array{5_st, 4_st, 7_st},
+                                       Spectral::bases::spherical_shell<>,
+                                       Spectral::quadratures::spherical_shell<>}
+                             : Mesh<3>{5, Spectral::Basis::Legendre,
+                                       Spectral::Quadrature::GaussLobatto};
+    std::vector<std::unique_ptr<amr::Criterion>> criteria;
+    criteria.emplace_back(
+        std::make_unique<BadCriterion<3, amr::Criteria::Type::hp>>());
+    ActionTesting::MockRuntimeSystem<metavariables> runner{
+        {std::move(criteria), std::nullopt,
+         amr::Policies{amr::Isotropy::Anisotropic, amr::Limits{}, true, true}}};
+    const Element<3> element =
+        spherical ? Element<3>{id, {}, domain::topologies::spherical_shell}
+                  : Element<3>{id, {}};
+    ActionTesting::emplace_component_and_initialize<component>(
+        &runner, id,
+        {element, mesh,
+         amr::Info<3>{make_array<3>(amr::Flag::Undefined), Mesh<3>{}},
+         std::unordered_map<ElementId<3>, amr::Info<3>>{}});
+    ActionTesting::simple_action<component,
+                                 amr::Actions::EvaluateRefinementCriteria>(
+        make_not_null(&runner), id);
+    const amr::Info<3> expected{
+        std::array{amr::Flag::Split,
+                   spherical ? amr::Flag::IncreaseResolution
+                             : amr::Flag::DecreaseResolution,
+                   amr::Flag::IncreaseResolution},
+        spherical
+            ? Mesh<3>{std::array{5_st, 5_st, 9_st},
+                      Spectral::bases::spherical_shell<>,
+                      Spectral::quadratures::spherical_shell<>}
+            : Mesh<3>{std::array{5_st, 4_st, 6_st}, Spectral::Basis::Legendre,
+                      Spectral::Quadrature::GaussLobatto}};
+    CHECK(ActionTesting::get_databox_tag<component, amr::Tags::Info<3>>(
+              runner, id) == expected);
+  }
+}
 }  //  namespace
 
 SPECTRE_TEST_CASE("Unit.Amr.Actions.EvaluateRefinementCriteria",
@@ -515,6 +567,16 @@ SPECTRE_TEST_CASE("Unit.Amr.Actions.EvaluateRefinementCriteria",
     criteria.emplace_back(wants_to_increase_resolution());
     evaluate_criteria<true>(std::move(criteria),
                             std::array{amr::Flag::DoNothing});
+  }
+  {
+    INFO(
+        "Joint hp criterion may choose p even when pure p criteria are "
+        "ignored");
+    std::vector<std::unique_ptr<amr::Criterion>> criteria;
+    criteria.emplace_back(
+        std::make_unique<BadCriterion<1, amr::Criteria::Type::hp>>());
+    evaluate_criteria<true>(std::move(criteria),
+                            std::array{amr::Flag::IncreaseResolution});
   }
   {
     INFO("Should join");
@@ -560,4 +622,5 @@ SPECTRE_TEST_CASE("Unit.Amr.Actions.EvaluateRefinementCriteria",
   check_split_while_join_is_avoided();
   check_topology_restrictions_enforced<true>();
   check_topology_restrictions_enforced<false>();
+  check_joint_mixed_decisions();
 }

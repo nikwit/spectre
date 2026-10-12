@@ -13,7 +13,9 @@
 #include "Domain/Structure/ElementId.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "ParallelAlgorithms/Amr/Criteria/Type.hpp"
+#include "ParallelAlgorithms/Amr/CriterionData.hpp"
 #include "Utilities/CallWithDynamicType.hpp"
+#include "Utilities/Gsl.hpp"
 #include "Utilities/Serialization/CharmPupable.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -58,6 +60,51 @@ class Criterion : public PUP::able {
   virtual Criteria::Type type() = 0;
 
   virtual std::string observation_name() = 0;
+
+  /// Opt in to an exchange with one exact face sibling before evaluation.
+  virtual bool needs_sibling_data() const { return false; }
+
+  /// Evaluate a decision and, for criteria that opt in, update element-local
+  /// history. Observations use evaluate() and never advance this history.
+  template <typename ComputeTagsList, typename DataBoxType,
+            typename Metavariables>
+  auto evaluate_and_update(
+      const gsl::not_null<ObservationBox<ComputeTagsList, DataBoxType>*> box,
+      Parallel::GlobalCache<Metavariables>& cache,
+      const ElementId<Metavariables::volume_dim>& element_id) const {
+    using factory_classes =
+        typename Metavariables::factory_creation::factory_classes;
+    return call_with_dynamic_type<
+        std::array<amr::Flag, Metavariables::volume_dim>,
+        tmpl::at<factory_classes, Criterion>>(this, [&box, &cache, &element_id](
+                                                        const auto* criterion) {
+      if constexpr (requires {
+                      criterion->evaluate_with_history(box, cache, element_id);
+                    }) {
+        return criterion->evaluate_with_history(box, cache, element_id);
+      } else {
+        return apply(*criterion, *box, cache, element_id);
+      }
+    });
+  }
+
+  /// Default for local criteria. A derived criterion can hide this member to
+  /// select nodal tensors to send to its sibling.
+  template <typename DbTags>
+  CriterionTensorData pack_sibling_data(const db::DataBox<DbTags>&) const {
+    return {};
+  }
+
+  template <typename Metavariables, typename DbTags>
+  CriterionTensorData sibling_data(const db::DataBox<DbTags>& box) const {
+    using factory_classes =
+        typename Metavariables::factory_creation::factory_classes;
+    return call_with_dynamic_type<CriterionTensorData,
+                                  tmpl::at<factory_classes, Criterion>>(
+        this, [&box](const auto* criterion) {
+          return criterion->pack_sibling_data(box);
+        });
+  }
 
   /// Evaluates the AMR criteria by selecting the appropriate derived class
   /// and forwarding its `argument_tags` from the ObservationBox (along with the

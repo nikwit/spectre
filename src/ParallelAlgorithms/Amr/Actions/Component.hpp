@@ -13,6 +13,7 @@
 #include "ParallelAlgorithms/Amr/Actions/AdjustDomain.hpp"
 #include "ParallelAlgorithms/Amr/Actions/ElementsRegistration.hpp"
 #include "ParallelAlgorithms/Amr/Actions/EvaluateRefinementCriteria.hpp"
+#include "ParallelAlgorithms/Amr/Actions/PrepareRefinementCriteria.hpp"
 #include "ParallelAlgorithms/Amr/Criteria/Tags/Criteria.hpp"
 #include "ParallelAlgorithms/Amr/Policies/Tags.hpp"
 #include "ParallelAlgorithms/Amr/Protocols/AmrMetavariables.hpp"
@@ -70,9 +71,9 @@ struct Component {
     if (Parallel::Phase::EvaluateAmrCriteria == next_phase) {
       if constexpr (Parallel::is_dg_element_collection_v<ElementArray>) {
         Parallel::threaded_action<Parallel::Actions::SimpleActionOnElement<
-            ::amr::Actions::EvaluateRefinementCriteria, true>>(element_array);
+            ::amr::Actions::PrepareRefinementCriteria, true>>(element_array);
       } else {
-        Parallel::simple_action<::amr::Actions::EvaluateRefinementCriteria>(
+        Parallel::simple_action<::amr::Actions::PrepareRefinementCriteria>(
             element_array);
       }
     }

@@ -26,11 +26,11 @@ namespace amr::protocols {
 ///   (e.g. `domain::Tags::Element`, `domain::Tags::Mesh`, and
 ///   `domain::Tags::NeighborMesh` are handled by AMR). See
 ///   `amr::protocols::Projector` for details.
-/// - `p_refine_only_in_event`: A boolean indicating that only h-refinement
-///   criteria should be evaluated in
-///   `::amr::Actions::EvaluateRefinementCriteria`.  Only h-refinement will be
-///   done in `Phase::AdjustDomain`; p-refinement will only be done via
-///   `::amr::Events::RefineMesh`.
+/// - `p_refine_only_in_event`: A boolean indicating that pure p-refinement
+///   criteria should be evaluated only in `::amr::Events::RefineMesh` rather
+///   than `::amr::Actions::EvaluateRefinementCriteria`. Joint hp criteria are
+///   always evaluated in the latter and apply both kinds of changes through
+///   `Phase::AdjustDomain`, preserving a single decision per adaptation cycle.
 /// - `keep_coarse_grids`: A boolean indicating that AMR should create a
 ///   completely new grid at each AMR step with an incremented grid index, and
 ///   keep the old grid around. This is useful for multigrid solvers.
