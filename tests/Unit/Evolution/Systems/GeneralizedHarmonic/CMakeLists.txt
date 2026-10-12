@@ -21,6 +21,8 @@ set(LIBRARY_SOURCES
   Test_BbhCompletionCriteria.cpp
   Test_BbhCompletionSingleton.cpp
   Test_Characteristics.cpp
+  Test_ChalmersConstraintFeedback.cpp
+  Test_SpecAmr.cpp
   Test_Constraints.cpp
   Test_DuDt.cpp
   Test_DuDtTempTags.cpp
@@ -37,6 +39,8 @@ add_test_library(${LIBRARY} "${LIBRARY_SOURCES}")
 target_link_libraries(
   ${LIBRARY}
   PRIVATE
+  AmrCriteria
+  AmrPolicies
   CoordinateMaps
   DataBoxTestHelpers
   DataStructures

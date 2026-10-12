@@ -10,6 +10,7 @@ spectre_python_add_module(
   SOURCES
   Bindings.cpp
   FilledSpherePowerMonitor.cpp
+  SpecAmr.cpp
   SphericalShellPowerMonitor.cpp
   PYTHON_FILES
   __init__.py

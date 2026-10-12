@@ -9,10 +9,12 @@ spectre_target_sources(
   ${LIBRARY}
   PRIVATE
   ApplyTensorYlmFilter.cpp
+  ChalmersWithSpecCoarsening.cpp
   Characteristics.cpp
   Constraints.cpp
   Equations.cpp
   FilledSpherePowerMonitor.cpp
+  SpecAmr.cpp
   SpectralFilter.cpp
   SphericalShellPowerMonitor.cpp
   TensorYlmTransforms.cpp
@@ -24,12 +26,15 @@ spectre_target_headers(
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
   ApplyTensorYlmFilter.hpp
+  ChalmersConstraintFeedback.hpp
+  ChalmersWithSpecCoarsening.hpp
   Characteristics.hpp
   Constraints.hpp
   DuDtTempTags.hpp
   Equations.hpp
   FilledSpherePowerMonitor.hpp
   Initialize.hpp
+  SpecAmr.hpp
   SpectralFilter.hpp
   SphericalShellPowerMonitor.hpp
   System.hpp
@@ -43,6 +48,7 @@ spectre_target_headers(
 target_link_libraries(
   ${LIBRARY}
   PUBLIC
+  AmrCriteria
   CoordinateMaps
   ConstraintDamping
   DataStructures

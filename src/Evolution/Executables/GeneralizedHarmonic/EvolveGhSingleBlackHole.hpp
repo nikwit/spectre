@@ -27,6 +27,8 @@
 #include "Evolution/Executables/GeneralizedHarmonic/GeneralizedHarmonicBase.hpp"
 #include "Evolution/Systems/Cce/Callbacks/DumpBondiSachsOnWorldtube.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Actions/SetInitialData.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/ChalmersConstraintFeedback.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/ChalmersWithSpecCoarsening.hpp"
 #include "NumericalAlgorithms/Strahlkorper/IO/InitialShapeFromFile.hpp"
 #include "NumericalAlgorithms/Strahlkorper/InitialShape.hpp"
 #include "Options/FactoryHelpers.hpp"
@@ -40,6 +42,7 @@
 #include "Parallel/Protocols/RegistrationMetavariables.hpp"
 #include "ParallelAlgorithms/Actions/FunctionsOfTimeAreReady.hpp"
 #include "ParallelAlgorithms/Actions/MutateApply.hpp"
+#include "ParallelAlgorithms/Amr/Criteria/Chalmers.hpp"
 #include "ParallelAlgorithms/Amr/Events/ObserveAmrCriteria.hpp"
 #include "ParallelAlgorithms/Amr/Events/ObserveAmrStats.hpp"
 #include "ParallelAlgorithms/Amr/Events/RefineMesh.hpp"
@@ -182,6 +185,19 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3> {
       : tt::ConformsTo<Options::protocols::FactoryCreation> {
     using factory_classes = Options::add_factory_classes<
         typename gh_base::factory_creation::factory_classes,
+        tmpl::pair<
+            amr::Criterion,
+            tmpl::list<
+                gh::ChalmersWithConstraintFeedback<volume_dim>,
+                gh::ChalmersWithSpecCoarsening,
+                amr::Criteria::Chalmers<
+                    volume_dim, typename system::variables_tag::tags_list>,
+                amr::Criteria::Chalmers<
+                    volume_dim, typename system::variables_tag::tags_list,
+                    true>,
+                amr::Criteria::Chalmers<
+                    volume_dim, typename system::variables_tag::tags_list, true,
+                    true>>>,
         tmpl::pair<ah::Criterion, ah::Criteria::standard_criteria>,
         tmpl::pair<ylm::InitialShape<Frame::Inertial>,
                    tmpl::list<ylm::InitialShapes::Sphere<Frame::Inertial>,
@@ -226,6 +242,7 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3> {
       tmpl::pop_back<typename gh_base::template initialization_actions<
           EvolutionMetavars, use_control_systems>>,
       control_system::Actions::InitializeMeasurements<control_systems>,
+      Initialization::Actions::InitializeItems<gh::spec_amr::InitializeHistory>,
       intrp::Actions::ElementInitInterpPoints<volume_dim,
                                               interpolation_target_tags>,
       tmpl::back<typename gh_base::template initialization_actions<
@@ -285,6 +302,7 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3> {
   struct amr : tt::ConformsTo<::amr::protocols::AmrMetavariables> {
     using element_array = gh_dg_element_array;
     using projectors = tmpl::list<
+        gh::spec_amr::ProjectHistory,
         Initialization::ProjectTimeStepping<volume_dim>,
         evolution::dg::Initialization::ProjectDomain<volume_dim>,
         ::amr::projectors::ProjectVariables<volume_dim,

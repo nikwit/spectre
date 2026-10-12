@@ -1,0 +1,297 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+# Stationary Schwarzschild with Chalmers hp AMR and genuine outflow excision.
+# Scientific diagnostics and controls: tools/Amr/ChalmersSingleHole.py.
+Executable: EvolveGhSingleBlackHole
+Testing:
+  Check: parse;execute
+  Timeout: 60
+ExpectedOutput:
+  - Volume0.h5
+  - Reductions.h5
+  - Surfaces.h5
+
+---
+
+Parallelization:
+  ElementDistribution: NumGridPoints
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.0005
+  MinimumTimeStep: 1e-7
+  InitialSlabSize: 0.0005
+  LocalTimeStepping: 'Off'
+  VariableOrderAlgorithm:
+    GoalOrder: 5
+  LtsStepChoosers: null
+  TimeStepper:
+    DormandPrince5: null
+Amr:
+  Criteria:
+  - Chalmers:
+      VariablesToMonitor:
+      - SpacetimeMetric
+      - Pi
+      - Phi
+      AbsoluteTarget: 0.0001
+      RelativeTarget: 0.0
+      SmoothnessThreshold: 1.0
+      PRefineOnly: false
+      CoarseningFactor: 0.0
+      HCoarsening: false
+      UseDirectionalEnergy: true
+  EnableInBlocks: All
+  Policies:
+    EnforceTwoToOneBalanceInNormalDirection: true
+    Isotropy: Anisotropic
+    Limits:
+      RefinementLevel:
+      - 0
+      - 2
+      NumPolynomialModes:
+      - 2
+      - 20
+      FourierM: Auto
+      SphericalHarmonicL: Auto
+      ErrorBeyondLimits: true
+    AllowCoarsening: false
+  Verbosity: Quiet
+PhaseChangeAndTriggers:
+- Trigger:
+    Times:
+      Specified:
+        Values:
+        - 0.1
+        - 0.2
+  PhaseChanges:
+  - VisitAndReturn(EvaluateAmrCriteria)
+  - VisitAndReturn(AdjustDomain)
+  - VisitAndReturn(CheckDomain)
+InitialData: &id001
+  GeneralizedHarmonic(KerrSchild):
+    Mass: 1.0
+    Spin:
+    - 0.0
+    - 0.0
+    - 0.0
+    Center: &id002
+    - 0.0
+    - 0.0
+    - 0.0
+    Velocity:
+    - 0.0
+    - 0.0
+    - 0.0
+DomainCreator:
+  Sphere:
+    InnerRadius: 1.8
+    OuterRadius: 6.0
+    Interior:
+      ExciseWithBoundaryCondition: DemandOutgoingCharSpeeds
+    InitialRefinement: 0
+    InitialGridPoints: 8
+    UseEquiangularMap: true
+    EquatorialCompression: None
+    RadialPartitioning:
+    - 3.0
+    RadialDistribution: Linear
+    WhichWedges: All
+    TimeDependentMaps: None
+    OuterBoundaryCondition:
+      DirichletAnalytic:
+        AnalyticPrescription: *id001
+EvolutionSystem:
+  GeneralizedHarmonic:
+    GaugeCondition:
+      AnalyticChristoffel:
+        AnalyticPrescription: *id001
+    DampingFunctionGamma0:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 3.0
+        Width: 11.313708499
+        Center:
+        - 0.0
+        - 0.0
+        - 0.0
+    DampingFunctionGamma1:
+      GaussianPlusConstant:
+        Constant: -1.0
+        Amplitude: 0.0
+        Width: 11.313708499
+        Center:
+        - 0.0
+        - 0.0
+        - 0.0
+    DampingFunctionGamma2:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 1.0
+        Width: 11.313708499
+        Center:
+        - 0.0
+        - 0.0
+        - 0.0
+SpatialDiscretization:
+  BoundaryCorrection:
+    AveragedUpwindPenalty: null
+  DiscontinuousGalerkin:
+    Formulation: StrongInertial
+    Quadrature: GaussLobatto
+    Filtering:
+    - None:
+        BlocksToFilter: All
+EventsAndTriggersAtCheckpoints: null
+EventsAndTriggersAtSlabs:
+- Trigger:
+    Times:
+      Specified:
+        Values:
+        - 0.0
+        - 0.1
+        - 0.2
+        - 0.3
+  Events:
+  - ObserveAmrStats:
+      PrintToTerminal: false
+      ObservePerCore: false
+  - ObserveNorms:
+      SubfileName: Errors
+      TensorsToObserve:
+      - Name: Error(SpacetimeMetric)
+        NormType: L2Norm
+        Components: Sum
+      - Name: Error(Pi)
+        NormType: L2Norm
+        Components: Sum
+      - Name: Error(Phi)
+        NormType: L2Norm
+        Components: Sum
+  - ObserveNorms:
+      SubfileName: Norms
+      TensorsToObserve:
+      - Name: Lapse
+        NormType: L2Norm
+        Components: Individual
+      - Name: PointwiseL2Norm(GaugeConstraint)
+        NormType: L2Norm
+        Components: Sum
+      - Name: PointwiseL2Norm(ThreeIndexConstraint)
+        NormType: L2Norm
+        Components: Sum
+      - Name: PointwiseL2Norm(FourIndexConstraint)
+        NormType: L2Norm
+        Components: Sum
+  - ObserveFields:
+      SubfileName: Fields
+      VariablesToObserve:
+      - SpacetimeMetric
+      - Pi
+      - Phi
+      InterpolateToMesh: None
+      ProjectToMesh: None
+      CoordinatesFloatingPointType: Double
+      FloatingPointTypes:
+      - Double
+      BlocksToObserve: All
+  - ApparentHorizon
+- Trigger:
+    Times:
+      Specified:
+        Values:
+        - 0.3
+  Events:
+  - Completion
+- Trigger: Always
+  Events:
+  - ObserveTimeStep:
+      SubfileName: TimeSteps
+      PrintTimeToTerminal: false
+      ObservePerCore: false
+  - ChangeSlabSize:
+      DelayChange: 0
+      StepChoosers:
+      - Cfl:
+          SafetyFactor: 0.5
+      - StepToTimes:
+          Times:
+            Specified:
+              Values:
+              - 0.1
+              - 0.2
+              - 0.3
+EventsAndTriggersAtSteps: null
+EventsAndDenseTriggers: null
+EventsRunAtCleanup:
+  ObservationValue: -1000.0
+  Events:
+  - ObserveTimeStepVolume:
+      SubfileName: FailureTimeStep
+      FloatingPointType: Double
+      CoordinatesFloatingPointType: Float
+Observers:
+  VolumeFileName: Volume
+  ReductionFileName: Reductions
+  SurfaceFileName: Surfaces
+Interpolator:
+  Verbosity: Silent
+ApparentHorizons:
+  LMax: 10
+  ApparentHorizon: &id003
+    Criteria:
+    - Residual:
+        MinResidual: 1.0e-08
+        MaxResidual: 1.0e-06
+        MinResolutionL: 6
+    InitialGuess:
+      InitialL: 8
+      InitialShape:
+        Sphere:
+          Radius: 2.0
+          Center: *id002
+    FastFlow:
+      Flow: Fast
+      Alpha: 1.0
+      Beta: 0.5
+      AbsTol: 1e-12
+      TruncationTol: 1.0e-08
+      DivergenceTol: 1.2
+      DivergenceIter: 5
+      MaxIts: 100
+    Verbosity: Silent
+    MaxComputeCoordsRetries: 3
+    BlocksForHorizonFind: All
+  ControlSystemSingleAh: *id003
+  ControlSystemCharSpeedAh: *id003
+InterpolationTargets:
+  BondiSachsInterpolation:
+    LMax: 16
+    Radius:
+    - 100
+    - 150
+    - 200
+    Center:
+    - 0
+    - 0
+    - 0
+    AngularOrdering: Cce
+  ExcisionBoundary: &id004
+    LMax: 8
+    Center: *id002
+    Radius: 1.8
+    AngularOrdering: Strahlkorper
+  ControlSystemCharSpeedExcision: *id004
+Cce:
+  BondiSachsOutputFilePrefix: BondiSachs
+ControlSystems:
+  WriteDataToDisk: true
+  MeasurementsPerUpdate: 4
+  DelayUpdate: true
+  Verbosity: Silent
+  Translation: None
+  Shape: None
+  Size: None

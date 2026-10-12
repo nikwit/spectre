@@ -9,6 +9,10 @@
 
 namespace py = pybind11;
 
+namespace gh::spec_amr {
+void bind_spec_amr(py::module_& module);
+}
+
 PYBIND11_MODULE(_Pybindings, m) {  // NOLINT
   enable_segfault_handler();
   py::module_::import("spectre.DataStructures");
@@ -18,4 +22,5 @@ PYBIND11_MODULE(_Pybindings, m) {  // NOLINT
 
   gh::power_monitor::py_bindings::bind_filled_sphere_power_monitor(m);
   gh::power_monitor::py_bindings::bind_spherical_shell_power_monitor(m);
+  gh::spec_amr::bind_spec_amr(m);
 }
