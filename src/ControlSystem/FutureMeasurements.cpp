@@ -3,6 +3,9 @@
 
 #include "ControlSystem/FutureMeasurements.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <iterator>
 #include <limits>
 #include <pup_stl.h>
 
@@ -66,9 +69,23 @@ void FutureMeasurements::pup(PUP::er& p) {
 }
 
 bool operator==(const FutureMeasurements& lhs, const FutureMeasurements& rhs) {
-  return lhs.measurements_ == rhs.measurements_ and
-         lhs.measurements_until_update_ == rhs.measurements_until_update_ and
-         lhs.measurements_per_update_ == rhs.measurements_per_update_;
+  if (lhs.measurements_.size() != rhs.measurements_.size() or
+      lhs.measurements_until_update_ != rhs.measurements_until_update_ or
+      lhs.measurements_per_update_ != rhs.measurements_per_update_) {
+    return false;
+  }
+  if (lhs.measurements_.empty()) {
+    return true;
+  }
+  // Before the first measurement, the old-measurement slot contains a NaN
+  // sentinel. This persists for inactive control systems. Treat matching
+  // sentinels as equal so AMR can verify that joining children agree.
+  return ((std::isnan(lhs.measurements_.front()) and
+           std::isnan(rhs.measurements_.front())) or
+          lhs.measurements_.front() == rhs.measurements_.front()) and
+         std::equal(std::next(lhs.measurements_.begin()),
+                    lhs.measurements_.end(),
+                    std::next(rhs.measurements_.begin()));
 }
 
 bool operator!=(const FutureMeasurements& lhs, const FutureMeasurements& rhs) {

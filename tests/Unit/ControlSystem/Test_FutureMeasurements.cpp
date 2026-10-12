@@ -4,6 +4,7 @@
 #include "Framework/TestingFramework.hpp"
 
 #include <array>
+#include <limits>
 #include <optional>
 
 #include "ControlSystem/FutureMeasurements.hpp"
@@ -15,12 +16,24 @@
 SPECTRE_TEST_CASE("Unit.ControlSystem.FutureMeasurements",
                   "[Unit][ControlSystem]") {
   control_system::FutureMeasurements measurements(5, 1.0);
+  // Copies must compare equal even before the initial NaN sentinel is popped.
+  CHECK(measurements == serialize_and_deserialize(measurements));
+  CHECK(measurements != control_system::FutureMeasurements(5, 2.0));
+  CHECK(measurements != control_system::FutureMeasurements(4, 1.0));
+  CHECK(measurements != control_system::FutureMeasurements{});
+  CHECK(control_system::FutureMeasurements{} ==
+        control_system::FutureMeasurements{});
+  const control_system::FutureMeasurements inactive(
+      1, std::numeric_limits<double>::infinity());
+  CHECK(inactive == serialize_and_deserialize(inactive));
+  CHECK(inactive != measurements);
   REQUIRE(measurements.next_measurement() == std::optional(1.0));
   REQUIRE(not measurements.next_update().has_value());
 
   domain::FunctionsOfTime::PiecewisePolynomial<0> measurement_timescales(
       1.0, {{{0.5}}}, 1.75);
   measurements.update(measurement_timescales);
+  CHECK(measurements == serialize_and_deserialize(measurements));
   REQUIRE(measurements.next_measurement() == std::optional(1.0));
   REQUIRE(not measurements.next_update().has_value());
 
