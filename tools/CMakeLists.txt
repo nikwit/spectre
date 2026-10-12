@@ -9,4 +9,5 @@ spectre_python_add_module(
   ValidateInputFile.py
 )
 
+add_subdirectory(Amr)
 add_subdirectory(Status)
