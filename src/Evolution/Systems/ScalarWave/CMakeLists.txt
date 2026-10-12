@@ -26,6 +26,7 @@ spectre_target_headers(
   HEADERS
   ApplyTensorYlmFilter.hpp
   Characteristics.hpp
+  ChalmersConstraintGuard.hpp
   Constraints.hpp
   EnergyDensity.hpp
   Equations.hpp
@@ -56,6 +57,7 @@ target_link_libraries(
   TensorYlm
   Utilities
   INTERFACE
+  AmrCriteria
   Initialization
   Parallel
   Serialization

@@ -1,0 +1,163 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+# Resolved Gaussian entering a coarse region. Exercises joint h/p decisions
+# and projection in the domain-adjustment phase with global RK stepping.
+
+Executable: EvolveScalarWave1D
+Testing:
+  Check: parse;execute
+  Priority: High
+ExpectedOutput:
+- Reductions.h5
+- Volume0.h5
+
+---
+
+Parallelization:
+  ElementDistribution: NumGridPoints
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
+InitialData: &id001
+  PlaneWave:
+    WaveVector:
+    - 1.0
+    Center:
+    - -2.0
+    Profile:
+      Gaussian:
+        Amplitude: 1.0
+        Width: 0.3
+        Center: 0.0
+Amr:
+  Criteria:
+  - Chalmers:
+      VariablesToMonitor:
+      - Psi
+      - Pi
+      - Phi
+      AbsoluteTarget: 1.0e-06
+      RelativeTarget: 0.0
+      SmoothnessThreshold: 1.0
+      PRefineOnly: false
+      CoarseningFactor: 0.0
+      HCoarsening: false
+  EnableInBlocks: All
+  Policies:
+    EnforceTwoToOneBalanceInNormalDirection: true
+    Isotropy: Anisotropic
+    Limits:
+      RefinementLevel:
+      - 0
+      - 7
+      NumPolynomialModes:
+      - 5
+      - 20
+      FourierM: Auto
+      SphericalHarmonicL: Auto
+      ErrorBeyondLimits: true
+    AllowCoarsening: false
+  Verbosity: Quiet
+PhaseChangeAndTriggers:
+- Trigger:
+    Slabs:
+      EvenlySpaced:
+        Interval: 40
+        Offset: 0
+  PhaseChanges:
+  - VisitAndReturn(EvaluateAmrCriteria)
+  - VisitAndReturn(AdjustDomain)
+  - VisitAndReturn(CheckDomain)
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.0005
+  InitialSlabSize: 0.0005
+  MinimumTimeStep: 1.0e-08
+  LocalTimeStepping: 'Off'
+  TimeStepper:
+    DormandPrince5: null
+  LtsStepChoosers: null
+  VariableOrderAlgorithm:
+    GoalOrder: 5
+DomainCreator:
+  RotatedIntervals:
+    LowerBound:
+    - -4.0
+    Midpoint:
+    - 0.0
+    UpperBound:
+    - 8.0
+    InitialRefinement:
+    - 3
+    InitialGridPoints:
+    - - 16
+      - 5
+    TimeDependence: None
+    BoundaryConditions:
+      LowerBoundary:
+        DirichletAnalytic:
+          AnalyticPrescription: *id001
+      UpperBoundary:
+        DirichletAnalytic:
+          AnalyticPrescription: *id001
+SpatialDiscretization:
+  BoundaryCorrection:
+    UpwindPenalty: null
+  DiscontinuousGalerkin:
+    Formulation: StrongInertial
+    Quadrature: GaussLobatto
+    Filtering:
+    - None:
+        BlocksToFilter: All
+EventsAndTriggersAtSlabs:
+- Trigger:
+    Slabs:
+      EvenlySpaced:
+        Interval: 400
+        Offset: 0
+  Events:
+  - ObserveAmrStats:
+      PrintToTerminal: false
+      ObservePerCore: false
+  - ObserveTimeStep:
+      SubfileName: TimeSteps
+      PrintTimeToTerminal: false
+      ObservePerCore: false
+  - ObserveNorms:
+      SubfileName: Errors
+      TensorsToObserve:
+      - Name: Error(Psi)
+        NormType: L2Norm
+        Components: Sum
+      - Name: Error(Pi)
+        NormType: L2Norm
+        Components: Sum
+      - Name: Error(Phi)
+        NormType: L2Norm
+        Components: Sum
+  - ObserveFields:
+      SubfileName: Fields
+      VariablesToObserve:
+      - Psi
+      - Pi
+      - Phi
+      InterpolateToMesh: None
+      ProjectToMesh: None
+      CoordinatesFloatingPointType: Double
+      FloatingPointTypes:
+      - Double
+      BlocksToObserve: All
+- Trigger:
+    Slabs:
+      Specified:
+        Values:
+        - 2000
+  Events:
+  - Completion
+EventsAndTriggersAtSteps: null
+EventsAndTriggersAtCheckpoints: null
+EventsAndDenseTriggers: null
+Observers:
+  VolumeFileName: Volume
+  ReductionFileName: Reductions

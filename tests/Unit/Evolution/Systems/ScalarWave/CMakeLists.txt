@@ -13,6 +13,7 @@ set(LIBRARY_SOURCES
   BoundaryCorrections/Test_UpwindPenalty.cpp
   Test_ApplyTensorYlmFilter.cpp
   Test_Characteristics.cpp
+  Test_ChalmersConstraintGuard.cpp
   Test_Constraints.cpp
   Test_EnergyDensity.cpp
   Test_Equations.cpp
@@ -29,6 +30,7 @@ add_test_library(${LIBRARY} "${LIBRARY_SOURCES}")
 target_link_libraries(
   ${LIBRARY}
   PRIVATE
+  AmrCriteria
   DataStructures
   Domain
   LinearOperators

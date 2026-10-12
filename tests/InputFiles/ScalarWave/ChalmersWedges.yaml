@@ -1,0 +1,321 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+# Oblique Gaussian plane pulse crossing angular cubed-sphere interfaces.
+# Accuracy, constraint and interface diagnostics: tools/Amr/ChalmersWedges.py.
+
+Executable: EvolveScalarWave3D
+Testing:
+  Check: parse;execute
+  Timeout: 60
+ExpectedOutput:
+- Reductions.h5
+- Volume0.h5
+
+---
+
+Parallelization:
+  ElementDistribution: NumGridPoints
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
+InitialData: &id001
+  PlaneWave:
+    WaveVector:
+    - 0.2672612419124244
+    - 0.5345224838248488
+    - 0.8017837257372732
+    Center:
+    - -0.7483314773547882
+    - -1.4966629547095764
+    - -2.244994432064365
+    Profile:
+      Gaussian:
+        Amplitude: 1.0
+        Width: 0.8
+        Center: 0.0
+Amr:
+  Criteria:
+  - Chalmers:
+      VariablesToMonitor:
+      - Psi
+      - Pi
+      - Phi
+      AbsoluteTarget: 1.0e-05
+      RelativeTarget: 0.0
+      SmoothnessThreshold: 1.0
+      PRefineOnly: false
+      CoarseningFactor: 0.0
+      HCoarsening: false
+      UseDirectionalEnergy: true
+  EnableInBlocks: All
+  Policies:
+    EnforceTwoToOneBalanceInNormalDirection: true
+    Isotropy: Anisotropic
+    Limits:
+      RefinementLevel:
+      - 0
+      - 3
+      NumPolynomialModes:
+      - 2
+      - 20
+      FourierM: Auto
+      SphericalHarmonicL: Auto
+      ErrorBeyondLimits: true
+    AllowCoarsening: false
+  Verbosity: Quiet
+PhaseChangeAndTriggers:
+- Trigger:
+    Times:
+      Specified:
+        Values:
+        - 0.04
+        - 0.08
+        - 0.12
+        - 0.16
+        - 0.2
+        - 0.24
+        - 0.28
+        - 0.32
+        - 0.36
+        - 0.4
+        - 0.44
+        - 0.48
+        - 0.52
+        - 0.56
+        - 0.6
+        - 0.64
+        - 0.68
+        - 0.72
+        - 0.76
+        - 0.8
+        - 0.84
+        - 0.88
+        - 0.92
+        - 0.96
+        - 1.0
+        - 1.04
+        - 1.08
+        - 1.12
+        - 1.16
+        - 1.2
+        - 1.24
+        - 1.28
+        - 1.32
+        - 1.36
+        - 1.4
+        - 1.44
+        - 1.48
+        - 1.52
+        - 1.56
+        - 1.6
+        - 1.64
+        - 1.68
+        - 1.72
+        - 1.76
+        - 1.8
+        - 1.84
+        - 1.88
+        - 1.92
+        - 1.96
+        - 2.0
+        - 2.04
+        - 2.08
+        - 2.12
+        - 2.16
+        - 2.2
+        - 2.24
+        - 2.28
+        - 2.32
+        - 2.36
+  PhaseChanges:
+  - VisitAndReturn(EvaluateAmrCriteria)
+  - VisitAndReturn(AdjustDomain)
+  - VisitAndReturn(CheckDomain)
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.0005
+  InitialSlabSize: 0.0005
+  MinimumTimeStep: 1.0e-08
+  LocalTimeStepping: 'Off'
+  TimeStepper:
+    DormandPrince5: null
+  LtsStepChoosers: null
+  VariableOrderAlgorithm:
+    GoalOrder: 5
+DomainCreator:
+  Sphere:
+    InnerRadius: 1.0
+    OuterRadius: 2.0
+    Interior:
+      ExciseWithBoundaryCondition: &id002
+        DirichletAnalytic:
+          AnalyticPrescription: *id001
+    InitialRefinement:
+    - 0
+    - 0
+    - 0
+    InitialGridPoints:
+    - - 10
+      - 10
+      - 14
+    - - 18
+      - 18
+      - 14
+    - - 14
+      - 14
+      - 14
+    - - 18
+      - 18
+      - 14
+    - - 14
+      - 14
+      - 14
+    - - 16
+      - 16
+      - 14
+    UseEquiangularMap: true
+    EquatorialCompression: None
+    RadialPartitioning: []
+    RadialDistribution: Linear
+    WhichWedges: All
+    TimeDependentMaps: None
+    OuterBoundaryCondition: *id002
+SpatialDiscretization:
+  BoundaryCorrection:
+    UpwindPenalty: null
+  DiscontinuousGalerkin:
+    Formulation: StrongInertial
+    Quadrature: GaussLobatto
+    Filtering:
+    - None:
+        BlocksToFilter: All
+EventsAndTriggersAtSlabs:
+- Trigger:
+    Times:
+      Specified:
+        Values: &id003
+        - 0.0
+        - 1.2
+        - 2.4
+  Events:
+  - ObserveAmrStats:
+      PrintToTerminal: false
+      ObservePerCore: false
+  - ObserveNorms:
+      SubfileName: Errors
+      TensorsToObserve:
+      - Name: Error(Psi)
+        NormType: L2Norm
+        Components: Sum
+      - Name: Error(Pi)
+        NormType: L2Norm
+        Components: Sum
+      - Name: Error(Phi)
+        NormType: L2Norm
+        Components: Sum
+- Trigger:
+    Times:
+      Specified:
+        Values: *id003
+  Events:
+  - ObserveFields:
+      SubfileName: Fields
+      VariablesToObserve:
+      - Psi
+      - Pi
+      - Phi
+      InterpolateToMesh: None
+      ProjectToMesh: None
+      CoordinatesFloatingPointType: Double
+      FloatingPointTypes:
+      - Double
+      BlocksToObserve: All
+- Trigger:
+    Times:
+      Specified:
+        Values:
+        - 2.4
+  Events:
+  - Completion
+- Trigger: Always
+  Events:
+  - ObserveTimeStep:
+      SubfileName: TimeSteps
+      PrintTimeToTerminal: false
+      ObservePerCore: false
+  - ChangeSlabSize:
+      DelayChange: 0
+      StepChoosers:
+      - Cfl:
+          SafetyFactor: 0.5
+      - StepToTimes:
+          Times:
+            Specified:
+              Values:
+              - 0.04
+              - 0.08
+              - 0.12
+              - 0.16
+              - 0.2
+              - 0.24
+              - 0.28
+              - 0.32
+              - 0.36
+              - 0.4
+              - 0.44
+              - 0.48
+              - 0.52
+              - 0.56
+              - 0.6
+              - 0.64
+              - 0.68
+              - 0.72
+              - 0.76
+              - 0.8
+              - 0.84
+              - 0.88
+              - 0.92
+              - 0.96
+              - 1.0
+              - 1.04
+              - 1.08
+              - 1.12
+              - 1.16
+              - 1.2
+              - 1.24
+              - 1.28
+              - 1.32
+              - 1.36
+              - 1.4
+              - 1.44
+              - 1.48
+              - 1.52
+              - 1.56
+              - 1.6
+              - 1.64
+              - 1.68
+              - 1.72
+              - 1.76
+              - 1.8
+              - 1.84
+              - 1.88
+              - 1.92
+              - 1.96
+              - 2.0
+              - 2.04
+              - 2.08
+              - 2.12
+              - 2.16
+              - 2.2
+              - 2.24
+              - 2.28
+              - 2.32
+              - 2.36
+              - 2.4
+EventsAndTriggersAtSteps: null
+EventsAndTriggersAtCheckpoints: null
+EventsAndDenseTriggers: null
+Observers:
+  VolumeFileName: Volume
+  ReductionFileName: Reductions

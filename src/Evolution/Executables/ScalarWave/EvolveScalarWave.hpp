@@ -34,6 +34,7 @@
 #include "Evolution/Initialization/SetVariables.hpp"
 #include "Evolution/Systems/ScalarWave/BoundaryConditions/Factory.hpp"
 #include "Evolution/Systems/ScalarWave/BoundaryCorrections/Factory.hpp"
+#include "Evolution/Systems/ScalarWave/ChalmersConstraintGuard.hpp"
 #include "Evolution/Systems/ScalarWave/EnergyDensity.hpp"
 #include "Evolution/Systems/ScalarWave/Equations.hpp"
 #include "Evolution/Systems/ScalarWave/Initialize.hpp"
@@ -70,6 +71,7 @@
 #include "ParallelAlgorithms/Amr/Actions/CreateChild.hpp"
 #include "ParallelAlgorithms/Amr/Actions/Initialize.hpp"
 #include "ParallelAlgorithms/Amr/Actions/SendAmrDiagnostics.hpp"
+#include "ParallelAlgorithms/Amr/Criteria/Chalmers.hpp"
 #include "ParallelAlgorithms/Amr/Criteria/Criterion.hpp"
 #include "ParallelAlgorithms/Amr/Criteria/Factory.hpp"
 #include "ParallelAlgorithms/Amr/Criteria/Tags/Criteria.hpp"
@@ -182,9 +184,14 @@ struct EvolutionMetavars {
   struct factory_creation
       : tt::ConformsTo<Options::protocols::FactoryCreation> {
     using factory_classes = tmpl::map<
-        tmpl::pair<amr::Criterion,
-                   amr::Criteria::standard_criteria<
-                       volume_dim, typename system::variables_tag::tags_list>>,
+        tmpl::pair<
+            amr::Criterion,
+            tmpl::push_back<
+                amr::Criteria::standard_criteria<
+                    volume_dim, typename system::variables_tag::tags_list>,
+                amr::Criteria::Chalmers<
+                    volume_dim, typename system::variables_tag::tags_list>,
+                ScalarWave::ChalmersWithConstraintGuard<volume_dim>>>,
         tmpl::pair<DenseTrigger, DenseTriggers::standard_dense_triggers>,
         tmpl::pair<DomainCreator<volume_dim>, domain_creators<volume_dim>>,
         tmpl::pair<Event,
