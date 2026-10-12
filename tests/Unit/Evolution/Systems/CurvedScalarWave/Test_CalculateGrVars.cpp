@@ -16,6 +16,7 @@
 #include "Evolution/Initialization/NonconservativeSystem.hpp"
 #include "Evolution/Systems/CurvedScalarWave/BackgroundSpacetime.hpp"
 #include "Evolution/Systems/CurvedScalarWave/CalculateGrVars.hpp"
+#include "Evolution/Systems/CurvedScalarWave/ProjectBackground.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
 #include "Framework/ActionTesting.hpp"
 #include "Framework/TestHelpers.hpp"
@@ -56,6 +57,34 @@ struct Metavariables {
   using const_global_cache_tag_list = tmpl::list<>;
 };
 
+template <typename Background, typename... Tags>
+void test_projector(
+    const Background& background,
+    const tnsr::I<DataVector, Background::volume_dim>& coordinates,
+    tmpl::list<Tags...> /*meta*/) {
+  using projector = CurvedScalarWave::ProjectBackground<
+      CurvedScalarWave::System<Background::volume_dim>, Background>;
+  tuples::TaggedTuple<Tags...> fields{};
+  // The projector never reads the previous grid or child data. Exercise
+  // differently sized grids to detect stale analytic-background arrays.
+  for (const size_t size : {size_t{17}, size_t{23}}) {
+    auto new_coordinates = coordinates;
+    for (auto& component : new_coordinates) {
+      const double offset = component[0];
+      component = DataVector(size);
+      for (size_t i = 0; i < size; ++i) {
+        component[i] = offset + 0.01 * (size + i);
+      }
+    }
+    projector::apply(make_not_null(&get<Tags>(fields))..., new_coordinates, 1.3,
+                     background, 0);
+    const auto expected =
+        background.variables(new_coordinates, 1.3, tmpl::list<Tags...>{});
+    ([&]() { CHECK_ITERABLE_APPROX(get<Tags>(fields), get<Tags>(expected)); }(),
+     ...);
+  }
+}
+
 template <typename BackgroundSpacetime>
 void test(const BackgroundSpacetime& background_spacetime,
           const gsl::not_null<std::mt19937*> generator) {
@@ -69,6 +98,8 @@ void test(const BackgroundSpacetime& background_spacetime,
   std::uniform_real_distribution dist{-10., 10.};
   const auto random_coords = make_with_random_values<tnsr::I<DataVector, Dim>>(
       generator, make_not_null(&dist), DataVector{num_points});
+  test_projector(background_spacetime, random_coords,
+                 typename system::spacetime_tag_list{});
   const double time = 0.;
   const ElementId<Dim> element_id{0};
   ActionTesting::emplace_component_and_initialize<comp>(

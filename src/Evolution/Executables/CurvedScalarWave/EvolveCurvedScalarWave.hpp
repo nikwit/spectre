@@ -24,6 +24,7 @@
 #include "Evolution/DiscontinuousGalerkin/EqualRateLts/FixedLtsRatio.hpp"
 #include "Evolution/DiscontinuousGalerkin/EqualRateLts/NonconformingEqualRateRegions.hpp"
 #include "Evolution/DiscontinuousGalerkin/Initialization/Mortars.hpp"
+#include "Evolution/DiscontinuousGalerkin/Initialization/ProjectSpectralFilters.hpp"
 #include "Evolution/DiscontinuousGalerkin/Initialization/QuadratureTag.hpp"
 #include "Evolution/DiscontinuousGalerkin/Initialization/SetupEqualRateRegions.hpp"
 #include "Evolution/DiscontinuousGalerkin/Initialization/SpectralFilters.hpp"
@@ -38,6 +39,7 @@
 #include "Evolution/Systems/CurvedScalarWave/CalculateGrVars.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Constraints.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Initialize.hpp"
+#include "Evolution/Systems/CurvedScalarWave/ProjectBackground.hpp"
 #include "Evolution/Systems/CurvedScalarWave/PsiSquared.hpp"
 #include "Evolution/Systems/CurvedScalarWave/System.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
@@ -67,6 +69,23 @@
 #include "ParallelAlgorithms/Actions/MutateApply.hpp"
 #include "ParallelAlgorithms/Actions/SpectralFilter.hpp"
 #include "ParallelAlgorithms/Actions/TerminatePhase.hpp"
+#include "ParallelAlgorithms/Amr/Actions/CollectDataFromChildren.hpp"
+#include "ParallelAlgorithms/Amr/Actions/Component.hpp"
+#include "ParallelAlgorithms/Amr/Actions/CreateChild.hpp"
+#include "ParallelAlgorithms/Amr/Actions/Initialize.hpp"
+#include "ParallelAlgorithms/Amr/Actions/SendAmrDiagnostics.hpp"
+#include "ParallelAlgorithms/Amr/Criteria/Chalmers.hpp"
+#include "ParallelAlgorithms/Amr/Criteria/Criterion.hpp"
+#include "ParallelAlgorithms/Amr/Criteria/Factory.hpp"
+#include "ParallelAlgorithms/Amr/Criteria/Tags/Criteria.hpp"
+#include "ParallelAlgorithms/Amr/Events/ObserveAmrCriteria.hpp"
+#include "ParallelAlgorithms/Amr/Events/ObserveAmrStats.hpp"
+#include "ParallelAlgorithms/Amr/Events/RefineMesh.hpp"
+#include "ParallelAlgorithms/Amr/Projectors/CopyFromCreatorOrLeaveAsIs.hpp"
+#include "ParallelAlgorithms/Amr/Projectors/DefaultInitialize.hpp"
+#include "ParallelAlgorithms/Amr/Projectors/Tensors.hpp"
+#include "ParallelAlgorithms/Amr/Projectors/Variables.hpp"
+#include "ParallelAlgorithms/Amr/Protocols/AmrMetavariables.hpp"
 #include "ParallelAlgorithms/Events/ChangeFixedLtsRatio.hpp"
 #include "ParallelAlgorithms/Events/Completion.hpp"
 #include "ParallelAlgorithms/Events/Factory.hpp"
@@ -206,6 +225,20 @@ struct EvolutionMetavars {
       : tt::ConformsTo<Options::protocols::FactoryCreation> {
     using factory_classes = tmpl::map<
         tmpl::pair<
+            amr::Criterion,
+            tmpl::append<
+                amr::Criteria::standard_criteria<
+                    volume_dim, typename system::variables_tag::tags_list>,
+                tmpl::list<
+                    amr::Criteria::Chalmers<
+                        volume_dim, typename system::variables_tag::tags_list>,
+                    amr::Criteria::Chalmers<
+                        volume_dim, typename system::variables_tag::tags_list,
+                        true>,
+                    amr::Criteria::Chalmers<
+                        volume_dim, typename system::variables_tag::tags_list,
+                        true, true>>>>,
+        tmpl::pair<
             CurvedScalarWave::BoundaryConditions::BoundaryCondition<volume_dim>,
             CurvedScalarWave::BoundaryConditions::standard_boundary_conditions<
                 volume_dim>>,
@@ -214,7 +247,9 @@ struct EvolutionMetavars {
         tmpl::pair<
             Event,
             tmpl::flatten<tmpl::list<
-                Events::Completion,
+                Events::Completion, amr::Events::RefineMesh,
+                amr::Events::ObserveAmrStats<volume_dim>,
+                amr::Events::ObserveAmrCriteria<EvolutionMetavars>,
                 dg::Events::field_observations<volume_dim, observe_fields,
                                                non_tensor_compute_tags>,
                 tmpl::conditional_t<
@@ -286,7 +321,8 @@ struct EvolutionMetavars {
       Initialization::Actions::InitializeItems<
           Initialization::TimeStepping<EvolutionMetavars, TimeStepper, false,
                                        true>,
-          evolution::dg::Initialization::Domain<EvolutionMetavars>>,
+          evolution::dg::Initialization::Domain<EvolutionMetavars>,
+          ::amr::Initialization::Initialize<volume_dim, EvolutionMetavars>>,
       Initialization::Actions::NonconservativeSystem<system>,
       Initialization::Actions::InitializeItems<
           Initialization::TimeStepperHistory<system>>,
@@ -330,6 +366,9 @@ struct EvolutionMetavars {
           Parallel::PhaseActions<Parallel::Phase::Restart,
                                  tmpl::list<dg_registration_list,
                                             Parallel::Actions::TerminatePhase>>,
+          Parallel::PhaseActions<Parallel::Phase::CheckDomain,
+                                 tmpl::list<::amr::Actions::SendAmrDiagnostics,
+                                            Parallel::Actions::TerminatePhase>>,
           Parallel::PhaseActions<
               Parallel::Phase::WriteCheckpoint,
               tmpl::list<evolution::Actions::RunEventsAndTriggers<
@@ -347,6 +386,46 @@ struct EvolutionMetavars {
                              step_actions, Actions::MutateApply<AdvanceTime<>>,
                              PhaseControl::Actions::ExecutePhaseChange>>>>>;
 
+  struct amr : tt::ConformsTo<::amr::protocols::AmrMetavariables> {
+    using element_array = dg_element_array;
+    using projectors = tmpl::list<
+        Initialization::ProjectTimeStepping<volume_dim>,
+        evolution::dg::Initialization::ProjectDomain<volume_dim>,
+        ::amr::projectors::ProjectVariables<volume_dim,
+                                            typename system::variables_tag>,
+        ::amr::projectors::ProjectTensors<
+            volume_dim, ::CurvedScalarWave::Tags::ConstraintGamma1,
+            ::CurvedScalarWave::Tags::ConstraintGamma2>,
+        CurvedScalarWave::ProjectBackground<system, BackgroundSpacetime>,
+        ::amr::projectors::DefaultInitialize<
+            typename intrp::Actions::ElementInitInterpPoints<
+                volume_dim, interpolation_target_tags>::simple_tags>,
+        evolution::dg::Initialization::ProjectMortars<volume_dim>,
+        Initialization::ProjectTimeStepperHistory<EvolutionMetavars>,
+        evolution::Actions::ProjectRunEventsAndDenseTriggers,
+        evolution::dg::Initialization::ProjectSpectralFilters<
+            volume_dim, typename system::variables_tag::tags_list>,
+        ::amr::projectors::DefaultInitialize<
+            Initialization::Tags::InitialTimeDelta,
+            Initialization::Tags::InitialSlabSize,
+            ::domain::Tags::InitialExtents<volume_dim>,
+            ::domain::Tags::InitialRefinementLevels<volume_dim>,
+            evolution::dg::Tags::Quadrature,
+            Tags::StepperErrors<typename system::variables_tag>,
+            SelfStart::Tags::InitialValue<typename system::variables_tag>,
+            SelfStart::Tags::InitialValue<Tags::TimeStep>>,
+        ::amr::projectors::CopyFromCreatorOrLeaveAsIs<
+            evolution::dg::Tags::ChangeFixedLtsRatio::NumberOfExpectedMessages,
+            evolution::dg::Tags::ChangeFixedLtsRatio::NewStepSize,
+            Tags::FixedLtsRatio,
+            Parallel::Tags::Section<dg_element_array,
+                                    evolution::dg::Tags::EqualRateRegionId>,
+            Tags::ChangeSlabSize::NumberOfExpectedMessages,
+            Tags::ChangeSlabSize::NewSlabSize>>;
+    static constexpr bool keep_coarse_grids = false;
+    static constexpr bool p_refine_only_in_event = true;
+  };
+
   struct registration
       : tt::ConformsTo<Parallel::protocols::RegistrationMetavariables> {
     using element_registrars =
@@ -354,7 +433,8 @@ struct EvolutionMetavars {
   };
 
   using component_list = tmpl::flatten<
-      tmpl::list<observers::Observer<EvolutionMetavars>,
+      tmpl::list<::amr::Component<EvolutionMetavars>,
+                 observers::Observer<EvolutionMetavars>,
                  observers::ObserverWriter<EvolutionMetavars>,
                  importers::ElementDataReader<EvolutionMetavars>,
                  tmpl::conditional_t<interpolate,
@@ -373,6 +453,7 @@ struct EvolutionMetavars {
                  Parallel::Phase::ImportInitialData,
                  Parallel::Phase::InitializeTimeStepperHistory,
                  Parallel::Phase::Register,
+                 Parallel::Phase::CheckDomain,
                  Parallel::Phase::Evolve,
                  Parallel::Phase::Exit};
 

@@ -12,6 +12,7 @@ Parallelization:
 
 ResourceInfo:
   AvoidGlobalProc0: false
+  Singletons: Auto
 
 InitialData:
   PlaneWave:
@@ -25,6 +26,25 @@ InitialData:
 
 BackgroundSpacetime:
   Minkowski:
+
+Amr:
+  Criteria: []
+  EnableInBlocks: All
+  Policies:
+    EnforceTwoToOneBalanceInNormalDirection: true
+    Isotropy: Anisotropic
+    Limits:
+      RefinementLevel:
+      - 0
+      - 2
+      NumPolynomialModes:
+      - 2
+      - 20
+      FourierM: Auto
+      SphericalHarmonicL: Auto
+      ErrorBeyondLimits: true
+    AllowCoarsening: false
+  Verbosity: Quiet
 
 PhaseChangeAndTriggers:
 

@@ -3,6 +3,8 @@
 
 set(LIBS_TO_LINK
   Actions
+  AmrEvents
+  ParallelAmr
   Charmxx::main
   CoordinateMaps
   CurvedScalarWave

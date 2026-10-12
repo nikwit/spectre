@@ -1,0 +1,228 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+Executable: EvolveCurvedScalarWaveKerrSchild3D
+Testing:
+  Check: parse;execute
+  Timeout: 180
+  Priority: High
+ExpectedOutput:
+  - Reductions.h5
+  - Volume0.h5
+
+---
+Parallelization:
+  ElementDistribution: NumGridPoints
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
+InitialData:
+  PureSphericalHarmonic:
+    Radius: 10.0
+    Width: 2.0
+    Mode:
+    - 2
+    - 0
+Amr:
+  Criteria:
+  - ChalmersIgnoringHighestMode:
+      VariablesToMonitor:
+      - Psi
+      - Pi
+      - Phi
+      AbsoluteTarget: 0.0001
+      RelativeTarget: 0.0
+      SmoothnessThreshold: 0.5
+      PRefineOnly: false
+      CoarseningFactor: 0.1
+      HCoarsening: true
+      UseDirectionalEnergy: true
+  EnableInBlocks: All
+  Policies:
+    EnforceTwoToOneBalanceInNormalDirection: true
+    Isotropy: Anisotropic
+    Limits:
+      RefinementLevel:
+      - 0
+      - 2
+      NumPolynomialModes:
+      - 2
+      - 19
+      FourierM: Auto
+      SphericalHarmonicL: Auto
+      ErrorBeyondLimits: true
+    AllowCoarsening: true
+  Verbosity: Quiet
+PhaseChangeAndTriggers:
+- Trigger:
+    Times:
+      Specified:
+        Values:
+        - 0.4
+        - 0.8
+        - 1.2
+  PhaseChanges:
+  - VisitAndReturn(EvaluateAmrCriteria)
+  - VisitAndReturn(AdjustDomain)
+  - VisitAndReturn(CheckDomain)
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.001
+  InitialSlabSize: 0.001
+  MinimumTimeStep: 1.0e-08
+  LocalTimeStepping: 'Off'
+  TimeStepper:
+    DormandPrince5: null
+  LtsStepChoosers: null
+  VariableOrderAlgorithm:
+    GoalOrder: 5
+DomainCreator:
+  Sphere:
+    InnerRadius: 1.7
+    OuterRadius: 40.0
+    Interior:
+      ExciseWithBoundaryCondition: DemandOutgoingCharSpeeds
+    InitialRefinement:
+    - 0
+    - 0
+    - 1
+    InitialGridPoints:
+    - 10
+    - 10
+    - 10
+    UseEquiangularMap: true
+    EquatorialCompression: None
+    RadialPartitioning:
+    - 3.0
+    - 6.0
+    - 10.0
+    - 16.0
+    - 24.0
+    RadialDistribution: Linear
+    WhichWedges: All
+    TimeDependentMaps: None
+    OuterBoundaryCondition: ConstraintPreservingSphericalRadiation
+SpatialDiscretization:
+  BoundaryCorrection:
+    UpwindPenalty: null
+  DiscontinuousGalerkin:
+    Formulation: StrongInertial
+    Quadrature: GaussLobatto
+    Filtering:
+    - Hypercube:
+        HalfPower: 256
+        Enable: true
+        BlocksToFilter: All
+        VolumeFilterOnSubstep: true
+        BoundaryCorrectionFilterOnSubstep: false
+        VolumeFilterEveryNSteps: None
+        BoundaryCorrectionFilterEveryNSteps: None
+EventsAndTriggersAtSlabs:
+- Trigger:
+    Times:
+      Specified:
+        Values: &id001
+        - 0.0
+        - 0.4
+        - 0.8
+        - 1.2
+        - 1.6
+  Events:
+  - ObserveAmrStats:
+      PrintToTerminal: false
+      ObservePerCore: false
+  - ObserveNorms:
+      SubfileName: Norms
+      TensorsToObserve:
+      - Name: Psi
+        NormType: L2Norm
+        Components: Sum
+      - Name: Pi
+        NormType: L2Norm
+        Components: Sum
+      - Name: Phi
+        NormType: L2Norm
+        Components: Sum
+      - Name: PointwiseL2Norm(OneIndexConstraint)
+        NormType: L2Norm
+        Components: Sum
+      - Name: PointwiseL2Norm(TwoIndexConstraint)
+        NormType: L2Norm
+        Components: Sum
+- Trigger:
+    Times:
+      Specified:
+        Values: *id001
+  Events:
+  - ObserveFields:
+      SubfileName: Fields
+      VariablesToObserve:
+      - Psi
+      - Pi
+      - Phi
+      - OneIndexConstraint
+      - TwoIndexConstraint
+      InterpolateToMesh: None
+      ProjectToMesh: None
+      CoordinatesFloatingPointType: Double
+      FloatingPointTypes:
+      - Double
+      BlocksToObserve: All
+- Trigger:
+    Times:
+      Specified:
+        Values:
+        - 1.6
+  Events:
+  - Completion
+- Trigger: Always
+  Events:
+  - ObserveTimeStep:
+      SubfileName: TimeSteps
+      PrintTimeToTerminal: false
+      ObservePerCore: false
+  - ChangeSlabSize:
+      DelayChange: 0
+      StepChoosers:
+      - Cfl:
+          SafetyFactor: 0.25
+      - StepToTimes:
+          Times:
+            Specified:
+              Values:
+              - 0.4
+              - 0.8
+              - 1.2
+              - 1.6
+EventsAndTriggersAtSteps: null
+EventsAndTriggersAtCheckpoints: null
+EventsAndDenseTriggers: null
+Observers:
+  VolumeFileName: Volume
+  ReductionFileName: Reductions
+BackgroundSpacetime:
+  KerrSchild:
+    Mass: 1.0
+    Spin:
+    - 0.0
+    - 0.0
+    - 0.5
+    Center:
+    - 0.0
+    - 0.0
+    - 0.0
+    Velocity:
+    - 0.0
+    - 0.0
+    - 0.0
+InterpolationTargets:
+  SphericalSurface:
+    LMax: 8
+    Center:
+    - 0.0
+    - 0.0
+    - 0.0
+    Radius: 12.0
+    AngularOrdering: Strahlkorper
+Interpolator:
+  Verbosity: Silent
