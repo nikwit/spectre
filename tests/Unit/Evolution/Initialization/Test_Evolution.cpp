@@ -971,6 +971,19 @@ TimeDelta test_h_refine_lts_split(
       old_h_refinement_items<3>(parent_id, std::nullopt, mesh, time_step_id,
                                 old_order, old_time_step, first_order_error);
 
+  // Resetting an existing history must discard both steps and substeps.
+  db::mutate<history_tag>(
+      [&](const auto history) {
+        history->integration_order(4);
+        history->insert(time_step_id, variables_tag::type{},
+                        dt_variables_tag::type{});
+        history->insert(
+            TimeStepId{true, 5, time_step_id.step_time(), 1, old_time_step,
+                       (time_step_id.step_time() + old_time_step).value()},
+            variables_tag::type{}, dt_variables_tag::type{});
+      },
+      make_not_null(&box));
+
   db::mutate_apply<Initialization::ProjectTimeStepperHistory<Metavariables>>(
       make_not_null(&box), parent_items);
 
@@ -979,6 +992,7 @@ TimeDelta test_h_refine_lts_split(
   const auto& history = db::get<history_tag>(box);
   CHECK(history.integration_order() == 1);
   CHECK(history.empty());
+  CHECK(history.substeps().empty());
   const auto& new_time_step = db::get<::Tags::TimeStep>(box);
   CHECK(db::get<::Tags::Next<::Tags::TimeStepId>>(box) ==
         time_stepper.next_time_id(time_step_id, new_time_step));
@@ -1028,6 +1042,18 @@ TimeDelta test_h_refine_lts_join(
   children_items.emplace(child0_id, std::move(child0_items));
   children_items.emplace(child1_id, std::move(child1_items));
 
+  db::mutate<history_tag>(
+      [&](const auto history) {
+        history->integration_order(4);
+        history->insert(time_step_id, variables_tag::type{},
+                        dt_variables_tag::type{});
+        history->insert(
+            TimeStepId{true, 5, time_step_id.step_time(), 1, old_time_step0,
+                       (time_step_id.step_time() + old_time_step0).value()},
+            variables_tag::type{}, dt_variables_tag::type{});
+      },
+      make_not_null(&box));
+
   db::mutate_apply<Initialization::ProjectTimeStepperHistory<Metavariables>>(
       make_not_null(&box), children_items);
 
@@ -1036,6 +1062,7 @@ TimeDelta test_h_refine_lts_join(
   const auto& history = db::get<history_tag>(box);
   CHECK(history.integration_order() == 1);
   CHECK(history.empty());
+  CHECK(history.substeps().empty());
   const auto& new_time_step = db::get<::Tags::TimeStep>(box);
   CHECK(db::get<::Tags::Next<::Tags::TimeStepId>>(box) ==
         time_stepper.next_time_id(time_step_id, new_time_step));

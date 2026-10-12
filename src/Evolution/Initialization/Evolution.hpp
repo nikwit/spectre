@@ -419,13 +419,13 @@ struct ProjectTimeStepperHistory : tt::ConformsTo<amr::protocols::Projector> {
         const auto integrator_order = time_stepper.order();
         if (variants::holds_alternative<TimeSteppers::Tags::FixedOrder>(
                 integrator_order)) {
-          *history = typename history_tag::type{
-              get<TimeSteppers::Tags::FixedOrder>(integrator_order)};
+          reset_history(history,
+                        get<TimeSteppers::Tags::FixedOrder>(integrator_order));
           return;
         }
         const auto start_order =
             get<TimeSteppers::Tags::VariableOrder>(integrator_order).minimum;
-        *history = typename history_tag::type{start_order};
+        reset_history(history, start_order);
 
         const auto reduced_step = restart_time_step(parent_items, start_order);
         if (abs(reduced_step) < abs(*time_step)) {
@@ -482,13 +482,13 @@ struct ProjectTimeStepperHistory : tt::ConformsTo<amr::protocols::Projector> {
         const auto integrator_order = time_stepper.order();
         if (variants::holds_alternative<TimeSteppers::Tags::FixedOrder>(
                 integrator_order)) {
-          *history = typename history_tag::type{
-              get<TimeSteppers::Tags::FixedOrder>(integrator_order)};
+          reset_history(history,
+                        get<TimeSteppers::Tags::FixedOrder>(integrator_order));
           return;
         }
         const auto start_order =
             get<TimeSteppers::Tags::VariableOrder>(integrator_order).minimum;
-        *history = typename history_tag::type{start_order};
+        reset_history(history, start_order);
 
         for (const auto& [child, child_items] : children_items) {
           const auto reduced_step = restart_time_step(child_items, start_order);
@@ -533,6 +533,17 @@ struct ProjectTimeStepperHistory : tt::ConformsTo<amr::protocols::Projector> {
   }
 
  private:
+  // A GH history is large enough that a temporary can overflow a worker's
+  // stack in the h-refinement call chain, even when the compiler reserves the
+  // temporary's space for an inactive branch. Reset in place instead.
+  static void reset_history(
+      const gsl::not_null<typename history_tag::type*> history,
+      const size_t integration_order) {
+    history->clear();
+    history->shrink_to_fit();
+    history->integration_order(integration_order);
+  }
+
   template <typename... Tags>
   static evolution::dg::TimeSteppingPolicy
   time_stepping_policy_for_h_refinement(

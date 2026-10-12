@@ -1266,8 +1266,19 @@ template <typename... CopiedItemsTags>
 tuples::TaggedTuple<CopiedItemsTags...>
 DataBox<tmpl::list<DbTags...>>::copy_items(
     tmpl::list<CopiedItemsTags...> /*meta*/) const {
-  return tuples::TaggedTuple<CopiedItemsTags...>{
-      copy_item<CopiedItemsTags>()...};
+  tuples::TaggedTuple<CopiedItemsTags...> result{};
+  // Deserialize directly into the result. Constructing all copies as
+  // constructor arguments keeps their temporaries alive simultaneously and
+  // can exhaust worker-thread stacks for large evolution DataBoxes.
+  tmpl::for_each<tmpl::list<CopiedItemsTags...>>([&](auto tag_v) {
+    using tag = tmpl::type_from<decltype(tag_v)>;
+    using item_tag = detail::first_matching_tag<tags_list, tag>;
+    static_assert(tmpl::list_contains_v<mutable_item_creation_tags, item_tag>,
+                  "Can only copy mutable creation items");
+    serialize_and_deserialize(make_not_null(&tuples::get<tag>(result)),
+                              get_item<item_tag>().get());
+  });
+  return result;
 }
 /// \endcond
 
