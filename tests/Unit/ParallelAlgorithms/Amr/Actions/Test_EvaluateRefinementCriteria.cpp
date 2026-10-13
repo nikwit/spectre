@@ -70,6 +70,9 @@ class BadCriterion : public amr::Criterion {
   WRAPPED_PUPable_decl_template(BadCriterion);  // NOLINT
 
   amr::Criteria::Type type() override { return Type; }
+  bool p_refine_in_domain_adjustment_phase() const override {
+    return Type == amr::Criteria::Type::p;
+  }
 
   std::string observation_name() override { return "BadCriterion"; }
 
@@ -81,7 +84,7 @@ class BadCriterion : public amr::Criterion {
       Parallel::GlobalCache<Metavariables>& /*cache*/,
       const ElementId<Metavariables::volume_dim>& /*element_id*/) const {
     if constexpr (Dim == 1) {
-      return std::array{Type == amr::Criteria::Type::hp
+      return std::array{Type != amr::Criteria::Type::h
                             ? amr::Flag::IncreaseResolution
                             : amr::Flag::DecreaseResolution};
     } else if constexpr (Dim == 2) {
@@ -134,6 +137,7 @@ struct Metavariables {
         amr::Criterion,
         tmpl::list<
             BadCriterion<volume_dim>,
+            BadCriterion<volume_dim, amr::Criteria::Type::p>,
             BadCriterion<volume_dim, amr::Criteria::Type::hp>,
             amr::Criteria::IncreaseResolution<volume_dim>,
             amr::Criteria::DriveToTarget<volume_dim, amr::Criteria::Type::h>,
@@ -560,6 +564,14 @@ SPECTRE_TEST_CASE("Unit.Amr.Actions.EvaluateRefinementCriteria",
     criteria.emplace_back(wants_to_increase_resolution());
     evaluate_criteria<false>(std::move(criteria),
                              std::array{amr::Flag::IncreaseResolution});
+  }
+  {
+    INFO("Pure p criterion explicitly opts in to the synchronized phase");
+    std::vector<std::unique_ptr<amr::Criterion>> criteria;
+    criteria.emplace_back(
+        std::make_unique<BadCriterion<1, amr::Criteria::Type::p>>());
+    evaluate_criteria<true>(std::move(criteria),
+                            std::array{amr::Flag::IncreaseResolution});
   }
   {
     INFO("Only one p-criteria, ignored");

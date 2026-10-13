@@ -64,6 +64,13 @@ class Criterion : public PUP::able {
   /// Opt in to an exchange with one exact face sibling before evaluation.
   virtual bool needs_sibling_data() const { return false; }
 
+  /// Route a pure p criterion through the synchronized domain-adjustment
+  /// phase, even when the executable normally evaluates p criteria in the
+  /// RefineMesh event. Such a criterion is skipped by that event. This lets
+  /// stateful p controllers use the same history and neighbor-mesh updates
+  /// as hp controllers without claiming to request h changes.
+  virtual bool p_refine_in_domain_adjustment_phase() const { return false; }
+
   /// Evaluate a decision and, for criteria that opt in, update element-local
   /// history. Observations use evaluate() and never advance this history.
   template <typename ComputeTagsList, typename DataBoxType,

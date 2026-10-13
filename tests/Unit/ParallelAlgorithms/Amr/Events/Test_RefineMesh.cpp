@@ -56,7 +56,8 @@ static_assert(
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
-template <amr::Criteria::Type Type = amr::Criteria::Type::p>
+template <amr::Criteria::Type Type = amr::Criteria::Type::p,
+          bool InPhase = false>
 class BadCriterion : public amr::Criterion {
  public:
   using options = tmpl::list<>;
@@ -67,6 +68,7 @@ class BadCriterion : public amr::Criterion {
   WRAPPED_PUPable_decl_template(BadCriterion);  // NOLINT
 
   amr::Criteria::Type type() override { return Type; }
+  bool p_refine_in_domain_adjustment_phase() const override { return InPhase; }
 
   std::string observation_name() override { return "BadCriterion"; }
 
@@ -83,8 +85,8 @@ class BadCriterion : public amr::Criterion {
   void pup(PUP::er& p) override { Criterion::pup(p); }
 };
 
-template <amr::Criteria::Type Type>
-PUP::able::PUP_ID BadCriterion<Type>::my_PUP_ID = 0;  // NOLINT
+template <amr::Criteria::Type Type, bool InPhase>
+PUP::able::PUP_ID BadCriterion<Type, InPhase>::my_PUP_ID = 0;  // NOLINT
 #pragma GCC diagnostic pop
 
 template <typename Metavariables>
@@ -164,6 +166,7 @@ struct Metavariables {
             amr::Criterion,
             tmpl::list<
                 BadCriterion<>, BadCriterion<amr::Criteria::Type::hp>,
+                BadCriterion<amr::Criteria::Type::p, true>,
                 amr::Criteria::IncreaseResolution<1>,
                 amr::Criteria::DriveToTarget<1, amr::Criteria::Type::p>,
                 amr::Criteria::DriveToTarget<1, amr::Criteria::Type::h>>>>;
@@ -220,6 +223,9 @@ void test(const Event& event, const Event& observe_event) {
     // Evaluating this here would incorrectly request a split in a p event.
     criteria.emplace_back(
         std::make_unique<BadCriterion<amr::Criteria::Type::hp>>());
+    // An explicitly phase-routed pure p criterion must also be skipped.
+    criteria.emplace_back(
+        std::make_unique<BadCriterion<amr::Criteria::Type::p, true>>());
     // this should be ignored...
     criteria.emplace_back(
         std::make_unique<

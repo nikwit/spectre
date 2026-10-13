@@ -31,6 +31,8 @@ namespace amr::protocols {
 ///   than `::amr::Actions::EvaluateRefinementCriteria`. Joint hp criteria are
 ///   always evaluated in the latter and apply both kinds of changes through
 ///   `Phase::AdjustDomain`, preserving a single decision per adaptation cycle.
+///   Pure p criteria can opt in to this same route by overriding
+///   `amr::Criterion::p_refine_in_domain_adjustment_phase()`.
 /// - `keep_coarse_grids`: A boolean indicating that AMR should create a
 ///   completely new grid at each AMR step with an incremented grid index, and
 ///   keep the old grid around. This is useful for multigrid solvers.

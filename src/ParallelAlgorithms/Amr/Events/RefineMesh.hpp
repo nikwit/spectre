@@ -115,7 +115,8 @@ class RefineMesh : public Event {
         db::get<amr::Criteria::Tags::Criteria>(*box);
     for (const auto& criterion : refinement_criteria) {
       // Joint hp criteria are evaluated once in the domain-adjustment phase.
-      if (criterion->type() != amr::Criteria::Type::p) {
+      if (criterion->type() != amr::Criteria::Type::p or
+          criterion->p_refine_in_domain_adjustment_phase()) {
         continue;
       }
       auto decision = criterion->evaluate(observation_box, cache, element_id);

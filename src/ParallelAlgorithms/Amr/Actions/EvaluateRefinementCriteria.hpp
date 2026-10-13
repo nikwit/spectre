@@ -77,7 +77,8 @@ namespace amr::Actions {
 ///   and in each dimension selects the amr::Flag with the highest
 ///   priority (i.e the highest integral value).  If
 ///   Metavariables::amr::p_refine_only_in_event is true, pure p-refinement
-///   criteria are skipped. Joint hp criteria always run here so their choice
+///   criteria are skipped unless they explicitly opt in to this phase.
+///   Joint hp criteria always run here so their choice
 ///   is made once, before either mesh change.
 /// - If necessary, changes the refinement decision in order to satisfy the
 ///   amr::Policies
@@ -130,7 +131,8 @@ struct EvaluateRefinementCriteria {
       for (const auto& criterion : refinement_criteria) {
         const auto refinement_type = criterion->type();
         if (Metavariables::amr::p_refine_only_in_event and
-            refinement_type == amr::Criteria::Type::p) {
+            refinement_type == amr::Criteria::Type::p and
+            not criterion->p_refine_in_domain_adjustment_phase()) {
           continue;
         }
         auto decision = criterion->evaluate_and_update(
