@@ -2346,3 +2346,161 @@ The `analyze_target_shift.py`, `audit_target_shift.py`,
 `verify_target_shift_exterior.py`, `summarize_target_shift.py`, and
 `plot_target_shift.py` scripts preserve the analysis. No evolution code was
 changed or rebuilt for this matched run.
+
+## Standalone SpEC-style p controller
+
+`gh::SpecSpectral` uses the existing grouped metric and Pi/Phi diagnostics to
+decide both p addition and removal, without a preceding Chalmers request.
+It has one relative spectral target, projected C2/C3 targets, the stored
+local target adjustment, SpEC's ordinary removal permissions and exceptional
+pile-up removal, a minimum extent, and a p-change cooldown. It has no
+componentwise Chalmers target, sigma threshold, instantaneous constraint
+feedback, or Chalmers coarsening factor. Setting the adjustment limit to
+zero disables target adjustment; it does not select the hybrid's legacy
+refinement behavior.
+
+The criterion holds all decisions and history updates before `StartTime`.
+This is a global activation gate, not SpEC's radius-dependent junk rule.
+It assumes a tensor-product Legendre mesh with the highest mode removed by
+a steep filter. Neighbor smoothing, adaptive filtering and h adaptation
+remain outside this first implementation. The existing hybrid is retained
+for controlled comparisons; choose one of these controllers per evolution.
+
+`SpecSpectral` declares itself a p criterion and explicitly requests the
+synchronized domain-adjustment route. Schedule `EvaluateAmrCriteria` and
+`AdjustDomain` phases as in `SpecSpectral.yaml`. The ordinary `RefineMesh`
+event skips this criterion. Existing p criteria keep their previous routing.
+This ensures that history and neighbor meshes are updated without labeling
+the new controller as an hp criterion.
+
+The tilted-Kerr driver accepts `--policy spec` and `--policy hybrid-p`.
+Both hold h fixed, enable p increases and decreases, and default to a target
+shift limit of -1 and activation at zero. Older policy defaults are unchanged.
+The physical configuration, initial mesh and non-AMR settings match between
+the two new choices. Use `--spin 0` for Schwarzschild gauge relaxation.
+
+```sh
+build-release-debug/bin/python-spectre tools/Amr/ChalmersTiltedKerr.py \
+  --executable build-release-debug/bin/EvolveGhSingleBlackHole \
+  --output build-release-debug/spec-spectral/kerr-fixed-h-spec-10 \
+  --policy spec --radial-levels 0 0 1 2 --end-time 10 --processes 10
+```
+
+Repeat with `--policy hybrid-p` and a separate output directory for the
+matched control. Both use the existing physical-volume constraint, horizon,
+excision, field-comparison and mesh-history analysis tools. The log parser
+also accepts `SpecSpectral` records; standalone records have no upstream
+`before` flag, so only hybrid records contribute to override counts.
+
+The first 24-element fixed-h Kerr trial reached its p limit at 6.8M in an
+outer-shell radial direction. It requested 22 points, beyond the configured
+maximum of 21 (maximum polynomial degree 20). The relative Pi/Phi error was
+1.37624e-4 against a 1e-4 target; the target shift was zero and both projected
+constraints were below their tolerances. This was a resolution-limit stop,
+not a reported nonfinite evolution. The subsequent comparison uses the
+existing fine reference's fixed radial levels `[0, 0, 1, 2]`, giving 48
+elements. Neither the error targets nor the p limit were loosened.
+
+### Validation and fixed-h comparison
+
+The targeted GH and parallel-AMR builds pass, as do both GH executable
+builds. All 39 selected CTests pass (35 unit tests and four input-file
+parse/execute checks). Coverage includes standalone addition, removal and
+holding; the shifted target and constraint predictor; pile-up behavior;
+cooldown; factory construction and serialization; read-only observations;
+delayed activation; and the two AMR execution routes. A BBH input containing
+the new criterion also passes native option parsing. No BBH evolution has
+been performed with this controller.
+
+The ten-PE Schwarzschild gauge-relaxation run completes 5M on 24 fixed
+elements. It realizes 96 directional p additions and 18 removals, with no
+immediate reversals. All 3,528 logged decisions match an independent replay.
+The physical-volume three-index constraint L2 at 5M is 0.00562802, the
+maximum horizon-mass error is 2.54e-7, and the minimum sampled outgoing
+excision light speed is 0.340939. Evolution returned zero; postprocessing
+initially failed because a Python wrapper loaded an old copied parser.
+Analysis was recovered from the saved output without rerunning evolution.
+
+The refined fixed-h Kerr trial requested 20M but stops at 11.7M, again
+requesting 22 points with a 21-point cap. This time the limiting direction
+is angular in an innermost element (B5, direction 0). Its projected C3 is
+0.00444969 against a 0.004 target, the stored shift is -1, and the metric
+spectral error is 1.08194e-5 against the effective 1e-5 target. This is a
+second resolution-limit stop. Adding outer radial elements resolves the
+first stop but does not make the full 20M trial successful.
+
+The old hybrid p-only control completes 10M on the same 48-element mesh.
+The following comparison uses the valid common interval, with realized
+changes and work counted for steps beginning in `[0M,10M)`. Both use the
+same physical configuration, tolerances, resolution bounds, filter and
+two-call cooldown. The standalone trial applies eight p additions at 10M;
+the control ends before that adaptation. Those endpoint additions preserve
+the represented polynomials, and there are no endpoint removals.
+
+| Measurement | Standalone SpEC-style | Hybrid p-only |
+| --- | ---: | ---: |
+| Points immediately before 10M | 73,002 | 65,720 |
+| Grid-point steps, 0--10M | 189,345,416 | 177,404,064 |
+| Realized directional p additions / removals | 314 / 204 | 100 / 42 |
+| Remove-then-add pairs | 90 | 2 |
+| Pairs returning within 0.3M | 36 | 0 |
+| Three-index constraint L2 at 10M | 0.00906827 | 0.00960840 |
+| Gauge constraint L2 at 10M | 0.000203322 | 0.000232625 |
+| Full-state L2 reference difference at 5M | 0.00342798 | 0.00479065 |
+| Full-state L2 reference difference at 10M | 0.00690688 | 0.00361996 |
+| Metric L2 reference difference at 10M | 0.00634252 | 0.000869597 |
+
+The simpler controller uses 6.73% more grid-point work and 11.08% more
+points just before 10M. Its final three-index and gauge norms are 5.62%
+and 12.60% smaller. Coarsening is demonstrably active, but rapid cycling
+increases. The full-state difference from the fixed fine reference is
+smaller at 5M and about 1.91 times larger at 10M, dominated by the metric;
+the Pi and Phi differences remain smaller. These are reference differences,
+not certified error estimates. Lower constraints alone do not establish
+an accuracy improvement. Grid-point work excludes AMR and diagnostic
+overheads and is not a measured wall-clock speedup.
+
+Both runs keep sampled excision light speeds positive (minimum about
+0.199778). Their maximum horizon-mass and spin-magnitude errors through
+10M are the same to reported precision, 8.07e-7 and 2.81e-6, because an
+early common sample dominates those maxima. All field differences and
+physical-volume constraint integrals pass the 28/36-point quadrature
+checks. Recomputed damped-harmonic gauge sources agree with saved values
+to about 2e-14. Independent replay reproduces all 16,848 standalone and
+14,256 hybrid directional decisions over their respective logged
+intervals, including target tightening and relaxation. Neither controller
+violates the cooldown.
+
+All 36 rapid standalone reversals occur in outermost-shell radial
+directions, at unshifted targets: 30 follow a 10-to-9-point removal and
+six follow an 8-to-7-point removal. None uses exceptional pile-up removal;
+all pass the ordinary predicted removal budgets. Thirty re-additions occur
+after 0.2M and six after 0.3M. For example, at 9.4M one removal predicts
+6.0735e-5 against a 1e-4 target, but its error reaches 1.01567e-4 at 9.7M.
+The former upstream Chalmers requirement suppressed some such additions.
+
+A useful next SpEC feature to test is its region-dependent minimum
+resolution. `spec/InputFiles/Bbh/AmrDriver.input` sets wave-zone `SphereC`
+radial minima to `12+k`, while its near-hole minima are `5+k`. Our global
+seven-point floor permits every observed rapid radial cycle. An outer-shell
+radial floor would forbid these particular removals, but its effect on
+accuracy, cost and later cycling still needs measurement. SpEC's spherical
+harmonic angular bounds do not transfer directly to SpECTRE's Legendre
+wedges, and its radial floors should also be tested on the subdivided DG
+mesh rather than treated as equivalent resolutions. This remains separate
+from the eventual h fallback needed when p limits are reached.
+
+Keep the standalone controller opt-in. It simplifies the policy and
+successfully adds and removes points, but these results do not justify
+replacing the existing BBH setup. Neighbor smoothing of the stored target,
+adaptive filtering, region-specific bounds and a separate h strategy are
+still absent from this first stage.
+
+Artifacts are retained under `build-release-debug/spec-spectral`:
+`CommonIntervalSummary.json`, `CoarseMeshLimit.json`, `FixedHLimit.json`,
+`RapidCycles.json`, `RapidCycleLocations.json`, the three `compare-*.json`
+files, and per-run native logs, mesh histories, constraints and target-shift
+audits. `Manifest.json` records launch executable/library hashes.
+`analyze_common.py` and `audit_standalone.py` preserve the study analysis.
+The incomplete 20M run has `PartialAnalysis.json` and keeps its nonzero
+native return code; it is not recorded as a completed evolution.

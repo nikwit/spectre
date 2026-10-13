@@ -5,6 +5,7 @@
 
 Fixed three-dimensional runs provide references; stationary Kerr-Schild
 components are used only to check initial data, not as evolved exact fields.
+The spec and hybrid-p policies hold h fixed and default to activation at t=0.
 """
 
 import argparse
@@ -23,7 +24,12 @@ EXPERIMENT = "tilted-kerr-damped-harmonic-relaxation-v1"
 
 
 def configuration(args):
-    args.strategy = "fixed" if args.policy == "fixed" else "hp05"
+    p_only = args.policy in ("spec", "hybrid-p")
+    args.strategy = (
+        "fixed" if args.policy == "fixed" else ("p" if p_only else "hp05")
+    )
+    if p_only:
+        args.h_coarsening = False
     args.constraint_feedback = "off" if args.policy == "fixed" else "tighten"
     config = relax.configuration(args)
     direction = np.asarray(args.spin_direction, dtype=float)
@@ -73,8 +79,12 @@ def configuration(args):
                     "RefinementCriterion": old,
                     "RelativeTruncationTarget": args.spectral_target,
                     "ConstraintTargets": args.constraint_targets,
-                    "EnableCoarsening": args.policy in ("ordinary", "pileup"),
-                    "ForceDropPileUpModes": args.policy == "pileup",
+                    "EnableCoarsening": (
+                        args.policy in ("ordinary", "pileup", "hybrid-p")
+                    ),
+                    "ForceDropPileUpModes": (
+                        args.policy in ("pileup", "hybrid-p")
+                    ),
                     "MinimumModes": 7,
                     "CallsBetweenChanges": args.calls_between_changes,
                     "TruncationErrorAdjustmentLimit": args.target_shift_limit,
@@ -83,6 +93,14 @@ def configuration(args):
                 }
             }
         ]
+        if args.policy == "spec":
+            settings = config["Amr"]["Criteria"][0][
+                "ChalmersWithSpecCoarsening"
+            ]
+            del settings["RefinementCriterion"]
+            del settings["EnableCoarsening"]
+            settings["ForceDropPileUpModes"] = True
+            config["Amr"]["Criteria"] = [{"SpecSpectral": settings}]
     return config
 
 
@@ -92,7 +110,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--policy",
-        choices=["original", "ordinary", "pileup", "fixed"],
+        choices=["original", "ordinary", "pileup", "fixed", "spec", "hybrid-p"],
         required=True,
     )
     parser.add_argument("--spin", type=float, default=0.5)
@@ -118,7 +136,7 @@ def main():
     parser.add_argument("--horizon-l", type=int, default=10)
     parser.add_argument("--cfl", type=float, default=0.5)
     parser.add_argument("--end-time", type=float, default=5.0)
-    parser.add_argument("--start-time", type=float, default=10.0)
+    parser.add_argument("--start-time", type=float, default=None)
     parser.add_argument(
         "--calls-between-changes",
         type=int,
@@ -129,8 +147,8 @@ def main():
     parser.add_argument(
         "--target-shift-limit",
         type=float,
-        default=0.0,
-        help="Stored log10 target limit; -1 enables SpEC local feedback",
+        default=None,
+        help="Stored log10 target limit; default -1 for spec/hybrid-p, else 0",
     )
     parser.add_argument("--timeout", type=float, default=86400.0)
     parser.add_argument("--spectral-target", type=float, default=1.0e-4)
@@ -139,6 +157,12 @@ def main():
     )
     parser.add_argument("--write-only", action="store_true")
     args = parser.parse_args()
+    if args.start_time is None:
+        args.start_time = 0.0 if args.policy in ("spec", "hybrid-p") else 10.0
+    if args.target_shift_limit is None:
+        args.target_shift_limit = (
+            -1.0 if args.policy in ("spec", "hybrid-p") else 0.0
+        )
     if args.calls_between_changes < 1:
         parser.error("--calls-between-changes must be positive")
     if not np.isfinite(args.target_shift_limit) or args.target_shift_limit > 0:
@@ -157,6 +181,12 @@ def main():
     args.mesh_observations = True
     args.constraint_target = 3.0e-5
     args.minimum_target_factor = 0.1
+    if args.policy in ("spec", "hybrid-p"):
+        args.estimator_variant = (
+            "spec-grouped-tensor"
+            if args.policy == "spec"
+            else "chalmers-directional-energy-with-spec-tensor"
+        )
     config = configuration(args)
     if args.write_only:
         args.output.mkdir(parents=True, exist_ok=False)
@@ -167,7 +197,12 @@ def main():
         return
     sources = {
         str(p): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in [Path(__file__).resolve(), Path(relax.__file__).resolve()]
+        for p in (
+            Path(__file__).resolve(),
+            Path(relax.__file__).resolve(),
+            Path(cube.__file__).resolve(),
+            Path(coarsening.__file__).resolve(),
+        )
     }
     try:
         status = cube.run(

@@ -157,9 +157,10 @@ def configuration(args):
 
 def analyze_log(directory):
     pattern = re.compile(
-        r"SpecCoarsening time=(\S+) element=(\S+) direction=(\d+) "
+        r"(?:SpecCoarsening|SpecSpectral) time=(\S+) element=(\S+) "
+        r"direction=(\d+) "
         r"extent=(\d+) metric=\(([^)]+)\) derivative=\(([^)]+)\) "
-        r"constraints=\(([^)]+)\) before=(\w+) after=(\w+)"
+        r"constraints=\(([^)]+)\) (?:before=(\w+) )?after=(\w+)"
         r"(?: target_shift=(\S+) effective_target=(\S+))?"
     )
     records = []
@@ -206,7 +207,12 @@ def analyze_log(directory):
     if not records:
         raise ValueError("No native pre-AMR diagnostics")
     write_csv(directory / "SpecDecisions.csv", records)
-    changed = [r for r in records if r["before"] != r["after"]]
+    # Standalone decisions have no upstream Chalmers flag to override.
+    changed = [
+        r
+        for r in records
+        if r["before"] is not None and r["before"] != r["after"]
+    ]
     summary = dict(
         directional_evaluations=len(records),
         decisions=dict(Counter(r["after"] for r in records)),
@@ -223,6 +229,10 @@ def analyze_log(directory):
             for key in ["c2", "c3"]
         },
         first_change=min((r["time"] for r in changed), default=None),
+        first_request=min(
+            (r["time"] for r in records if r["after"] != "DoNothing"),
+            default=None,
+        ),
     )
     (directory / "SpecAnalysis.json").write_text(
         json.dumps(summary, indent=2) + "\n"

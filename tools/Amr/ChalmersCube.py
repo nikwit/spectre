@@ -272,6 +272,8 @@ def run(
         executable_sha256=executable_hash,
         processes=getattr(args, "processes", 1),
     )
+    if hasattr(args, "estimator_variant"):
+        metadata["estimator_variant"] = args.estimator_variant
     (directory / "Run.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(json.dumps({"run": str(directory), **metadata}), flush=True)
     if returncode:
