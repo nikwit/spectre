@@ -2504,3 +2504,118 @@ audits. `Manifest.json` records launch executable/library hashes.
 `analyze_common.py` and `audit_standalone.py` preserve the study analysis.
 The incomplete 20M run has `PartialAnalysis.json` and keeps its nonzero
 native return code; it is not recorded as a completed evolution.
+
+### Regional radial-floor experiment
+
+`SpecSpectral.MinimumModes` now accepts a scalar, one three-direction array,
+or one such array per block in domain order. Entries count points, including
+the highest filtered mode, and must be at least five. The initial mesh must
+meet the chosen floors. These restrictions veto all p removals at the floor,
+including the exceptional pile-up path, but do not prevent p additions.
+Scalar inputs retain the previous decisions on meshes satisfying the bound.
+The restricted decision is stored in the history, so observations and repeated
+evaluations remain consistent. This is a local resolution restriction; it
+does not add a new error estimator or change the target-feedback rules.
+
+The Kerr driver exposes `--radial-minimum-modes` for the standalone policy.
+Its four entries apply to the four radial shells, with angular minima fixed
+at seven. The first test compares `[7,7,7,7]` and `[7,7,7,12]`. Twelve is the
+base `12+k` wave-zone floor in SpEC's BBH input, evaluated at `k=0`; this is
+a trial value for the subdivided DG mesh, not a claim of equivalent accuracy.
+
+Both runs start with radial extents `[8,8,8,12]`, rather than starting the
+floored run below its restriction. They retain radial refinement levels
+`[0,0,1,2]`, angular extents 12, the same physical setup and error targets,
+and run to 10M on ten PEs. Rerunning the control with this same initial mesh
+separates the floor's effect from changing the initial data discretization.
+
+```sh
+build-release-debug/bin/python-spectre tools/Amr/ChalmersTiltedKerr.py \
+  --executable build-release-debug/bin/EvolveGhSingleBlackHole \
+  --output build-release-debug/spec-spectral/radial-floor/floor12-10 \
+  --policy spec --radial-levels 0 0 1 2 --radial-points 8 8 8 12 \
+  --radial-minimum-modes 7 7 7 12 --end-time 10 --processes 10
+```
+
+For the control, use a separate directory and
+`--radial-minimum-modes 7 7 7 7`. The study files are retained under
+`build-release-debug/spec-spectral/radial-floor`.
+
+Both matched runs complete 10M. The saved initial fields and coordinates
+match bitwise, and the parsed inputs differ only in the six outer blocks'
+radial minimum. Executable and linked-library hashes remain unchanged
+through both runs. The control here is a fresh standalone run with twelve
+initial outer radial points; it is not the earlier eight-point control.
+
+| Measurement | Minimum 7 | Outer radial minimum 12 |
+| --- | ---: | ---: |
+| Points immediately before 10M | 74,730 | 84,546 |
+| Grid-point steps, 0--10M | 197,209,724 | 224,710,070 |
+| Directional p additions / removals | 338 / 312 | 230 / 132 |
+| Outer radial p additions / removals | 216 / 288 | 108 / 108 |
+| Remove-then-add pairs | 78 | 42 |
+| Pairs returning within 0.3M | 42 | 18 |
+| Full-state L2 reference difference at 10M | 0.00712413 | 0.00299421 |
+| Metric L2 reference difference at 10M | 0.00584958 | 0.00143079 |
+| Three-index constraint L2 at 10M | 0.00905969 | 0.00909864 |
+| Gauge constraint L2 at 10M | 0.000204583 | 0.000202878 |
+| Three-index constraint L2 in 8 < r < 20 at 10M | 0.000323059 | 0.000901249 |
+
+The floor reduces rapid reversals by 57.1% and the final full-state and
+metric differences from the fine reference by 58.0% and 75.5%. These gains
+cost 13.94% more grid-point work and 13.14% more final points. Both runs
+take 2,800 global steps. The directly integrated outer-shell full-state
+reference difference falls from 0.00711496 to 0.00297457, so the final
+field improvement occurs mainly where the floor acts. At 5M, however, the
+full-state reference difference increases slightly, from 0.00299963 to
+0.00307629 (2.56%). Reference differences do not certify the true error.
+
+Constraints show a different tradeoff. At 10M, the whole-domain C3 norm
+rises by 0.43%, and the gauge norm decreases by 0.83%. The outer-shell C3
+norm increases by a factor of 2.79. Breaking that shell into its four radial
+elements locates most of the increase in the outermost interval, adjacent
+to the outer boundary: its C3 norm grows from 8.72e-5 to 8.81e-4. The
+innermost interval of the same shell improves from 2.63e-4 to 6.63e-6.
+This spatial contrast merits a boundary/filter investigation; the present
+experiment does not establish its cause. The maximum horizon-mass and
+spin-magnitude errors remain 8.07e-7 and 2.81e-6 in both runs, and the minimum
+sampled excision light speed remains positive at about 0.199778.
+
+Coarsening remains active above the floor: 108 outer radial removals and
+24 removals elsewhere are realized. The outer radial extents range from
+12 to 20 instead of 7 to 20. All 4,848 saved element meshes per run obey
+their bounds. The controller vetoes 1,332 otherwise allowed removal
+requests at the raised floor, including 536 using exceptional pile-up
+removal. Such a veto does not prevent a subsequent addition when needed.
+
+The 18 remaining rapid reversals are still outer radial changes, all at
+unshifted targets. Six are 20-to-19 removals at 2.8M using exceptional
+pile-up removal; six are ordinary 15-to-14 removals at 5.1M, and six are
+ordinary 13-to-12 removals at 9M. Their re-addition gaps are 0.2M for six
+pairs and 0.3M for twelve. Thus raising the floor removes many low-order
+cycles but does not remove cycling above it. Increasing the floor further
+solely to hide those cycles would require a separate accuracy/cost case.
+
+The independent audit reproduces all 14,256 directional decisions in each
+run, including stored target shifts and floor vetoes. There are no cooldown
+violations. Physical-volume integrals and field differences pass the
+28/36-point quadrature checks, and recomputed gauge sources agree with
+saved values to better than 2.2e-14. Both GH executables build, and all nine
+targeted controller unit and input-file parse/execute checks pass. The
+driver also rejects initial radial extents below their proposed floors.
+
+Regional floors are a promising opt-in simplification, with better final
+field agreement and fewer reversals in this test. They are not an
+unqualified constraint improvement or a reason to raise the minima again.
+Before selecting BBH defaults, investigate the outer-boundary constraint
+response and remaining pile-up removals, then address the separate h
+fallback. This test ends at 10M and does not establish whether the earlier
+11.7M inner angular p-limit stop is resolved.
+
+`Summary.json`, `CycleAudit.json` and `OuterConstraintBreakdown.json`
+contain the comparisons. Per-run `TargetShiftAudit.json` and `PolicyReplay.csv`
+retain the decision checks. `run_pair.py`, `analyze_all.py`,
+`analyze_pair.py`, `audit_floor.py`, `cycle_audit.py` and
+`outer_constraint_breakdown.py` preserve the local study workflow;
+`Manifest.json`, `BaseCommit.txt` and `Source.patch` record the
+executable/library hashes and source used for the runs.
