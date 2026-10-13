@@ -57,12 +57,18 @@ Diagnostics diagnose(const tnsr::aa<DataVector, 3>& metric,
 /// Serialized per-element history. Reset on h changes; retained on p changes
 /// so the next call can detect the *realized* mesh change. Observations do not
 /// update it. Target adjustment retains constraint history across p changes,
-/// as in SpEC; the prospective-removal forecast uses only an unchanged mesh.
+/// as in SpEC, including in the prospective-removal forecast.
 struct History {
   size_t calls{0};
   double time{-std::numeric_limits<double>::infinity()};
   std::array<size_t, 3> extents{};
   std::array<size_t, 3> last_change{};
+  std::array<double, 3> last_change_time{
+      {-std::numeric_limits<double>::infinity(),
+       -std::numeric_limits<double>::infinity(),
+       -std::numeric_limits<double>::infinity()}};
+  // Spatial base target, sampled once and retained across p changes.
+  double spectral_target{std::numeric_limits<double>::signaling_NaN()};
   std::array<std::array<double, 3>, 2> constraints{};
   std::array<double, 3> log10_target_shift{};
   std::array<amr::Flag, 3> decision{};
@@ -71,6 +77,8 @@ struct History {
     p | time;
     p | extents;
     p | last_change;
+    p | last_change_time;
+    p | spectral_target;
     p | constraints;
     p | log10_target_shift;
     p | decision;
@@ -87,6 +95,7 @@ struct Settings {
   // addition gate in that case; decide_p always requires LargeTrunc.
   // Negative values enable SpEC's local target adjustment (inspiral uses -1).
   double adjustment_limit{0.0};
+  double minimum_time_between_changes{0.0};
 };
 
 /// Compute the next local log10 target shifts without changing history.

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
@@ -47,9 +48,63 @@ namespace gh {
  */
 class SpecSpectral : public amr::Criterion {
  public:
+  struct GaussianTarget {
+    struct Center {
+      using type = std::array<double, 3>;
+      static constexpr Options::String help = "Center in grid coordinates.";
+    };
+    struct Width {
+      using type = double;
+      static constexpr Options::String help = "Gaussian e-folding radius.";
+    };
+    struct Amplitude {
+      using type = double;
+      static constexpr Options::String help = "Nonnegative blending weight.";
+    };
+    struct Target {
+      using type = double;
+      static constexpr Options::String help = "Relative spectral target.";
+    };
+    using options = tmpl::list<Center, Width, Amplitude, Target>;
+    static constexpr Options::String help =
+        "Gaussian contribution to the log10 spectral target.";
+    GaussianTarget() = default;
+    GaussianTarget(std::array<double, 3> center_in, double width_in,
+                   double amplitude_in, double target_in,
+                   const Options::Context& context = {});
+    void pup(PUP::er& p);
+    std::array<double, 3> center{};
+    double width{1.0};
+    double amplitude{1.0};
+    double target{1.e-4};
+  };
+  struct SpatialTarget {
+    struct Background {
+      using type = double;
+      static constexpr Options::String help = "Constant target of weight one.";
+    };
+    struct Gaussians {
+      using type = std::vector<GaussianTarget>;
+      static constexpr Options::String help = "Grid-frame Gaussian profiles.";
+    };
+    using options = tmpl::list<Background, Gaussians>;
+    static constexpr Options::String help =
+        "SpEC log10 target blend, using each profile's maximum over the "
+        "element's initial grid points. Frozen across p changes.";
+    SpatialTarget() = default;
+    SpatialTarget(double background_in,
+                  std::vector<GaussianTarget> gaussians_in,
+                  const Options::Context& context = {});
+    double operator()(
+        const tnsr::I<DataVector, 3, Frame::Grid>& coordinates) const;
+    void pup(PUP::er& p);
+    double background{1.e-4};
+    std::vector<GaussianTarget> gaussians{};
+  };
   struct RelativeTruncationTarget {
-    using type = double;
-    static constexpr Options::String help = "Relative tensor spectral target.";
+    using type = std::variant<double, SpatialTarget>;
+    static constexpr Options::String help =
+        "Constant relative spectral target or a spatial log10 target blend.";
   };
   struct ConstraintTargets {
     using type = std::array<double, 2>;
@@ -91,23 +146,33 @@ class SpecSpectral : public amr::Criterion {
     using type = bool;
     static constexpr Options::String help = "Record pre-AMR diagnostics.";
   };
+  struct TimeBetweenChanges {
+    using type = double;
+    static type lower_bound() { return 0.0; }
+    static constexpr Options::String help =
+        "Minimum elapsed evolution time after a realized p change. Zero "
+        "disables this restriction; the call-count cooldown still applies.";
+  };
   using options =
       tmpl::list<RelativeTruncationTarget, ConstraintTargets,
                  ForceDropPileUpModes, MinimumModes, CallsBetweenChanges,
-                 TruncationErrorAdjustmentLimit, StartTime, Verbose>;
+                 TruncationErrorAdjustmentLimit, StartTime, Verbose,
+                 TimeBetweenChanges>;
   static constexpr Options::String help =
       "SpEC-style GH p refinement and coarsening on filtered Legendre meshes.";
 
   SpecSpectral() = default;
-  SpecSpectral(double spectral_target,
+  SpecSpectral(RelativeTruncationTarget::type spectral_target,
                const std::array<double, 2>& constraint_targets, bool force,
                MinimumModes::type minimum_modes, size_t cooldown,
                double adjustment_limit, double start_time, bool verbose,
+               double time_between_changes = 0.0,
                const Options::Context& context = {});
-  SpecSpectral(double spectral_target,
+  SpecSpectral(RelativeTruncationTarget::type spectral_target,
                const std::array<double, 2>& constraint_targets, bool force,
                size_t minimum_modes, size_t cooldown, double adjustment_limit,
                double start_time, bool verbose,
+               double time_between_changes = 0.0,
                const Options::Context& context = {});
   explicit SpecSpectral(CkMigrateMessage* msg) : amr::Criterion(msg) {}
   using PUP::able::register_constructor;
@@ -178,8 +243,16 @@ class SpecSpectral : public amr::Criterion {
         db::get<domain::Tags::Coordinates<3, Frame::Inertial>>(box), time,
         db::get<gauges::Tags::GaugeCondition>(box),
         db::get<gh::Tags::ConstraintGamma2>(box));
-    auto result = spec_amr::decide_p(history, diagnostics,
-                                     mesh.extents().indices(), time, settings_);
+    auto local_settings = settings_;
+    if (spatial_target_.has_value()) {
+      if (not std::isfinite(history->spectral_target)) {
+        history->spectral_target = (*spatial_target_)(
+            db::get<domain::Tags::Coordinates<3, Frame::Grid>>(box));
+      }
+      local_settings.spectral_target = history->spectral_target;
+    }
+    auto result = spec_amr::decide_p(
+        history, diagnostics, mesh.extents().indices(), time, local_settings);
     // Resolution restrictions also take priority over forced pile-up removal.
     // Store the restricted result so repeated evaluation remains idempotent.
     for (size_t d = 0; d < 3; ++d) {
@@ -204,7 +277,7 @@ class SpecSpectral : public amr::Criterion {
             k.pile_up, diagnostics.constraints[0][d],
             diagnostics.constraints[1][d], get_output(result[d]),
             history->log10_target_shift[d],
-            settings_.spectral_target *
+            local_settings.spectral_target *
                 pow(10.0, history->log10_target_shift[d]));
       }
     }
@@ -212,6 +285,7 @@ class SpecSpectral : public amr::Criterion {
   }
   std::array<size_t, 3> minimum_modes(size_t block_id) const;
   spec_amr::Settings settings_{};
+  std::optional<SpatialTarget> spatial_target_{};
   MinimumModes::type minimum_modes_{size_t{5}};
   double start_time_{0.0};
   bool verbose_{false};

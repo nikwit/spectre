@@ -246,8 +246,7 @@ std::array<double, 3> updated_target_shifts(const History& history,
       const double current = diagnostics.constraints[c][d];
       const double previous = history.constraints[c][d];
       const bool have_previous = history.calls > 0;
-      // Unlike the prospective p-removal forecast, SpEC's target controller
-      // retains the previous constraint even when a p change was realized.
+      // Retain the previous constraint even when a p change was realized.
       const double predicted =
           have_previous ? predict(current, previous) : current;
       double next_shift = shift;
@@ -289,7 +288,6 @@ std::array<amr::Flag, 3> decide_impl(const gsl::not_null<History*> history,
   }
   ASSERT(time >= history->time, "AMR history ran backwards");
   const size_t call = history->calls;
-  const bool same_mesh = call > 0 and extents == history->extents;
   const bool joining =
       std::any_of(flags.begin(), flags.end(),
                   [](const auto f) { return f == amr::Flag::Join; });
@@ -312,6 +310,7 @@ std::array<amr::Flag, 3> decide_impl(const gsl::not_null<History*> history,
       // Change took place following the previous evaluation, which is when
       // SpEC starts its cooldown. Use realized extents, not requested flags.
       history->last_change[d] = call - 1;
+      history->last_change_time[d] = history->time;
     }
     if (flags[d] == amr::Flag::Split) {
       continue;
@@ -327,7 +326,9 @@ std::array<amr::Flag, 3> decide_impl(const gsl::not_null<History*> history,
       // Simultaneous p-down would invalidate that prospective-parent check.
       continue;
     }
-    if (call > 0 and call < history->last_change[d] + settings.cooldown) {
+    if ((call > 0 and call < history->last_change[d] + settings.cooldown) or
+        time < history->last_change_time[d] +
+                   settings.minimum_time_between_changes) {
       flags[d] = amr::Flag::DoNothing;
       continue;
     }
@@ -349,14 +350,9 @@ std::array<amr::Flag, 3> decide_impl(const gsl::not_null<History*> history,
       const size_t constraint = 1 - group;
       const double current = diagnostics.constraints[constraint][d];
       const double predicted =
-          same_mesh ? predict(current, history->constraints[constraint][d])
-                    : current;
-      const double addition_forecast =
-          (standalone or settings.adjustment_limit < 0.0) and call > 0
-              ? predict(current, history->constraints[constraint][d])
-              : predicted;
-      constraint_excess |=
-          addition_forecast >= settings.constraint_targets[constraint];
+          call > 0 ? predict(current, history->constraints[constraint][d])
+                   : current;
+      constraint_excess |= predicted >= settings.constraint_targets[constraint];
       const double ratio =
           spectrum.error > 0.0
               ? std::max(1.0, spectrum.next_error / spectrum.error)

@@ -22,6 +22,7 @@ using Phi = gh::Tags::Phi<DataVector, 3>;
 using Inverse =
     domain::Tags::InverseJacobian<3, Frame::ElementLogical, Frame::Inertial>;
 using Coordinates = domain::Tags::Coordinates<3, Frame::Inertial>;
+using GridCoordinates = domain::Tags::Coordinates<3, Frame::Grid>;
 using Criterion = gh::ChalmersWithSpecCoarsening;
 struct Metavariables {
   static constexpr size_t volume_dim = 3;
@@ -122,6 +123,110 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.Standalone",
   CHECK(trial.calls == calls);
   CHECK(decide_p(make_not_null(&trial), data, {{7, 7, 7}}, 6., settings) ==
         none);
+}
+
+SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.TimeAndPredictor",
+                  "[Unit][Evolution]") {
+  using namespace gh::spec_amr;
+  Settings settings{1.e-4, {{1.e-3, 1.e-3}}, true, 7, 2, -1., 1.};
+  Diagnostics data{};
+  for (auto& group : data.spectra) {
+    group.fill(Spectrum{1.e-5, 2.e-5, 0.5, 0., false});
+    group[0] = Spectrum{2.e-4, 4.e-4, 0.5, 0., false};
+  }
+  for (auto& group : data.constraints) {
+    group.fill(1.e-5);
+  }
+  auto extents = std::array<size_t, 3>{{12, 12, 12}};
+  History history{};
+  history.calls = 3;
+  history.extents = extents;
+  history.constraints = data.constraints;
+  const auto up = amr::Flag::IncreaseResolution;
+  const auto down = amr::Flag::DecreaseResolution;
+  const auto hold = amr::Flag::DoNothing;
+  CHECK(decide_p(make_not_null(&history), data, extents, 0., settings) ==
+        (std::array{up, down, down}));
+  ++extents[0];  // Only this requested change is realized.
+  for (const double time : {0.1, 0.25, 0.75}) {
+    CHECK(decide_p(make_not_null(&history), data, extents, time, settings) ==
+          (std::array{hold, down, down}));
+    CHECK(history.last_change_time[0] == 0.);
+    CHECK(std::isinf(history.last_change_time[1]));
+  }
+  history = serialize_and_deserialize(history);
+  CHECK(history.last_change_time[0] == 0.);
+  // The elapsed-time gate blocks forced removal as well. Diagnostics and
+  // target history still advance while both cooldowns are applied.
+  for (auto& group : data.spectra) {
+    group[0].pile_up = 5.;
+  }
+  data.constraints[0][0] = 0.01;
+  CHECK(decide_p(make_not_null(&history), data, extents, 0.9, settings)[0] ==
+        hold);
+  CHECK(history.constraints == data.constraints);
+  CHECK(history.log10_target_shift[0] < 0.);
+  CHECK(decide_p(make_not_null(&history), data, extents, 1., settings)[0] ==
+        down);
+  const auto calls = history.calls;
+  CHECK(decide_p(make_not_null(&history), data, extents, 1., settings)[0] ==
+        down);
+  CHECK(history.calls == calls);
+  --extents[0];
+  CHECK(decide_p(make_not_null(&history), data, extents, 1.1, settings)[0] ==
+        hold);
+  CHECK(history.last_change_time[0] == 1.);
+
+  // SpEC SetAddDropLimits extrapolates across p changes too. With one call
+  // between changes and no elapsed-time gate, isolate this prediction:
+  // rising C: 1.25 * (4e-4)^2 / 1e-4 * 2 > 1e-3, so hold;
+  // falling C: 1.25 * (6e-4)^2 / 1.2e-3 * 2 < 1e-3, so drop.
+  settings.cooldown = 1;
+  settings.minimum_time_between_changes = 0.;
+  settings.adjustment_limit = 0.;
+  for (const bool rising : {true, false}) {
+    history = History{};
+    history.calls = 3;
+    history.extents = extents;
+    ++history.extents[0];
+    for (auto& group : history.constraints) {
+      group.fill(rising ? 1.e-4 : 1.2e-3);
+    }
+    for (auto& group : data.constraints) {
+      group.fill(rising ? 4.e-4 : 6.e-4);
+    }
+    for (auto& group : data.spectra) {
+      group.fill(Spectrum{1.e-5, 2.e-5, 0.5, 0., false});
+    }
+    CHECK(decide_p(make_not_null(&history), data, extents, 0., settings)[0] ==
+          (rising ? hold : down));
+  }
+}
+
+SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.SpatialTarget",
+                  "[Unit][Evolution]") {
+  using Gaussian = gh::SpecSpectral::GaussianTarget;
+  using Target = gh::SpecSpectral::SpatialTarget;
+  GridCoordinates::type coords(3, 0.);
+  coords.get(0) = DataVector{0., 2., 4.};
+  const Target one{1.e-4, {Gaussian{{0., 0., 0.}, 2., 1., 1.e-8}}};
+  CHECK(one(coords) == approx(1.e-6));
+  CHECK(serialize_and_deserialize(one)(coords) == approx(1.e-6));
+  // Maximize each profile separately before the logarithmic blend.
+  const Target two{1.e-4,
+                   {Gaussian{{0., 0., 0.}, 2., 1., 1.e-8},
+                    Gaussian{{4., 0., 0.}, 2., 2., 1.e-10}}};
+  CHECK(two(coords) == approx(1.e-8));
+  coords.get(0) = 2.;
+  const double weight = exp(-1.);
+  CHECK(one(coords) == approx(pow(10., (-4. - 8. * weight) / (1. + weight))));
+  coords.get(0) = 1.e6;
+  CHECK(one(coords) == approx(1.e-4));
+  CHECK(Target(1.e-4, {})(coords) == approx(1.e-4));
+  CHECK_THROWS_WITH((Gaussian{{0., 0., 0.}, 0., 1., 1.e-8}),
+                    Catch::Matchers::ContainsSubstring("Gaussian width"));
+  CHECK_THROWS_WITH((Target{0., {}}),
+                    Catch::Matchers::ContainsSubstring("Background target"));
 }
 
 SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.Spectrum",
@@ -491,10 +596,12 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.DiagnosticsAndHistory",
   Phi::type phi(n, 0.0);
   Inverse::type inverse(n, 0.0);
   Coordinates::type coords(n, 0.0);
+  GridCoordinates::type grid_coords(n, 0.0);
   const auto xi = logical_coordinates(mesh);
   for (size_t d = 0; d < 3; ++d) {
     inverse.get(d, d) = 1. / (d + 1.);
     coords.get(d) = (d + 1.) * xi.get(d);
+    grid_coords.get(d) = coords.get(d);
   }
   const gh::gauges::Harmonic harmonic{};
   const Scalar<DataVector> gamma2(n, 1.0);
@@ -523,11 +630,11 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.DiagnosticsAndHistory",
                                                          false, false};
   const Criterion criterion{
       refinement, 1.e-4, {{1.e-3, 1.e-3}}, true, true, 7, 2, 0., false};
-  auto box = db::create<
-      tmpl::list<domain::Tags::Mesh<3>, Metric, Pi, Phi, Inverse, Coordinates,
-                 ::Tags::Time, gh::gauges::Tags::GaugeCondition,
-                 gh::Tags::ConstraintGamma2, gh::spec_amr::HistoryTag>>(
-      mesh, metric, pi, phi, inverse, coords, 0.,
+  auto box = db::create<tmpl::list<
+      domain::Tags::Mesh<3>, Metric, Pi, Phi, Inverse, Coordinates,
+      GridCoordinates, ::Tags::Time, gh::gauges::Tags::GaugeCondition,
+      gh::Tags::ConstraintGamma2, gh::spec_amr::HistoryTag>>(
+      mesh, metric, pi, phi, inverse, coords, grid_coords, 0.,
       std::unique_ptr<gh::gauges::GaugeCondition>(
           std::make_unique<gh::gauges::Harmonic>()),
       gamma2, gh::spec_amr::History{});
@@ -566,6 +673,7 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.DiagnosticsAndHistory",
           "  MinimumModes: 7\n"
           "  CallsBetweenChanges: 2\n"
           "  TruncationErrorAdjustmentLimit: -1\n"
+          "  TimeBetweenChanges: 0\n"
           "  StartTime: 2\n"
           "  Verbose: false\n");
   CHECK(standalone->type() == amr::Criteria::Type::p);
@@ -613,7 +721,13 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.DiagnosticsAndHistory",
     auto regional =
         TestHelpers::test_factory_creation<amr::Criterion, gh::SpecSpectral>(
             "SpecSpectral:\n"
-            "  RelativeTruncationTarget: 1.e-4\n"
+            "  RelativeTruncationTarget:\n"
+            "    Background: 1.e-4\n"
+            "    Gaussians:\n"
+            "      - Center: [-1, -2, -3]\n"
+            "        Width: 1\n"
+            "        Amplitude: 1\n"
+            "        Target: 1.e-8\n"
             "  ConstraintTargets: [1.e-3, 1.e-3]\n"
             "  ForceDropPileUpModes: true\n"
             "  MinimumModes: " +
@@ -621,6 +735,7 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.DiagnosticsAndHistory",
             "\n"
             "  CallsBetweenChanges: 2\n"
             "  TruncationErrorAdjustmentLimit: -1\n"
+            "  TimeBetweenChanges: 0\n"
             "  StartTime: 0\n"
             "  Verbose: false\n");
     db::mutate<gh::spec_amr::HistoryTag>(
@@ -646,7 +761,17 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.DiagnosticsAndHistory",
       CHECK(regional->evaluate_and_update(make_not_null(&observation), cache,
                                           ElementId<3>{1}) == expected);
       CHECK(db::get<gh::spec_amr::HistoryTag>(box).calls == 4);
+      CHECK(db::get<gh::spec_amr::HistoryTag>(box).spectral_target ==
+            approx(1.e-6));
     }
+    CHECK(serialize_and_deserialize(db::get<gh::spec_amr::HistoryTag>(box))
+              .spectral_target == approx(1.e-6));
+    auto projected_history = db::get<gh::spec_amr::HistoryTag>(box);
+    gh::spec_amr::ProjectHistory::apply(make_not_null(&projected_history),
+                                        std::pair{mesh, Element<3>{id, {}}});
+    CHECK(projected_history.spectral_target == approx(1.e-6));
+    gh::spec_amr::ProjectHistory::apply(make_not_null(&projected_history), 0);
+    CHECK(std::isnan(projected_history.spectral_target));
   }
   CHECK_THROWS_WITH(
       (gh::SpecSpectral{1.e-4,
@@ -688,10 +813,12 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.WrapperTargetShift",
   Pi::type pi(n, 0.0);
   Inverse::type inverse(n, 0.0);
   Coordinates::type coords(n, 0.0);
+  GridCoordinates::type grid_coords(n, 0.0);
   const auto xi = logical_coordinates(mesh);
   for (size_t d = 0; d < 3; ++d) {
     inverse.get(d, d) = 1.;
     coords.get(d) = xi.get(d);
+    grid_coords.get(d) = coords.get(d);
   }
   auto phi = partial_derivative(metric, mesh, inverse);
   phi.get(0, 0, 0) += 0.01;
@@ -734,11 +861,11 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.WrapperTargetShift",
   initial_history.time = -1.;
   initial_history.extents = mesh.extents().indices();
   initial_history.constraints = diagnostics.constraints;
-  auto box = db::create<
-      tmpl::list<domain::Tags::Mesh<3>, Metric, Pi, Phi, Inverse, Coordinates,
-                 ::Tags::Time, gh::gauges::Tags::GaugeCondition,
-                 gh::Tags::ConstraintGamma2, gh::spec_amr::HistoryTag>>(
-      mesh, metric, pi, phi, inverse, coords, 0.,
+  auto box = db::create<tmpl::list<
+      domain::Tags::Mesh<3>, Metric, Pi, Phi, Inverse, Coordinates,
+      GridCoordinates, ::Tags::Time, gh::gauges::Tags::GaugeCondition,
+      gh::Tags::ConstraintGamma2, gh::spec_amr::HistoryTag>>(
+      mesh, metric, pi, phi, inverse, coords, grid_coords, 0.,
       std::unique_ptr<gh::gauges::GaugeCondition>(
           std::make_unique<gh::gauges::Harmonic>()),
       gamma2, initial_history);

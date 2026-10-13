@@ -38,6 +38,7 @@ Amr:
       ForceDropPileUpModes: true
       MinimumModes: [7, 7, 8]
       CallsBetweenChanges: 2
+      TimeBetweenChanges: 0.15
       TruncationErrorAdjustmentLimit: -1.0
       StartTime: 0.0
       Verbose: false
