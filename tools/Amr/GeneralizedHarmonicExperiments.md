@@ -2619,3 +2619,149 @@ retain the decision checks. `run_pair.py`, `analyze_all.py`,
 `outer_constraint_breakdown.py` preserve the local study workflow;
 `Manifest.json`, `BaseCommit.txt` and `Source.patch` record the
 executable/library hashes and source used for the runs.
+
+
+### Local SpEC policy alignment and elapsed-time restriction
+
+This pass deliberately defers the radius-dependent junk gate and neighbor
+coordination. The standalone policy still uses fixed filtering and fixed h;
+it permits both p additions and removals. The changes are:
+
+- The prospective-removal predictor now retains the previous constraint
+  across p changes, as `ChangeSpectralGrid::SetAddDropLimits` does. Addition,
+  removal, and stored target adjustment use the same temporal forecast.
+- `SpecSpectral.TimeBetweenChanges` supplements the call-count cooldown.
+  It starts at the previous evaluation time when a subsequent evaluation
+  detects a realized extent change. A requested but vetoed change does not
+  start the timer. The restriction applies to ordinary and forced p changes;
+  diagnostics and target history continue updating. Zero restores the
+  call-count-only restriction. The new option is required in YAML.
+- `RelativeTruncationTarget` accepts either the original scalar or a mapping
+  with `Background` and `Gaussians`. Each Gaussian has `Center`, `Width`,
+  `Amplitude`, and `Target`. Centers and widths are in grid coordinates.
+  Its weight is the maximum of `Amplitude * exp(-r_squared / Width^2)` over
+  the element's collocation points. The base target is the normalized
+  weighted average of logarithmic targets, including background weight one.
+  This follows the grid-coordinate branch of SpEC's `ComputeTruncErrorMax`;
+  mapping profile distances to the inertial frame is not implemented.
+  The first accepted AMR evaluation samples the target, which is then cached
+  across p changes and checkpoints. An h projection resets this cache along
+  with the other history. Read-only observations update only a history copy.
+
+The Gaussian blend is geometric: background 1e-4 and an isolated Gaussian
+with target 1e-8 and unit peak amplitude give 1e-6 at its center. A near-hole
+parameter is a contribution to the blend, not the final local target.
+The physical-time restriction defaults to 1M in the experimental drivers,
+while the C++ constructor defaults to zero. SpEC's BBH setup uses
+`min(1, 2 * min(M_A, M_B))` in total-mass-one units and multiplies this by 0.01
+in its frequent-trigger mode. Consequently 1M is a trial setting, not a
+universal value to impose on every simulation.
+
+#### Constraint normalization audit
+
+The native diagnostic remains the nodal RMS R of the directionally projected
+constraint, summing independent tensor components. SpEC's
+`NormOfProjectedDerivConstraint` first forms this RMS and then performs an
+additional topological aggregation. For an independent I1 factor it returns
+sqrt(R); for a multi-dimensional irreducible factor it returns the square
+root of the mean of the directional RMS values. Its optional B2/B3 radial
+projection is returned separately without that final square root.
+
+For an I1 comparison only, a SpEC norm threshold S corresponds to the native
+RMS threshold S squared. This conversion matches the instantaneous threshold,
+**not the entire controller**: SpEC's 1.25 removal margin and spectral-growth
+factor operate on its own norm, so converting their full inequalities to RMS
+would square those factors too. Likewise, a universal conversion for grouped
+angular directions does not exist. We retain the existing, explicitly named
+RMS targets and their tested native forecasts rather than silently changing
+all tolerances. This remains a deliberate difference from SpEC's legacy
+basis-dependent normalization; the implementation is SpEC-style, not a claim
+of identical decisions on its spherical-harmonic grids.
+
+Unit coverage includes increasing and decreasing constraint trends across p
+changes, physical-time and call-count restrictions, forced pile-up during a
+cooldown, unchanged-mesh requests, target evolution during a cooldown,
+serialization, profile weighting, spatial factory dispatch, and preserving or
+resetting the target cache on p or h projection respectively. The input test
+also executes with a nonzero physical-time cooldown.
+
+The BBH generator now uses `SpecSpectral`, fixed h, two fixed references, and
+two tolerance levels. It creates seven inputs including the smoke and restart
+cases. It does not add either deferred feature. See `ChalmersBbh.md` for the
+cluster procedure. New runs require rebuilt binaries; older AMR checkpoints
+have a different serialized history layout.
+
+
+#### 20M Kerr integration and restart check
+
+The acceptance run uses the previous tilted Kerr-Schild initial geometry
+evolved in damped harmonic gauge, with positive constraint
+damping, steep HalfPower=256 filter, and static excision/outer boundary.
+Radial h levels are [0,0,1,2]; the innermost shell now has angular h level
+one, giving 66 fixed elements. Initial radial extents are [8,8,8,12], angular
+extents 12, and all floors seven. The p ceiling remains 21 points. The spatial
+profile has background 1e-4 and one origin-centered Gaussian of width 4,
+amplitude 1, and target 1e-5. C2/C3 targets stay 0.002/0.004, the stored shift
+limit is -1, and the elapsed-time/call cooldowns are 1M/two calls.
+
+```sh
+build-release-debug/bin/python-spectre tools/Amr/ChalmersTiltedKerr.py \
+  --executable build-release-debug/bin/EvolveGhSingleBlackHole \
+  --output build-release-debug/spec-parity/kerr-20 \
+  --policy spec --radial-levels 0 0 1 2 --angular-levels 1 0 0 0 \
+  --radial-points 8 8 8 12 --end-time 20 --checkpoint-at 10 \
+  --target-profile build-release-debug/spec-parity/KerrTarget.yaml \
+  --time-between-changes 1 --processes 10
+```
+
+Write the profile YAML described above before launching. This is a combined
+integration test, not a matched experiment isolating the cooldown or target
+profile. The finer initial h mesh provides headroom beyond the previous
+11.7M p-limit stop.
+
+The run completed 20M in 1327 seconds on ten PEs. All 39,402 directional
+records replay independently, including the target profile sampled from the
+initial coordinates, target history, predictions, and both cooldowns. The
+saved mesh history confirms 288 p additions and 304 removals, no h changes,
+and no immediate reversals between successive 0.1M snapshots. There are zero
+cooldown violations. Extents never exceed 16; final point count is 87,940
+(initially 89,856), with 638,554,084 grid-point steps. The base targets span
+3.33031e-5 to 9.999997e-5; stored corrections span [-1,0].
+
+The 10M checkpoint restarted successfully on the same ten-PE layout with
+unchanged executable and GH-library hashes. All 19,602 subsequent decisions
+and meshes match the uninterrupted continuation. Coordinates match exactly;
+maximum field difference over the eleven saved 10–20M snapshots is
+3.40e-12. Stored target shifts differ by at most 1.04e-9, with effective-target
+differences below 2.09e-14. Thus the continuation agrees numerically, but is
+not bitwise identical.
+
+Independent volume integration at orders 28 and 36, geometry checks,
+initial-data checks, finite-data checks, observation completeness, and
+excision outflow checks pass. Minimum excision light speed is 0.199779.
+Maximum horizon mass and spin-magnitude errors are 8.66e-7 and 2.85e-6.
+
+| Quantity | 10M | 20M |
+| --- | ---: | ---: |
+| Integrated C3 norm | 1.26602e-3 | 3.25932e-3 |
+| Integrated gauge-constraint norm | 7.00755e-5 | 6.90299e-5 |
+| Outer-shell C3 norm (8 < r < 20) | 1.17589e-3 | 1.90340e-4 |
+| Full-state difference from old graded-fine run | 2.18672e-2 | 7.22884e-2 |
+| Metric difference from old graded-fine run | 2.05862e-2 | 7.14463e-2 |
+
+The old graded-fine run has C3 norms 6.20915e-4 at 10M and 3.11634e-1
+at 20M; its late growth is overwhelmingly in the inner shell. The new run
+has larger constraints at 10M and much smaller constraints at 20M. Its
+outer-shell C3 remains above that reference at both times. Neither this
+comparison nor the lower work count establishes a uniform accuracy gain:
+the initial h mesh changed, and the old reference is not a clean late-time
+error standard. The result supports moving to the BBH integration pilot;
+accuracy convergence still requires the two tolerance levels and fixed
+reference comparisons on the actual BBH configuration.
+
+All thirteen affected CTests pass (nine controller unit tests and parse/
+execution tests for both standalone and hybrid inputs). Both GH executables
+build. All seven new BBH cases pass native parsing; one initial invocation
+crashed during Charm++ startup before parsing and succeeded on retry. No BBH
+initial-data evolution has been run. Local inputs, logs, hashes, replay,
+restart comparison, and analysis are under `build-release-debug/spec-parity`.

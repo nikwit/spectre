@@ -65,9 +65,22 @@ def configuration(args):
             for shell in range(4)
             for _ in range(6)
         ]
-    if args.radial_levels is not None:
+    if args.radial_levels is not None or args.angular_levels is not None:
         creator["InitialRefinement"] = [
-            [0, 0, level] for level in args.radial_levels for _ in range(6)
+            [
+                *(
+                    [args.angular_levels[shell]] * 2
+                    if args.angular_levels
+                    else [0, 0]
+                ),
+                (
+                    args.radial_levels[shell]
+                    if args.radial_levels
+                    else args.radial_level
+                ),
+            ]
+            for shell in range(4)
+            for _ in range(6)
         ]
     # The policy bounds polynomial degree: degree 6 gives 7 points.
     config["Amr"]["Policies"]["Limits"]["NumPolynomialModes"][0] = 6
@@ -100,6 +113,11 @@ def configuration(args):
             del settings["RefinementCriterion"]
             del settings["EnableCoarsening"]
             settings["ForceDropPileUpModes"] = True
+            settings["TimeBetweenChanges"] = args.time_between_changes
+            if args.target_profile is not None:
+                settings["RelativeTruncationTarget"] = yaml.safe_load(
+                    args.target_profile.read_text()
+                )
             if getattr(args, "radial_minimum_modes", None) is not None:
                 settings["MinimumModes"] = [
                     [7, 7, minimum]
@@ -107,6 +125,15 @@ def configuration(args):
                     for _ in range(6)
                 ]
             config["Amr"]["Criteria"] = [{"SpecSpectral": settings}]
+    if args.checkpoint_at is not None:
+        config["PhaseChangeAndTriggers"].append(
+            {
+                "Trigger": {
+                    "Times": {"Specified": {"Values": [args.checkpoint_at]}}
+                },
+                "PhaseChanges": ["VisitAndReturn(WriteCheckpoint)"],
+            }
+        )
     return config
 
 
@@ -138,6 +165,12 @@ def main():
     )
     parser.add_argument("--radial-level", type=int, default=0)
     parser.add_argument("--radial-levels", type=int, nargs=4)
+    parser.add_argument("--angular-levels", type=int, nargs=4)
+    parser.add_argument(
+        "--target-profile",
+        type=Path,
+        help="Spec policy grid-frame Background/Gaussians YAML",
+    )
     parser.add_argument(
         "--radial-minimum-modes",
         type=int,
@@ -148,12 +181,18 @@ def main():
     parser.add_argument("--horizon-l", type=int, default=10)
     parser.add_argument("--cfl", type=float, default=0.5)
     parser.add_argument("--end-time", type=float, default=5.0)
+    parser.add_argument("--checkpoint-at", type=float)
     parser.add_argument("--start-time", type=float, default=None)
     parser.add_argument(
         "--calls-between-changes",
         type=int,
         default=2,
         help="P-change cooldown; ten calls equal 1M at this driver's cadence",
+    )
+    parser.add_argument(
+        "--time-between-changes",
+        type=float,
+        help="Elapsed-time cooldown for spec (default 1M; otherwise zero)",
     )
     parser.add_argument("--processes", type=int, default=10)
     parser.add_argument(
@@ -169,6 +208,19 @@ def main():
     )
     parser.add_argument("--write-only", action="store_true")
     args = parser.parse_args()
+    if args.time_between_changes is None:
+        args.time_between_changes = 1.0 if args.policy == "spec" else 0.0
+    if args.policy != "spec" and args.time_between_changes != 0.0:
+        parser.error("A nonzero --time-between-changes requires --policy spec")
+    if args.checkpoint_at is not None and not (
+        0 < args.checkpoint_at < args.end_time
+        and np.isclose(args.checkpoint_at * 10, round(args.checkpoint_at * 10))
+    ):
+        parser.error(
+            "--checkpoint-at must lie on an interior 0.1M AMR boundary"
+        )
+    if args.target_profile is not None and args.policy != "spec":
+        parser.error("--target-profile requires --policy spec")
     if args.radial_minimum_modes is not None:
         if args.policy != "spec" or min(args.radial_minimum_modes) < 7:
             parser.error("Radial floors require --policy spec and values >= 7")
@@ -181,6 +233,11 @@ def main():
         args.target_shift_limit = (
             -1.0 if args.policy in ("spec", "hybrid-p") else 0.0
         )
+    if (
+        not np.isfinite(args.time_between_changes)
+        or args.time_between_changes < 0
+    ):
+        parser.error("--time-between-changes must be finite and nonnegative")
     if args.calls_between_changes < 1:
         parser.error("--calls-between-changes must be positive")
     if not np.isfinite(args.target_shift_limit) or args.target_shift_limit > 0:
@@ -206,6 +263,8 @@ def main():
             else "chalmers-directional-energy-with-spec-tensor"
         )
     config = configuration(args)
+    if args.target_profile is not None:
+        args.target_profile = str(args.target_profile.resolve())
     if args.write_only:
         args.output.mkdir(parents=True, exist_ok=False)
         (args.output / "Input.yaml").write_text(

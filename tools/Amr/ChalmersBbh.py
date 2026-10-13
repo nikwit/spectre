@@ -16,16 +16,15 @@ from pathlib import Path
 
 import yaml
 
-CRITERION = "ChalmersWithSpecCoarsening"
+CRITERION = "SpecSpectral"
 CASES = (
     "p-smoke",
-    "hp-smoke",
     "restart-control",
     "restart-checkpoint",
     "fixed",
     "fixed-fine",
-    "pileup",
-    "stored-target",
+    "spec",
+    "spec-tight",
 )
 
 
@@ -156,16 +155,24 @@ def configuration(base, case, settings):
                 "Finer reference exceeds point/filter limit; raise it"
                 " explicitly (<=20)"
             )
-    field = dict(
-        VariablesToMonitor=["SpacetimeMetric", "Pi", "Phi"],
-        AbsoluteTarget=s.field_target,
-        RelativeTarget=0.0,
-        SmoothnessThreshold=0.5,
-        PRefineOnly=(case == "p-smoke"),
-        UseDirectionalEnergy=True,
-        CoarseningFactor=0.05,
-        HCoarsening=(case != "p-smoke"),
-    )
+    tolerance_factor = s.tight_factor if case == "spec-tight" else 1.0
+    target = s.spectral_target * tolerance_factor
+    # SpEC's background plus two Gaussian profiles, expressed in the grid
+    # frame. Centers remain attached to the objects under moving maps.
+    y, z = domain["CenterOfMassOffset"]
+    gaussians = []
+    for name, other in (("ObjectA", "ObjectB"), ("ObjectB", "ObjectA")):
+        gaussians.append(
+            dict(
+                Center=[domain[name]["XCoord"], y, z],
+                Width=abs(domain[other]["XCoord"]),
+                Amplitude=1.0,
+                Target=target * s.near_hole_factor,
+            )
+        )
+    if any(g["Width"] <= 0 for g in gaussians):
+        raise ValueError("Gaussian widths require nonzero object X coordinates")
+    spectral_target = dict(Background=target, Gaussians=gaussians)
     config["Amr"].update(
         Criteria=(
             None
@@ -173,22 +180,15 @@ def configuration(base, case, settings):
             else [
                 {
                     CRITERION: {
-                        "RefinementCriterion": {
-                            "Chalmers": field,
-                            "ConstraintTarget": 3e-5,
-                            "MinimumTargetFactor": 0.1,
-                            "EnableCoarseningVeto": True,
-                            "Verbose": False,
-                        },
-                        "RelativeTruncationTarget": s.spectral_target,
-                        "ConstraintTargets": list(s.constraint_targets),
-                        "EnableCoarsening": True,
+                        "RelativeTruncationTarget": spectral_target,
+                        "ConstraintTargets": [
+                            c * tolerance_factor for c in s.constraint_targets
+                        ],
                         "ForceDropPileUpModes": True,
                         "MinimumModes": s.min_points,
                         "CallsBetweenChanges": 2,
-                        "TruncationErrorAdjustmentLimit": (
-                            0.0 if case == "pileup" else -1.0
-                        ),
+                        "TimeBetweenChanges": s.time_between_changes,
+                        "TruncationErrorAdjustmentLimit": -1.0,
                         "StartTime": initial,
                         "Verbose": not s.quiet_decisions,
                     }
@@ -351,12 +351,27 @@ def prepare(args):
         base, (args.input_run_dir or args.base_input.parent).resolve()
     )
     cases = {name: configuration(base, name, args) for name in CASES}
-    # This assertion protects the primary causal comparison.
-    legacy = copy.deepcopy(cases["pileup"])
-    legacy["Amr"]["Criteria"][0][CRITERION][
-        "TruncationErrorAdjustmentLimit"
-    ] = -1.0
-    assert legacy == cases["stored-target"]
+    # The two adaptive runs differ only in spectral and constraint targets.
+    tighter = copy.deepcopy(cases["spec"])
+    criterion = tighter["Amr"]["Criteria"][0][CRITERION]
+    profile = criterion["RelativeTruncationTarget"]
+    profile["Background"] *= args.tight_factor
+    for gaussian in profile["Gaussians"]:
+        gaussian["Target"] *= args.tight_factor
+    criterion["ConstraintTargets"] = [
+        c * args.tight_factor for c in criterion["ConstraintTargets"]
+    ]
+    actual = cases["spec-tight"]["Amr"]["Criteria"][0][CRITERION]
+    assert math.isclose(
+        profile["Background"], actual["RelativeTruncationTarget"]["Background"]
+    )
+    for expected, found in zip(
+        profile["Gaussians"], actual["RelativeTruncationTarget"]["Gaussians"]
+    ):
+        assert math.isclose(expected["Target"], found["Target"])
+        expected["Target"] = found["Target"]
+    profile["Background"] = actual["RelativeTruncationTarget"]["Background"]
+    assert tighter == cases["spec-tight"]
     restart = copy.deepcopy(cases["restart-checkpoint"])
     restart["PhaseChangeAndTriggers"].pop()
     assert restart == cases["restart-control"]
@@ -421,8 +436,20 @@ def parser():
     p.add_argument("--min-level", type=int, default=1)
     p.add_argument("--max-level", type=int, default=4)
     p.add_argument("--fine-increment", type=int, default=2)
-    p.add_argument("--field-target", type=float, default=1e-4)
     p.add_argument("--spectral-target", type=float, default=1e-4)
+    p.add_argument(
+        "--near-hole-factor",
+        type=float,
+        default=0.01,
+        help="Gaussian target/background ratio; center blend is geometric",
+    )
+    p.add_argument(
+        "--tight-factor",
+        type=float,
+        default=0.25,
+        help="Multiply all spectral and constraint targets in spec-tight",
+    )
+    p.add_argument("--time-between-changes", type=float, default=1.0)
     p.add_argument(
         "--constraint-targets", type=float, nargs=2, default=[0.002, 0.004]
     )
@@ -444,12 +471,20 @@ def main():
         args.amr_interval,
         args.volume_interval,
         args.checkpoint_hours,
-        args.field_target,
+        args.near_hole_factor,
+        args.tight_factor,
         args.spectral_target,
         *args.constraint_targets,
     ]
     if not all(math.isfinite(v) and v > 0 for v in positive):
         p.error("Durations, intervals and targets must be finite and positive")
+    if not 0 < args.tight_factor < 1 or not 0 < args.near_hole_factor <= 1:
+        p.error("Require 0 < tight-factor < 1 and 0 < near-hole-factor <= 1")
+    if (
+        not math.isfinite(args.time_between_changes)
+        or args.time_between_changes < 0
+    ):
+        p.error("time-between-changes must be finite and nonnegative")
     if not 7 <= args.min_points <= args.max_points <= 20:
         p.error(
             "Require 7 <= min-points <= max-points <= 20 for the filter model"
