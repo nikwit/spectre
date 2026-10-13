@@ -274,12 +274,14 @@ std::array<double, 3> updated_target_shifts(const History& history,
   return result;
 }
 
-std::array<amr::Flag, 3> decide(const gsl::not_null<History*> history,
-                                const Diagnostics& diagnostics,
-                                const std::array<size_t, 3>& extents,
-                                const double time,
-                                std::array<amr::Flag, 3> flags,
-                                const Settings& settings) {
+namespace {
+std::array<amr::Flag, 3> decide_impl(const gsl::not_null<History*> history,
+                                     const Diagnostics& diagnostics,
+                                     const std::array<size_t, 3>& extents,
+                                     const double time,
+                                     std::array<amr::Flag, 3> flags,
+                                     const Settings& settings,
+                                     const bool standalone) {
   // Repeated observations/evaluations at a fixed time must be idempotent.
   if (history->calls > 0 and time == history->time and
       extents == history->extents) {
@@ -350,7 +352,7 @@ std::array<amr::Flag, 3> decide(const gsl::not_null<History*> history,
           same_mesh ? predict(current, history->constraints[constraint][d])
                     : current;
       const double addition_forecast =
-          settings.adjustment_limit < 0.0 and call > 0
+          (standalone or settings.adjustment_limit < 0.0) and call > 0
               ? predict(current, history->constraints[constraint][d])
               : predicted;
       constraint_excess |=
@@ -373,15 +375,18 @@ std::array<amr::Flag, 3> decide(const gsl::not_null<History*> history,
     const bool forced = settings.force_pile_up and pile_up > 3.0 and
                         (pile_up - 1.1 > 3.0 or next < target);
     const bool excessive = pile_up > 3.0;
-    if (flags[d] == amr::Flag::IncreaseResolution) {
+    if (standalone or flags[d] == amr::Flag::IncreaseResolution) {
       // Forced pile-up has priority over p-addition. Otherwise apply SpEC's
-      // pile-up hysteresis before preserving the Chalmers refinement request.
+      // pile-up hysteresis before adding points.
       if (not forced) {
         // Retain SpEC's base-target/constraint permission gate, and also
-        // require LargeTrunc against the shifted target in the new mode.
+        // require LargeTrunc against the shifted target. Only the legacy
+        // unadjusted hybrid relies on Chalmers to supply that accuracy check.
         if (pile_up <= (settings.force_pile_up ? 1.5 : 3.0) and
             (error >= settings.spectral_target or constraint_excess) and
-            (settings.adjustment_limit == 0.0 or error > target)) {
+            ((not standalone and settings.adjustment_limit == 0.0) or
+             error > target)) {
+          flags[d] = amr::Flag::IncreaseResolution;
           continue;
         }
         flags[d] = amr::Flag::DoNothing;
@@ -401,5 +406,26 @@ std::array<amr::Flag, 3> decide(const gsl::not_null<History*> history,
   history->constraints = diagnostics.constraints;
   history->decision = flags;
   return flags;
+}
+}  // namespace
+
+std::array<amr::Flag, 3> decide(const gsl::not_null<History*> history,
+                                const Diagnostics& diagnostics,
+                                const std::array<size_t, 3>& extents,
+                                const double time,
+                                const std::array<amr::Flag, 3> field_decision,
+                                const Settings& settings) {
+  return decide_impl(history, diagnostics, extents, time, field_decision,
+                     settings, false);
+}
+
+std::array<amr::Flag, 3> decide_p(const gsl::not_null<History*> history,
+                                  const Diagnostics& diagnostics,
+                                  const std::array<size_t, 3>& extents,
+                                  const double time, const Settings& settings) {
+  return decide_impl(
+      history, diagnostics, extents, time,
+      {{amr::Flag::DoNothing, amr::Flag::DoNothing, amr::Flag::DoNothing}},
+      settings, true);
 }
 }  // namespace gh::spec_amr

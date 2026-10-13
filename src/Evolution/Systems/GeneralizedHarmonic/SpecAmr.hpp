@@ -83,8 +83,9 @@ struct Settings {
   bool force_pile_up{false};
   size_t minimum_modes{5};
   size_t cooldown{2};
-  // Zero preserves the original coarsening experiment. Negative values enable
-  // SpEC's local, history-dependent target adjustment (inspiral uses -1).
+  // Zero disables stored target adjustment. The hybrid retains its legacy
+  // addition gate in that case; decide_p always requires LargeTrunc.
+  // Negative values enable SpEC's local target adjustment (inspiral uses -1).
   double adjustment_limit{0.0};
 };
 
@@ -109,6 +110,15 @@ std::array<amr::Flag, 3> decide(gsl::not_null<History*> history,
                                 double time,
                                 std::array<amr::Flag, 3> field_decision,
                                 const Settings& settings);
+
+/// Standalone SpEC-style p control. Both addition and removal are decided
+/// from the grouped spectra and projected constraints, without an upstream
+/// refinement request. Even with adjustment_limit == 0, addition requires
+/// spectral error above the target. No h changes are requested.
+std::array<amr::Flag, 3> decide_p(gsl::not_null<History*> history,
+                                  const Diagnostics& diagnostics,
+                                  const std::array<size_t, 3>& extents,
+                                  double time, const Settings& settings);
 
 struct HistoryTag : db::SimpleTag {
   using type = History;

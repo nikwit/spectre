@@ -29,6 +29,7 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Actions/SetInitialData.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/ChalmersConstraintFeedback.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/ChalmersWithSpecCoarsening.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/SpecSpectral.hpp"
 #include "NumericalAlgorithms/Strahlkorper/IO/InitialShapeFromFile.hpp"
 #include "NumericalAlgorithms/Strahlkorper/InitialShape.hpp"
 #include "Options/FactoryHelpers.hpp"
@@ -189,7 +190,7 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3> {
             amr::Criterion,
             tmpl::list<
                 gh::ChalmersWithConstraintFeedback<volume_dim>,
-                gh::ChalmersWithSpecCoarsening,
+                gh::ChalmersWithSpecCoarsening, gh::SpecSpectral,
                 amr::Criteria::Chalmers<
                     volume_dim, typename system::variables_tag::tags_list>,
                 amr::Criteria::Chalmers<

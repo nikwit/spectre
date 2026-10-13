@@ -70,6 +70,7 @@
 #include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/SetPiAndPhiFromConstraints.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Tags/GaugeCondition.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Initialize.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/SpecSpectral.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/SpectralFilter.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
@@ -481,7 +482,7 @@ struct EvolutionMetavars {
             tmpl::push_back<
                 amr::Criteria::standard_criteria<
                     volume_dim, typename system::variables_tag::tags_list>,
-                gh::ChalmersWithSpecCoarsening,
+                gh::ChalmersWithSpecCoarsening, gh::SpecSpectral,
                 amr::Criteria::Constraints<
                     volume_dim,
                     tmpl::list<gh::Tags::ThreeIndexConstraintCompute<

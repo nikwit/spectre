@@ -8,6 +8,7 @@
 #include "Evolution/Systems/GeneralizedHarmonic/ChalmersWithSpecCoarsening.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/GaugeSourceFunctions/Harmonic.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/SpecAmr.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/SpecSpectral.hpp"
 #include "Framework/TestCreation.hpp"
 #include "Framework/TestHelpers.hpp"
 #include "NumericalAlgorithms/LinearOperators/CoefficientTransforms.hpp"
@@ -28,11 +29,100 @@ struct Metavariables {
   using const_global_cache_tags = tmpl::list<>;
   struct factory_creation
       : tt::ConformsTo<Options::protocols::FactoryCreation> {
-    using factory_classes =
-        tmpl::map<tmpl::pair<amr::Criterion, tmpl::list<Criterion>>>;
+    using factory_classes = tmpl::map<
+        tmpl::pair<amr::Criterion, tmpl::list<Criterion, gh::SpecSpectral>>>;
   };
 };
 }  // namespace
+
+SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.Standalone",
+                  "[Unit][Evolution]") {
+  using namespace gh::spec_amr;
+  Settings settings{1.e-4, {{1.e-3, 1.e-3}}, true, 7, 2, 0.};
+  const std::array<size_t, 3> extents{{12, 12, 8}};
+  const auto none = make_array<3>(amr::Flag::DoNothing);
+  const auto up = make_array<3>(amr::Flag::IncreaseResolution);
+  const auto down = make_array<3>(amr::Flag::DecreaseResolution);
+  History history{};
+  history.calls = 3;
+  history.extents = extents;
+  Diagnostics data{};
+  for (auto& group : data.constraints) {
+    group.fill(1.e-5);
+  }
+  history.constraints = data.constraints;
+  for (auto& group : data.spectra) {
+    group = {{{2.e-4, 4.e-4, 0.5, 0., false},
+              {1.e-5, 2.e-5, 0.5, 0., false},
+              {5.e-5, 2.e-4, 0.5, 0., false}}};
+  }
+  // A single set of directional tensor errors requests addition, removal,
+  // and holding. The old hybrid cannot initiate the addition on its own.
+  auto hybrid_history = history;
+  CHECK(decide(make_not_null(&hybrid_history), data, extents, 0., none,
+               settings)[0] == amr::Flag::DoNothing);
+  CHECK(decide_p(make_not_null(&history), data, extents, 0., settings) ==
+        (std::array{amr::Flag::IncreaseResolution,
+                    amr::Flag::DecreaseResolution, amr::Flag::DoNothing}));
+  auto restored = serialize_and_deserialize(history);
+  auto changed = extents;
+  ++changed[0];
+  --changed[1];
+  CHECK(decide_p(make_not_null(&restored), data, changed, 1., settings) ==
+        none);
+  CHECK(decide_p(make_not_null(&history), data, changed, 1., settings) == none);
+  CHECK(decide_p(make_not_null(&restored), data, changed, 2., settings) ==
+        decide_p(make_not_null(&history), data, changed, 2., settings));
+
+  // Without a stored shift, high constraints alone still cannot request p-up
+  // when the spectrum is below (or exactly at) the spectral target.
+  for (const double error : {1.e-5, settings.spectral_target}) {
+    for (auto& group : data.spectra) {
+      group.fill(Spectrum{error, error, 0.5, 0., false});
+    }
+    for (auto& group : data.constraints) {
+      group.fill(1.e-2);
+    }
+    auto trial = history;
+    CHECK(decide_p(make_not_null(&trial), data, extents, 3., settings) == none);
+  }
+  // Stored constraint feedback can refine below the base target without a
+  // componentwise Chalmers request.
+  settings.adjustment_limit = -1.;
+  history.constraints = data.constraints;
+  for (auto& group : data.spectra) {
+    group.fill(Spectrum{8.e-5, 9.e-5, 0.5, 0., false});
+  }
+  CHECK(decide_p(make_not_null(&history), data, changed, 3., settings) == up);
+  CHECK(history.log10_target_shift[0] < 0.);
+  // Genuine pile-up prevents addition; forced removal is a separate route
+  // and, as in SpEC, can override ordinary error/constraint permissions.
+  for (auto& group : data.spectra) {
+    group.fill(Spectrum{1.e-2, 2.e-2, 0.5, 3.5, false});
+  }
+  CHECK(decide_p(make_not_null(&history), data, changed, 4., settings) == none);
+  for (auto& group : data.spectra) {
+    for (auto& spectrum : group) {
+      spectrum.pile_up = 4.2;
+    }
+  }
+  auto unforced = settings;
+  unforced.force_pile_up = false;
+  auto trial = history;
+  CHECK(decide_p(make_not_null(&trial), data, changed, 5., unforced) == none);
+  const auto decision =
+      decide_p(make_not_null(&history), data, changed, 5., settings);
+  CHECK(decision[0] == down[0]);
+  CHECK(decision[1] == down[1]);
+  CHECK(decision[2] == down[2]);
+  trial = history;
+  const auto calls = trial.calls;
+  CHECK(decide_p(make_not_null(&trial), data, changed, 5., settings) ==
+        decision);
+  CHECK(trial.calls == calls);
+  CHECK(decide_p(make_not_null(&trial), data, {{7, 7, 7}}, 6., settings) ==
+        none);
+}
 
 SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.Spectrum",
                   "[Unit][Evolution]") {
@@ -465,6 +555,56 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.DiagnosticsAndHistory",
   CHECK(history.calls == 1);
   gh::spec_amr::ProjectHistory::apply(make_not_null(&history), 0);
   CHECK(history.calls == 0);
+
+  // Standalone factory dispatch, serialization, and a real delayed gate.
+  const auto standalone =
+      TestHelpers::test_factory_creation<amr::Criterion, gh::SpecSpectral>(
+          "SpecSpectral:\n"
+          "  RelativeTruncationTarget: 1.e-4\n"
+          "  ConstraintTargets: [1.e-3, 1.e-3]\n"
+          "  ForceDropPileUpModes: true\n"
+          "  MinimumModes: 7\n"
+          "  CallsBetweenChanges: 2\n"
+          "  TruncationErrorAdjustmentLimit: -1\n"
+          "  StartTime: 2\n"
+          "  Verbose: false\n");
+  CHECK(standalone->type() == amr::Criteria::Type::p);
+  CHECK(standalone->p_refine_in_domain_adjustment_phase());
+  CHECK_FALSE(standalone->needs_sibling_data());
+  db::mutate<gh::spec_amr::HistoryTag>(
+      [](const auto h) { *h = gh::spec_amr::History{}; }, make_not_null(&box));
+  observation.reset();
+  const auto hold = make_array<3>(amr::Flag::DoNothing);
+  CHECK(standalone->evaluate_and_update(make_not_null(&observation), cache,
+                                        id) == hold);
+  CHECK(db::get<gh::spec_amr::HistoryTag>(box).calls == 0);
+  for (size_t t = 2; t <= 4; ++t) {
+    db::mutate<::Tags::Time>([t](const auto time) { *time = t; },
+                             make_not_null(&box));
+    observation.reset();
+    const auto before_calls = db::get<gh::spec_amr::HistoryTag>(box).calls;
+    const auto expected =
+        t < 4 ? hold : make_array<3>(amr::Flag::DecreaseResolution);
+    CHECK(standalone->evaluate(observation, cache, id) == expected);
+    CHECK(db::get<gh::spec_amr::HistoryTag>(box).calls == before_calls);
+    CHECK(serialize_and_deserialize(standalone)
+              ->evaluate(observation, cache, id) == expected);
+    CHECK(standalone->evaluate_and_update(make_not_null(&observation), cache,
+                                          id) == expected);
+    CHECK(db::get<gh::spec_amr::HistoryTag>(box).calls == before_calls + 1);
+    CHECK(standalone->evaluate_and_update(make_not_null(&observation), cache,
+                                          id) == expected);
+    CHECK(db::get<gh::spec_amr::HistoryTag>(box).calls == before_calls + 1);
+  }
+  CHECK_THROWS_WITH(
+      (gh::SpecSpectral{0., {{1., 1.}}, true, 7, 2, -1., 0., false}),
+      Catch::Matchers::ContainsSubstring("Invalid spectral"));
+  CHECK_THROWS_WITH(
+      (gh::SpecSpectral{1.e-4, {{0., 1.}}, true, 7, 2, -1., 0., false}),
+      Catch::Matchers::ContainsSubstring("Constraint targets"));
+  CHECK_THROWS_WITH(
+      (gh::SpecSpectral{1.e-4, {{1., 1.}}, true, 7, 2, -1000., 0., false}),
+      Catch::Matchers::ContainsSubstring("TruncationErrorAdjustmentLimit"));
 }
 
 SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.WrapperTargetShift",

@@ -15,6 +15,7 @@ spectre_target_sources(
   Equations.cpp
   FilledSpherePowerMonitor.cpp
   SpecAmr.cpp
+  SpecSpectral.cpp
   SpectralFilter.cpp
   SphericalShellPowerMonitor.cpp
   TensorYlmTransforms.cpp
@@ -35,6 +36,7 @@ spectre_target_headers(
   FilledSpherePowerMonitor.hpp
   Initialize.hpp
   SpecAmr.hpp
+  SpecSpectral.hpp
   SpectralFilter.hpp
   SphericalShellPowerMonitor.hpp
   System.hpp
