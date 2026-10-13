@@ -605,6 +605,69 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.DiagnosticsAndHistory",
   CHECK_THROWS_WITH(
       (gh::SpecSpectral{1.e-4, {{1., 1.}}, true, 7, 2, -1000., 0., false}),
       Catch::Matchers::ContainsSubstring("TruncationErrorAdjustmentLimit"));
+
+  // Directional restrictions differ between blocks without changing the
+  // spectral policy. Exercise option parsing, serialization and cached flags.
+  for (const auto& minima :
+       {std::string{"[[7, 7, 7], [7, 7, 8]]"}, std::string{"[7, 7, 8]"}}) {
+    auto regional =
+        TestHelpers::test_factory_creation<amr::Criterion, gh::SpecSpectral>(
+            "SpecSpectral:\n"
+            "  RelativeTruncationTarget: 1.e-4\n"
+            "  ConstraintTargets: [1.e-3, 1.e-3]\n"
+            "  ForceDropPileUpModes: true\n"
+            "  MinimumModes: " +
+            minima +
+            "\n"
+            "  CallsBetweenChanges: 2\n"
+            "  TruncationErrorAdjustmentLimit: -1\n"
+            "  StartTime: 0\n"
+            "  Verbose: false\n");
+    db::mutate<gh::spec_amr::HistoryTag>(
+        [&mesh](const auto h) {
+          *h = gh::spec_amr::History{};
+          h->calls = 3;
+          h->extents = mesh.extents().indices();
+          h->time = 0.;
+        },
+        make_not_null(&box));
+    observation.reset();
+    const std::array expected{amr::Flag::DecreaseResolution,
+                              amr::Flag::DecreaseResolution,
+                              amr::Flag::DoNothing};
+    if (minima.front() == '[' and minima[1] == '[') {
+      CHECK(regional->evaluate(observation, cache, ElementId<3>{0}) ==
+            make_array<3>(amr::Flag::DecreaseResolution));
+    }
+    CHECK(regional->evaluate(observation, cache, ElementId<3>{1}) == expected);
+    CHECK(serialize_and_deserialize(regional)->evaluate(
+              observation, cache, ElementId<3>{1}) == expected);
+    for (size_t repeat = 0; repeat < 2; ++repeat) {
+      CHECK(regional->evaluate_and_update(make_not_null(&observation), cache,
+                                          ElementId<3>{1}) == expected);
+      CHECK(db::get<gh::spec_amr::HistoryTag>(box).calls == 4);
+    }
+  }
+  CHECK_THROWS_WITH(
+      (gh::SpecSpectral{1.e-4,
+                        {{1., 1.}},
+                        true,
+                        std::array<size_t, 3>{{7, 7, 4}},
+                        2,
+                        -1.,
+                        0.,
+                        false}),
+      Catch::Matchers::ContainsSubstring("MinimumModes must be at least 5"));
+  CHECK_THROWS_WITH(
+      (gh::SpecSpectral{1.e-4,
+                        {{1., 1.}},
+                        true,
+                        std::vector<std::array<size_t, 3>>{},
+                        2,
+                        -1.,
+                        0.,
+                        false}),
+      Catch::Matchers::ContainsSubstring("block list must not be empty"));
 }
 
 SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.WrapperTargetShift",

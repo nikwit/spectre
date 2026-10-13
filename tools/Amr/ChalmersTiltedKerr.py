@@ -100,6 +100,12 @@ def configuration(args):
             del settings["RefinementCriterion"]
             del settings["EnableCoarsening"]
             settings["ForceDropPileUpModes"] = True
+            if getattr(args, "radial_minimum_modes", None) is not None:
+                settings["MinimumModes"] = [
+                    [7, 7, minimum]
+                    for minimum in args.radial_minimum_modes
+                    for _ in range(6)
+                ]
             config["Amr"]["Criteria"] = [{"SpecSpectral": settings}]
     return config
 
@@ -132,6 +138,12 @@ def main():
     )
     parser.add_argument("--radial-level", type=int, default=0)
     parser.add_argument("--radial-levels", type=int, nargs=4)
+    parser.add_argument(
+        "--radial-minimum-modes",
+        type=int,
+        nargs=4,
+        help="Spec policy radial floors by shell; angular floors stay at 7",
+    )
     parser.add_argument("--inner-radius", type=float, default=1.2)
     parser.add_argument("--horizon-l", type=int, default=10)
     parser.add_argument("--cfl", type=float, default=0.5)
@@ -157,6 +169,12 @@ def main():
     )
     parser.add_argument("--write-only", action="store_true")
     args = parser.parse_args()
+    if args.radial_minimum_modes is not None:
+        if args.policy != "spec" or min(args.radial_minimum_modes) < 7:
+            parser.error("Radial floors require --policy spec and values >= 7")
+        initial = args.radial_points or [args.grid_points[2]] * 4
+        if any(n < m for n, m in zip(initial, args.radial_minimum_modes)):
+            parser.error("Initial radial points must meet each radial floor")
     if args.start_time is None:
         args.start_time = 0.0 if args.policy in ("spec", "hybrid-p") else 10.0
     if args.target_shift_limit is None:

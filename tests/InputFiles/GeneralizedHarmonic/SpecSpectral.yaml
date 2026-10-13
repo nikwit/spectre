@@ -36,7 +36,7 @@ Amr:
       - 3.0e-05
       - 3.0e-05
       ForceDropPileUpModes: true
-      MinimumModes: 7
+      MinimumModes: [7, 7, 8]
       CallsBetweenChanges: 2
       TruncationErrorAdjustmentLimit: -1.0
       StartTime: 0.0

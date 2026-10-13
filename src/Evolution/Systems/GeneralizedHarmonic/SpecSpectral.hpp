@@ -9,6 +9,8 @@
 #include <limits>
 #include <string>
 #include <utility>
+#include <variant>
+#include <vector>
 
 #include "DataStructures/DataBox/DataBox.hpp"
 #include "DataStructures/DataBox/ObservationBox.hpp"
@@ -60,10 +62,12 @@ class SpecSpectral : public amr::Criterion {
         "Apply SpEC's exceptional pile-up removal and p-addition hysteresis.";
   };
   struct MinimumModes {
-    using type = size_t;
-    static type lower_bound() { return 5; }
+    using type = std::variant<size_t, std::array<size_t, 3>,
+                              std::vector<std::array<size_t, 3>>>;
     static constexpr Options::String help =
-        "Minimum points per direction, including the filtered highest mode.";
+        "Minimum points including the filtered mode: a scalar, three "
+        "logical-direction values, or one triple per block in domain order. "
+        "Each must be >= 5. Initialize the mesh at or above these bounds.";
   };
   struct CallsBetweenChanges {
     using type = size_t;
@@ -95,6 +99,11 @@ class SpecSpectral : public amr::Criterion {
       "SpEC-style GH p refinement and coarsening on filtered Legendre meshes.";
 
   SpecSpectral() = default;
+  SpecSpectral(double spectral_target,
+               const std::array<double, 2>& constraint_targets, bool force,
+               MinimumModes::type minimum_modes, size_t cooldown,
+               double adjustment_limit, double start_time, bool verbose,
+               const Options::Context& context = {});
   SpecSpectral(double spectral_target,
                const std::array<double, 2>& constraint_targets, bool force,
                size_t minimum_modes, size_t cooldown, double adjustment_limit,
@@ -145,9 +154,15 @@ class SpecSpectral : public amr::Criterion {
       return make_array<3>(amr::Flag::DoNothing);
     }
     const auto& mesh = db::get<domain::Tags::Mesh<3>>(box);
+    const auto minimum = minimum_modes(id.block_id());
     for (size_t d = 0; d < 3; ++d) {
       if (mesh.extents(d) < 5 or mesh.basis(d) != Spectral::Basis::Legendre) {
         ERROR("SpecSpectral requires Legendre extents >= 5 in " << id);
+      }
+      if (mesh.extents(d) < minimum[d]) {
+        ERROR("SpecSpectral mesh is below MinimumModes in "
+              << id << " direction " << d
+              << ". Initialize at or above the floor.");
       }
     }
     if (history->calls > 0 and time == history->time and
@@ -163,8 +178,17 @@ class SpecSpectral : public amr::Criterion {
         db::get<domain::Tags::Coordinates<3, Frame::Inertial>>(box), time,
         db::get<gauges::Tags::GaugeCondition>(box),
         db::get<gh::Tags::ConstraintGamma2>(box));
-    const auto result = spec_amr::decide_p(
-        history, diagnostics, mesh.extents().indices(), time, settings_);
+    auto result = spec_amr::decide_p(history, diagnostics,
+                                     mesh.extents().indices(), time, settings_);
+    // Resolution restrictions also take priority over forced pile-up removal.
+    // Store the restricted result so repeated evaluation remains idempotent.
+    for (size_t d = 0; d < 3; ++d) {
+      if (result[d] == amr::Flag::DecreaseResolution and
+          mesh.extents(d) <= minimum[d]) {
+        result[d] = amr::Flag::DoNothing;
+      }
+    }
+    history->decision = result;
     if (verbose_ and log) {
       for (size_t d = 0; d < 3; ++d) {
         const auto& g = diagnostics.spectra[0][d];
@@ -186,7 +210,9 @@ class SpecSpectral : public amr::Criterion {
     }
     return result;
   }
+  std::array<size_t, 3> minimum_modes(size_t block_id) const;
   spec_amr::Settings settings_{};
+  MinimumModes::type minimum_modes_{size_t{5}};
   double start_time_{0.0};
   bool verbose_{false};
 };
