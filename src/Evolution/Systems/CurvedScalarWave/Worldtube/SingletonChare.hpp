@@ -92,10 +92,13 @@ struct WorldtubeSingleton {
       ::Actions::MutateApply<IterateAccelerationTerms>,
       Actions::SendAccelerationTerms<Metavariables>,
       ::Actions::MutateApply<UpdateAcceleration>,
+      // The order-two boundary reconstruction uses Psi0, dtPsi0 and the
+      // particle velocity at this stage, together with its boundary data.
+      // Send it before UpdateU advances those evolved quantities.
+      Actions::SendToElements<Metavariables>,
       ::Actions::MutateApply<RecordTimeStepperData<worldtube_system>>,
       ::Actions::MutateApply<UpdateU<worldtube_system, local_time_stepping>>,
       ::Actions::MutateApply<CleanHistory<worldtube_system>>,
-      Actions::SendToElements<Metavariables>,
       domain::Actions::CheckFunctionsOfTimeAreReady<Dim>>;
   using phase_dependent_action_list = tmpl::list<
       Parallel::PhaseActions<Parallel::Phase::Initialization,
