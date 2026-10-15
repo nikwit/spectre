@@ -186,8 +186,9 @@ alphabetical order):
     SpEC libraries. In particular, the SpEC::Exporter library is linked in and
     enables loading SpEC data into SpECTRE. See \ref installation for details.
 - SPECTRE_AUTODIFF
-  - Enable automatic differentation (default is `OFF`). This is required for
-    computing Hessians.
+  - Enable automatic differentiation (default is `OFF`). This is required for
+    computing coordinate-map Hessians and second-order worldtube self-force
+    derivatives.
 - SPECTRE_DEBUG
   - Defines `SPECTRE_DEBUG` macro to enable `ASSERT`s and other debug
     checks so they can be used in Release builds. That is, you get sanity checks

@@ -30,6 +30,7 @@ spectre_target_sources(
   PunctureFieldOrder2Part11.cpp
   RadiusFunctions.cpp
   SelfForce.cpp
+  SelfForceDerivatives.cpp
   )
 
 spectre_target_headers(
@@ -44,12 +45,15 @@ spectre_target_headers(
   PunctureFieldOrder2Impl.hpp
   RadiusFunctions.hpp
   SelfForce.hpp
+  SelfForceDerivatives.hpp
   System.hpp
   Worldtube.hpp
   )
 
 target_link_libraries(
   ${LIBRARY}
+  PRIVATE
+  Autodiff
   PUBLIC
   DataStructures
   Domain

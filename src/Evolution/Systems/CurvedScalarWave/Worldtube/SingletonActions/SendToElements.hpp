@@ -14,13 +14,13 @@
 #include "Domain/Structure/ElementId.hpp"
 #include "Domain/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Inboxes.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/SelfForceDerivatives.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Tags.hpp"
 #include "NumericalAlgorithms/Strahlkorper/Tags.hpp"
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "Parallel/Invoke.hpp"
 #include "Time/TimeStepId.hpp"
-#include "Utilities/ConstantExpressions.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/TMPL.hpp"
@@ -114,30 +114,16 @@ struct SendToElements {
           get<Tags::ParticlePositionVelocity<Dim>>(box)[1];
       const double wt_radius = db::get<Tags::WorldtubeRadius>(box);
 
-      // the constant coefficient of the regular field is evolved separately
-      // at second order, see the class documentation
-      psi_coefs[0] = get(psi_0)[0];
-      // the constant coefficient of the time-derivative field gets a
-      // correction from the motion of the expansion center
-      double dt_psi_coef_0 = get(dt_psi_0)[0];
-      for (size_t i = 0; i < Dim; ++i) {
-        dt_psi_coef_0 -= psi_l1.get(i) * particle_velocity.get(i);
-      }
-      dt_psi_coefs[0] = dt_psi_coef_0;
-
-      // reconstruct the traces of the second-order coefficients from the
-      // boundary monopoles, see Eq. (10a) of the matching scheme
-      const double trace_psi_2_over_3 =
-          (get(psi_l0) - psi_coefs[0]) / square(wt_radius);
-      const double trace_dt_psi_2_over_3 =
-          (get(dt_psi_l0) - dt_psi_coefs[0]) / square(wt_radius);
+      const auto field = reconstruct_regular_field(
+          get(psi_l0), get(dt_psi_l0), psi_l1, dt_psi_l1, psi_l2, dt_psi_l2,
+          get(psi_0)[0], get(dt_psi_0)[0], particle_velocity, wt_radius);
+      psi_coefs[0] = field.psi;
+      dt_psi_coefs[0] = field.dt_psi;
       size_t index = 4;
       for (size_t i = 0; i < Dim; ++i) {
         for (size_t j = i; j < Dim; ++j, ++index) {
-          psi_coefs[index] =
-              psi_l2.get(i, j) + (i == j ? trace_psi_2_over_3 : 0.);
-          dt_psi_coefs[index] =
-              dt_psi_l2.get(i, j) + (i == j ? trace_dt_psi_2_over_3 : 0.);
+          psi_coefs[index] = 0.5 * field.d2_psi.get(i, j);
+          dt_psi_coefs[index] = 0.5 * field.d2_dt_psi.get(i, j);
         }
       }
       ASSERT(index == num_coefs, "Internal indexing error");

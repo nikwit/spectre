@@ -54,8 +54,10 @@ namespace {
 template <typename Metavariables>
 struct MockElementArray {
   using metavariables = Metavariables;
+  using simple_tags_from_options = tmpl::list<>;
   static constexpr size_t Dim = metavariables::volume_dim;
   using chare_type = ActionTesting::MockArrayChare;
+  using array_allocation_tags = tmpl::list<>;
   using array_index = ElementId<Dim>;
   using phase_dependent_action_list = tmpl::list<
       Parallel::PhaseActions<
@@ -75,6 +77,7 @@ struct MockElementArray {
 template <typename Metavariables>
 struct MockWorldtubeSingleton {
   using metavariables = Metavariables;
+  using simple_tags_from_options = tmpl::list<>;
   static constexpr size_t Dim = metavariables::volume_dim;
   using chare_type = ActionTesting::MockSingletonChare;
   using array_index = int;
@@ -96,8 +99,8 @@ struct MockWorldtubeSingleton {
                                        Frame::Inertial>,
                   Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 2, Dim,
                                        Frame::Inertial>,
-                  Tags::Psi0, Tags::dtPsi0,
-                  Tags::ParticlePositionVelocity<Dim>>,
+                  Tags::Psi0, Tags::dtPsi0, Tags::ParticlePositionVelocity<Dim>,
+                  Tags::WorldtubeRadius>,
               db::AddComputeTags<>>>>,
       Parallel::PhaseActions<
           Parallel::Phase::Testing,
@@ -113,7 +116,7 @@ struct MockMetavariables {
                                     MockElementArray<MockMetavariables>>;
   using const_global_cache_tags =
       tmpl::list<Tags::ExcisionSphere<Dim>, Tags::ExpansionOrder,
-                 Tags::MaxIterations, Tags::WorldtubeRadius>;
+                 Tags::MaxIterations>;
 };
 
 // This test checks that `SendToElements` sends the coefficients of the Taylor
@@ -163,8 +166,7 @@ SPECTRE_TEST_CASE("Unit.CurvedScalarWave.Worldtube.ReceiveWorldtubeData",
     const auto& initial_refinements = shell.initial_refinement_levels();
     const auto& initial_extents = shell.initial_extents();
     ActionTesting::MockRuntimeSystem<metavars> runner{
-        {excision_sphere, expansion_order, static_cast<size_t>(0),
-         excision_sphere.radius()}};
+        {excision_sphere, expansion_order, static_cast<size_t>(0)}};
     const auto element_ids = initial_element_ids(initial_refinements);
     const auto& blocks = shell_domain.blocks();
 
@@ -314,7 +316,8 @@ SPECTRE_TEST_CASE("Unit.CurvedScalarWave.Worldtube.ReceiveWorldtubeData",
          Scalar<double>(psi_monopole), Scalar<double>(dt_psi_monopole),
          psi_dipole, dt_psi_dipole, psi_quadrupole, dt_psi_quadrupole,
          Scalar<DataVector>(DataVector(1, psi_0)),
-         Scalar<DataVector>(DataVector(1, dt_psi_0)), particle_pos_vel});
+         Scalar<DataVector>(DataVector(1, dt_psi_0)), particle_pos_vel,
+         worldtube_radius});
 
     ActionTesting::set_phase(make_not_null(&runner), Parallel::Phase::Testing);
 
