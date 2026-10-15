@@ -5,10 +5,14 @@ set(LIBRARY "Test_NewmanPenrose")
 
 set(LIBRARY_SOURCES
   Test_CoulombDecode.cpp
+  Test_GeometricTide.cpp
+  Test_GeometricTideTransport.cpp
+  Test_LongitudinalTide.cpp
   Test_NullRotations.cpp
   Test_Psi4Fit.cpp
   Test_RestFrame.cpp
   Test_Tetrad.cpp
+  Test_ThirdOrderTide.cpp
   Test_TidalResponse.cpp
   Test_TypeD.cpp
   )
@@ -21,5 +25,6 @@ target_link_libraries(
   DataStructures
   DataStructuresHelpers
   NewmanPenrose
+  Spectral
   Utilities
   )

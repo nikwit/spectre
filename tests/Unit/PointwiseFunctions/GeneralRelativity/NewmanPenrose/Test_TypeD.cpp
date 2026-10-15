@@ -121,6 +121,15 @@ void test_aligned_limit() {
   // Without the alignment threshold the same input amplifies the roundoff
   const TypeDRotation unregularized = solve_type_d_rotation(psi, coulomb, 0.);
   CHECK(std::abs(get(unregularized.a_bar)[0]) > 0.1);
+  // Exactly zero Psi1 must use that same tolerance before the singular
+  // equation-pair guard. Above the tolerance the guard must still reject it.
+  psi.get(1) = 0.;
+  const auto transverse = solve_type_d_rotation(psi, coulomb);
+  CHECK(max(abs(get(transverse.a_bar))) == 0.);
+  CHECK(max(abs(get(transverse.b))) == 0.);
+  psi.get(2) = 1.01 * get(coulomb);
+  CHECK_THROWS_WITH(solve_type_d_rotation(psi, coulomb),
+                    Catch::Matchers::ContainsSubstring("Psi1 vanishes"));
 }
 }  // namespace
 
