@@ -16,7 +16,8 @@ namespace intrp::Tags {
  * in whatever frame those points are to be held constant.
  *
  * \details PointInfo is used only for interpolation points that are
- * time-independent in some frame, so that there is no `Interpolator`
+ * time-independent in some frame (or reference points transformed by the
+ * target's `points_at_time` hook), so that there is no `Interpolator`
  * ParallelComponent. `VolumeDim` is a typename rather than a `size_t` to better
  * facilitate this tag being used in metafunctions. `VolumeDim` must be a
  * `tmpl::size_t`.

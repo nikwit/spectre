@@ -7,6 +7,7 @@ spectre_target_headers(
   HEADERS
   Callbacks.hpp
   ObserveLineSegment.hpp
+  ObserveMovingSphere.hpp
   ObserveSurfaceData.hpp
   ObserveTimeSeriesOnSurface.hpp
   )

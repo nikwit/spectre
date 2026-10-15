@@ -73,6 +73,13 @@ struct initialize_elements_and_queue_simple_actions {
 
     CHECK(event.needs_evolved_variables());
 
+    auto cached_points = target_points;
+    if constexpr (Metavariables::move_target_points) {
+      // The physical points stay those checked by the callback. Only their
+      // cached reference positions differ; the event must move them back.
+      get<0>(cached_points) -= temporal_id.substep_time();
+    }
+
     // Run event on all elements.
     for (const auto& element_id : element_ids) {
       // 1. Get vars, mesh, and coords
@@ -91,7 +98,7 @@ struct initialize_elements_and_queue_simple_actions {
           domain::Tags::Coordinates<metavars::volume_dim, Frame::Inertial>,
           ::Tags::Variables<
               typename std::remove_reference_t<decltype(vars)>::tags_list>>>(
-          metavars{}, temporal_id, target_points, mesh, inertial_coords, vars);
+          metavars{}, temporal_id, cached_points, mesh, inertial_coords, vars);
 
       // 3. Run the event.  This will invoke simple actions on
       // InterpolationTarget.
@@ -105,9 +112,24 @@ struct initialize_elements_and_queue_simple_actions {
   }
 };
 
-template <bool HaveComputeVarsToInterpolate, bool UseTimeDependentMaps>
+template <bool HaveComputeVarsToInterpolate, bool UseTimeDependentMaps,
+          bool MoveTargetPoints = false>
 struct MockMetavariables {
   static constexpr bool use_time_dependent_maps = UseTimeDependentMaps;
+  static constexpr bool move_target_points = MoveTargetPoints;
+  template <typename Target>
+  struct MovingPoints
+      : intrp::TargetPoints::LineSegment<Target, 3, Frame::Inertial> {
+    template <typename Metavariables>
+    static auto points_at_time(
+        const tnsr::I<DataVector, 3, Frame::Inertial>& cached,
+        const Parallel::GlobalCache<Metavariables>& /*cache*/,
+        const double time) {
+      auto result = cached;
+      get<0>(result) += time;
+      return result;
+    }
+  };
   using const_global_cache_tags = tmpl::list<domain::Tags::Domain<3>>;
   using mutable_global_cache_tags =
       tmpl::conditional_t<use_time_dependent_maps,
@@ -123,8 +145,12 @@ struct MockMetavariables {
         InterpolateOnElementTestHelpers::ComputeMultiplyByTwo;
     // The following are not used in this test, but must be there to
     // conform to the protocol.
-    using compute_target_points = ::intrp::TargetPoints::LineSegment<
-        InterpolationTargetAWithComputeVarsToInterpolate, 3, Frame::Inertial>;
+    using compute_target_points = tmpl::conditional_t<
+        MoveTargetPoints,
+        MovingPoints<InterpolationTargetAWithComputeVarsToInterpolate>,
+        intrp::TargetPoints::LineSegment<
+            InterpolationTargetAWithComputeVarsToInterpolate, 3,
+            Frame::Inertial>>;
     using post_interpolation_callbacks =
         tmpl::list<intrp::callbacks::ObserveTimeSeriesOnSurface<
             tmpl::list<>, InterpolationTargetAWithComputeVarsToInterpolate>>;
@@ -184,6 +210,9 @@ SPECTRE_TEST_CASE(
   run_test<MockMetavariables<true, false>>();
   run_test<MockMetavariables<false, true>>();
   run_test<MockMetavariables<true, true>>();
+
+  run_test<MockMetavariables<true, false, true>>();
+  run_test<MockMetavariables<true, true, true>>();
 
   // Off-center test
   run_test<MockMetavariables<false, false>, true>();

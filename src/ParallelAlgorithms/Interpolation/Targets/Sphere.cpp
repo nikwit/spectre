@@ -7,7 +7,10 @@
 #include <cstddef>
 #include <pup.h>
 
+#include "Domain/Domain.hpp"
+#include "Domain/ExcisionSphere.hpp"
 #include "Options/Options.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/StdHelpers.hpp"
 
 namespace intrp::OptionHolders {
@@ -74,3 +77,25 @@ bool operator!=(const Sphere& lhs, const Sphere& rhs) {
 }
 
 }  // namespace intrp::OptionHolders
+
+std::array<double, 3> intrp::sphere_detail::excision_center(
+    const std::array<double, 3>& grid_center, const Domain<3>& domain,
+    const double time, const domain::FunctionsOfTimeMap& functions_of_time) {
+  for (const auto& [name, excision] : domain.excision_spheres()) {
+    (void)name;
+    if (std::array<double, 3>{{get<0>(excision.center()),
+                               get<1>(excision.center()),
+                               get<2>(excision.center())}} != grid_center) {
+      continue;
+    }
+    if (excision.is_time_dependent()) {
+      const auto mapped = excision.moving_mesh_grid_to_inertial_map()(
+          excision.center(), time, functions_of_time);
+      return {{get<0>(mapped), get<1>(mapped), get<2>(mapped)}};
+    }
+    return grid_center;
+  }
+  ERROR(
+      "The moving sphere Center must equal a domain excision center in grid "
+      "coordinates. Use the same input values or YAML anchors as the domain.");
+}

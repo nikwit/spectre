@@ -5,15 +5,17 @@ set(LIBRARY "Test_ParallelInterpolation")
 
 set(LIBRARY_SOURCES
   Test_ComputeExcisionBoundaryVolumeQuantities.cpp
+  Test_ComputeGhWorldtubeData.cpp
   Test_ElementReceiveInterpPoints.cpp
   Test_InitializeInterpolationTarget.cpp
   Test_InterpolateWithoutInterpComponent.cpp
   Test_InterpolationTargetKerrHorizon.cpp
   Test_InterpolationTargetLineSegment.cpp
-  Test_InterpolationTargetVarsFromElement.cpp
   Test_InterpolationTargetSpecifiedPoints.cpp
   Test_InterpolationTargetSphere.cpp
+  Test_InterpolationTargetVarsFromElement.cpp
   Test_InterpolationTargetWedgeSectionTorus.cpp
+  Test_MovingSphere.cpp
   Test_ObserveLineSegment.cpp
   Test_ObserveTimeSeriesAndSurfaceData.cpp
   Test_Protocols.cpp
@@ -34,6 +36,7 @@ target_link_libraries(
   DomainStructure
   Events
   GeneralRelativitySolutions
+  GeneralizedHarmonic
   GrSurfaces
   H5
   Interpolation

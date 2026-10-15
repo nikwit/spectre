@@ -45,12 +45,18 @@ namespace callbacks {
 /// - Metavariables
 ///   - `temporal_id`
 /// - DataBox:
-///   - `TagsToObserve` (each tag must be a Scalar<DataVector>)
+///   - `TagsToObserve` (tensors with DataVector components)
 ///
 /// Conforms to the intrp::protocols::PostInterpolationCallback protocol
 ///
 /// For requirements on InterpolationTargetTag, see
 /// intrp::protocols::InterpolationTargetTag
+///
+/// A target may supply `inertial_coordinates(box, cache, time)` returning a
+/// `tnsr::I<DataVector, 3, Frame::Inertial>` in Strahlkorper angular ordering.
+/// These coordinates take precedence over `CartesianCoords<Frame::Inertial>`
+/// in the DataBox. This permits grid-frame targets to forward-map their points
+/// without locating them by inverting the moving maps.
 ///
 /// The columns of spherical harmonic data written take the form
 ///
@@ -93,10 +99,25 @@ struct ObserveSurfaceData
     // Spherepack-evenly-distributed over the inertial-frame sphere
     // (they are Spherepack-evenly-distributed over the HorizonFrame
     // sphere).
+    const double time =
+        InterpolationTarget_detail::get_temporal_id_value(temporal_id);
     std::vector<TensorComponent> tensor_components;
-    if constexpr (db::tag_is_retrievable_v<
-                      ylm::Tags::CartesianCoords<::Frame::Inertial>,
-                      db::DataBox<DbTags>>) {
+    // Targets that locate points in another frame may provide their exact
+    // forward-mapped inertial coordinates at this observation time.
+    if constexpr (requires {
+                    InterpolationTargetTag::inertial_coordinates(box, cache,
+                                                                 time);
+                  }) {
+      const auto coordinates =
+          InterpolationTargetTag::inertial_coordinates(box, cache, time);
+      for (size_t d = 0; d < 3; ++d) {
+        tensor_components.emplace_back(
+            "InertialCoordinates" + coordinates.component_suffix(d),
+            coordinates[d]);
+      }
+    } else if constexpr (db::tag_is_retrievable_v<
+                             ylm::Tags::CartesianCoords<::Frame::Inertial>,
+                             db::DataBox<DbTags>>) {
       const auto& inertial_strahlkorper_coords =
           get<ylm::Tags::CartesianCoords<::Frame::Inertial>>(box);
       tensor_components.push_back(
@@ -107,13 +128,7 @@ struct ObserveSurfaceData
           {"InertialCoordinates_z"s, get<2>(inertial_strahlkorper_coords)});
     }
 
-    // Output each tag if it is a scalar. Otherwise, throw a compile-time
-    // error. This could be generalized to handle tensors of nonzero rank by
-    // looping over the components, so each component could be visualized
-    // separately as a scalar. But in practice, this generalization is
-    // probably unnecessary, because Strahlkorpers are typically only
-    // visualized with scalar quantities (used set the color at different
-    // points on the surface).
+    // Output all independent components of each tensor.
     tmpl::for_each<TagsToObserve>([&box, &tensor_components](auto tag_v) {
       using Tag = tmpl::type_from<decltype(tag_v)>;
       const auto tag_name = db::tag_name<Tag>();
@@ -133,8 +148,6 @@ struct ObserveSurfaceData
         2, Spectral::Basis::SphericalHarmonic};
     const std::vector<Spectral::Quadrature> quadratures_vector{
         {Spectral::Quadrature::Gauss, Spectral::Quadrature::Equiangular}};
-    const double time =
-        InterpolationTarget_detail::get_temporal_id_value(temporal_id);
     const observers::ObservationId observation_id{time, subfile_path + ".vol"};
 
     auto& proxy = Parallel::get_parallel_component<

@@ -4,6 +4,7 @@
 spectre_target_sources(
   ${LIBRARY}
   PRIVATE
+  ComputeRecordingData.cpp
   Events/ObserveWorldtubeMatching.cpp
   FaceReplay.cpp
   KretschmannFaceData.cpp
@@ -15,6 +16,8 @@ spectre_target_headers(
   ${LIBRARY}
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
+  ComputeExcisionRecordingData.hpp
+  ComputeRecordingData.hpp
   Actions/UpdateKretschmannFaceData.hpp
   Events/ObserveWorldtubeMatching.hpp
   FaceReplay.hpp

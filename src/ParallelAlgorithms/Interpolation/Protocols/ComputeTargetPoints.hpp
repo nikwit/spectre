@@ -45,13 +45,21 @@ namespace intrp::protocols {
  * - a type alias `const_global_cache_tags` with tags to be put in the
  *   GlobalCache
  *
+ * - a function `points_at_time(cached_points, cache, time)` returning target
+ *   coordinates at an observation time. `InterpolateWithoutInterpComponent`
+ *   accepts coordinates or an optional (empty means unchanged). It calls
+ *   this optional function on each element for non-sequential targets
+ *   whose cached points represent a reference configuration rather than fixed
+ *   coordinates. Functions of time must be ready at the observation time.
+ *
  * - a function `initialize` with signature matching the one in the example that
  *   is run during the Initialization phase of the InterpolationTarget and can
  *   initialize any of the `simple_tags` added.
  *
  * Here is an example of a class that conforms to this protocols:
  *
- * \snippet Helpers/ParallelAlgorithms/Interpolation/Examples.hpp ComputeTargetPoints
+ * \snippet Helpers/ParallelAlgorithms/Interpolation/Examples.hpp
+ * ComputeTargetPoints
  */
 struct ComputeTargetPoints {
   template <typename ConformingType>

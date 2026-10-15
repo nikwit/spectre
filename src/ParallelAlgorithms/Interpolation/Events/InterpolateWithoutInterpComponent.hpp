@@ -133,7 +133,7 @@ class InterpolateWithoutInterpComponent<VolumeDim, InterpolationTargetTag,
   template <typename ParallelComponent, typename Metavariables>
   void operator()(
       const typename InterpolationTargetTag::temporal_id::type& temporal_id,
-      const tnsr::I<DataVector, VolumeDim, frame>& all_target_points,
+      const tnsr::I<DataVector, VolumeDim, frame>& cached_target_points,
       const Mesh<VolumeDim>& mesh,
       const tnsr::I<DataVector, VolumeDim, frame> coordinates,
       const typename SourceVarTags::type&... source_vars_input,
@@ -142,6 +142,23 @@ class InterpolateWithoutInterpComponent<VolumeDim, InterpolationTargetTag,
       const ParallelComponent* const /*meta*/,
       const ObservationValue& /*observation_value*/) const {
     std::vector<BlockLogicalCoords<VolumeDim>> block_logical_coords{};
+
+    // A target may cache reference points and move them at observation time.
+    // Keep PointInfo unchanged: observations can finish out of order.
+    using target_points =
+        typename InterpolationTargetTag::compute_target_points;
+    std::optional<tnsr::I<DataVector, VolumeDim, frame>> moved_target_points{};
+    if constexpr (requires {
+                    target_points::points_at_time(cached_target_points, cache,
+                                                  double{});
+                  }) {
+      moved_target_points = target_points::points_at_time(
+          cached_target_points, cache,
+          InterpolationTarget_detail::get_temporal_id_value(temporal_id));
+    }
+    const auto& all_target_points = moved_target_points.has_value()
+                                        ? *moved_target_points
+                                        : cached_target_points;
 
     std::stringstream ss{};
     ss << std::setprecision(std::numeric_limits<double>::digits10 + 4)
@@ -167,7 +184,9 @@ class InterpolateWithoutInterpComponent<VolumeDim, InterpolationTargetTag,
 
       const auto& sphere =
           Parallel::get<Tags::Sphere<InterpolationTargetTag>>(cache);
-      const std::array<double, 3>& center = sphere.center;
+      const auto center = InterpolationTargetTag::compute_target_points::center(
+          cache,
+          InterpolationTarget_detail::get_temporal_id_value(temporal_id));
 
       // Calculate r^2 from center of sphere because sqrt is expensive
       DataVector radii_squared{get<0>(coordinates).size(), 0.0};

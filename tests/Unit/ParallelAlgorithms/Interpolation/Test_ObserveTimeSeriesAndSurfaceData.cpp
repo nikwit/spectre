@@ -28,6 +28,7 @@
 #include "IO/H5/AccessType.hpp"
 #include "IO/H5/Dat.hpp"
 #include "IO/H5/File.hpp"
+#include "IO/H5/VolumeData.hpp"
 #include "IO/Logging/Verbosity.hpp"
 #include "IO/Observer/Initialize.hpp"
 #include "IO/Observer/ObservationId.hpp"
@@ -94,10 +95,9 @@ void check_ylm_data(const std::string& h5_file_name) {
 
   std::vector<std::string> ylm_expected_legend{};
   std::vector<double> ylm_expected_data{};
-  ylm::fill_ylm_legend_and_data(make_not_null(&ylm_expected_legend),
-                                make_not_null(&ylm_expected_data),
-                                expected_surface, 0.0,
-                                max_resolution_and_output_l);
+  ylm::fill_ylm_legend_and_data(
+      make_not_null(&ylm_expected_legend), make_not_null(&ylm_expected_data),
+      expected_surface, 0.0, max_resolution_and_output_l);
   const size_t expected_num_columns = ylm_expected_legend.size();
 
   // Check that the H5 file was written correctly.
@@ -454,6 +454,22 @@ struct MockMetavariables {
 
 struct AdaptiveSurfaceTarget {};
 
+struct GridSurfaceTarget {
+  template <typename DbTags, typename Metavariables>
+  static tnsr::I<DataVector, 3> inertial_coordinates(
+      const db::DataBox<DbTags>& box,
+      const Parallel::GlobalCache<Metavariables>& /*cache*/,
+      const double time) {
+    const auto grid = ylm::cartesian_coords(
+        db::get<ylm::Tags::Strahlkorper<Frame::Grid>>(box));
+    tnsr::I<DataVector, 3> result(get<0>(grid).size());
+    for (size_t i = 0; i < 3; ++i) {
+      result.get(i) = 2. * grid.get(i) + (i + 1.) * time;
+    }
+    return result;
+  }
+};
+
 struct AdaptiveSurfaceMetavariables {
   using observed_reduction_data_tags = tmpl::list<>;
   using const_global_cache_tags = tmpl::list<ah::Tags::LMax>;
@@ -531,14 +547,14 @@ void run_test() {
   intrp::OptionHolders::KerrHorizon kerr_horizon_opts_E(
       3, {{0.04, 0.05, 0.06}}, 1.1, {{1.0, 0.0, 0.0}},
       ylm::AngularOrdering::Strahlkorper);
-  tuples::TaggedTuple<
-      observers::Tags::ReductionFileName, observers::Tags::SurfaceFileName,
-      ::intrp::Tags::KerrHorizon<metavars::SurfaceA>,
-      ::intrp::Tags::KerrHorizon<metavars::SurfaceB>,
-      ::intrp::Tags::KerrHorizon<metavars::SurfaceC>,
-      ::intrp::Tags::KerrHorizon<metavars::SurfaceD>,
-      ::intrp::Tags::KerrHorizon<metavars::SurfaceE>, ah::Tags::LMax,
-      ::intrp::Tags::Verbosity>
+  tuples::TaggedTuple<observers::Tags::ReductionFileName,
+                      observers::Tags::SurfaceFileName,
+                      ::intrp::Tags::KerrHorizon<metavars::SurfaceA>,
+                      ::intrp::Tags::KerrHorizon<metavars::SurfaceB>,
+                      ::intrp::Tags::KerrHorizon<metavars::SurfaceC>,
+                      ::intrp::Tags::KerrHorizon<metavars::SurfaceD>,
+                      ::intrp::Tags::KerrHorizon<metavars::SurfaceE>,
+                      ah::Tags::LMax, ::intrp::Tags::Verbosity>
       global_cache_tuple{h5_file_prefix,      surfaces_file_prefix,
                          kerr_horizon_opts_A, kerr_horizon_opts_B,
                          kerr_horizon_opts_C, kerr_horizon_opts_D,
@@ -592,8 +608,9 @@ void run_test() {
   ActionTesting::set_phase(make_not_null(&runner), Parallel::Phase::Testing);
 
   const auto setup_box = [&]<typename TargetComponent, typename TargetTag>(
-      TargetComponent /*target_component_v*/, TargetTag /*target_tag_v*/
-      ) -> const auto& {
+                             TargetComponent /*target_component_v*/,
+                             TargetTag /*target_tag_v*/
+                             ) -> const auto& {
     auto& box =
         ActionTesting::get_databox<TargetComponent>(make_not_null(&runner), 0);
     TargetTag::compute_target_points::initialize(make_not_null(&box), cache);
@@ -798,6 +815,23 @@ void run_test() {
   Callback::apply(low_box, adaptive_cache, 1.0);
   Callback::apply(high_box, adaptive_cache, 2.0);
 
+  // A grid-frame surface has no inertial coordinates in its DataBox. Test
+  // the forward-coordinate hook at two times and preserve inertial tensor
+  // components without applying the coordinate transformation to them.
+  const ylm::Strahlkorper<Frame::Grid> grid_surface(low_l, 1.2,
+                                                    adaptive_surface_center);
+  const auto grid_coords = ylm::cartesian_coords(grid_surface);
+  const tnsr::ii<DataVector, 3> metric(get<0>(grid_coords).size(), 0.7);
+  const auto grid_box =
+      db::create<tmpl::list<ylm::Tags::Strahlkorper<Frame::Grid>,
+                            gr::Tags::SpatialMetric<DataVector, 3>>>(
+          grid_surface, metric);
+  using GridCallback = intrp::callbacks::ObserveSurfaceData<
+      tmpl::list<gr::Tags::SpatialMetric<DataVector, 3>>, GridSurfaceTarget,
+      Frame::Grid>;
+  GridCallback::apply(grid_box, adaptive_cache, 1.0);
+  GridCallback::apply(grid_box, adaptive_cache, 2.0);
+
   while (ActionTesting::number_of_queued_threaded_actions<ObsWriter>(
              adaptive_runner, 0) > 0) {
     ActionTesting::invoke_queued_threaded_action<ObsWriter>(
@@ -849,6 +883,35 @@ void run_test() {
             max_resolution_and_output_l);
   check_row(ylm_data, 1, 2.0, strahlkorper_high, high_l,
             max_resolution_and_output_l);
+
+  {
+    const h5::H5File<h5::AccessType::ReadOnly> surface_file(
+        adaptive_surface_file_name);
+    const auto& volume = surface_file.get<h5::VolumeData>("GridSurfaceTarget");
+    CHECK(volume.list_observation_ids().size() == 2);
+    for (const auto id : volume.list_observation_ids()) {
+      const double time = volume.get_observation_value(id);
+      for (size_t i = 0; i < 3; ++i) {
+        CHECK_ITERABLE_APPROX(
+            std::get<DataVector>(
+                volume
+                    .get_tensor_component(
+                        id,
+                        "InertialCoordinates" + grid_coords.component_suffix(i))
+                    .data),
+            DataVector(2. * grid_coords.get(i) + (i + 1.) * time));
+      }
+      for (size_t i = 0; i < metric.size(); ++i) {
+        CHECK_ITERABLE_APPROX(
+            std::get<DataVector>(
+                volume
+                    .get_tensor_component(
+                        id, "SpatialMetric" + metric.component_suffix(i))
+                    .data),
+            metric[i]);
+      }
+    }
+  }
 
   remove_file_if_exists(adaptive_surface_reduction_file_name);
   remove_file_if_exists(adaptive_surface_file_name);

@@ -7,12 +7,15 @@
 #include <array>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <set>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
 #include "DataStructures/DataBox/DataBox.hpp"
 #include "DataStructures/Transpose.hpp"
+#include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/AngularOrdering.hpp"
 #include "NumericalAlgorithms/Strahlkorper/Strahlkorper.hpp"
 #include "NumericalAlgorithms/Strahlkorper/Tags.hpp"
@@ -28,6 +31,8 @@
 
 /// \cond
 class DataVector;
+template <size_t Dim>
+class Domain;
 namespace PUP {
 class er;
 }  // namespace PUP
@@ -130,6 +135,13 @@ struct AllCoords : db::SimpleTag {
 };
 }  // namespace Tags
 
+namespace sphere_detail {
+/// Map the center of the domain excision sphere at the specified grid location.
+std::array<double, 3> excision_center(
+    const std::array<double, 3>& grid_center, const Domain<3>& domain,
+    double time, const domain::FunctionsOfTimeMap& functions_of_time);
+}  // namespace sphere_detail
+
 namespace TargetPoints {
 /// \brief Computes points on spherical surfaces.
 ///
@@ -214,6 +226,47 @@ struct Sphere : tt::ConformsTo<intrp::protocols::ComputeTargetPoints> {
 
     Initialization::mutate_assign<tmpl::list<Tags::AllCoords<Frame>>>(
         box, std::move(all_coords));
+  }
+
+  /// By default the center is fixed in the target frame. A target tag may
+  /// supply inertial_center(grid_center, cache, time) to follow a moving center
+  /// while keeping the radii and angular axes fixed in the inertial frame.
+  template <typename Metavariables>
+  static std::array<double, 3> center(
+      const Parallel::GlobalCache<Metavariables>& cache, const double time) {
+    const auto& options =
+        Parallel::get<Tags::Sphere<InterpolationTargetTag>>(cache);
+    if constexpr (requires {
+                    InterpolationTargetTag::inertial_center(options.center,
+                                                            cache, time);
+                  }) {
+      static_assert(std::is_same_v<Frame, ::Frame::Inertial>);
+      return InterpolationTargetTag::inertial_center(options.center, cache,
+                                                     time);
+    } else {
+      return options.center;
+    }
+  }
+
+  template <typename Metavariables>
+  static std::optional<tnsr::I<DataVector, 3, Frame>> points_at_time(
+      const tnsr::I<DataVector, 3, Frame>& cached_points,
+      const Parallel::GlobalCache<Metavariables>& cache, const double time) {
+    const auto& options =
+        Parallel::get<Tags::Sphere<InterpolationTargetTag>>(cache);
+    if constexpr (requires {
+                    InterpolationTargetTag::inertial_center(options.center,
+                                                            cache, time);
+                  }) {
+      const auto mapped_center = center(cache, time);
+      auto result = cached_points;
+      for (size_t i = 0; i < 3; ++i) {
+        result.get(i) += gsl::at(mapped_center, i) - gsl::at(options.center, i);
+      }
+      return result;
+    } else {
+      return std::nullopt;
+    }
   }
 
   template <typename Metavariables, typename DbTags, typename TemporalId>
