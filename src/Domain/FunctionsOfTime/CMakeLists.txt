@@ -8,6 +8,7 @@ add_spectre_library(${LIBRARY})
 spectre_target_sources(
   ${LIBRARY}
   PRIVATE
+  FixedInertialRadius.cpp
   FixedSpeedCubic.cpp
   IntegratedFunctionOfTime.cpp
   OutputTimeBounds.cpp
@@ -23,6 +24,7 @@ spectre_target_headers(
   ${LIBRARY}
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
+  FixedInertialRadius.hpp
   FixedSpeedCubic.hpp
   FunctionOfTime.hpp
   IntegratedFunctionOfTime.hpp

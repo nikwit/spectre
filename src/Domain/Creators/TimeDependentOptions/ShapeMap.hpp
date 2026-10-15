@@ -212,9 +212,17 @@ struct FromVolumeFileShapeSize : public FromVolumeFile {
         "distortion map. If set to 'Auto', will use the LMax from the shape "
         "function of time in the volume file."};
   };
-  using options = tmpl::push_front<FromVolumeFile::options, LMax,
-                                   CoefficientTruncationLimit,
-                                   detail::TransitionEndsAtCube>;
+  struct FixedInertialRadius {
+    using type = Options::Auto<double, Options::AutoLabel::None>;
+    static constexpr Options::String help =
+        "Keep this inertial radius using zero angular shape and a prescribed "
+        "size compensating the archived Expansion. Requires Replay, "
+        "inner-region uniform expansion, and identity skew. None preserves the "
+        "recorded shape and size.";
+  };
+  using parsing_options =
+      tmpl::list<LMax, CoefficientTruncationLimit, detail::TransitionEndsAtCube,
+                 H5Filename, SubfileName, Replay, FixedInertialRadius>;
 
   FromVolumeFileShapeSize() = default;
   FromVolumeFileShapeSize(const std::optional<size_t>& l_max_in,
@@ -223,6 +231,25 @@ struct FromVolumeFileShapeSize : public FromVolumeFile {
                           std::string h5_filename, std::string subfile_name,
                           const Options::Context& context = {});
 
+  FromVolumeFileShapeSize(const std::optional<size_t>& l_max_in,
+                          double coefficient_truncation_limit_in,
+                          bool transition_ends_at_cube_in,
+                          std::string h5_filename, std::string subfile_name,
+                          bool replay,
+                          std::optional<double> fixed_inertial_radius_in,
+                          const Options::Context& context = {});
+
+  FromVolumeFileShapeSize(const std::optional<size_t>& l_max_in,
+                          double coefficient_truncation_limit_in,
+                          bool transition_ends_at_cube_in,
+                          std::string h5_filename, std::string subfile_name,
+                          bool replay, const Options::Context& context = {})
+      : FromVolumeFileShapeSize(l_max_in, coefficient_truncation_limit_in,
+                                transition_ends_at_cube_in,
+                                std::move(h5_filename), std::move(subfile_name),
+                                replay, std::nullopt, context) {}
+
+  std::optional<double> fixed_inertial_radius{};
   std::optional<size_t> l_max{};
   double coefficient_truncation_limit{0.0};
   bool transition_ends_at_cube{};
@@ -355,3 +382,17 @@ FunctionsOfTimeMap get_shape_and_size(
     double initial_time, double shape_expiration_time,
     double size_expiration_time, double deformed_radius);
 }  // namespace domain::creators::time_dependent_options
+
+template <domain::ObjectLabel Object>
+struct Options::create_from_yaml<
+    domain::creators::time_dependent_options::FromVolumeFileShapeSize<Object>> {
+  template <typename Metavariables>
+  static domain::creators::time_dependent_options::FromVolumeFileShapeSize<
+      Object>
+  create(const Options::Option& option) {
+    return parse(option);
+  }
+  static domain::creators::time_dependent_options::FromVolumeFileShapeSize<
+      Object>
+  parse(const Options::Option& option);
+};

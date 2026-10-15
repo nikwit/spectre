@@ -8,6 +8,7 @@
 #include <pup.h>
 #include <string>
 
+#include "Domain/FunctionsOfTime/FixedInertialRadius.hpp"
 #include "Domain/FunctionsOfTime/FixedSpeedCubic.hpp"
 #include "Domain/FunctionsOfTime/IntegratedFunctionOfTime.hpp"
 #include "Domain/FunctionsOfTime/PiecewisePolynomial.hpp"
@@ -20,7 +21,8 @@
 
 namespace domain::FunctionsOfTime {
 void register_derived_with_charm() {
-  register_classes_with_charm<FunctionsOfTime::FixedSpeedCubic,
+  register_classes_with_charm<FunctionsOfTime::FixedInertialRadius,
+                              FunctionsOfTime::FixedSpeedCubic,
                               FunctionsOfTime::IntegratedFunctionOfTime,
                               FunctionsOfTime::PiecewisePolynomial<0>,
                               FunctionsOfTime::PiecewisePolynomial<1>,

@@ -12,6 +12,7 @@
 #include "Domain/Structure/ObjectLabel.hpp"
 #include "Options/Auto.hpp"
 #include "Options/Context.hpp"
+#include "Options/Options.hpp"
 #include "Options/String.hpp"
 #include "Utilities/TMPL.hpp"
 
@@ -38,12 +39,18 @@ struct FromVolumeFile {
         "subfile."};
   };
 
-  using options = tmpl::list<H5Filename, SubfileName>;
+  struct Replay {
+    using type = bool;
+    static constexpr Options::String help =
+        "Replay the complete global history without reinitializing it. Disable "
+        "live control updates.";
+  };
+  // Custom parsing supplies backward-compatible defaults for Replay.
+  using parsing_options = tmpl::list<H5Filename, SubfileName, Replay>;
   static constexpr Options::String help =
       "Read function of time coefficients from a volume subfile of an H5 file.";
 
   FromVolumeFile() = default;
-  // The replay option cannot be set from options
   FromVolumeFile(std::string h5_filename, std::string subfile_name,
                  bool replay = false);
 
@@ -72,3 +79,15 @@ struct FromVolumeFile {
 };
 /// @}
 }  // namespace domain::creators::time_dependent_options
+
+template <>
+struct Options::create_from_yaml<
+    domain::creators::time_dependent_options::FromVolumeFile> {
+  template <typename Metavariables>
+  static domain::creators::time_dependent_options::FromVolumeFile create(
+      const Options::Option& option) {
+    return parse(option);
+  }
+  static domain::creators::time_dependent_options::FromVolumeFile parse(
+      const Options::Option& option);
+};

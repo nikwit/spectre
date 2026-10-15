@@ -2,6 +2,7 @@
 // See LICENSE.txt for details.
 
 #include "Domain/Creators/TimeDependentOptions/ShapeMap.hpp"
+#include "Domain/FunctionsOfTime/FixedInertialRadius.hpp"
 
 #include <array>
 #include <cmath>
@@ -27,6 +28,7 @@
 #include "NumericalAlgorithms/Strahlkorper/Strahlkorper.hpp"
 #include "Options/Context.hpp"
 #include "Options/ParseError.hpp"
+#include "Options/ParseOptions.hpp"
 #include "PointwiseFunctions/GeneralRelativity/KerrHorizon.hpp"
 #include "Utilities/EqualWithinRoundoff.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
@@ -68,9 +70,30 @@ FromVolumeFileShapeSize<Object>::FromVolumeFileShapeSize(
     const double coefficient_truncation_limit_in,
     const bool transition_ends_at_cube_in, std::string h5_filename,
     std::string subfile_name, const Options::Context& context)
-    : FromVolumeFile(std::move(h5_filename), std::move(subfile_name)),
+    : FromVolumeFileShapeSize(l_max_in, coefficient_truncation_limit_in,
+                              transition_ends_at_cube_in,
+                              std::move(h5_filename), std::move(subfile_name),
+                              false, std::nullopt, context) {}
+
+template <ObjectLabel Object>
+FromVolumeFileShapeSize<Object>::FromVolumeFileShapeSize(
+    const std::optional<size_t>& l_max_in,
+    const double coefficient_truncation_limit_in,
+    const bool transition_ends_at_cube_in, std::string h5_filename,
+    std::string subfile_name, const bool replay,
+    const std::optional<double> fixed_inertial_radius_in,
+    const Options::Context& context)
+    : FromVolumeFile(std::move(h5_filename), std::move(subfile_name), replay),
+      fixed_inertial_radius(fixed_inertial_radius_in),
       l_max(l_max_in),
       transition_ends_at_cube(transition_ends_at_cube_in) {
+  if (fixed_inertial_radius.has_value() and
+      (not replay or not std::isfinite(*fixed_inertial_radius) or
+       *fixed_inertial_radius <= 0.)) {
+    PARSE_ERROR(
+        context,
+        "FixedInertialRadius requires Replay and a positive finite radius.");
+  }
   if (this->replay() and l_max_in.has_value()) {
     PARSE_ERROR(context,
                 "Cannot supply LMax for shape map while also replaying.");
@@ -173,6 +196,24 @@ FunctionsOfTimeMap get_shape_and_size(
     check_fot.template operator()<2>(shape_name);
     check_fot.template operator()<3>(size_name);
 
+    if (from_vol_file.fixed_inertial_radius.has_value()) {
+      const auto expansion =
+          from_vol_file.retrieve_function_of_time({"Expansion"}, initial_time);
+      const size_t l_max =
+          static_cast<size_t>(sqrt(
+              volume_fots.at(shape_name)->func(initial_time)[0].size() / 2)) -
+          1;
+      const DataVector zeros(ylm::Spherepack::spectral_size(l_max, l_max), 0.);
+      result[shape_name] =
+          std::make_unique<domain::FunctionsOfTime::PiecewisePolynomial<2>>(
+              initial_time, std::array{zeros, zeros, zeros},
+              expansion.at("Expansion")->time_bounds()[1]);
+      result[size_name] =
+          std::make_unique<domain::FunctionsOfTime::FixedInertialRadius>(
+              deformed_radius, *from_vol_file.fixed_inertial_radius,
+              expansion.at("Expansion")->get_clone());
+      return result;
+    }
     if (from_vol_file.replay()) {
       result[shape_name] = std::move(volume_fots.at(shape_name));
     } else {
@@ -462,3 +503,33 @@ GENERATE_INSTANTIATIONS(INSTANTIATE,
 #undef OBJECT
 #undef INSTANTIATE
 }  // namespace domain::creators::time_dependent_options
+
+template <domain::ObjectLabel Object>
+domain::creators::time_dependent_options::FromVolumeFileShapeSize<Object>
+Options::create_from_yaml<
+    domain::creators::time_dependent_options::FromVolumeFileShapeSize<Object>>::
+    parse(const Options::Option& option) {
+  using Type =
+      domain::creators::time_dependent_options::FromVolumeFileShapeSize<Object>;
+  auto node = YAML::Clone(option.node());
+  if (node.IsMap()) {
+    if (not node["Replay"])
+      node["Replay"] = false;
+    if (not node["FixedInertialRadius"])
+      node["FixedInertialRadius"] = "None";
+  }
+  Options::Parser<typename Type::parsing_options> parser(Type::help);
+  parser.parse(Options::Option{std::move(node), option.context()});
+  return parser.apply_all([&option](auto /*meta*/, auto&&... args) {
+    return Type(std::move(args)..., option.context());
+  });
+}
+template struct Options::create_from_yaml<
+    domain::creators::time_dependent_options::FromVolumeFileShapeSize<
+        domain::ObjectLabel::A>>;
+template struct Options::create_from_yaml<
+    domain::creators::time_dependent_options::FromVolumeFileShapeSize<
+        domain::ObjectLabel::B>>;
+template struct Options::create_from_yaml<
+    domain::creators::time_dependent_options::FromVolumeFileShapeSize<
+        domain::ObjectLabel::None>>;

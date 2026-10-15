@@ -23,6 +23,7 @@
 #include "IO/H5/VolumeData.hpp"
 #include "Options/Context.hpp"
 #include "Options/ParseError.hpp"
+#include "Options/ParseOptions.hpp"
 #include "Utilities/Algorithm.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/PrettyType.hpp"
@@ -40,9 +41,10 @@ FunctionsOfTimeMap FromVolumeFile::retrieve_function_of_time(
     const double time) const {
   const h5::H5File<h5::AccessType::ReadOnly> h5_file{h5_filename_};
   const auto& vol_file = h5_file.get<h5::VolumeData>(subfile_name_);
-  const auto obs_id = vol_file.find_observation_id(time);
-  std::optional<std::vector<char>> serialized_functions_of_time =
-      vol_file.get_functions_of_time(obs_id);
+  const auto serialized_functions_of_time =
+      replay_
+          ? vol_file.get_global_functions_of_time()
+          : vol_file.get_functions_of_time(vol_file.find_observation_id(time));
   if (not serialized_functions_of_time.has_value()) {
     ERROR_NO_TRACE("There are no functions of time in the subfile "
                    << subfile_name_ << " of the H5 file " << h5_filename_
@@ -79,3 +81,16 @@ FunctionsOfTimeMap FromVolumeFile::retrieve_function_of_time(
   return result;
 }
 }  // namespace domain::creators::time_dependent_options
+
+domain::creators::time_dependent_options::FromVolumeFile Options::
+    create_from_yaml<domain::creators::time_dependent_options::FromVolumeFile>::
+        parse(const Options::Option& option) {
+  using Type = domain::creators::time_dependent_options::FromVolumeFile;
+  auto node = YAML::Clone(option.node());
+  if (node.IsMap() and not node["Replay"])
+    node["Replay"] = false;
+  Options::Parser<Type::parsing_options> parser(Type::help);
+  parser.parse(Options::Option{std::move(node), option.context()});
+  return parser.apply_all(
+      [](auto /*meta*/, auto&&... args) { return Type(std::move(args)...); });
+}
