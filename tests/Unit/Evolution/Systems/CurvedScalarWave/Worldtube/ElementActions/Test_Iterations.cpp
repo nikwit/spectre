@@ -63,8 +63,10 @@ namespace {
 template <typename Metavariables>
 struct MockElementArray {
   using metavariables = Metavariables;
+  using simple_tags_from_options = tmpl::list<>;
   static constexpr size_t Dim = metavariables::volume_dim;
   using chare_type = ActionTesting::MockArrayChare;
+  using array_allocation_tags = tmpl::list<>;
   using array_index = ElementId<Dim>;
   using phase_dependent_action_list = tmpl::list<
       Parallel::PhaseActions<
@@ -88,6 +90,7 @@ struct MockElementArray {
 template <typename Metavariables>
 struct MockWorldtubeSingleton {
   using metavariables = Metavariables;
+  using simple_tags_from_options = tmpl::list<>;
   static constexpr size_t Dim = metavariables::volume_dim;
   using chare_type = ActionTesting::MockSingletonChare;
   using array_index = int;
@@ -104,7 +107,8 @@ struct MockWorldtubeSingleton {
                   Tags::CurrentIteration, Tags::GeodesicAcceleration<Dim>,
                   CurvedScalarWave::Worldtube::Tags::ParticlePositionVelocity<
                       Dim>,
-                  Tags::AccelerationTerms, dt_variables_tag, variables_tag>,
+                  Tags::AccelerationTerms, dt_variables_tag, variables_tag,
+                  Tags::WorldtubeRadius>,
               db::AddComputeTags<Tags::BackgroundQuantitiesCompute<Dim>>>>>,
       Parallel::PhaseActions<
           Parallel::Phase::Testing,
@@ -125,14 +129,14 @@ struct MockMetavariables {
   using const_global_cache_tags = tmpl::list<
       domain::Tags::Domain<Dim>,
       CurvedScalarWave::Tags::BackgroundSpacetime<gr::Solutions::KerrSchild>,
-      Tags::ExcisionSphere<Dim>, Tags::WorldtubeRadius,
-      Tags::PunctureFieldConfig, Tags::ExpansionOrder, Tags::MaxIterations,
-      Tags::Charge, Tags::Mass, ::Tags::Time, Tags::SelfForceTurnOnTime,
-      Tags::SelfForceTurnOnInterval>;
+      Tags::ExcisionSphere<Dim>, Tags::PunctureFieldConfig,
+      Tags::ExpansionOrder, Tags::MaxIterations, Tags::Charge, Tags::Mass,
+      ::Tags::Time, Tags::SelfForceTurnOnTime, Tags::SelfForceTurnOnInterval>;
 };
 
-void test_iterations(const size_t max_iterations) {
-  CAPTURE(max_iterations);
+void test_iterations(const size_t max_iterations,
+                     const bool enable_self_force = false) {
+  CAPTURE(max_iterations, enable_self_force);
   static constexpr size_t Dim = 3;
   MAKE_GENERATOR(generator);
   std::uniform_real_distribution<> dist(-10., 10.);
@@ -148,14 +152,19 @@ void test_iterations(const size_t max_iterations) {
   const auto basis = Spectral::Basis::Legendre;
   const auto quadrature = Spectral::Quadrature::GaussLobatto;
   const double charge = 0.1;
-  const double mass = 0.1;
+  const double mass = 10.;
   gr::Solutions::KerrSchild kerr_schild(1., {{0., 0., 0.}}, {{0., 0., 0.}});
   // we create several differently refined shells so a different number of
   // elements sends data
   for (const auto& [expansion_order, initial_refinement, worldtube_radius] :
-       cartesian_product(std::array<size_t, 2>{0, 1},
+       cartesian_product(std::array<size_t, 3>{0, 1, 2},
                          std::array<size_t, 2>{0, 1},
                          make_array(0.07, 1., 2.8))) {
+    if (enable_self_force and
+        (expansion_order != 2 or initial_refinement != 0 or
+         worldtube_radius != 1.)) {
+      continue;
+    }
     CAPTURE(expansion_order);
     CAPTURE(worldtube_radius);
     CAPTURE(initial_refinement);
@@ -173,7 +182,7 @@ void test_iterations(const size_t max_iterations) {
     const auto& initial_extents = shell.initial_extents();
     // before self force is turned on
     const double time = 1.;
-    const double turn_on_time = 2.;
+    const double turn_on_time = enable_self_force ? 0.2 : 2.;
     const auto puncture_field_options =
         CurvedScalarWave::Worldtube::PunctureField{
             CurvedScalarWave::Worldtube::PunctureField::Schwarzschild{
@@ -181,14 +190,12 @@ void test_iterations(const size_t max_iterations) {
     tuples::TaggedTuple<
         domain::Tags::Domain<Dim>,
         CurvedScalarWave::Tags::BackgroundSpacetime<gr::Solutions::KerrSchild>,
-        Tags::ExcisionSphere<Dim>, Tags::WorldtubeRadius,
-        Tags::PunctureFieldConfig, Tags::ExpansionOrder, Tags::MaxIterations,
-        Tags::Charge, Tags::Mass, ::Tags::Time, Tags::SelfForceTurnOnTime,
-        Tags::SelfForceTurnOnInterval>
+        Tags::ExcisionSphere<Dim>, Tags::PunctureFieldConfig,
+        Tags::ExpansionOrder, Tags::MaxIterations, Tags::Charge, Tags::Mass,
+        ::Tags::Time, Tags::SelfForceTurnOnTime, Tags::SelfForceTurnOnInterval>
         tuple_of_opts{shell.create_domain(),
                       kerr_schild,
                       excision_sphere,
-                      excision_sphere.radius(),
                       puncture_field_options,
                       expansion_order,
                       max_iterations,
@@ -196,7 +203,7 @@ void test_iterations(const size_t max_iterations) {
                       std::make_optional(mass),
                       time,
                       std::make_optional(turn_on_time),
-                      std::nullopt};
+                      std::make_optional(0.8)};
     ActionTesting::MockRuntimeSystem<metavars> runner{std::move(tuple_of_opts)};
     const auto element_ids = initial_element_ids(initial_refinements);
     const auto& blocks = shell_domain.blocks();
@@ -209,12 +216,13 @@ void test_iterations(const size_t max_iterations) {
     const Time dummy_time{{1., 2.}, {1, 2}};
     const TimeStepId dummy_time_step_id{true, 123, dummy_time};
 
-    const auto particle_position =
-        make_with_random_values<tnsr::I<double, Dim>>(make_not_null(&generator),
-                                                      pos_dist, 1);
-    const auto particle_velocity =
-        make_with_random_values<tnsr::I<double, Dim>>(make_not_null(&generator),
-                                                      vel_dist, 1);
+    auto particle_position = make_with_random_values<tnsr::I<double, Dim>>(
+        make_not_null(&generator), pos_dist, 1);
+    auto particle_velocity = make_with_random_values<tnsr::I<double, Dim>>(
+        make_not_null(&generator), vel_dist, 1);
+    // The generated puncture assumes equatorial motion.
+    get<2>(particle_position) = 0.;
+    get<2>(particle_velocity) = 0.;
     const std::array<tnsr::I<double, Dim>, 2> particle_pos_vel{
         particle_position, particle_velocity};
     std::vector<ElementId<Dim>> abutting_element_ids{};
@@ -246,6 +254,9 @@ void test_iterations(const size_t max_iterations) {
                     make_with_random_values<face_quantities_type>(
                         make_not_null(&generator), dist, DataVector(face_size)))
               : std::nullopt;
+      if (enable_self_force and optional_face_quantities.has_value()) {
+        optional_face_quantities.value() *= 1.e-4;
+      }
       std::optional<puncture_field_type> optional_puncture_field =
           is_abutting ? std::make_optional<puncture_field_type>(puncture_field)
                       : std::nullopt;
@@ -281,7 +292,8 @@ void test_iterations(const size_t max_iterations) {
          typename MockWorldtubeSingleton<
              MockMetavariables<Dim>>::dt_variables_tag::type{1, 0.},
          typename MockWorldtubeSingleton<
-             MockMetavariables<Dim>>::variables_tag::type{1, 0.}});
+             MockMetavariables<Dim>>::variables_tag::type{1, 0.},
+         worldtube_radius});
     ActionTesting::set_phase(make_not_null(&runner), Parallel::Phase::Testing);
 
     // check that the non-abutting element_ids can just keep iterating
@@ -362,14 +374,39 @@ void test_iterations(const size_t max_iterations) {
                                          Tags::SelfForceInbox<Dim>>(runner,
                                                                     element_id);
         CHECK(self_force_inbox.count(dummy_time_step_id));
-        // the self force is not turned on, so the acceleration is just geodesic
-        for (size_t i = 0; i < Dim; ++i) {
-          CHECK(get(self_force_inbox.at(dummy_time_step_id))[i] ==
-                geodesic_acc.get(i));
-        }
-        // the other terms are just zero without the self force
-        for (size_t i = 3; i < 15; ++i) {
-          CHECK(get(self_force_inbox.at(dummy_time_step_id))[i] == 0.);
+        const auto data = get(self_force_inbox.at(dummy_time_step_id));
+        puncture_field_type expected_puncture{face_size};
+        if (enable_self_force) {
+          REQUIRE(data.size() == 21);
+          CHECK(data[16] != 0.);
+          CHECK(data[19] != 0.);
+          const auto& coords =
+              ActionTesting::get_databox_tag<
+                  element_chare,
+                  Tags::FaceCoordinates<Dim, Frame::Inertial, true>>(runner,
+                                                                     element_id)
+                  .value();
+          const tnsr::I<double, 3> acceleration{{data[0], data[1], data[2]}};
+          puncture_field_options.apply_puncture(
+              make_not_null(&expected_puncture), coords, particle_position,
+              particle_velocity, acceleration);
+          puncture_field_type expected_acceleration{face_size};
+          acceleration_terms_2(make_not_null(&expected_acceleration), coords,
+                               particle_position, particle_velocity,
+                               acceleration, data[3], data[4], data[5], data[6],
+                               data[7], data[8], data[9], data[10], data[11],
+                               data[12], data[13], data[14], data[15], data[16],
+                               data[17], data[18], data[19], data[20], 1.);
+          expected_puncture += expected_acceleration;
+          expected_puncture *= charge;
+        } else {
+          // Before turn-on, only the coordinate geodesic acceleration is sent.
+          for (size_t i = 0; i < Dim; ++i) {
+            CHECK(data[i] == geodesic_acc.get(i));
+          }
+          for (size_t i = 3; i < (expansion_order == 2 ? 21 : 15); ++i) {
+            CHECK(data[i] == 0.);
+          }
         }
         const std::string inbox_output =
             Tags::SelfForceInbox<Dim>::output_inbox(self_force_inbox, 2);
@@ -382,6 +419,14 @@ void test_iterations(const size_t max_iterations) {
         CHECK(ActionTesting::next_action_if_ready<element_chare>(
             make_not_null(&runner), element_id));
         CHECK(self_force_inbox.empty());
+        if (enable_self_force) {
+          CHECK_VARIABLES_APPROX(
+              (ActionTesting::get_databox_tag<element_chare,
+                                              Tags::IteratedPunctureField<Dim>>(
+                   runner, element_id)
+                   .value()),
+              expected_puncture);
+        }
         const auto& element_iteration =
             ActionTesting::get_databox_tag<element_chare,
                                            Tags::CurrentIteration>(runner,
@@ -432,6 +477,9 @@ SPECTRE_TEST_CASE("Unit.CurvedScalarWave.Worldtube.Iterations", "[Unit]") {
   test_iterations(1);
   test_iterations(2);
   test_iterations(5);
+#ifdef SPECTRE_AUTODIFF
+  test_iterations(3, true);
+#endif
 }
 }  // namespace
 }  // namespace CurvedScalarWave::Worldtube

@@ -7,6 +7,7 @@
 
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/KerrSchildDerivatives.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SelfForce.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/SelfForceDerivatives.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/IterateAccelerationTerms.hpp"
 #include "Framework/Pypp.hpp"
 #include "Framework/SetupLocalPythonEnvironment.hpp"
@@ -63,13 +64,22 @@ SPECTRE_TEST_CASE(
           Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim,
                                Frame::Inertial>,
           Tags::Charge, Tags::Mass, ::Tags::Time, Tags::SelfForceTurnOnTime,
-          Tags::SelfForceTurnOnInterval, Tags::CurrentIteration>,
+          Tags::SelfForceTurnOnInterval, Tags::CurrentIteration,
+          Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim, Frame::Inertial>,
+          Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 2, Dim,
+                               Frame::Inertial>,
+          Tags::Psi0, Tags::dtPsi0, Tags::ExpansionOrder, Tags::WorldtubeRadius,
+          Tags::PunctureFieldConfig>,
       db::AddComputeTags<Tags::BackgroundQuantitiesCompute<Dim>,
                          Tags::GeodesicAccelerationCompute<Dim>>>(
       Scalar<DataVector>{}, std::array<tnsr::I<double, 3>, 2>{pos, vel},
       kerr_schild, psi_monopole, dt_psi_monopole, psi_dipole, dt_psi_dipole,
       charge, std::make_optional(mass), time, std::make_optional(turn_on_time),
-      std::make_optional(turn_on_interval), current_iteration);
+      std::make_optional(turn_on_interval), current_iteration,
+      tnsr::ii<double, Dim>{0.}, tnsr::ii<double, Dim>{0.},
+      Scalar<DataVector>{DataVector(1, 0.)},
+      Scalar<DataVector>{DataVector(1, 0.)}, size_t{1}, 0.5,
+      PunctureField{PunctureField::Schwarzschild{1, 1.}});
   db::mutate_apply<IterateAccelerationTerms>(make_not_null(&box));
 
   const auto& background = db::get<Tags::BackgroundQuantities<Dim>>(box);
@@ -146,5 +156,61 @@ SPECTRE_TEST_CASE(
       charge, mass, new_iteration);
   CHECK_ITERABLE_APPROX(expected_terms_3,
                         get(db::get<Tags::AccelerationTerms>(box)));
+#ifdef SPECTRE_AUTODIFF
+  // Exercise the order-two path, including central values distinct from
+  // boundary monopoles and the six newly transmitted force components.
+  db::mutate<
+      CurvedScalarWave::Tags::BackgroundSpacetime<gr::Solutions::KerrSchild>,
+      Tags::ExpansionOrder, Tags::PunctureFieldConfig, Tags::Psi0,
+      Tags::dtPsi0>(
+      [](const auto background_spacetime, const auto order, const auto puncture,
+         const auto psi0, const auto dt_psi0) {
+        *background_spacetime =
+            gr::Solutions::KerrSchild{1.4, {{0., 0., 0.}}, {{0., 0., 0.}}};
+        *order = 2;
+        *puncture = PunctureField{PunctureField::Schwarzschild{2, 1.4}};
+        get(*psi0)[0] = 0.03;
+        get(*dt_psi0)[0] = -0.02;
+      },
+      make_not_null(&box));
+  const auto field = reconstruct_regular_field(
+      get(psi_monopole), get(dt_psi_monopole), psi_dipole, dt_psi_dipole,
+      tnsr::ii<double, 3>{0.}, tnsr::ii<double, 3>{0.}, 0.03, -0.02, vel, 0.5);
+  for (const size_t iteration : {size_t{1}, size_t{3}}) {
+    for (const double test_time : {time, new_time}) {
+      CAPTURE(iteration, test_time);
+      db::mutate<Tags::CurrentIteration, ::Tags::Time>(
+          [iteration, test_time](const auto it, const auto t) {
+            *it = iteration;
+            *t = test_time;
+          },
+          make_not_null(&box));
+      db::mutate_apply<IterateAccelerationTerms>(make_not_null(&box));
+      const auto& data = get(db::get<Tags::AccelerationTerms>(box));
+      REQUIRE(data.size() == 21);
+      if (test_time <= turn_on_time) {
+        for (size_t i = 0; i < 3; ++i) {
+          CHECK(data[i] == db::get<Tags::GeodesicAcceleration<3>>(box).get(i));
+        }
+        for (size_t i = 3; i < data.size(); ++i) {
+          CHECK(data[i] == 0.);
+        }
+      } else {
+        const auto expected = second_order_self_force_derivatives(
+            field, pos, vel, charge, mass, iteration > 1, 1.4, test_time,
+            turn_on_time, turn_on_interval);
+        for (size_t i = 0; i < 3; ++i) {
+          CHECK(data[i] == approx(expected.coordinate_acceleration.get(i)));
+          CHECK(data[i + 3] == approx(expected.f.get(i)));
+          CHECK(data[i + 6] == approx(expected.dt_f.get(i)));
+          CHECK(data[i + 9] == approx(expected.Du_f.get(i)));
+          CHECK(data[i + 12] == approx(expected.dt_Du_f.get(i)));
+          CHECK(data[i + 15] == approx(expected.DuDu_f.get(i)));
+          CHECK(data[i + 18] == approx(expected.dt_DuDu_f.get(i)));
+        }
+      }
+    }
+  }
+#endif  // SPECTRE_AUTODIFF
 }
 }  // namespace CurvedScalarWave::Worldtube

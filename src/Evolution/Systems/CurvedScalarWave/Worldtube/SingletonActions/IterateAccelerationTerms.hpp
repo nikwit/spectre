@@ -21,7 +21,9 @@ namespace CurvedScalarWave::Worldtube {
  * quantities required to compute the acceleration terms of the puncture field.
  *
  * \details Analytic expressions for the computed terms are given in Section V.B
- * of \cite Wittek:2024gxn.
+ * of \cite Wittek:2024gxn for orders zero and one. At order two,
+ * second_order_self_force_derivatives supplies the quadratic-field closure
+ * and the additional covariant acceleration derivatives.
  */
 struct IterateAccelerationTerms {
   static constexpr size_t Dim = 3;
@@ -37,7 +39,12 @@ struct IterateAccelerationTerms {
       Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 1, Dim,
                            Frame::Inertial>,
       Tags::Charge, Tags::Mass, ::Tags::Time, Tags::SelfForceTurnOnTime,
-      Tags::SelfForceTurnOnInterval, Tags::CurrentIteration>;
+      Tags::SelfForceTurnOnInterval, Tags::CurrentIteration,
+      Stf::Tags::StfTensor<Tags::PsiWorldtube, 2, Dim, Frame::Inertial>,
+      Stf::Tags::StfTensor<::Tags::dt<Tags::PsiWorldtube>, 2, Dim,
+                           Frame::Inertial>,
+      Tags::Psi0, Tags::dtPsi0, Tags::ExpansionOrder, Tags::WorldtubeRadius,
+      Tags::PunctureFieldConfig>;
   static void apply(
       gsl::not_null<Scalar<DataVector>*> acceleration_terms,
       const std::array<tnsr::I<double, Dim>, 2>& pos_vel,
@@ -53,7 +60,12 @@ struct IterateAccelerationTerms {
       const tnsr::i<double, Dim, Frame::Inertial>& dt_psi_dipole, double charge,
       std::optional<double> mass, double time,
       std::optional<double> turn_on_time,
-      std::optional<double> turn_on_interval, size_t iteration);
+      std::optional<double> turn_on_interval, size_t iteration,
+      const tnsr::ii<double, Dim>& psi_quadrupole,
+      const tnsr::ii<double, Dim>& dt_psi_quadrupole,
+      const Scalar<DataVector>& psi0, const Scalar<DataVector>& dt_psi0,
+      size_t expansion_order, double worldtube_radius,
+      const PunctureField& puncture_field);
 };
 
 }  // namespace CurvedScalarWave::Worldtube

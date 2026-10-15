@@ -10,6 +10,7 @@
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Inboxes.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/KerrSchildDerivatives.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SelfForce.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/SelfForceDerivatives.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Tags.hpp"
 #include "NumericalAlgorithms/Strahlkorper/Tags.hpp"
 #include "Utilities/Gsl.hpp"
@@ -30,18 +31,45 @@ void IterateAccelerationTerms::apply(
     const tnsr::i<double, Dim, Frame::Inertial>& dt_psi_dipole,
     const double charge, const std::optional<double> mass, const double time,
     const std::optional<double> turn_on_time,
-    const std::optional<double> turn_on_interval, const size_t iteration) {
+    const std::optional<double> turn_on_interval, const size_t iteration,
+    const tnsr::ii<double, Dim>& psi_quadrupole,
+    const tnsr::ii<double, Dim>& dt_psi_quadrupole,
+    const Scalar<DataVector>& psi0, const Scalar<DataVector>& dt_psi0,
+    const size_t expansion_order, const double worldtube_radius,
+    const PunctureField& puncture_field) {
   // size of the data that is sent to the elements to compute the acceleration
   // terms of the puncture field. Consists of  the x, y and z components of the
   // acceleration, as well the t, x and y components of the scalar self force
   // and three different derivatives of it.
-  const size_t data_size = 15;
+  // At order two append D_u^2 f and its total time derivative (t, x, y).
+  const size_t data_size = expansion_order == 2 ? 21 : 15;
   acceleration_terms->get() = DataVector(data_size, 0.);
   auto acc = geodesic_acc;
   double roll_on = 0.;
   if (time > turn_on_time.value()) {
     const auto& particle_position = pos_vel.at(0);
     const auto& particle_velocity = pos_vel.at(1);
+    if (expansion_order == 2) {
+      const auto field = reconstruct_regular_field(
+          get(psi_monopole), get(dt_psi_monopole), psi_dipole, dt_psi_dipole,
+          psi_quadrupole, dt_psi_quadrupole, get(psi0)[0], get(dt_psi0)[0],
+          particle_velocity, worldtube_radius);
+      const auto derivatives = second_order_self_force_derivatives(
+          field, particle_position, particle_velocity, charge, mass.value(),
+          iteration > 1, puncture_field.black_hole_mass(), time,
+          turn_on_time.value(), turn_on_interval.value());
+      for (size_t i = 0; i < Dim; ++i) {
+        get(*acceleration_terms)[i] =
+            derivatives.coordinate_acceleration.get(i);
+        get(*acceleration_terms)[i + 3] = derivatives.f.get(i);
+        get(*acceleration_terms)[i + 6] = derivatives.dt_f.get(i);
+        get(*acceleration_terms)[i + 9] = derivatives.Du_f.get(i);
+        get(*acceleration_terms)[i + 12] = derivatives.dt_Du_f.get(i);
+        get(*acceleration_terms)[i + 15] = derivatives.DuDu_f.get(i);
+        get(*acceleration_terms)[i + 18] = derivatives.dt_DuDu_f.get(i);
+      }
+      return;
+    }
     const auto& imetric =
         get<gr::Tags::InverseSpacetimeMetric<double, Dim>>(background);
     const auto& metric =

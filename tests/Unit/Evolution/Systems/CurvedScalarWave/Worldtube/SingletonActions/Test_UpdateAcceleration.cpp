@@ -231,9 +231,14 @@ void test_self_force_acceleration() {
 
   const double roll_on =
       turn_on_function(time - turn_on_time, turn_on_interval);
-  const double evolved_mass = mass - charge * get(psi_monopole);
+  const double evolved_mass =
+      mass - charge * get(get<Tags::Psi0>(evolved_vars))[0];
+  Scalar<double> central_dt_psi{get(get<Tags::dtPsi0>(evolved_vars))[0]};
+  for (size_t i = 0; i < Dim; ++i) {
+    get(central_dt_psi) -= vel.get(i) * psi_dipole.get(i);
+  }
   const auto self_force_acc =
-      self_force_acceleration(dt_psi_monopole, psi_dipole, vel, charge,
+      self_force_acceleration(central_dt_psi, psi_dipole, vel, charge,
                               evolved_mass, inverse_metric, dilation);
 
   const Approx local_approx = Approx::custom().epsilon(1e-12);

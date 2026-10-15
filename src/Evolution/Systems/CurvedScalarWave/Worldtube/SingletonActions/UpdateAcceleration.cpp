@@ -49,8 +49,18 @@ void UpdateAcceleration::apply(
     const auto& inverse_metric =
         get<gr::Tags::InverseSpacetimeMetric<double, Dim>>(background);
     const auto& dilation_factor = get<Tags::TimeDilationFactor>(background);
-    const double evolved_mass = mass.value() - charge * get(psi_monopole);
-    self_force_acceleration(make_not_null(&self_force_acc), dt_psi_monopole,
+    const double central_psi = expansion_order < 2
+                                   ? get(psi_monopole)
+                                   : get(get<Tags::Psi0>(evolved_vars))[0];
+    Scalar<double> central_dt_psi = dt_psi_monopole;
+    if (expansion_order == 2) {
+      get(central_dt_psi) = get(get<Tags::dtPsi0>(evolved_vars))[0];
+      for (size_t i = 0; i < Dim; ++i) {
+        get(central_dt_psi) -= particle_velocity.get(i) * psi_dipole.get(i);
+      }
+    }
+    const double evolved_mass = mass.value() - charge * central_psi;
+    self_force_acceleration(make_not_null(&self_force_acc), central_dt_psi,
                             psi_dipole, particle_velocity, charge, evolved_mass,
                             inverse_metric, dilation_factor);
   }

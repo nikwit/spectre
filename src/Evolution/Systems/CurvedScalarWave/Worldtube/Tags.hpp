@@ -785,6 +785,10 @@ struct IteratedPunctureField : db::SimpleTag {
 /*!
  * The acceleration terms computed by the worldtube singleton and sent to the
  * neighboring elements used to compute the puncture field.
+ * The first three entries are the coordinate acceleration (x,y,z), followed
+ * by the (t,x,y) components of f, dt f, D_u f, and dt D_u f. At expansion
+ * order two, D_u^2 f and dt D_u^2 f are appended, giving 21 entries instead
+ * of 15. Every dt is a total coordinate-time derivative along the worldline.
  */
 struct AccelerationTerms : db::SimpleTag {
   using type = Scalar<DataVector>;

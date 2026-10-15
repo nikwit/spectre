@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <vector>
@@ -75,6 +76,14 @@ struct IteratePunctureField {
                                ::Tags::deriv<CurvedScalarWave::Tags::Psi,
                                              tmpl::size_t<3>, Frame::Inertial>>>
               acceleration_terms(face_size);
+          std::optional<std::array<double, 6>> higher_derivatives{};
+          if (puncture_field.expansion_order() == 2) {
+            ASSERT(self_force_data.size() == 21,
+                   "Second-order puncture requires 21 acceleration inputs.");
+            higher_derivatives = {{self_force_data[15], self_force_data[16],
+                                   self_force_data[17], self_force_data[18],
+                                   self_force_data[19], self_force_data[20]}};
+          }
           puncture_field.apply_acceleration_terms(
               make_not_null(&acceleration_terms),
               centered_face_coordinates.value(), position_velocity[0],
@@ -82,7 +91,7 @@ struct IteratePunctureField {
               self_force_data[4], self_force_data[5], self_force_data[6],
               self_force_data[7], self_force_data[8], self_force_data[9],
               self_force_data[10], self_force_data[11], self_force_data[12],
-              self_force_data[13], self_force_data[14]);
+              self_force_data[13], self_force_data[14], higher_derivatives);
           iterated_puncture_field->value() += acceleration_terms;
           iterated_puncture_field->value() *= charge;
         },
