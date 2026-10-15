@@ -106,7 +106,8 @@ void PunctureField::apply_acceleration_terms(
     const double fx, const double fy, const double dt_ft, const double dt_fx,
     const double dt_fy, const double Du_ft, const double Du_fx,
     const double Du_fy, const double dt_Du_ft, const double dt_Du_fx,
-    const double dt_Du_fy) const {
+    const double dt_Du_fy,
+    const std::optional<std::array<double, 6>>& higher_derivatives) const {
   if (type_ == Type::Kerr) {
     ERROR("Kerr puncture not implemented yet");
   }
@@ -119,13 +120,23 @@ void PunctureField::apply_acceleration_terms(
                          particle_velocity, particle_acceleration, ft, fx, fy,
                          dt_ft, dt_fx, dt_fy, Du_ft, Du_fx, Du_fy, dt_Du_ft,
                          dt_Du_fx, dt_Du_fy, black_hole_mass_);
+  } else if (expansion_order_ == 2) {
+    if (not higher_derivatives.has_value()) {
+      ERROR(
+          "Second-order acceleration terms require D_u^2 f and its time "
+          "derivative.");
+    }
+    const auto& h = higher_derivatives.value();
+    acceleration_terms_2(result, centered_coords, particle_position,
+                         particle_velocity, particle_acceleration, ft, fx, fy,
+                         dt_ft, dt_fx, dt_fy, Du_ft, Du_fx, Du_fy, dt_Du_ft,
+                         dt_Du_fx, dt_Du_fy, h[0], h[1], h[2], h[3], h[4], h[5],
+                         black_hole_mass_);
   } else {
     ERROR(
         "The acceleration terms of the puncture field are only implemented "
-        "up to expansion order 1 but you requested order "
-        << expansion_order_
-        << ". At expansion order 2 only geodesic orbits are supported, so "
-           "select `SelfForce: None`.");
+        "up to expansion order 2 but you requested order "
+        << expansion_order_);
   }
 }
 

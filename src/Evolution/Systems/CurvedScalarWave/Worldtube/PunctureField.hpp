@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
+#include <optional>
 
 #include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/DataVector.hpp"
@@ -42,13 +44,14 @@ class PunctureField {
 
     /*!
      * \brief Puncture field expansion order. Currently orders 0, 1 and 2 are
-     * implemented. Order 2 only supports geodesic orbits.
+     * implemented. Order 2 includes experimental acceleration terms; computing
+     * their self-force inputs requires `SPECTRE_AUTODIFF=ON`.
      */
     struct ExpansionOrder {
       using type = size_t;
       static constexpr Options::String help{
           "Puncture field expansion order. Currently orders 0, 1 and 2 are "
-          "implemented. Order 2 only supports geodesic orbits."};
+          "implemented. Order 2 self-force requires SPECTRE_AUTODIFF=ON."};
       static size_t upper_bound() { return 2; }
     };
 
@@ -163,6 +166,9 @@ class PunctureField {
    * \brief Compute and write the corrections to the
    * puncture field for the configured puncture model and expansion order. These
    * terms arise at non-geodesic accelerations such as the self-force.
+   * At order two, `higher_derivatives` must contain the t, x, y components
+   * of D_u^2 f, followed by their total coordinate-time derivatives. It is
+   * unused at lower orders; omitting it at order two is an error.
    */
   void apply_acceleration_terms(
       gsl::not_null<Variables<tmpl::list<
@@ -176,7 +182,9 @@ class PunctureField {
       const tnsr::I<double, 3>& particle_acceleration, double ft, double fx,
       double fy, double dt_ft, double dt_fx, double dt_fy, double Du_ft,
       double Du_fx, double Du_fy, double dt_Du_ft, double dt_Du_fx,
-      double dt_Du_fy) const;
+      double dt_Du_fy,
+      const std::optional<std::array<double, 6>>& higher_derivatives =
+          std::nullopt) const;
 
  private:
   Type type_{Type::Schwarzschild};
@@ -251,9 +259,8 @@ void puncture_field_1(
  * hold for generic equatorial geodesic orbits. The returned time derivative
  * is the exact time derivative of the truncated field, i.e. it retains the
  * explicit time derivative of the second-order coefficient which is one
- * order beyond the guaranteed accuracy of the expansion. There are no
- * corresponding acceleration terms at second order yet, so this order cannot
- * be used with the scalar self-force.
+ * order beyond the guaranteed accuracy of the expansion. For accelerated
+ * motion, add the cumulative correction from `acceleration_terms_2`.
  */
 void puncture_field_2(
     gsl::not_null<Variables<tmpl::list<
@@ -319,4 +326,48 @@ void acceleration_terms_1(
     double fy, double dt_ft, double dt_fx, double dt_fy, double Du_ft,
     double Du_fx, double Du_fy, double dt_Du_ft, double dt_Du_fx,
     double dt_Du_fy, double bh_mass);
+
+/*!
+ * \brief Computes the cumulative acceleration correction through second
+ * order in coordinate distance for an equatorial worldline in Schwarzschild
+ * spacetime, with scalar charge one.
+ *
+ * \details Returns the correction to the field, its three spatial derivatives,
+ * and the exact time derivative of the truncated correction at a fixed
+ * inertial field point. Add these outputs to `puncture_field_2`; do not also
+ * add `acceleration_terms_0` or `acceleration_terms_1`.
+ *
+ * The inputs `ft`, `fx`, `fy` are contravariant components of the covariant
+ * four-acceleration \f$f^a\f$. The `Du_f` and `DuDu_f` inputs are components
+ * of \f$u^b\nabla_b f^a\f$ and
+ * \f$u^c\nabla_c(u^b\nabla_b f^a)\f$, respectively. All `dt_` inputs are
+ * ordinary coordinate-time derivatives of those components along the
+ * worldline, not additional covariant derivatives. `particle_acceleration`
+ * is the ordinary coordinate acceleration. Particle motion and acceleration
+ * data are equatorial; field points may have nonzero z offsets.
+ *
+ * The expressions include nonlinear acceleration terms and the covariant
+ * jerk/jounce convention. Their flat-spacetime limit was checked against the
+ * direct singular field and the accelerated regularization parameters in
+ * https://arxiv.org/abs/1712.01098. Curvature terms use the corrected covariant
+ * puncture derivation; that comparison does not independently validate them.
+ *
+ * \note The evolution computes the higher inputs with the quadratic
+ * regular-field closure in `second_order_self_force_derivatives`. This kernel
+ * can also be called independently with prescribed acceleration data.
+ */
+void acceleration_terms_2(
+    gsl::not_null<Variables<tmpl::list<
+        CurvedScalarWave::Tags::Psi, ::Tags::dt<CurvedScalarWave::Tags::Psi>,
+        ::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<3>,
+                      Frame::Inertial>>>*>
+        result,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& centered_coords,
+    const tnsr::I<double, 3>& particle_position,
+    const tnsr::I<double, 3>& particle_velocity,
+    const tnsr::I<double, 3>& particle_acceleration, double ft, double fx,
+    double fy, double dt_ft, double dt_fx, double dt_fy, double Du_ft,
+    double Du_fx, double Du_fy, double dt_Du_ft, double dt_Du_fx,
+    double dt_Du_fy, double DuDu_ft, double DuDu_fx, double DuDu_fy,
+    double dt_DuDu_ft, double dt_DuDu_fx, double dt_DuDu_fy, double bh_mass);
 }  // namespace CurvedScalarWave::Worldtube
