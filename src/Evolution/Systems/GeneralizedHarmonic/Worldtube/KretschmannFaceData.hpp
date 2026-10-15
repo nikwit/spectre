@@ -14,20 +14,56 @@
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "Domain/Structure/Direction.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/FaceReplay.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/QhatRadialGauge.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/RadialGauge.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/GeometricTideFixedPoint.hpp"
 #include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Psi4Fit.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/ThirdOrderTide.hpp"
 
 /// \cond
-template <size_t Dim> class Element;
-template <size_t Dim> class ExcisionSphere;
-template <size_t Dim> class Mesh;
+template <size_t Dim>
+class Element;
+template <size_t Dim>
+class ExcisionSphere;
+template <size_t Dim>
+class Mesh;
+class TimeStepId;
 namespace PUP {
 class er;
-} // namespace PUP
+}  // namespace PUP
 /// \endcond
 
 namespace gh::worldtube {
 enum class PhysicalModel;
+
+/// Stateless inner solve, refreshed once per RHS before boundary evaluation.
+struct GeometricFixedPointFaceData {
+  double time{};
+  Scalar<ComplexDataVector> psi0_target;
+  gr::np::GeometricFixedPointDiagnostics diagnostics;
+  void pup(PUP::er& p);
+};
+bool operator==(const GeometricFixedPointFaceData& a,
+                const GeometricFixedPointFaceData& b);
+
+/// Cached third-order target and causal history, owned by the worldtube
+/// element and serialized for migration/checkpointing. Diagnostics describe
+/// the currently imposed fit; the history stores preliminary undotted fits.
+struct ThirdOrderFaceData {
+  gr::np::GeometricTideHistory history;
+  double time{};
+  Scalar<ComplexDataVector> psi0_target;
+  gr::np::ThirdOrderMoments moments{};
+  gr::np::DottedTidalMoments dots{};
+  size_t derivative_order{};
+  double clock_rate{};
+  double tilt_residual{};
+  double fit_residual{};
+  double fit_condition{};
+  // NOLINTNEXTLINE(google-runtime-references)
+  void pup(PUP::er& p);
+};
+bool operator==(const ThirdOrderFaceData& a, const ThirdOrderFaceData& b);
 
 /*!
  * \brief The Kretschmann scalar, its spacetime gradient and the quadrature
@@ -56,7 +92,8 @@ enum class PhysicalModel;
  * weights of the unit-sphere measure, so the least-squares fit of the
  * matching becomes a modal fit.
  */
-template <size_t Dim> struct KretschmannFaceData {
+template <size_t Dim>
+struct KretschmannFaceData {
   std::optional<Direction<Dim>> direction{};
   double time{std::numeric_limits<double>::signaling_NaN()};
   Scalar<DataVector> kretschmann{};
@@ -74,6 +111,13 @@ template <size_t Dim> struct KretschmannFaceData {
   /// is applied on the face.
   std::optional<gr::np::TidalMoments> filtered_moments{};
   double filtered_moments_time{std::numeric_limits<double>::signaling_NaN()};
+  /// Diagnostic sampling only; never used to construct a boundary target.
+  std::optional<double> last_moment_observation_time{};
+
+  std::optional<ThirdOrderFaceData> third_order{};
+  std::optional<GeometricFixedPointFaceData> psi0_fixed_point{};
+  /// Transported quadrupole filter history; legacy models do not use it.
+  std::optional<gr::np::GeometricRelaxationHistory> quadrupole_relaxation{};
 
   /// Initial q_minus - q_plus = -2 l^b n^i Phi_iab. Captured once,
   /// preserved across time-step self-start resets and serialized on migration.
@@ -84,27 +128,41 @@ template <size_t Dim> struct KretschmannFaceData {
   /// Current and initial radial gauge data on a fixed spherical face.
   std::optional<RadialGaugeFaceData> radial_gauge{};
 
+  /// Damping-subtracted startup profile for the moving-sphere radial gauge.
+  std::optional<QhatRadialGaugeData> qhat_radial_gauge{};
+
   /// Donor trace and receiver lifting geometry, refreshed before each RHS.
   std::optional<FaceReplayData<Dim>> replay{};
 
   // NOLINTNEXTLINE(google-runtime-references)
-  void pup(PUP::er &p);
+  void pup(PUP::er& p);
 };
 
 template <size_t Dim>
-bool operator==(const KretschmannFaceData<Dim> &lhs,
-                const KretschmannFaceData<Dim> &rhs);
+bool operator==(const KretschmannFaceData<Dim>& lhs,
+                const KretschmannFaceData<Dim>& rhs);
+
+/// Requires current K derivatives; never advances their history in the solve.
+void update_geometric_fixed_point(
+    gsl::not_null<KretschmannFaceData<3>*> data,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates, double mass,
+    double time, const gr::np::GeometricFixedPointOptions& options);
 template <size_t Dim>
-bool operator!=(const KretschmannFaceData<Dim> &lhs,
-                const KretschmannFaceData<Dim> &rhs);
+bool operator!=(const KretschmannFaceData<Dim>& lhs,
+                const KretschmannFaceData<Dim>& rhs);
 
 /// \brief The direction of the excision face of the element, if it abuts an
 /// excision sphere.
 template <size_t Dim>
 std::optional<Direction<Dim>> excision_face_direction(
-    const std::unordered_map<std::string, ExcisionSphere<Dim>>
-        &excision_spheres,
-    const Element<Dim> &element);
+    const std::unordered_map<std::string, ExcisionSphere<Dim>>&
+        excision_spheres,
+    const Element<Dim>& element);
 
 /*!
  * \brief Quadrature weights of a face collocation grid, normalized to unit
@@ -117,7 +175,45 @@ std::optional<Direction<Dim>> excision_face_direction(
  * unit-sphere area element on a spherical-harmonic face.
  */
 template <size_t Dim>
-DataVector face_quadrature_weights(const Mesh<Dim - 1> &face_mesh);
+DataVector face_quadrature_weights(const Mesh<Dim - 1>& face_mesh);
+
+/// Check the geometry required by QuadrupoleGeometric: a complete spherical-
+/// harmonic face whose inertial coordinates form a round sphere with radial
+/// normal covectors. Translation, rotation and uniform expansion are allowed.
+/// Fail before fitting if a shape/skew map violates this assumption.
+void validate_geometric_matching_face(
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const Direction<3>& direction);
+
+/// Geometric quadrupole relaxation, using coordinates/mesh motion and step IDs
+/// to transport the boundary history independently of intermediate RHS calls.
+void update_geometric_quadrupole_relaxation(
+    gsl::not_null<KretschmannFaceData<3>*> data,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const std::optional<tnsr::I<DataVector, 3, Frame::Inertial>>& mesh_velocity,
+    double mass, double relaxation_time, bool model_time, double time,
+    const TimeStepId& time_id);
+
+/// Build and cache the third-order target once per RHS evaluation, after
+/// updating the curvature gradient. Only full-step samples enter history.
+void update_third_order_matching(
+    gsl::not_null<KretschmannFaceData<3>*> data,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const std::optional<tnsr::I<DataVector, 3, Frame::Inertial>>& mesh_velocity,
+    double mass, double time, const TimeStepId& time_id);
 
 /*!
  * \brief Update the Kretschmann face data of an element from its evolved
@@ -132,18 +228,18 @@ DataVector face_quadrature_weights(const Mesh<Dim - 1> &face_mesh);
  */
 template <size_t Dim>
 void update_kretschmann_face_data(
-    gsl::not_null<KretschmannFaceData<Dim> *> data,
-    const tnsr::aa<DataVector, Dim, Frame::Inertial> &spacetime_metric,
-    const tnsr::aa<DataVector, Dim, Frame::Inertial> &pi,
-    const tnsr::iaa<DataVector, Dim, Frame::Inertial> &phi,
-    const Mesh<Dim> &mesh,
+    gsl::not_null<KretschmannFaceData<Dim>*> data,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
+    const Mesh<Dim>& mesh,
     const InverseJacobian<DataVector, Dim, Frame::ElementLogical,
-                          Frame::Inertial> &inverse_jacobian,
-    const Element<Dim> &element,
-    const std::unordered_map<std::string, ExcisionSphere<Dim>>
-        &excision_spheres,
-    const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>
-        &mesh_velocity,
+                          Frame::Inertial>& inverse_jacobian,
+    const Element<Dim>& element,
+    const std::unordered_map<std::string, ExcisionSphere<Dim>>&
+        excision_spheres,
+    const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
+        mesh_velocity,
     double time);
 
 /*!
@@ -157,9 +253,9 @@ void update_kretschmann_face_data(
  * repeated evaluation at the same time leaves them unchanged.
  */
 void relax_tidal_moments(
-    gsl::not_null<std::optional<gr::np::TidalMoments> *> moments,
-    gsl::not_null<double *> moments_time, const gr::np::TidalMoments &raw,
-    double time, const std::optional<double> &relaxation_time);
+    gsl::not_null<std::optional<gr::np::TidalMoments>*> moments,
+    gsl::not_null<double*> moments_time, const gr::np::TidalMoments& raw,
+    double time, const std::optional<double>& relaxation_time);
 
 /*!
  * \brief Fit the instantaneous tidal moments of the order-two model on the
@@ -179,20 +275,21 @@ void relax_tidal_moments(
  */
 template <size_t Dim>
 void update_filtered_tidal_moments(
-    gsl::not_null<KretschmannFaceData<Dim> *> data,
-    const tnsr::aa<DataVector, Dim, Frame::Inertial> &spacetime_metric,
-    const tnsr::aa<DataVector, Dim, Frame::Inertial> &pi,
-    const tnsr::iaa<DataVector, Dim, Frame::Inertial> &phi,
-    const Mesh<Dim> &mesh,
+    gsl::not_null<KretschmannFaceData<Dim>*> data,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
+    const Mesh<Dim>& mesh,
     const InverseJacobian<DataVector, Dim, Frame::ElementLogical,
-                          Frame::Inertial> &inverse_jacobian,
+                          Frame::Inertial>& inverse_jacobian,
     PhysicalModel model, double mass,
-    const std::optional<double> &relaxation_time, double time);
+    const std::optional<double>& relaxation_time, double time);
 
 namespace Tags {
 /// The `gh::worldtube::KretschmannFaceData` of the element
-template <size_t Dim> struct KretschmannFaceData : db::SimpleTag {
+template <size_t Dim>
+struct KretschmannFaceData : db::SimpleTag {
   using type = worldtube::KretschmannFaceData<Dim>;
 };
-} // namespace Tags
-} // namespace gh::worldtube
+}  // namespace Tags
+}  // namespace gh::worldtube

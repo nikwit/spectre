@@ -3,6 +3,15 @@
 
 #pragma once
 
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/WorldtubeEvolvedPhysicalGhost.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Actions/EvolvePhysicalTrace.hpp"
+#include "Time/ChangeTimeStepperOrder.tpp"
+#include "Time/CleanHistory.tpp"
+#include "Time/RecordTimeStepperData.tpp"
+#include "Time/UpdateU.tpp"
+
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Events/ObserveWorldtubeMatching.hpp"
+
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -28,6 +37,7 @@
 #include "DataStructures/Tensor/EagerMath/RaiseOrLowerIndex.hpp"
 #include "Domain/Creators/BinaryCompactObject.hpp"
 #include "Domain/Creators/CylindricalBinaryCompactObject.hpp"
+#include "Domain/StrahlkorperTransformations.hpp"
 #include "Domain/Structure/ObjectLabel.hpp"
 #include "Domain/Tags.hpp"
 #include "Domain/TagsCharacteristicSpeeds.hpp"
@@ -61,6 +71,9 @@
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/DemandOutgoingCharSpeeds.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/DirichletMinkowski.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/Factory.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/WorldtubeReplay.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/WorldtubeReplayTypeD.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/WorldtubeTypeD.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryCorrections/Factory.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Characteristics.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Equations.hpp"
@@ -73,6 +86,8 @@
 #include "Evolution/Systems/GeneralizedHarmonic/System.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Actions/UpdateKretschmannFaceData.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/ComputeExcisionRecordingData.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/ComputeRecordingData.hpp"
 #include "Evolution/Triggers/SeparationLessThan.hpp"
 #include "Evolution/TypeTraits.hpp"
 #include "IO/Importers/Actions/RegisterWithElementDataReader.hpp"
@@ -158,6 +173,7 @@
 #include "ParallelAlgorithms/EventsAndTriggers/Trigger.hpp"
 #include "ParallelAlgorithms/Interpolation/Actions/ElementInitInterpPoints.hpp"
 #include "ParallelAlgorithms/Interpolation/Actions/InitializeInterpolationTarget.hpp"
+#include "ParallelAlgorithms/Interpolation/Callbacks/ObserveMovingSphere.hpp"
 #include "ParallelAlgorithms/Interpolation/Callbacks/ObserveSurfaceData.hpp"
 #include "ParallelAlgorithms/Interpolation/Callbacks/ObserveTimeSeriesOnSurface.hpp"
 #include "ParallelAlgorithms/Interpolation/ComputeExcisionBoundaryVolumeQuantities.hpp"
@@ -250,6 +266,7 @@ struct EvolutionMetavars {
   using initialize_initial_data_dependent_quantities_actions =
       tmpl::list<gh::gauges::SetPiAndPhiFromConstraints<
                      gh::Solutions::all_solutions<volume_dim>, volume_dim>,
+                 Actions::MutateApply<gh::worldtube::InitializePhysicalTrace>,
                  Parallel::Actions::TerminatePhase>;
 
   // NOLINTNEXTLINE(google-runtime-references)
@@ -301,19 +318,33 @@ struct EvolutionMetavars {
   struct ExcisionBoundary
       : tt::ConformsTo<intrp::protocols::InterpolationTargetTag> {
     using temporal_id = ::Tags::Time;
-    using tags_to_observe =
-        tmpl::list<gr::Tags::Lapse<DataVector>,
-                   gr::Tags::Shift<DataVector, 3, Frame::Grid>>;
+    using tags_to_observe = gh::worldtube::excision_recording_tags<Frame::Grid>;
     using compute_vars_to_interpolate =
-        intrp::ComputeExcisionBoundaryVolumeQuantities;
+        gh::worldtube::ComputeExcisionRecordingData;
     using vars_to_interpolate_to_target = tags_to_observe;
-    using compute_items_on_source = tmpl::list<>;
+    using compute_items_on_source =
+        tmpl::list<::Events::Tags::ObserverInverseJacobianCompute<
+            3, Frame::ElementLogical, Frame::Inertial>>;
     using compute_items_on_target = tmpl::list<>;
     using compute_target_points =
         intrp::TargetPoints::Sphere<ExcisionBoundary<Excision>, ::Frame::Grid>;
     using post_interpolation_callbacks =
         tmpl::list<intrp::callbacks::ObserveSurfaceData<
             tags_to_observe, ExcisionBoundary<Excision>, ::Frame::Grid>>;
+    // Locate the sphere in the stationary grid frame, then map its points
+    // forward. No inverse of the moving excision maps is needed.
+    template <typename DbTags, typename Metavariables>
+    static tnsr::I<DataVector, 3, Frame::Inertial> inertial_coordinates(
+        const db::DataBox<DbTags>& box,
+        const Parallel::GlobalCache<Metavariables>& cache, const double time) {
+      tnsr::I<DataVector, 3, Frame::Inertial> result;
+      strahlkorper_coords_in_different_frame(
+          make_not_null(&result),
+          db::get<ylm::Tags::Strahlkorper<Frame::Grid>>(box),
+          Parallel::get<domain::Tags::Domain<3>>(cache),
+          Parallel::get<domain::Tags::FunctionsOfTime>(cache), time);
+      return result;
+    }
     // run_callbacks
     template <typename metavariables>
     using interpolating_component = typename metavariables::gh_dg_element_array;
@@ -358,9 +389,34 @@ struct EvolutionMetavars {
     using interpolating_component = typename metavariables::gh_dg_element_array;
   };
 
+  struct GhWorldtube
+      : tt::ConformsTo<intrp::protocols::InterpolationTargetTag> {
+    using temporal_id = ::Tags::Time;
+    using vars_to_interpolate_to_target = gh::worldtube::recording_tags;
+    using compute_vars_to_interpolate = gh::worldtube::ComputeRecordingData;
+    using compute_items_on_source =
+        tmpl::list<::Events::Tags::ObserverInverseJacobianCompute<
+            3, Frame::ElementLogical, Frame::Inertial>>;
+    using compute_target_points =
+        intrp::TargetPoints::Sphere<GhWorldtube, Frame::Inertial>;
+    template <typename Metavariables>
+    static std::array<double, 3> inertial_center(
+        const std::array<double, 3>& grid_center,
+        const Parallel::GlobalCache<Metavariables>& cache, const double time) {
+      return intrp::sphere_detail::excision_center(
+          grid_center, Parallel::get<domain::Tags::Domain<3>>(cache), time,
+          Parallel::get<domain::Tags::FunctionsOfTime>(cache));
+    }
+    using post_interpolation_callbacks =
+        tmpl::list<intrp::callbacks::ObserveMovingSphere<GhWorldtube>>;
+    using compute_items_on_target = tmpl::list<>;
+    template <typename Metavariables>
+    using interpolating_component = typename Metavariables::gh_dg_element_array;
+  };
+
   using interpolation_target_tags = tmpl::push_back<
       control_system::metafunctions::interpolation_target_tags<control_systems>,
-      BondiSachs, ExcisionBoundaryA, ExcisionBoundaryB>;
+      BondiSachs, GhWorldtube, ExcisionBoundaryA, ExcisionBoundaryB>;
 
   using observe_fields = tmpl::append<
       tmpl::list<
@@ -499,31 +555,35 @@ struct EvolutionMetavars {
             DomainCreator<volume_dim>,
             tmpl::list<::domain::creators::BinaryCompactObject,
                        ::domain::creators::CylindricalBinaryCompactObject>>,
-        tmpl::pair<Event,
-                   tmpl::flatten<tmpl::list<
-                       ah::Events::FindApparentHorizon<AhA>,
-                       ah::Events::FindApparentHorizon<AhB>,
-                       ah::Events::FindCommonHorizon<AhC, observe_fields,
-                                                     non_tensor_compute_tags>,
-                       gh::bbh::Events::CheckConstraintThresholds,
-                       intrp::Events::InterpolateWithoutInterpComponent<
-                           3, BondiSachs, source_vars_no_deriv>,
-                       intrp::Events::InterpolateWithoutInterpComponent<
-                           3, ExcisionBoundaryA, ah::source_vars<3>>,
-                       intrp::Events::InterpolateWithoutInterpComponent<
-                           3, ExcisionBoundaryB, ah::source_vars<3>>,
-                       Events::MonitorMemory<3>, Events::Completion,
-                       dg::Events::field_observations<
-                           volume_dim, observe_fields, non_tensor_compute_tags>,
-                       control_system::metafunctions::control_system_events<
-                           control_systems>,
-                       control_system::CleanFunctionsOfTime,
-                       Events::time_events<system>,
-                       dg::Events::ObserveTimeStepVolume<system>,
-                       amr::Events::RefineMesh,
-                       amr::Events::ObserveAmrStats<volume_dim>,
-                       amr::Events::ObserveAmrCriteria<EvolutionMetavars>,
-                       dg::Events::ChangeFixedLtsRatio<volume_dim>>>>,
+        tmpl::pair<
+            Event,
+            tmpl::flatten<tmpl::list<
+                ah::Events::FindApparentHorizon<AhA>,
+                ah::Events::FindApparentHorizon<AhB>,
+                ah::Events::FindCommonHorizon<AhC, observe_fields,
+                                              non_tensor_compute_tags>,
+                gh::bbh::Events::CheckConstraintThresholds,
+                gh::worldtube::Events::ObserveWorldtubeMatching,
+                intrp::Events::InterpolateWithoutInterpComponent<
+                    3, BondiSachs, source_vars_no_deriv>,
+                intrp::Events::InterpolateWithoutInterpComponent<
+                    3, GhWorldtube, gh::worldtube::recording_source_tags>,
+                intrp::Events::InterpolateWithoutInterpComponent<
+                    3, ExcisionBoundaryA, gh::worldtube::recording_source_tags>,
+                intrp::Events::InterpolateWithoutInterpComponent<
+                    3, ExcisionBoundaryB, gh::worldtube::recording_source_tags>,
+                Events::MonitorMemory<3>, Events::Completion,
+                dg::Events::field_observations<volume_dim, observe_fields,
+                                               non_tensor_compute_tags>,
+                control_system::metafunctions::control_system_events<
+                    control_systems>,
+                control_system::CleanFunctionsOfTime,
+                Events::time_events<system>,
+                dg::Events::ObserveTimeStepVolume<system>,
+                amr::Events::RefineMesh,
+                amr::Events::ObserveAmrStats<volume_dim>,
+                amr::Events::ObserveAmrCriteria<EvolutionMetavars>,
+                dg::Events::ChangeFixedLtsRatio<volume_dim>>>>,
         tmpl::pair<
             evolution::BoundaryCorrection,
             gh::BoundaryCorrections::standard_boundary_corrections<volume_dim>>,
@@ -534,7 +594,11 @@ struct EvolutionMetavars {
             tmpl::list<
                 gh::BoundaryConditions::ConstraintPreservingBjorhus<volume_dim>,
                 gh::BoundaryConditions::DirichletMinkowski<volume_dim>,
-                gh::BoundaryConditions::DemandOutgoingCharSpeeds<volume_dim>>>,
+                gh::BoundaryConditions::DemandOutgoingCharSpeeds<volume_dim>,
+                gh::BoundaryConditions::WorldtubeTypeD<volume_dim>,
+                gh::BoundaryConditions::WorldtubeReplay,
+                gh::BoundaryConditions::WorldtubeReplayTypeD,
+                gh::BoundaryConditions::WorldtubeEvolvedPhysicalGhost>>,
         tmpl::pair<
             gh::gauges::GaugeCondition,
             tmpl::list<gh::gauges::DampedHarmonic, gh::gauges::Harmonic>>,
@@ -591,6 +655,15 @@ struct EvolutionMetavars {
                  Parallel::Phase::Evolve,
                  Parallel::Phase::Exit};
 
+  struct SurfaceTimeSystem {
+    static constexpr bool has_primitive_and_conservative_vars = false;
+    using variables_tag = gh::worldtube::Tags::PhysicalTrace;
+  };
+  struct CoupledTimeSystem {
+    static constexpr bool has_primitive_and_conservative_vars = false;
+    using variables_tag = tmpl::list<typename system::variables_tag,
+                                     gh::worldtube::Tags::PhysicalTrace>;
+  };
   using step_actions = tmpl::list<
       Actions::MutateApply<
           gh::worldtube::UpdateKretschmannFaceData<volume_dim>>,
@@ -598,16 +671,17 @@ struct EvolutionMetavars {
           volume_dim, system, AllStepChoosers, use_dg_element_collection>,
       evolution::dg::Actions::ApplyBoundaryCorrectionsToTimeDerivative<
           volume_dim, use_dg_element_collection>,
-      Actions::MutateApply<RecordTimeStepperData<system>>,
+      Actions::MutateApply<gh::worldtube::ComputePhysicalTraceRhs>,
+      Actions::MutateApply<RecordTimeStepperData<CoupledTimeSystem>>,
       evolution::Actions::RunEventsAndDenseTriggers<tmpl::list<
           ::domain::CheckFunctionsOfTimeAreReadyPostprocessor<volume_dim>,
           evolution::dg::ApplyLtsDenseBoundaryCorrections<EvolutionMetavars>>>,
       control_system::Actions::LimitTimeStep<control_systems>,
-      Actions::MutateApply<UpdateU<system>>,
+      Actions::MutateApply<UpdateU<CoupledTimeSystem>>,
       evolution::dg::Actions::ApplyLtsBoundaryCorrections<
           volume_dim, use_dg_element_collection>,
-      Actions::MutateApply<ChangeTimeStepperOrder<system>>,
-      Actions::MutateApply<CleanHistory<system>>,
+      Actions::MutateApply<ChangeTimeStepperOrder<CoupledTimeSystem>>,
+      Actions::MutateApply<CleanHistory<CoupledTimeSystem>>,
       Actions::MutateApply<evolution::dg::CleanMortarHistory<volume_dim>>,
       dg::Actions::SpectralFilter<volume_dim,
                                   typename system::variables_tag::tags_list>>;
@@ -621,7 +695,9 @@ struct EvolutionMetavars {
           ::amr::Initialization::Initialize<volume_dim, EvolutionMetavars>>,
       Initialization::Actions::NonconservativeSystem<system>,
       Initialization::Actions::InitializeItems<
-          Initialization::TimeStepperHistory<system>>,
+          Initialization::TimeStepperHistory<system>,
+          gh::worldtube::Initialization::PhysicalTrace,
+          Initialization::TimeStepperHistory<SurfaceTimeSystem>>,
       Initialization::Actions::AddComputeTags<tmpl::list<::Tags::DerivCompute<
           typename system::variables_tag, ::domain::Tags::Mesh<volume_dim>,
           ::domain::Tags::InverseJacobian<volume_dim, Frame::ElementLogical,
@@ -676,7 +752,7 @@ struct EvolutionMetavars {
                          Parallel::Actions::TerminatePhase>>,
           Parallel::PhaseActions<
               Parallel::Phase::InitializeTimeStepperHistory,
-              SelfStart::self_start_procedure<step_actions, system>>,
+              SelfStart::self_start_procedure<step_actions, CoupledTimeSystem>>,
           Parallel::PhaseActions<Parallel::Phase::CheckDomain,
                                  tmpl::list<::amr::Actions::SendAmrDiagnostics,
                                             Parallel::Actions::TerminatePhase>>,
@@ -728,10 +804,13 @@ struct EvolutionMetavars {
                                             typename system::variables_tag>,
         evolution::dg::Initialization::ProjectMortars<volume_dim>,
         Initialization::ProjectTimeStepperHistory<EvolutionMetavars>,
+        gh::worldtube::ProjectPhysicalTrace<typename system::variables_tag>,
         evolution::Actions::ProjectRunEventsAndDenseTriggers,
         evolution::dg::Initialization::ProjectSpectralFilters<
             volume_dim, typename system::variables_tag::tags_list>,
         ::amr::projectors::DefaultInitialize<
+            Tags::StepperErrors<gh::worldtube::Tags::PhysicalTrace>,
+            SelfStart::Tags::InitialValue<gh::worldtube::Tags::PhysicalTrace>,
             Initialization::Tags::InitialTimeDelta,
             Initialization::Tags::InitialSlabSize,
             ::domain::Tags::InitialExtents<volume_dim>,

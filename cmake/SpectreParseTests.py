@@ -39,6 +39,7 @@ allowed_tags = [
     "Options",
     "Parallel",
     "ParallelAlgorithms",
+    "PhysicalTrace",
     "PointwiseFunctions",
     "Pypp",
     "Python",

@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -182,7 +183,8 @@ std::optional<typename MockContributeReductionData<Metavariables>::Results>
 run_event(
     const Observe& observe,
     const std::vector<std::pair<size_t, std::array<SegmentId, 3>>>& elements,
-    const std::vector<bool>& expect_registered) {
+    const std::vector<bool>& expect_registered,
+    const bool with_fixed_point = false) {
   using element_component = ElementComponent<Metavariables>;
   using observer_component = MockObserverComponent<Metavariables>;
   auto& results = MockContributeReductionData<Metavariables>::results;
@@ -214,6 +216,12 @@ run_event(
           previous_time);
       face_data.filtered_moments = gr::np::TidalMoments{};
       face_data.filtered_moments_time = previous_time;
+      if (with_fixed_point and e == 0) {
+        face_data.psi0_fixed_point = gh::worldtube::GeometricFixedPointFaceData{
+            previous_time,
+            Scalar<ComplexDataVector>{ComplexDataVector(1, {.01, 0.})},
+            {7, 2.e-15, 3.e-11, .2}};
+      }
     }
     auto box = db::create<tag_list>(
         Metavariables{}, 0.0, setup.evolved_variables(0.), setup.mesh,
@@ -317,6 +325,18 @@ void test_observe() {
   CHECK(std::isfinite(std::get<21>(data)));
   CHECK(std::get<22>(data) > 2.5 * 0.99);
   CHECK(std::get<23>(data) < 2.5 * lorentz_factor * 1.01);
+  CHECK(std::get<24>(data) == 0);
+  CHECK(std::get<26>(data) == 0);
+  const auto fixed = run_event(Observe{"WorldtubeMatching", std::nullopt},
+                               elements, {true, true, false}, true);
+  const auto& fixed_data = fixed->reduction_data.data();
+  CHECK(std::get<24>(fixed_data) == 1);
+  CHECK(std::get<25>(fixed_data) == .001);
+  CHECK(std::get<26>(fixed_data) == 7);
+  CHECK(std::get<27>(fixed_data) == 2.e-15);
+  CHECK(std::get<28>(fixed_data) == 3.e-11);
+  CHECK(std::get<29>(fixed_data) == .2);
+  CHECK(std::get<30>(fixed_data) == .01);
 
   // Without a mass the order-two columns are not evaluated
   const auto without_mass = run_event(
@@ -388,6 +408,17 @@ void test_static_hole_on_spherical_shell() {
 SPECTRE_TEST_CASE(
     "Unit.Evolution.Systems.GeneralizedHarmonic.Worldtube.ObserveMatching",
     "[Unit][Evolution]") {
+  const double unavailable = std::numeric_limits<double>::quiet_NaN();
+  const gh::worldtube::Events::detail::MaxAvailable maximum{};
+  const gh::worldtube::Events::detail::MinAvailable minimum{};
+  CHECK(maximum(unavailable, 2.) == 2.);
+  CHECK(maximum(2., unavailable) == 2.);
+  CHECK(minimum(unavailable, 2.) == 2.);
+  CHECK(minimum(2., unavailable) == 2.);
+  CHECK(std::isnan(maximum(unavailable, unavailable)));
+  CHECK(std::isnan(minimum(unavailable, unavailable)));
+  CHECK(maximum(2., 3.) == 3.);
+  CHECK(minimum(2., 3.) == 2.);
   register_factory_classes_with_charm<Metavariables>();
   test_options();
   test_observe();

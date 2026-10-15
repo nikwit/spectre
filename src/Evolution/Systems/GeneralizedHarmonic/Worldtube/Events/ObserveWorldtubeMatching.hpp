@@ -42,6 +42,18 @@
 #include "Utilities/TMPL.hpp"
 
 namespace gh::worldtube::Events {
+namespace detail {
+// Optional diagnostics use quiet NaN for an unavailable value. Ordinary
+// comparison-based extrema can trap on NaN when floating-point exceptions
+// are enabled. These reductions ignore unavailable contributions, returning
+// NaN only if every contribution is unavailable.
+struct MaxAvailable {
+  double operator()(double lhs, double rhs) const;
+};
+struct MinAvailable {
+  double operator()(double lhs, double rhs) const;
+};
+}  // namespace detail
 /// The reduction data of `ObserveWorldtubeMatching`
 using MatchingReductionData = Parallel::ReductionData<
     // Time
@@ -63,24 +75,33 @@ using MatchingReductionData = Parallel::ReductionData<
     Parallel::ReductionDatum<double, funcl::Max<>>,
     Parallel::ReductionDatum<double, funcl::Max<>>,
     // Max |Psi0| of the Quadrupole target, max |target - Psi0|
-    Parallel::ReductionDatum<double, funcl::Max<>>,
-    Parallel::ReductionDatum<double, funcl::Max<>>,
+    Parallel::ReductionDatum<double, detail::MaxAvailable>,
+    Parallel::ReductionDatum<double, detail::MaxAvailable>,
     // Psi4 fit relative residual
-    Parallel::ReductionDatum<double, funcl::Max<>>,
+    Parallel::ReductionDatum<double, detail::MaxAvailable>,
     // Max |tanh(rapidity)|, then min and max rapidity
-    Parallel::ReductionDatum<double, funcl::Max<>>,
-    Parallel::ReductionDatum<double, funcl::Min<>>,
-    Parallel::ReductionDatum<double, funcl::Max<>>,
+    Parallel::ReductionDatum<double, detail::MaxAvailable>,
+    Parallel::ReductionDatum<double, detail::MinAvailable>,
+    Parallel::ReductionDatum<double, detail::MaxAvailable>,
     // Min, max measured radius
-    Parallel::ReductionDatum<double, funcl::Min<>>,
-    Parallel::ReductionDatum<double, funcl::Max<>>,
+    Parallel::ReductionDatum<double, detail::MinAvailable>,
+    Parallel::ReductionDatum<double, detail::MaxAvailable>,
     // Max |Psi0| of the order-two target from the relaxed moments
-    Parallel::ReductionDatum<double, funcl::Max<>>,
+    Parallel::ReductionDatum<double, detail::MaxAvailable>,
     // Coulomb decode: max |Psi0| of its target, its fit residual, min and
     // max areal radius
+    Parallel::ReductionDatum<double, detail::MaxAvailable>,
+    Parallel::ReductionDatum<double, detail::MaxAvailable>,
+    Parallel::ReductionDatum<double, detail::MinAvailable>,
+    Parallel::ReductionDatum<double, detail::MaxAvailable>,
+    // Cached fixed-point solve: count, age, evaluations, residuals, ratio,
+    // target
+    Parallel::ReductionDatum<size_t, funcl::Plus<>>,
+    Parallel::ReductionDatum<double, funcl::Max<>>,
+    Parallel::ReductionDatum<size_t, funcl::Max<>>,
     Parallel::ReductionDatum<double, funcl::Max<>>,
     Parallel::ReductionDatum<double, funcl::Max<>>,
-    Parallel::ReductionDatum<double, funcl::Min<>>,
+    Parallel::ReductionDatum<double, funcl::Max<>>,
     Parallel::ReductionDatum<double, funcl::Max<>>>;
 
 /*!
@@ -133,6 +154,13 @@ using MatchingReductionData = Parallel::ReductionData<
  * \f$(-M/\Psi_2^K)^{1/3}\f$
  *
  * Elements abutting no excision sphere neither register nor contribute.
+ * FixedPointFaces counts faces with a cached converged solve. The appended
+ * MaxFixedPointTargetAge (absolute observation-time minus cache-time),
+ * MaxFixedPointIterations, MaxFixedPointAbsoluteResidual,
+ * MaxFixedPointRelativeResidual, MaxFixedPointResidualRatio and
+ * MaxAbsPsi0FixedPoint describe that cached RHS target, not a new solve at
+ * the observation time. These columns are zero when FixedPointFaces is zero.
+ * A small inner residual is not evidence of stable coupled evolution.
  */
 class ObserveWorldtubeMatching : public Event {
  private:

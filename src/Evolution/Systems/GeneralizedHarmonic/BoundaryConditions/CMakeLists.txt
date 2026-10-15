@@ -10,6 +10,11 @@ spectre_target_sources(
   DemandOutgoingCharSpeeds.cpp
   DirichletAnalytic.cpp
   DirichletMinkowski.cpp
+  MomentFeedback.cpp
+  WorldtubeEvolvedPhysicalGhost.cpp
+  WorldtubePhysicalGhost.cpp
+  WorldtubeReplay.cpp
+  WorldtubeReplayTypeD.cpp
   WorldtubeTypeD.cpp
   )
 
@@ -18,7 +23,6 @@ spectre_target_headers(
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
   AlgebraicGauge.hpp
-  SchwarzschildReference.hpp
   Bjorhus.hpp
   BjorhusImpl.hpp
   BoundaryCondition.hpp
@@ -26,5 +30,11 @@ spectre_target_headers(
   DirichletAnalytic.hpp
   DirichletMinkowski.hpp
   Factory.hpp
+  MomentFeedback.hpp
+  SchwarzschildReference.hpp
+  WorldtubeEvolvedPhysicalGhost.hpp
+  WorldtubePhysicalGhost.hpp
+  WorldtubeReplay.hpp
+  WorldtubeReplayTypeD.hpp
   WorldtubeTypeD.hpp
   )

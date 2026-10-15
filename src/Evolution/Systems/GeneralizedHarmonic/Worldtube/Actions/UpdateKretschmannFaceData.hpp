@@ -18,13 +18,14 @@
 #include "Domain/Structure/Element.hpp"
 #include "Domain/Tags.hpp"
 #include "Domain/TagsTimeDependent.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/WorldtubeReplayTypeD.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/WorldtubeTypeD.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Tags.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Matching.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
-#include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "PointwiseFunctions/ConstraintDamping/GaussianPlusConstant.hpp"
+#include "PointwiseFunctions/GeneralRelativity/Tags.hpp"
 #include "Time/Tags/Time.hpp"
 #include "Time/Tags/TimeStepId.hpp"
 #include "Utilities/Gsl.hpp"
@@ -65,18 +66,17 @@ struct KretschmannFaceData {
 template <size_t Dim>
 struct UpdateKretschmannFaceData {
   using return_tags = tmpl::list<Tags::KretschmannFaceData<Dim>>;
-  using argument_tags =
-      tmpl::list<gr::Tags::SpacetimeMetric<DataVector, Dim>,
-                 gh::Tags::Pi<DataVector, Dim>, gh::Tags::Phi<DataVector, Dim>,
-                 domain::Tags::Mesh<Dim>,
-                 domain::Tags::InverseJacobian<Dim, Frame::ElementLogical,
-                                               Frame::Inertial>,
-                 domain::Tags::Element<Dim>, domain::Tags::Domain<Dim>,
-                 domain::Tags::MeshVelocity<Dim>, ::Tags::Time,
-                 domain::Tags::ExternalBoundaryConditions<Dim>,
-                 domain::Tags::Coordinates<Dim, Frame::Inertial>, ::Tags::TimeStepId,
-                 gh::Tags::DampingFunctionGamma2<Dim, Frame::Grid>,
-                 domain::Tags::FunctionsOfTime>;
+  using argument_tags = tmpl::list<
+      gr::Tags::SpacetimeMetric<DataVector, Dim>, gh::Tags::Pi<DataVector, Dim>,
+      gh::Tags::Phi<DataVector, Dim>, domain::Tags::Mesh<Dim>,
+      domain::Tags::InverseJacobian<Dim, Frame::ElementLogical,
+                                    Frame::Inertial>,
+      domain::Tags::Element<Dim>, domain::Tags::Domain<Dim>,
+      domain::Tags::MeshVelocity<Dim>, ::Tags::Time,
+      domain::Tags::ExternalBoundaryConditions<Dim>,
+      domain::Tags::Coordinates<Dim, Frame::Inertial>, ::Tags::TimeStepId,
+      gh::Tags::DampingFunctionGamma2<Dim, Frame::Grid>,
+      domain::Tags::FunctionsOfTime>;
 
   static void apply(
       const gsl::not_null<worldtube::KretschmannFaceData<Dim>*> data,
@@ -93,14 +93,16 @@ struct UpdateKretschmannFaceData {
       const std::vector<DirectionMap<
           Dim, std::unique_ptr<domain::BoundaryConditions::BoundaryCondition>>>&
           external_boundary_conditions,
-      const tnsr::I<DataVector,Dim,Frame::Inertial>& coordinates,
+      const tnsr::I<DataVector, Dim, Frame::Inertial>& coordinates,
       const TimeStepId& time_id,
-      const ConstraintDamping::DampingFunction<Dim, Frame::Grid>& damping_gamma2,
+      const ConstraintDamping::DampingFunction<Dim, Frame::Grid>&
+          damping_gamma2,
       const domain::FunctionsOfTimeMap& functions_of_time) {
     update_kretschmann_face_data(
         data, spacetime_metric, pi, phi, mesh, inverse_jacobian, element,
         domain.excision_spheres(), mesh_velocity, time);
     if constexpr (Dim == 3) {
+      data->psi0_fixed_point.reset();
       // The relaxed tidal moments are only needed, and only defined, when the
       // excision face carries the order-two worldtube condition
       if (data->direction.has_value()) {
@@ -110,34 +112,169 @@ struct UpdateKretschmannFaceData {
             dynamic_cast<const BoundaryConditions::WorldtubeTypeD<Dim>*>(
                 conditions.at(*data->direction).get());
         if (worldtube != nullptr and worldtube->radial_response().has_value()) {
-          if (mesh_velocity.has_value() or domain.blocks()[element.id().block_id()].is_time_dependent() or
-              element.id().refinement_levels() != std::array<size_t,Dim>{}) {
-            ERROR("RadialResponse requires a static unrefined spherical-shell element.");
+          if (mesh_velocity.has_value() or
+              domain.blocks()[element.id().block_id()].is_time_dependent() or
+              element.id().refinement_levels() != std::array<size_t, Dim>{}) {
+            ERROR(
+                "RadialResponse requires a static unrefined spherical-shell "
+                "element.");
           }
-          if (dynamic_cast<const ConstraintDamping::Constant<Dim,Frame::Grid>*>(&damping_gamma2) == nullptr and
-              dynamic_cast<const ConstraintDamping::GaussianPlusConstant<Dim,Frame::Grid>*>(&damping_gamma2) == nullptr) {
+          if (dynamic_cast<
+                  const ConstraintDamping::Constant<Dim, Frame::Grid>*>(
+                  &damping_gamma2) == nullptr and
+              dynamic_cast<const ConstraintDamping::GaussianPlusConstant<
+                      Dim, Frame::Grid>*>(&damping_gamma2) == nullptr) {
             ERROR("RadialResponse requires time-independent gamma2.");
           }
-          const auto center = BoundaryConditions::detail::excision_sphere_center(
-              domain.excision_spheres(), element.id(), time, functions_of_time);
-          tnsr::I<DataVector,Dim,Frame::Grid> grid_coordinates(mesh.number_of_grid_points(),0.);
-          for(size_t i=0;i<Dim;++i) { grid_coordinates.get(i)=coordinates.get(i); }
-          Scalar<DataVector> gamma2(mesh.number_of_grid_points(),0.);
-          damping_gamma2(make_not_null(&gamma2),grid_coordinates,time,functions_of_time);
-          update_radial_gauge_face_data(make_not_null(&data->radial_gauge),
-              spacetime_metric,pi,phi,gamma2,coordinates,center,mesh,inverse_jacobian,*data->direction,time);
+          const auto center =
+              BoundaryConditions::detail::excision_sphere_center(
+                  domain.excision_spheres(), element.id(), time,
+                  functions_of_time);
+          tnsr::I<DataVector, Dim, Frame::Grid> grid_coordinates(
+              mesh.number_of_grid_points(), 0.);
+          for (size_t i = 0; i < Dim; ++i) {
+            grid_coordinates.get(i) = coordinates.get(i);
+          }
+          Scalar<DataVector> gamma2(mesh.number_of_grid_points(), 0.);
+          damping_gamma2(make_not_null(&gamma2), grid_coordinates, time,
+                         functions_of_time);
+          update_radial_gauge_face_data(
+              make_not_null(&data->radial_gauge), spacetime_metric, pi, phi,
+              gamma2, coordinates, center, mesh, inverse_jacobian,
+              *data->direction, time);
         }
         if (worldtube != nullptr and worldtube->face_replay().has_value()) {
-          if (mesh_velocity.has_value() or element.id().refinement_levels() != std::array<size_t,Dim>{}) {
-            ERROR("Face replay requires a static unrefined spherical-shell element.");
+          if (mesh_velocity.has_value() or
+              element.id().refinement_levels() != std::array<size_t, Dim>{}) {
+            ERROR(
+                "Face replay requires a static unrefined spherical-shell "
+                "element.");
           }
-          update_face_replay(make_not_null(&data->replay), *worldtube->face_replay(),
-              spacetime_metric, pi, phi, coordinates, mesh, inverse_jacobian, time_id, time);
+          update_face_replay(make_not_null(&data->replay),
+                             *worldtube->face_replay(), spacetime_metric, pi,
+                             phi, coordinates, mesh, inverse_jacobian, time_id,
+                             time);
         } else {
           data->replay.reset();
         }
+        const auto* const physical_replay =
+            dynamic_cast<const BoundaryConditions::WorldtubeReplayTypeD*>(
+                conditions.at(*data->direction).get());
+        if (physical_replay != nullptr and
+            physical_replay->moment_diagnostics_interval().has_value() and
+            time_id.substep() == 0 and time_id.slab_number() >= 0 and
+            (not data->last_moment_observation_time.has_value() or
+             time >= *data->last_moment_observation_time +
+                         *physical_replay->moment_diagnostics_interval())) {
+          physical_replay->observe_moment_response(
+              time, spacetime_metric, pi, phi, coordinates, mesh,
+              inverse_jacobian, domain, element, functions_of_time, *data);
+          data->last_moment_observation_time = time;
+        }
+        if (physical_replay != nullptr and
+            physical_replay->qhat_radial_response().has_value()) {
+          const auto center =
+              BoundaryConditions::detail::excision_sphere_center(
+                  domain.excision_spheres(), element.id(), time,
+                  functions_of_time);
+          initialize_qhat_radial_gauge(
+              make_not_null(&data->qhat_radial_gauge), spacetime_metric, pi,
+              phi, coordinates, center, mesh, inverse_jacobian,
+              *data->direction, time, functions_of_time);
+        }
+        if (physical_replay != nullptr and
+            physical_replay->physical_target() == "Live" and
+            physical_replay->physical_model() ==
+                PhysicalModel::ThirdOrderGeometric) {
+          data->quadrupole_relaxation.reset();
+          update_third_order_matching(data, spacetime_metric, pi, phi, mesh,
+                                      inverse_jacobian, coordinates,
+                                      mesh_velocity, *physical_replay->mass(),
+                                      time, time_id);
+          return;
+        }
+        if (physical_replay != nullptr and
+            (physical_replay->physical_model() ==
+                 PhysicalModel::QuadrupoleGeometric or
+             physical_replay->physical_model() ==
+                 PhysicalModel::QuadrupoleLongitudinal)) {
+          validate_geometric_matching_face(coordinates, mesh, inverse_jacobian,
+                                           *data->direction);
+        }
+        if (physical_replay != nullptr and
+            physical_replay->physical_target() == "Live" and
+            is_order_two(physical_replay->physical_model())) {
+          data->third_order.reset();
+          if (physical_replay->psi0_fixed_point()) {
+            update_geometric_fixed_point(data, spacetime_metric, pi, phi, mesh,
+                                         inverse_jacobian, coordinates,
+                                         *physical_replay->mass(), time,
+                                         *physical_replay->psi0_fixed_point());
+            return;
+          }
+          if (physical_replay->physical_model() ==
+                  PhysicalModel::QuadrupoleGeometric and
+              physical_replay->moment_relaxation_time()) {
+            update_geometric_quadrupole_relaxation(
+                data, spacetime_metric, pi, phi, mesh, inverse_jacobian,
+                coordinates, mesh_velocity, *physical_replay->mass(),
+                *physical_replay->moment_relaxation_time(),
+                physical_replay->moment_relaxation_uses_model_time(), time,
+                time_id);
+            return;
+          }
+          data->quadrupole_relaxation.reset();
+          if (physical_replay->physical_model() ==
+              PhysicalModel::QuadrupoleLongitudinal) {
+            data->filtered_moments.reset();
+            return;
+          }
+          update_filtered_tidal_moments(
+              data, spacetime_metric, pi, phi, mesh, inverse_jacobian,
+              physical_replay->physical_model(), *physical_replay->mass(),
+              physical_replay->moment_relaxation_time(), time);
+          return;
+        }
+        if (worldtube != nullptr and
+            worldtube->physical_model() == PhysicalModel::ThirdOrderGeometric) {
+          data->quadrupole_relaxation.reset();
+          update_third_order_matching(
+              data, spacetime_metric, pi, phi, mesh, inverse_jacobian,
+              coordinates, mesh_velocity, *worldtube->mass(), time, time_id);
+          return;
+        }
+        data->third_order.reset();
         if (worldtube != nullptr and
             is_order_two(worldtube->physical_model())) {
+          if (worldtube->physical_model() ==
+              PhysicalModel::QuadrupoleGeometric) {
+            if (worldtube->psi0_fixed_point()) {
+              update_geometric_fixed_point(data, spacetime_metric, pi, phi,
+                                           mesh, inverse_jacobian, coordinates,
+                                           *worldtube->mass(), time,
+                                           *worldtube->psi0_fixed_point());
+              return;
+            }
+            validate_geometric_matching_face(
+                coordinates, mesh, inverse_jacobian, *data->direction);
+            if (worldtube->moment_relaxation_time()) {
+              update_geometric_quadrupole_relaxation(
+                  data, spacetime_metric, pi, phi, mesh, inverse_jacobian,
+                  coordinates, mesh_velocity, *worldtube->mass(),
+                  *worldtube->moment_relaxation_time(),
+                  worldtube->moment_relaxation_uses_model_time(), time,
+                  time_id);
+              return;
+            }
+          }
+          data->quadrupole_relaxation.reset();
+          if (worldtube->physical_model() ==
+              PhysicalModel::QuadrupoleLongitudinal) {
+            validate_geometric_matching_face(
+                coordinates, mesh, inverse_jacobian, *data->direction);
+            data->filtered_moments.reset();
+            return;
+          }
           update_filtered_tidal_moments(
               data, spacetime_metric, pi, phi, mesh, inverse_jacobian,
               worldtube->physical_model(), *worldtube->mass(),
@@ -146,6 +283,7 @@ struct UpdateKretschmannFaceData {
         }
       }
       data->filtered_moments.reset();
+      data->quadrupole_relaxation.reset();
     } else {
       (void)external_boundary_conditions;
     }

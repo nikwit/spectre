@@ -3,6 +3,13 @@
 
 #pragma once
 
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/WorldtubeEvolvedPhysicalGhost.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Worldtube/Actions/EvolvePhysicalTrace.hpp"
+#include "Time/ChangeTimeStepperOrder.tpp"
+#include "Time/CleanHistory.tpp"
+#include "Time/RecordTimeStepperData.tpp"
+#include "Time/UpdateU.tpp"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -85,7 +92,11 @@
 struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3> {
   static constexpr size_t volume_dim = 3;
   using gh_base = GeneralizedHarmonicTemplateBase<volume_dim>;
-  using typename gh_base::initialize_initial_data_dependent_quantities_actions;
+  using initialize_initial_data_dependent_quantities_actions = tmpl::push_back<
+      tmpl::pop_back<typename gh_base::
+                         initialize_initial_data_dependent_quantities_actions>,
+      Actions::MutateApply<gh::worldtube::InitializePhysicalTrace>,
+      Parallel::Actions::TerminatePhase>;
   using typename gh_base::system;
 
   static constexpr Options::String help{
@@ -183,6 +194,9 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3> {
       : tt::ConformsTo<Options::protocols::FactoryCreation> {
     using factory_classes = Options::add_factory_classes<
         typename gh_base::factory_creation::factory_classes,
+        tmpl::pair<
+            gh::BoundaryConditions::BoundaryCondition<3>,
+            tmpl::list<gh::BoundaryConditions::WorldtubeEvolvedPhysicalGhost>>,
         tmpl::pair<ah::Criterion, ah::Criteria::standard_criteria>,
         tmpl::pair<ylm::InitialShape<Frame::Inertial>,
                    tmpl::list<ylm::InitialShapes::Sphere<Frame::Inertial>,
@@ -219,13 +233,41 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3> {
 
   using dg_registration_list = typename gh_base::dg_registration_list;
 
-  using step_actions =
-      typename gh_base::template step_actions<EvolutionMetavars,
-                                              control_systems>;
+  // Only the time bookkeeping sees the extra surface state. The volume PDE
+  // system and its characteristic fields remain unchanged.
+  struct SurfaceTimeSystem {
+    static constexpr bool has_primitive_and_conservative_vars = false;
+    using variables_tag = gh::worldtube::Tags::PhysicalTrace;
+  };
+  struct CoupledTimeSystem {
+    static constexpr bool has_primitive_and_conservative_vars = false;
+    using variables_tag = tmpl::list<typename system::variables_tag,
+                                     gh::worldtube::Tags::PhysicalTrace>;
+  };
+  using step_actions = tmpl::flatten<tmpl::replace<
+      tmpl::replace<
+          tmpl::replace<
+              tmpl::replace<
+                  typename gh_base::template step_actions<EvolutionMetavars,
+                                                          control_systems>,
+                  Actions::MutateApply<RecordTimeStepperData<system>>,
+                  tmpl::list<Actions::MutateApply<
+                                 gh::worldtube::ComputePhysicalTraceRhs>,
+                             Actions::MutateApply<
+                                 RecordTimeStepperData<CoupledTimeSystem>>>>,
+              Actions::MutateApply<UpdateU<system>>,
+              Actions::MutateApply<UpdateU<CoupledTimeSystem>>>,
+          Actions::MutateApply<ChangeTimeStepperOrder<system>>,
+          Actions::MutateApply<ChangeTimeStepperOrder<CoupledTimeSystem>>>,
+      Actions::MutateApply<CleanHistory<system>>,
+      Actions::MutateApply<CleanHistory<CoupledTimeSystem>>>>;
 
   using initialization_actions = tmpl::push_back<
       tmpl::pop_back<typename gh_base::template initialization_actions<
           EvolutionMetavars, use_control_systems>>,
+      Initialization::Actions::InitializeItems<
+          gh::worldtube::Initialization::PhysicalTrace,
+          Initialization::TimeStepperHistory<SurfaceTimeSystem>>,
       control_system::Actions::InitializeMeasurements<control_systems>,
       intrp::Actions::ElementInitInterpPoints<volume_dim,
                                               interpolation_target_tags>,
@@ -251,7 +293,7 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3> {
               initialize_initial_data_dependent_quantities_actions>,
           Parallel::PhaseActions<
               Parallel::Phase::InitializeTimeStepperHistory,
-              SelfStart::self_start_procedure<step_actions, system>>,
+              SelfStart::self_start_procedure<step_actions, CoupledTimeSystem>>,
           Parallel::PhaseActions<Parallel::Phase::Register,
                                  tmpl::list<dg_registration_list,
                                             Parallel::Actions::TerminatePhase>>,
@@ -292,10 +334,13 @@ struct EvolutionMetavars : public GeneralizedHarmonicTemplateBase<3> {
                                             typename system::variables_tag>,
         evolution::dg::Initialization::ProjectMortars<volume_dim>,
         Initialization::ProjectTimeStepperHistory<EvolutionMetavars>,
+        gh::worldtube::ProjectPhysicalTrace<typename system::variables_tag>,
         evolution::Actions::ProjectRunEventsAndDenseTriggers,
         evolution::dg::Initialization::ProjectSpectralFilters<
             volume_dim, typename system::variables_tag::tags_list>,
         ::amr::projectors::DefaultInitialize<
+            Tags::StepperErrors<gh::worldtube::Tags::PhysicalTrace>,
+            SelfStart::Tags::InitialValue<gh::worldtube::Tags::PhysicalTrace>,
             Initialization::Tags::InitialTimeDelta,
             Initialization::Tags::InitialSlabSize,
             ::domain::Tags::InitialExtents<volume_dim>,

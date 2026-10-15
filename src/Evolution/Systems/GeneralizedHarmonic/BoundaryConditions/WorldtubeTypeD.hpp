@@ -43,9 +43,89 @@ template <size_t Dim> class Element;
 namespace domain::Tags {
 template <size_t Dim, typename Frame> struct Coordinates;
 } // namespace domain::Tags
+namespace gh::BoundaryConditions::Bjorhus {
+template <size_t Dim>
+struct IntermediateVariables;
+}
 /// \endcond
 
 namespace gh::BoundaryConditions::detail {
+/// Explicit opt-in without changing the existing PhysicalModel YAML strings.
+struct GeometricFixedPoint {
+  struct RelativeTolerance {
+    using type = double;
+    static constexpr Options::String help{
+        "Relative undamped RMS residual tolerance."};
+  };
+  struct AbsoluteTolerance {
+    using type = double;
+    static constexpr Options::String help{
+        "Absolute RMS residual tolerance in curvature units."};
+  };
+  struct MaxIterations {
+    using type = size_t;
+    static constexpr Options::String help{
+        "Maximum number of geometric target evaluations per RHS."};
+  };
+  struct Damping {
+    using type = double;
+    static constexpr Options::String help{
+        "Iteration damping in (0,1]; does not relax in physical time."};
+  };
+  struct Parameters {
+    using options = tmpl::list<RelativeTolerance, AbsoluteTolerance,
+                               MaxIterations, Damping>;
+    static constexpr Options::String help{
+        "Solve Psi0 = geometric quadrupole target, starting from zero."};
+    double relative_tolerance{};
+    double absolute_tolerance{};
+    size_t max_iterations{};
+    double damping{};
+  };
+  struct QuadrupoleGeometricFixedPoint {
+    using type = Parameters;
+    static constexpr Options::String help{
+        "Refit frame, boost, map and moments at each trial Psi0. Holds "
+        "measured dK and dtK fixed. Requires MomentRelaxationTime: None."};
+  };
+  using options = tmpl::list<QuadrupoleGeometricFixedPoint>;
+  static constexpr Options::String help{
+      "Geometric quadrupole with an inner Psi0 fixed-point solve."};
+  GeometricFixedPoint() = default;
+  explicit GeometricFixedPoint(Parameters p)
+      : settings{p.relative_tolerance, p.absolute_tolerance, p.max_iterations,
+                 p.damping} {}
+  gr::np::GeometricFixedPointOptions settings{};
+};
+
+/// Explicit alternative to the legacy numeric NR-time relaxation interval.
+struct ModelTimeRelaxation {
+  struct Timescale {
+    using type = double;
+    static constexpr Options::String help{
+        "Positive relaxation interval in model-time units."};
+  };
+  struct Parameters {
+    using options = tmpl::list<Timescale>;
+    static constexpr Options::String help{"Model-time relaxation interval."};
+    double timescale{};
+  };
+  struct ModelTime {
+    using type = Parameters;
+    static constexpr Options::String help{"Use the geometric model clock."};
+  };
+  using options = tmpl::list<ModelTime>;
+  static constexpr Options::String help{
+      "Geometric quadrupole relaxation in the model clock."};
+  ModelTimeRelaxation() = default;
+  explicit ModelTimeRelaxation(Parameters parameters)
+      : timescale(parameters.timescale) {}
+  explicit ModelTimeRelaxation(double value) : timescale(value) {}
+  double timescale{};
+};
+using MomentRelaxation =
+    std::optional<std::variant<double, ModelTimeRelaxation>>;
+
 /// How one characteristic sector of the worldtube boundary condition is
 /// imposed.
 enum class SectorImposition {
@@ -71,7 +151,8 @@ enum class SectorImposition {
   /// offset.
   OutgoingDriven,
   SchwarzschildReference,
-  /// Replace the time/radial incoming gauge derivative with an initial-profile Robin response.
+  /// Replace the time/radial incoming gauge derivative with an initial-profile
+  /// Robin response.
   RadialResponse
 };
 
@@ -303,10 +384,10 @@ public:
   };
   /// \brief How the gauge sector of \f$u^-\f$ is imposed.
   struct GaugeSector {
-    using type = std::variant<detail::SectorImposition, detail::AlgebraicGauge,
-                              detail::OutgoingDrivenGauge,
-                              detail::SchwarzschildReferenceGauge, worldtube::ReferenceReplayGauge,
-                   worldtube::RadialResponseGauge>;
+    using type = std::variant<
+        detail::SectorImposition, detail::AlgebraicGauge,
+        detail::OutgoingDrivenGauge, detail::SchwarzschildReferenceGauge,
+        worldtube::ReferenceReplayGauge, worldtube::RadialResponseGauge>;
     static constexpr Options::String help{
         "Imposition of the gauge sector of v_minus: Frozen (zero projected "
         "characteristic RHS), or SommerfeldAbsorbing / SommerfeldOutgoing for "
@@ -321,14 +402,16 @@ public:
         "This requires a static mesh and time-independent gamma2. "
         "RadialResponse: [Kt, Kr] replaces the radial derivative of the "
         "time/radial gauge data, retaining live GH sources and an initial "
-        "profile. Tangential gauge data retain the zero-rate radiation condition. "
+        "profile. Tangential gauge data retain the zero-rate radiation "
+        "condition. "
         "This prototype requires static unrefined 3D spherical shells. "
         "Bjorhus without a specified gauge prescription is not implemented."};
   };
   /// \brief Which model supplies the incoming radiation to the physical
   /// sector's Bjorhus term.
   struct PhysicalModel {
-    using type = detail::PhysicalModel;
+    using type =
+        std::variant<detail::PhysicalModel, detail::GeometricFixedPoint>;
     static constexpr Options::String help{
         "The incoming radiation the physical Bjorhus term drives the boundary "
         "towards: None (no incoming radiation, the outer-boundary condition), "
@@ -337,7 +420,17 @@ public:
         "Quadrupole (order two: the type-D hole carries a quadrupolar tide "
         "fitted to Psi4 over the face, in the invariant rest frame fixed by "
         "the gradient of the Kretschmann scalar; needs Mass and the "
-        "UpdateKretschmannFaceData action) or QuadrupoleCoulomb (order two "
+        "UpdateKretschmannFaceData action), QuadrupoleGeometric (the same tide "
+        "with common angular axes and dyad transport from the screen-metric "
+        "Laplace eigenmap; requires a complete spherical-harmonic face on a "
+        "round coordinate sphere), QuadrupoleGeometricFixedPoint: "
+        "{RelativeTolerance, AbsoluteTolerance, MaxIterations, Damping} "
+        "(solves the geometric target without reading the measured Psi0 slot; "
+        "requires MomentRelaxationTime: None), ThirdOrderGeometric (adds "
+        "electric and "
+        "magnetic octupoles and causal, transported quadrupole derivatives; "
+        "same sphere requirements, MomentRelaxationTime: None), or "
+        "QuadrupoleCoulomb (order two "
         "with the tide read from the Coulomb scalar and its normal "
         "derivative instead of Psi4, which removes the fast feedback of the "
         "condition on itself through the leaving mode but leaves a slow "
@@ -351,28 +444,30 @@ public:
     using type = Options::Auto<double, Options::AutoLabel::None>;
     static constexpr Options::String help{
         "The mass of the excised hole. Required by the order-two models "
-        "Quadrupole and QuadrupoleCoulomb (tidal radial profiles and the "
+        "Quadrupole, QuadrupoleGeometric, ThirdOrderGeometric and "
+        "QuadrupoleCoulomb (tidal radial "
+        "profiles and the "
         "areal radius of the worldtube), None otherwise."};
   };
   /// \brief Relaxation time of the fitted tidal moments of the order-two
-  /// models, a first-order low-pass that breaks the feedback loop of the
-  /// order-two condition on itself.
+  /// models, a first-order low-pass intended to suppress rapid feedback.
   struct MomentRelaxationTime {
-    using type = Options::Auto<double, Options::AutoLabel::None>;
+    using type =
+        Options::Auto<std::variant<double, detail::ModelTimeRelaxation>,
+                      Options::AutoLabel::None>;
     static constexpr Options::String help{
-        "Order-two models only. Relax the five fitted tidal moments "
-        "toward the instantaneous fit on this timescale (first-order "
-        "low-pass) before they enter the target. Without it the condition "
-        "is unstable: the Psi0 it injects returns as Psi4 at the face, is "
-        "read as a tide and re-emitted amplified by the boost factor "
-        "((1+v)/(1-v))^2 of the slice, about one e-folding per M for a hole "
-        "excised at 2.5M. Choose it long compared to the light-crossing "
-        "time of the excision (several M) and short compared to the tidal "
-        "timescale; a first-order filter lags the tide by atan(2 Omega tau). "
-        "QuadrupoleCoulomb has no loop through Psi4 but a slow one with gain "
-        "just above one (its target sits 0.1-1% above the face Psi0, growth "
-        "about 0.03/M at 3M); 10M removes it. None imposes the "
-        "instantaneous fit."};
+        "A number uses NR-time units; ModelTime: {Timescale: value} uses the "
+        "geometric model clock (QuadrupoleGeometric only). The geometric "
+        "model transports moments between frames with full-step history. "
+        "None imposes the instantaneous fit. Order-two models only. Relax "
+        "the five complex STF tidal components toward the instantaneous "
+        "fit before they enter the target. The geometric model uses an "
+        "exponential step with linearly interpolated forcing; legacy models "
+        "retain their capped Euler update. For a physical harmonic at "
+        "frequency omega in the selected clock, the continuous filter "
+        "attenuates by 1/sqrt(1+(omega*tau)^2) and lags by atan(omega*tau). "
+        "Choose a timescale short compared with the physical tidal "
+        "timescale; relaxation alone does not guarantee coupled stability."};
   };
   using options =
       tmpl::list<ConstraintPreservingSector, PhysicalSector, GaugeSector,
@@ -391,15 +486,16 @@ public:
       std::variant<detail::SectorImposition, detail::PerFieldConstraintSectors>
           constraint_preserving_sector,
       detail::SectorImposition physical_sector,
-      std::variant<detail::SectorImposition, detail::AlgebraicGauge,
-                   detail::OutgoingDrivenGauge,
-                   detail::SchwarzschildReferenceGauge, worldtube::ReferenceReplayGauge,
-                   worldtube::RadialResponseGauge>
+      std::variant<
+          detail::SectorImposition, detail::AlgebraicGauge,
+          detail::OutgoingDrivenGauge, detail::SchwarzschildReferenceGauge,
+          worldtube::ReferenceReplayGauge, worldtube::RadialResponseGauge>
           gauge_sector,
-      detail::PhysicalModel physical_model,
+      std::variant<detail::PhysicalModel, detail::GeometricFixedPoint>
+          physical_model,
       std::optional<double> mass = std::nullopt,
-      std::optional<double> moment_relaxation_time = std::nullopt,
-      const Options::Context &context = {});
+      detail::MomentRelaxation moment_relaxation_time = std::nullopt,
+      const Options::Context& context = {});
 
   WorldtubeTypeD() = default;
   /// \cond
@@ -497,6 +593,61 @@ public:
           &damping_gamma2 = ConstraintDamping::Constant<Dim, Frame::Grid>{
               0.}) const;
 
+  /// Compute the correction and retain the intermediate quantities for a
+  /// caller that projects selected characteristic sectors. The caller supplies
+  /// storage sized to the face; it is populated from the current arguments.
+  /// Prescribed moments override the face history and tidal fit while keeping
+  /// the frame, boost and remaining curvature inputs live. A prescribed full
+  /// incoming mode instead overrides the entire physical target.
+  std::optional<std::string> dg_time_derivative_with_intermediates(
+      gsl::not_null<Bjorhus::IntermediateVariables<Dim>*> intermediates,
+      gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
+          dt_spacetime_metric_correction,
+      gsl::not_null<tnsr::aa<DataVector, Dim, Frame::Inertial>*>
+          dt_pi_correction,
+      gsl::not_null<tnsr::iaa<DataVector, Dim, Frame::Inertial>*>
+          dt_phi_correction,
+      const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
+          face_mesh_velocity,
+      const tnsr::i<DataVector, Dim, Frame::Inertial>& normal_covector,
+      const tnsr::I<DataVector, Dim, Frame::Inertial>& /*normal_vector*/,
+      // c.f. dg_interior_evolved_variables_tags
+      const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
+      const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
+      // c.f. dg_interior_temporary_tags
+      const tnsr::I<DataVector, Dim, Frame::Inertial>& coords,
+      const Scalar<DataVector>& gamma1, const Scalar<DataVector>& gamma2,
+      const Scalar<DataVector>& lapse,
+      const tnsr::I<DataVector, Dim, Frame::Inertial>& shift,
+      const tnsr::AA<DataVector, Dim, Frame::Inertial>&
+          inverse_spacetime_metric,
+      const tnsr::A<DataVector, Dim, Frame::Inertial>&
+          spacetime_unit_normal_vector,
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& three_index_constraint,
+      const tnsr::a<DataVector, Dim, Frame::Inertial>& gauge_source,
+      const tnsr::ab<DataVector, Dim, Frame::Inertial>&
+          spacetime_deriv_gauge_source,
+      // c.f. dg_interior_dt_vars_tags
+      const tnsr::aa<DataVector, Dim, Frame::Inertial>&
+          logical_dt_spacetime_metric,
+      const tnsr::aa<DataVector, Dim, Frame::Inertial>& logical_dt_pi,
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& logical_dt_phi,
+      // c.f. dg_interior_deriv_vars_tags
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_spacetime_metric,
+      const tnsr::iaa<DataVector, Dim, Frame::Inertial>& d_pi,
+      const tnsr::ijaa<DataVector, Dim, Frame::Inertial>& d_phi,
+      // c.f. dg_gridless_tags
+      double time, const Domain<Dim>& domain, const Element<Dim>& element,
+      const domain::FunctionsOfTimeMap& functions_of_time,
+      const worldtube::KretschmannFaceData<Dim>& face_data,
+      const ConstraintDamping::DampingFunction<Dim, Frame::Grid>&
+          damping_gamma2 = ConstraintDamping::Constant<Dim, Frame::Grid>{0.},
+      const tnsr::ii<DataVector, Dim, Frame::Inertial>*
+          prescribed_incoming_mode = nullptr,
+      const std::optional<gr::np::TidalMoments>& prescribed_tidal_moments =
+          std::nullopt) const;
+
   detail::SectorImposition constraint_v_psi() const {
     return constraint_v_psi_;
   }
@@ -514,11 +665,20 @@ public:
   const auto &schwarzschild_reference() const {
     return schwarzschild_reference_;
   }
-  const std::optional<worldtube::FaceReplayParameters>& face_replay() const { return face_replay_; }
+  const std::optional<worldtube::FaceReplayParameters>& face_replay() const {
+    return face_replay_;
+  }
   detail::PhysicalModel physical_model() const { return physical_model_; }
   const std::optional<double> &mass() const { return mass_; }
   const std::optional<double> &moment_relaxation_time() const {
     return moment_relaxation_time_;
+  }
+  bool moment_relaxation_uses_model_time() const {
+    return moment_relaxation_uses_model_time_;
+  }
+  const std::optional<gr::np::GeometricFixedPointOptions>& psi0_fixed_point()
+      const {
+    return psi0_fixed_point_;
   }
 
 private:
@@ -539,6 +699,8 @@ private:
   detail::PhysicalModel physical_model_{detail::PhysicalModel::None};
   std::optional<double> mass_{};
   std::optional<double> moment_relaxation_time_{};
+  bool moment_relaxation_uses_model_time_{false};
+  std::optional<gr::np::GeometricFixedPointOptions> psi0_fixed_point_{};
 };
 
 template <size_t Dim>

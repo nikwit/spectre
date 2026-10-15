@@ -4,11 +4,16 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/KretschmannFaceData.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <iomanip>
 #include <numbers>
 #include <optional>
 #include <pup.h>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 
@@ -28,28 +33,444 @@
 #include "Evolution/Systems/GeneralizedHarmonic/Worldtube/WeylCurvature.hpp"
 #include "NumericalAlgorithms/LinearOperators/PartialDerivatives.hpp"
 #include "NumericalAlgorithms/Spectral/Basis.hpp"
+#include "NumericalAlgorithms/Spectral/CollocationPointsAndWeights.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "NumericalAlgorithms/Spectral/QuadratureWeights.hpp"
+#include "PointwiseFunctions/GeneralRelativity/NewmanPenrose/Tetrad.hpp"
+#include "Time/TimeStepId.hpp"
+#include "Utilities/ConstantExpressions.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
+#include "Utilities/ErrorHandling/FloatingPointExceptions.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Serialization/PupStlCpp17.hpp"
 
 namespace gh::worldtube {
 namespace {
+// Opt-in startup diagnostics. Emit each record in one thread-safe stdio call
+// and flush before a possible exception; do not alter the model or history.
+bool trace_third_order(const double time) {
+  const char* until = std::getenv("NP_THIRD_ORDER_TRACE_UNTIL");
+  return until != nullptr and time <= std::stod(until);
+}
+void emit_third_order_trace(const std::ostringstream& record) {
+  std::fprintf(stderr, "%s\n", record.str().c_str());
+  std::fflush(stderr);
+}
 struct KretschmannTag : db::SimpleTag {
   using type = Scalar<DataVector>;
 };
-template <size_t Dim> struct DerivKretschmannTag : db::SimpleTag {
+template <size_t Dim>
+struct DerivKretschmannTag : db::SimpleTag {
   using type = tnsr::i<DataVector, Dim, Frame::Inertial>;
 };
-template <size_t Dim> struct MeshVelocityTag : db::SimpleTag {
+template <size_t Dim>
+struct MeshVelocityTag : db::SimpleTag {
   using type = tnsr::I<DataVector, Dim, Frame::Inertial>;
 };
-} // namespace
+}  // namespace
 
-template <size_t Dim> void KretschmannFaceData<Dim>::pup(PUP::er &p) {
+void validate_geometric_matching_face(
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const Direction<3>& direction) {
+  if (direction != Direction<3>::lower_xi() or
+      mesh.basis(1) != Spectral::Basis::SphericalHarmonic or
+      mesh.basis(2) != Spectral::Basis::SphericalHarmonic or
+      mesh.quadrature(1) != Spectral::Quadrature::Gauss or
+      mesh.quadrature(2) != Spectral::Quadrature::Equiangular or
+      mesh.extents(2) != 2 * mesh.extents(1) - 1) {
+    ERROR(
+        "QuadrupoleGeometric requires a complete spherical-harmonic inner "
+        "face. Enable UseSphericalHarmonics on the worldtube object.");
+  }
+  const auto weights = face_quadrature_weights<3>(mesh.slice_away(0));
+  const size_t nr = mesh.extents(0), np = weights.size();
+  std::array<double, 3> center{};
+  for (size_t p = 0; p < np; ++p) {
+    for (size_t i = 0; i < 3; ++i) {
+      center[i] += weights[p] * coordinates.get(i)[nr * p];
+    }
+  }
+  DataVector radius(np, 0.);
+  double mean_radius = 0.;
+  for (size_t p = 0; p < np; ++p) {
+    for (size_t i = 0; i < 3; ++i) {
+      radius[p] += square(coordinates.get(i)[nr * p] - center[i]);
+    }
+    radius[p] = sqrt(radius[p]);
+    mean_radius += weights[p] * radius[p];
+  }
+  if (not(mean_radius > 0. and std::isfinite(mean_radius))) {
+    ERROR("QuadrupoleGeometric requires a finite nonzero coordinate radius.");
+  }
+  for (size_t p = 0; p < np; ++p) {
+    double normal_norm = 0.;
+    for (size_t i = 0; i < 3; ++i) {
+      normal_norm += square(inverse_jacobian.get(0, i)[nr * p]);
+    }
+    normal_norm = sqrt(normal_norm);
+    if (not(normal_norm > 0. and std::isfinite(normal_norm)) or
+        not(std::abs(radius[p] / mean_radius - 1.) < 1.e-9)) {
+      ERROR(
+          "QuadrupoleGeometric requires a round inertial-coordinate sphere; "
+          "disable non-spherical shape/skew deformations on the worldtube.");
+    }
+    for (size_t i = 0; i < 3; ++i) {
+      if (not(std::abs(inverse_jacobian.get(0, i)[nr * p] / normal_norm -
+                       (coordinates.get(i)[nr * p] - center[i]) / radius[p]) <
+              1.e-9)) {
+        ERROR(
+            "QuadrupoleGeometric requires radial coordinate-normal covectors.");
+      }
+    }
+  }
+}
+
+void GeometricFixedPointFaceData::pup(PUP::er& p) {
+  p | time;
+  p | psi0_target;
+  p | diagnostics;
+}
+bool operator==(const GeometricFixedPointFaceData& a,
+                const GeometricFixedPointFaceData& b) {
+  return a.time == b.time and a.psi0_target == b.psi0_target and
+         a.diagnostics == b.diagnostics;
+}
+
+void update_geometric_fixed_point(
+    const gsl::not_null<KretschmannFaceData<3>*> data,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const double mass, const double time,
+    const gr::np::GeometricFixedPointOptions& options) {
+  data->psi0_fixed_point.reset();
+  data->filtered_moments.reset();
+  data->quadrupole_relaxation.reset();
+  if (not data->direction or data->time != time) {
+    ERROR(
+        "Update the Kretschmann data before geometric Psi0 fixed-point "
+        "matching");
+  }
+  validate_geometric_matching_face(coordinates, mesh, inverse_jacobian,
+                                   *data->direction);
+  const auto face = face_curvature(spacetime_metric, pi, phi, mesh,
+                                   inverse_jacobian, *data->direction);
+  const size_t np = get(face.lapse).size();
+  if (data->quadrature_weights.size() != np) {
+    ERROR("Geometric Psi0 fixed point requires full-sphere quadrature weights");
+  }
+  gr::np::TriadVector inward(np, 0.), labels(np, 0.);
+  const auto& normal = face.unit_normal_covector;
+  const DataVector norm = sqrt(square(normal.get(0)) + square(normal.get(1)) +
+                               square(normal.get(2)));
+  for (size_t i = 0; i < 3; ++i) {
+    inward.get(i) = normal.get(i) / norm;
+    labels.get(i) = -inward.get(i);
+  }
+  const auto rotation = gr::np::adapted_triad(face.spatial_metric, inward);
+  const auto psi = gr::np::weyl_scalars_from_electric_magnetic(
+      face.electric, face.magnetic, face.spatial_metric, inward);
+  const size_t grid_lmax = mesh.extents(1) - 1;
+  const char* setting = std::getenv("NP_GEOMETRIC_LMAX");
+  const size_t lmax =
+      setting == nullptr ? std::min(size_t{8}, grid_lmax) : std::stoul(setting);
+  if (lmax < 2 or lmax > grid_lmax) {
+    ERROR("NP_GEOMETRIC_LMAX must lie between 2 and the grid l_max");
+  }
+  auto solution = gr::np::geometric_tide_fixed_point(
+      psi, rotation, face.spatial_metric, labels, data->quadrature_weights,
+      mass, lmax, face.lapse, face.shift, data->d_kretschmann,
+      data->dt_kretschmann, options);
+  data->psi0_fixed_point = GeometricFixedPointFaceData{
+      time, std::move(solution.geometric.second_order.psi0_target),
+      solution.diagnostics};
+}
+
+void ThirdOrderFaceData::pup(PUP::er& p) {
+  p | history;
+  p | time;
+  p | psi0_target;
+  p | moments;
+  p | dots;
+  p | derivative_order;
+  p | clock_rate;
+  p | tilt_residual;
+  p | fit_residual;
+  p | fit_condition;
+}
+bool operator==(const ThirdOrderFaceData& a, const ThirdOrderFaceData& b) {
+  return a.history == b.history and a.time == b.time and
+         a.psi0_target == b.psi0_target and a.moments == b.moments and
+         a.dots == b.dots and a.derivative_order == b.derivative_order and
+         a.clock_rate == b.clock_rate and a.tilt_residual == b.tilt_residual and
+         a.fit_residual == b.fit_residual and
+         a.fit_condition == b.fit_condition;
+}
+
+namespace {
+struct GeometricMatchingGeometry {
+  gr::np::FrameRegistration registration;
+  gr::np::GeometricFrame frame;
+  gr::np::GeometricTimeData temporal;
+  std::array<double, 3> center;
+  double measured_psi0_max;
+};
+GeometricMatchingGeometry prepare_geometric_matching(
+    const KretschmannFaceData<3>* data,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const std::optional<tnsr::I<DataVector, 3, Frame::Inertial>>& velocity,
+    const double mass, const double time, const TimeStepId& time_id) {
+  if (not data->direction.has_value() or time != data->time) {
+    ERROR("Update the Kretschmann data before geometric matching");
+  }
+  if (not time_id.time_runs_forward()) {
+    ERROR("Geometric matching supports forward evolution only");
+  }
+  validate_geometric_matching_face(coordinates, mesh, inverse_jacobian,
+                                   *data->direction);
+  const auto face = face_curvature(spacetime_metric, pi, phi, mesh,
+                                   inverse_jacobian, *data->direction);
+  const auto& weights = data->quadrature_weights;
+  const size_t np = weights.size(), nr = mesh.extents(0);
+  gr::np::TriadVector labels(np, 0.), inward(np, 0.), mesh_velocity(np, 0.);
+  std::array<double, 3> center{};
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t p = 0; p < np; ++p) {
+      center[i] += weights[p] * coordinates.get(i)[nr * p];
+    }
+  }
+  double coordinate_radius = 0.;
+  for (size_t p = 0; p < np; ++p) {
+    double radius = 0.;
+    for (size_t i = 0; i < 3; ++i) {
+      labels.get(i)[p] = coordinates.get(i)[nr * p] - center[i];
+      radius += square(labels.get(i)[p]);
+      if (velocity)
+        mesh_velocity.get(i)[p] = velocity->get(i)[nr * p];
+    }
+    radius = sqrt(radius);
+    coordinate_radius += weights[p] * radius;
+    for (size_t i = 0; i < 3; ++i) {
+      labels.get(i)[p] /= radius;
+      inward.get(i)[p] = -labels.get(i)[p];
+    }
+  }
+  const auto rotation = gr::np::adapted_triad(face.spatial_metric, inward);
+  const auto psi = gr::np::weyl_scalars_from_electric_magnetic(
+      face.electric, face.magnetic, face.spatial_metric, inward);
+  auto registration = gr::np::register_frame(psi, rotation, mass);
+  const bool trace = trace_third_order(time);
+  const auto trace_record = [&](const char* stage) {
+    std::ostringstream out;
+    out << std::setprecision(17) << "THIRD_ORDER_TRACE stage=" << stage
+        << " time=" << time << " slab=" << time_id.slab_number()
+        << " step_start=" << time_id.step_time().value()
+        << " substep=" << time_id.substep() << " center=" << center[0] << ','
+        << center[1] << ',' << center[2];
+    return out;
+  };
+  if (trace) {
+    const auto tanh_eta = gr::np::invariant_tanh_rapidity(
+        registration.member, rotation, face.spatial_metric, face.lapse,
+        face.shift, data->d_kretschmann, data->dt_kretschmann);
+    size_t worst = 0;
+    for (size_t p = 1; p < np; ++p) {
+      if (std::abs(get(tanh_eta)[p]) > std::abs(get(tanh_eta)[worst]))
+        worst = p;
+    }
+    auto out = trace_record("boost");
+    out << " tanh_min=" << min(get(tanh_eta))
+        << " tanh_max=" << max(get(tanh_eta)) << " worst_point=" << worst
+        << " dtK=" << get(data->dt_kretschmann)[worst]
+        << " lapse=" << get(face.lapse)[worst]
+        << " K_max=" << max(abs(get(data->kretschmann)))
+        << " measured_radius_min=" << min(get(registration.measured_radius))
+        << " measured_radius_max=" << max(get(registration.measured_radius));
+    for (size_t i = 0; i < 3; ++i) {
+      out << " dK" << i << '=' << data->d_kretschmann.get(i)[worst] << " shift"
+          << i << '=' << face.shift.get(i)[worst];
+    }
+    if (data->third_order) {
+      out << " previous_target_max="
+          << max(abs(get(data->third_order->psi0_target))) << " history_times=";
+      for (const auto& past : data->third_order->history.samples)
+        out << past.time << ',';
+    }
+    emit_third_order_trace(out);
+  }
+  const auto rapidity = gr::np::invariant_rapidity(
+      registration.member, rotation, face.spatial_metric, face.lapse,
+      face.shift, data->d_kretschmann, data->dt_kretschmann);
+  const size_t grid_lmax = mesh.extents(1) - 1;
+  const char* setting = std::getenv("NP_GEOMETRIC_LMAX");
+  const size_t lmax =
+      setting == nullptr ? std::min(size_t{8}, grid_lmax) : std::stoul(setting);
+  if (lmax < 2 or lmax > grid_lmax) {
+    ERROR("NP_GEOMETRIC_LMAX must lie between 2 and the grid l_max");
+  }
+  auto frame =
+      gr::np::geometric_frame(registration, rapidity, rotation,
+                              face.spatial_metric, labels, weights, mass, lmax);
+  const auto temporal = gr::np::geometric_time_data(
+      frame, labels, coordinate_radius, registration.measured_radius, mass,
+      rotation, face.spatial_metric, face.lapse, face.shift, mesh_velocity);
+  return {std::move(registration), std::move(frame), temporal, center,
+          max(abs(psi.get(0)))};
+}
+}  // namespace
+
+void update_third_order_matching(
+    const gsl::not_null<KretschmannFaceData<3>*> data,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const std::optional<tnsr::I<DataVector, 3, Frame::Inertial>>& velocity,
+    const double mass, const double time, const TimeStepId& time_id) {
+  const auto geometry = prepare_geometric_matching(
+      &*data, spacetime_metric, pi, phi, mesh, inverse_jacobian, coordinates,
+      velocity, mass, time, time_id);
+  const auto& registration = geometry.registration;
+  const auto& frame = geometry.frame;
+  const auto& temporal = geometry.temporal;
+  const bool trace = trace_third_order(time);
+  const auto trace_record = [&](const char* stage) {
+    std::ostringstream out;
+    out << std::setprecision(17) << "THIRD_ORDER_TRACE stage=" << stage
+        << " time=" << time << " slab=" << time_id.slab_number()
+        << " step_start=" << time_id.step_time().value()
+        << " substep=" << time_id.substep() << " center=" << geometry.center[0]
+        << ',' << geometry.center[1] << ',' << geometry.center[2];
+    return out;
+  };
+  const auto columns = gr::np::third_order_tide_columns(
+      frame, registration.measured_radius, mass, temporal.slice_tilt);
+  // This preliminary undotted fit is the same history variable as offline.
+  // Differentiating its O(epsilon^3) contamination affects fourth order;
+  // differentiating the corrected fit would create an implicit feedback loop.
+  const auto preliminary = gr::np::fit_third_order_tide(registration, columns,
+                                                        frame.map.weights, {});
+  gr::np::GeometricTideSample sample{};
+  sample.time = time;
+  sample.direction = frame.map.direction;
+  std::copy_n(preliminary.moments.begin(), 10, sample.quadrupole.begin());
+  if (not data->third_order)
+    data->third_order.emplace();
+  auto& state = *data->third_order;
+  if (trace) {
+    auto out = trace_record("preliminary");
+    out << " clock=" << temporal.clock_rate
+        << " clock_min=" << temporal.minimum_clock_rate
+        << " tilt_residual=" << temporal.tilt_residual
+        << " fit_residual=" << preliminary.relative_residual
+        << " fit_condition=" << preliminary.condition_number
+        << " measured_psi0_max=" << geometry.measured_psi0_max
+        << " undotted_target_max=" << max(abs(get(preliminary.psi0_target)))
+        << " quadrupole=";
+    for (const double q : sample.quadrupole)
+      out << q << ',';
+    out << " history_times=";
+    for (const auto& past : state.history.samples)
+      out << past.time << ',';
+    emit_third_order_trace(out);
+  }
+  const auto derivative = gr::np::causal_tidal_derivative(
+      make_not_null(&state.history), sample, frame.map, temporal,
+      time_id.step_time().value(), time_id.substep() == 0);
+  if (trace) {
+    auto out = trace_record("derivative");
+    out << " derivative_order=" << derivative.derivative_order << " dots=";
+    for (const double q : derivative.dots)
+      out << q << ',';
+    out << " angular_velocity=";
+    for (const double omega : derivative.angular_velocity)
+      out << omega << ',';
+    emit_third_order_trace(out);
+  }
+  // Diagnostic ablation: retain the live history and all undotted moments,
+  // but omit induction, near-zone and slice-time terms proportional to dots.
+  const char* disable_dots_setting = std::getenv("NP_THIRD_ORDER_DISABLE_DOTS");
+  if (disable_dots_setting != nullptr and
+      std::string{disable_dots_setting} != "0" and
+      std::string{disable_dots_setting} != "1") {
+    ERROR("NP_THIRD_ORDER_DISABLE_DOTS must be 0 or 1");
+  }
+  const bool disable_dots = disable_dots_setting != nullptr and
+                            std::string{disable_dots_setting} == "1";
+  const auto applied_dots =
+      disable_dots ? gr::np::DottedTidalMoments{} : derivative.dots;
+  auto fit = gr::np::fit_third_order_tide(registration, columns,
+                                          frame.map.weights, applied_dots);
+  if (trace) {
+    auto out = trace_record("target");
+    out << " dots_disabled=" << disable_dots
+        << " target_max=" << max(abs(get(fit.psi0_target)))
+        << " dotted_target_change_max="
+        << max(abs(get(fit.psi0_target) - get(preliminary.psi0_target)))
+        << " fit_residual=" << fit.relative_residual
+        << " fit_condition=" << fit.condition_number << " applied_dots=";
+    for (const double q : applied_dots)
+      out << q << ',';
+    out << " moments=";
+    for (const double q : fit.moments)
+      out << q << ',';
+    emit_third_order_trace(out);
+  }
+  state.time = time;
+  state.psi0_target = std::move(fit.psi0_target);
+  state.moments = fit.moments;
+  state.dots = applied_dots;
+  state.derivative_order = derivative.derivative_order;
+  state.clock_rate = temporal.clock_rate;
+  state.tilt_residual = temporal.tilt_residual;
+  state.fit_residual = fit.relative_residual;
+  state.fit_condition = fit.condition_number;
+  data->filtered_moments.reset();
+}
+
+void update_geometric_quadrupole_relaxation(
+    const gsl::not_null<KretschmannFaceData<3>*> data,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, 3, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, 3, Frame::Inertial>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& coordinates,
+    const std::optional<tnsr::I<DataVector, 3, Frame::Inertial>>& velocity,
+    const double mass, const double relaxation_time, const bool model_time,
+    const double time, const TimeStepId& time_id) {
+  const auto geometry = prepare_geometric_matching(
+      &*data, spacetime_metric, pi, phi, mesh, inverse_jacobian, coordinates,
+      velocity, mass, time, time_id);
+  const auto raw = gr::np::evaluate_geometric_second_order(
+      geometry.registration, geometry.frame, mass);
+  if (not data->quadrupole_relaxation)
+    data->quadrupole_relaxation.emplace();
+  data->filtered_moments = gr::np::relax_geometric_tidal_moments(
+      make_not_null(&*data->quadrupole_relaxation),
+      raw.second_order.fit.components, geometry.frame.map, geometry.temporal,
+      relaxation_time, model_time, time, time_id.step_time().value(),
+      time_id.substep() == 0);
+  data->filtered_moments_time = time;
+}
+
+template <size_t Dim>
+void KretschmannFaceData<Dim>::pup(PUP::er& p) {
   p | direction;
   p | time;
   p | kretschmann;
@@ -60,20 +481,32 @@ template <size_t Dim> void KretschmannFaceData<Dim>::pup(PUP::er &p) {
   p | previous_kretschmann;
   p | filtered_moments;
   p | filtered_moments_time;
+  p | last_moment_observation_time;
+  p | third_order;
+  p | psi0_fixed_point;
+  p | quadrupole_relaxation;
   p | initial_gauge_difference;
   p | radial_gauge;
+  p | qhat_radial_gauge;
   p | replay;
 }
 
 template <size_t Dim>
-bool operator==(const KretschmannFaceData<Dim> &lhs,
-                const KretschmannFaceData<Dim> &rhs) {
+bool operator==(const KretschmannFaceData<Dim>& lhs,
+                const KretschmannFaceData<Dim>& rhs) {
   // NaN times compare equal when both are NaN, so that default-constructed
   // objects are equal
   const auto same_time = [](const double a, const double b) {
+    // Uninitialized times intentionally contain signaling NaNs.
+    const ScopedFpeState disable_fpes(false);
     return (std::isnan(a) and std::isnan(b)) or a == b;
   };
-  return lhs.replay == rhs.replay and lhs.direction == rhs.direction and same_time(lhs.time, rhs.time) and
+  return lhs.psi0_fixed_point == rhs.psi0_fixed_point and
+         lhs.quadrupole_relaxation == rhs.quadrupole_relaxation and
+         lhs.last_moment_observation_time ==
+             rhs.last_moment_observation_time and
+         lhs.third_order == rhs.third_order and lhs.replay == rhs.replay and
+         lhs.direction == rhs.direction and same_time(lhs.time, rhs.time) and
          lhs.kretschmann == rhs.kretschmann and
          lhs.d_kretschmann == rhs.d_kretschmann and
          lhs.dt_kretschmann == rhs.dt_kretschmann and
@@ -81,23 +514,24 @@ bool operator==(const KretschmannFaceData<Dim> &lhs,
          same_time(lhs.previous_time, rhs.previous_time) and
          lhs.previous_kretschmann == rhs.previous_kretschmann and
          lhs.radial_gauge == rhs.radial_gauge and
+         lhs.qhat_radial_gauge == rhs.qhat_radial_gauge and
          lhs.initial_gauge_difference == rhs.initial_gauge_difference and
          lhs.filtered_moments == rhs.filtered_moments and
          same_time(lhs.filtered_moments_time, rhs.filtered_moments_time);
 }
 
 template <size_t Dim>
-bool operator!=(const KretschmannFaceData<Dim> &lhs,
-                const KretschmannFaceData<Dim> &rhs) {
+bool operator!=(const KretschmannFaceData<Dim>& lhs,
+                const KretschmannFaceData<Dim>& rhs) {
   return not(lhs == rhs);
 }
 
 template <size_t Dim>
 std::optional<Direction<Dim>> excision_face_direction(
-    const std::unordered_map<std::string, ExcisionSphere<Dim>>
-        &excision_spheres,
-    const Element<Dim> &element) {
-  for (const auto &[name, excision_sphere] : excision_spheres) {
+    const std::unordered_map<std::string, ExcisionSphere<Dim>>&
+        excision_spheres,
+    const Element<Dim>& element) {
+  for (const auto& [name, excision_sphere] : excision_spheres) {
     (void)name;
     if (const auto direction = excision_sphere.abutting_direction(element.id());
         direction.has_value()) {
@@ -108,7 +542,7 @@ std::optional<Direction<Dim>> excision_face_direction(
 }
 
 template <size_t Dim>
-DataVector face_quadrature_weights(const Mesh<Dim - 1> &face_mesh) {
+DataVector face_quadrature_weights(const Mesh<Dim - 1>& face_mesh) {
   if constexpr (Dim == 1) {
     (void)face_mesh;
     return DataVector{1.};
@@ -121,10 +555,14 @@ DataVector face_quadrature_weights(const Mesh<Dim - 1> &face_mesh) {
       if (mesh_1d.basis(0) == Spectral::Basis::SphericalHarmonic and
           mesh_1d.quadrature(0) == Spectral::Quadrature::Gauss) {
         // Gauss-Legendre in cos(theta); the weights are symmetric, so the
-        // ordering of the theta collocation points does not matter
-        weights_1d = Spectral::quadrature_weights<Spectral::Basis::Legendre,
-                                                  Spectral::Quadrature::Gauss>(
-            num_points_1d);
+        // ordering of the theta collocation points does not matter. Compute
+        // these directly: the Legendre spectral cache is limited to 20 points,
+        // whereas spherical-harmonic faces can have many more polar points.
+        weights_1d =
+            Spectral::compute_collocation_points_and_weights<
+                Spectral::Basis::Legendre, Spectral::Quadrature::Gauss>(
+                num_points_1d)
+                .second;
       } else if (mesh_1d.basis(0) == Spectral::Basis::SphericalHarmonic or
                  mesh_1d.basis(0) == Spectral::Basis::Fourier) {
         weights_1d = 2. * std::numbers::pi / static_cast<double>(num_points_1d);
@@ -146,18 +584,18 @@ DataVector face_quadrature_weights(const Mesh<Dim - 1> &face_mesh) {
 
 template <size_t Dim>
 void update_kretschmann_face_data(
-    const gsl::not_null<KretschmannFaceData<Dim> *> data,
-    const tnsr::aa<DataVector, Dim, Frame::Inertial> &spacetime_metric,
-    const tnsr::aa<DataVector, Dim, Frame::Inertial> &pi,
-    const tnsr::iaa<DataVector, Dim, Frame::Inertial> &phi,
-    const Mesh<Dim> &mesh,
+    const gsl::not_null<KretschmannFaceData<Dim>*> data,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
+    const Mesh<Dim>& mesh,
     const InverseJacobian<DataVector, Dim, Frame::ElementLogical,
-                          Frame::Inertial> &inverse_jacobian,
-    const Element<Dim> &element,
-    const std::unordered_map<std::string, ExcisionSphere<Dim>>
-        &excision_spheres,
-    const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>
-        &mesh_velocity,
+                          Frame::Inertial>& inverse_jacobian,
+    const Element<Dim>& element,
+    const std::unordered_map<std::string, ExcisionSphere<Dim>>&
+        excision_spheres,
+    const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
+        mesh_velocity,
     const double time) {
   const auto direction = excision_face_direction(excision_spheres, element);
   if (not direction.has_value()) {
@@ -187,7 +625,7 @@ void update_kretschmann_face_data(
                                        inverse_jacobian, *direction);
       const auto sliced_phi = data_on_slice<gh::Tags::Phi<DataVector, Dim>>(
           mesh.extents(), sliced_dim, fixed_index, phi);
-      const auto &face_phi = get<gh::Tags::Phi<DataVector, Dim>>(sliced_phi);
+      const auto& face_phi = get<gh::Tags::Phi<DataVector, Dim>>(sliced_phi);
       tnsr::I<DataVector, Dim, Frame::Inertial> normal(num_face_points, 0.);
       for (size_t i = 0; i < Dim; ++i) {
         for (size_t j = 0; j < Dim; ++j) {
@@ -226,14 +664,16 @@ void update_kretschmann_face_data(
         data_on_slice<KretschmannTag, DerivKretschmannTag<Dim>>(
             mesh.extents(), sliced_dim, fixed_index, kretschmann,
             d_kretschmann);
-    const Scalar<DataVector> &face_kretschmann = get<KretschmannTag>(face_vars);
+    const Scalar<DataVector>& face_kretschmann = get<KretschmannTag>(face_vars);
 
     // Time derivative at fixed inertial coordinates from the backward
     // difference at fixed grid points, corrected for the mesh velocity
-    const bool have_history =
-        get(data->previous_kretschmann).size() == num_face_points and
-        time > data->previous_time;
-    const bool same_time = time == data->previous_time;
+    // Before the first update previous_time is a signaling NaN, so guard
+    // both time comparisons with the availability of previous face data.
+    const bool have_previous_data =
+        get(data->previous_kretschmann).size() == num_face_points;
+    const bool have_history = have_previous_data and time > data->previous_time;
+    const bool same_time = have_previous_data and time == data->previous_time;
     const bool reuse_previous_estimate =
         same_time and get(data->dt_kretschmann).size() == num_face_points;
     if (not reuse_previous_estimate) {
@@ -252,6 +692,22 @@ void update_kretschmann_face_data(
       }
       get(data->dt_kretschmann) = std::move(grid_rate);
     }
+    if (trace_third_order(time)) {
+      std::ostringstream out;
+      out << std::setprecision(17)
+          << "THIRD_ORDER_TRACE stage=curvature element=" << element.id()
+          << " time=" << time << " have_history=" << have_history
+          << " same_time=" << same_time << " reuse=" << reuse_previous_estimate
+          << " dtK_max=" << max(abs(get(data->dt_kretschmann)))
+          << " K_max=" << max(abs(get(face_kretschmann)));
+      if (have_previous_data) {
+        out << " previous_time=" << data->previous_time
+            << " delta_time=" << time - data->previous_time << " deltaK_max="
+            << max(abs(get(face_kretschmann) -
+                       get(data->previous_kretschmann)));
+      }
+      emit_third_order_trace(out);
+    }
     if (not same_time) {
       data->previous_kretschmann = face_kretschmann;
       data->previous_time = time;
@@ -263,9 +719,9 @@ void update_kretschmann_face_data(
 }
 
 void relax_tidal_moments(
-    const gsl::not_null<std::optional<gr::np::TidalMoments> *> moments,
-    const gsl::not_null<double *> moments_time, const gr::np::TidalMoments &raw,
-    const double time, const std::optional<double> &relaxation_time) {
+    const gsl::not_null<std::optional<gr::np::TidalMoments>*> moments,
+    const gsl::not_null<double*> moments_time, const gr::np::TidalMoments& raw,
+    const double time, const std::optional<double>& relaxation_time) {
   if (not relaxation_time.has_value() or not moments->has_value() or
       not(time >= *moments_time)) {
     *moments = raw;
@@ -284,15 +740,15 @@ void relax_tidal_moments(
 
 template <size_t Dim>
 void update_filtered_tidal_moments(
-    const gsl::not_null<KretschmannFaceData<Dim> *> data,
-    const tnsr::aa<DataVector, Dim, Frame::Inertial> &spacetime_metric,
-    const tnsr::aa<DataVector, Dim, Frame::Inertial> &pi,
-    const tnsr::iaa<DataVector, Dim, Frame::Inertial> &phi,
-    const Mesh<Dim> &mesh,
+    const gsl::not_null<KretschmannFaceData<Dim>*> data,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& spacetime_metric,
+    const tnsr::aa<DataVector, Dim, Frame::Inertial>& pi,
+    const tnsr::iaa<DataVector, Dim, Frame::Inertial>& phi,
+    const Mesh<Dim>& mesh,
     const InverseJacobian<DataVector, Dim, Frame::ElementLogical,
-                          Frame::Inertial> &inverse_jacobian,
+                          Frame::Inertial>& inverse_jacobian,
     const PhysicalModel model, const double mass,
-    const std::optional<double> &relaxation_time, const double time) {
+    const std::optional<double>& relaxation_time, const double time) {
   if constexpr (Dim != 3) {
     (void)data;
     (void)spacetime_metric;
@@ -307,8 +763,9 @@ void update_filtered_tidal_moments(
     ERROR("The order-two worldtube model is only implemented in 3 dimensions.");
   } else {
     if (not data->direction.has_value()) {
-      ERROR("The tidal moments can only be updated on an element that abuts an "
-            "excision sphere; update the Kretschmann face data first.");
+      ERROR(
+          "The tidal moments can only be updated on an element that abuts an "
+          "excision sphere; update the Kretschmann face data first.");
     }
     const FaceCurvature face = face_curvature(
         spacetime_metric, pi, phi, mesh, inverse_jacobian, *data->direction);
@@ -329,42 +786,42 @@ void update_filtered_tidal_moments(
 
 #define DIM(data) BOOST_PP_TUPLE_ELEM(0, data)
 
-#define INSTANTIATION(r, data)                                                 \
-  template struct KretschmannFaceData<DIM(data)>;                              \
-  template bool operator==(const KretschmannFaceData<DIM(data)> &lhs,          \
-                           const KretschmannFaceData<DIM(data)> &rhs);         \
-  template bool operator!=(const KretschmannFaceData<DIM(data)> &lhs,          \
-                           const KretschmannFaceData<DIM(data)> &rhs);         \
-  template std::optional<Direction<DIM(data)>> excision_face_direction(        \
-      const std::unordered_map<std::string, ExcisionSphere<DIM(data)>>         \
-          &excision_spheres,                                                   \
-      const Element<DIM(data)> &element);                                      \
-  template DataVector face_quadrature_weights<DIM(data)>(                      \
-      const Mesh<DIM(data) - 1> &face_mesh);                                   \
-  template void update_filtered_tidal_moments(                                 \
-      gsl::not_null<KretschmannFaceData<DIM(data)> *>,                         \
-      const tnsr::aa<DataVector, DIM(data), Frame::Inertial> &,                \
-      const tnsr::aa<DataVector, DIM(data), Frame::Inertial> &,                \
-      const tnsr::iaa<DataVector, DIM(data), Frame::Inertial> &,               \
-      const Mesh<DIM(data)> &,                                                 \
-      const InverseJacobian<DataVector, DIM(data), Frame::ElementLogical,      \
-                            Frame::Inertial> &,                                \
-      PhysicalModel, double, const std::optional<double> &, double);           \
-  template void update_kretschmann_face_data(                                  \
-      gsl::not_null<KretschmannFaceData<DIM(data)> *>,                         \
-      const tnsr::aa<DataVector, DIM(data), Frame::Inertial> &,                \
-      const tnsr::aa<DataVector, DIM(data), Frame::Inertial> &,                \
-      const tnsr::iaa<DataVector, DIM(data), Frame::Inertial> &,               \
-      const Mesh<DIM(data)> &,                                                 \
-      const InverseJacobian<DataVector, DIM(data), Frame::ElementLogical,      \
-                            Frame::Inertial> &,                                \
-      const Element<DIM(data)> &,                                              \
-      const std::unordered_map<std::string, ExcisionSphere<DIM(data)>> &,      \
-      const std::optional<tnsr::I<DataVector, DIM(data), Frame::Inertial>> &,  \
+#define INSTANTIATION(r, data)                                               \
+  template struct KretschmannFaceData<DIM(data)>;                            \
+  template bool operator==(const KretschmannFaceData<DIM(data)>& lhs,        \
+                           const KretschmannFaceData<DIM(data)>& rhs);       \
+  template bool operator!=(const KretschmannFaceData<DIM(data)>& lhs,        \
+                           const KretschmannFaceData<DIM(data)>& rhs);       \
+  template std::optional<Direction<DIM(data)>> excision_face_direction(      \
+      const std::unordered_map<std::string, ExcisionSphere<DIM(data)>>&      \
+          excision_spheres,                                                  \
+      const Element<DIM(data)>& element);                                    \
+  template DataVector face_quadrature_weights<DIM(data)>(                    \
+      const Mesh<DIM(data) - 1>& face_mesh);                                 \
+  template void update_filtered_tidal_moments(                               \
+      gsl::not_null<KretschmannFaceData<DIM(data)>*>,                        \
+      const tnsr::aa<DataVector, DIM(data), Frame::Inertial>&,               \
+      const tnsr::aa<DataVector, DIM(data), Frame::Inertial>&,               \
+      const tnsr::iaa<DataVector, DIM(data), Frame::Inertial>&,              \
+      const Mesh<DIM(data)>&,                                                \
+      const InverseJacobian<DataVector, DIM(data), Frame::ElementLogical,    \
+                            Frame::Inertial>&,                               \
+      PhysicalModel, double, const std::optional<double>&, double);          \
+  template void update_kretschmann_face_data(                                \
+      gsl::not_null<KretschmannFaceData<DIM(data)>*>,                        \
+      const tnsr::aa<DataVector, DIM(data), Frame::Inertial>&,               \
+      const tnsr::aa<DataVector, DIM(data), Frame::Inertial>&,               \
+      const tnsr::iaa<DataVector, DIM(data), Frame::Inertial>&,              \
+      const Mesh<DIM(data)>&,                                                \
+      const InverseJacobian<DataVector, DIM(data), Frame::ElementLogical,    \
+                            Frame::Inertial>&,                               \
+      const Element<DIM(data)>&,                                             \
+      const std::unordered_map<std::string, ExcisionSphere<DIM(data)>>&,     \
+      const std::optional<tnsr::I<DataVector, DIM(data), Frame::Inertial>>&, \
       double);
 
 GENERATE_INSTANTIATIONS(INSTANTIATION, (1, 2, 3))
 
 #undef INSTANTIATION
 #undef DIM
-} // namespace gh::worldtube
+}  // namespace gh::worldtube

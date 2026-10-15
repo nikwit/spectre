@@ -1,0 +1,273 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+# Fixed-sphere evolved physical trace with a prescribed oscillating curvature target.
+Executable: EvolveGhSingleBlackHole
+Testing:
+  Check: parse;execute
+  Timeout: 120
+  Priority: High
+ExpectedOutput:
+- GhPhysicalGhostVolume0.h5
+- GhPhysicalGhostReductions.h5
+---
+Parallelization:
+  ElementDistribution: NumGridPointsAndGridSpacing
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.002
+  InitialSlabSize: 0.002
+  MinimumTimeStep: 1e-7
+  LocalTimeStepping: 'Off'
+  VariableOrderAlgorithm:
+    GoalOrder: 4
+  LtsStepChoosers: null
+  TimeStepper:
+    AdamsBashforth:
+      Order: 4
+Amr:
+  Criteria: null
+  EnableInBlocks: []
+  Policies:
+    EnforceTwoToOneBalanceInNormalDirection: true
+    Isotropy: Anisotropic
+    Limits:
+      RefinementLevel: Auto
+      NumGridPoints: Auto
+      ErrorBeyondLimits: false
+    AllowCoarsening: true
+  Verbosity: Quiet
+PhaseChangeAndTriggers: []
+InitialData: &id001
+  GeneralizedHarmonic(KerrSchild):
+    Mass: 1.0
+    Spin:
+    - 0.0
+    - 0.0
+    - 0.0
+    Center: &id002
+    - 0.0
+    - 0.0
+    - 0.0
+    Velocity:
+    - 0.0
+    - 0.0
+    - 0.0
+DomainCreator:
+  SphericalShells:
+    InnerRadius: 2.5
+    OuterRadius: 10.0
+    InitialRadialRefinement: 1
+    InitialNumberOfRadialGridPoints: 12
+    InitialSphericalHarmonicL: 8
+    RadialPartitioning: []
+    RadialDistribution: Logarithmic
+    TimeDependentMaps: None
+    InnerBoundaryCondition:
+      WorldtubeEvolvedPhysicalGhost:
+        GaugeSector: SommerfeldAbsorbing
+        Amplitude: 1.0e-05
+        Frequency: 1.0
+    OuterBoundaryCondition:
+      DirichletAnalytic:
+        AnalyticPrescription: *id001
+EvolutionSystem:
+  GeneralizedHarmonic:
+    GaugeCondition:
+      AnalyticChristoffel:
+        AnalyticPrescription: *id001
+    DampingFunctionGamma0:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 3.0
+        Width: 11.313708499
+        Center:
+        - 0.0
+        - 0.0
+        - 0.0
+    DampingFunctionGamma1:
+      GaussianPlusConstant:
+        Constant: -1.0
+        Amplitude: 0.0
+        Width: 11.313708499
+        Center:
+        - 0.0
+        - 0.0
+        - 0.0
+    DampingFunctionGamma2:
+      GaussianPlusConstant:
+        Constant: 0.001
+        Amplitude: 1.0
+        Width: 11.313708499
+        Center:
+        - 0.0
+        - 0.0
+        - 0.0
+SpatialDiscretization:
+  BoundaryCorrection:
+    AveragedUpwindPenalty: null
+  DiscontinuousGalerkin:
+    Formulation: StrongInertial
+    Quadrature: GaussLobatto
+    Filtering:
+    - Hypercube:
+        HalfPower: 200
+        Enable: true
+        BlocksToFilter: All
+        VolumeFilterOnSubstep: true
+        BoundaryCorrectionFilterOnSubstep: false
+        VolumeFilterEveryNSteps: None
+        BoundaryCorrectionFilterEveryNSteps: None
+    - SphericalShell:
+        NumModesToKill: 4
+        AngularHalfPower: None
+        RadialHalfPower: None
+        Enable: true
+        BlocksToFilter: All
+        VolumeFilterOnSubstep: true
+        BoundaryCorrectionFilterOnSubstep: false
+        VolumeFilterEveryNSteps: None
+        BoundaryCorrectionFilterEveryNSteps: None
+EventsAndTriggersAtCheckpoints: null
+EventsAndTriggersAtSlabs:
+- Trigger:
+    Slabs:
+      EvenlySpaced:
+        Interval: 2
+        Offset: 0
+  Events:
+  - ObserveTimeStep:
+      SubfileName: TimeSteps
+      PrintTimeToTerminal: true
+      ObservePerCore: false
+  - ObserveNorms:
+      SubfileName: Errors
+      TensorsToObserve:
+      - Name: Error(SpacetimeMetric)
+        NormType: L2Norm
+        Components: Sum
+      - Name: Error(Pi)
+        NormType: L2Norm
+        Components: Sum
+      - Name: Error(Phi)
+        NormType: L2Norm
+        Components: Sum
+  - ObserveNorms:
+      SubfileName: Norms
+      TensorsToObserve:
+      - Name: Lapse
+        NormType: L2Norm
+        Components: Individual
+      - Name: PointwiseL2Norm(GaugeConstraint)
+        NormType: L2Norm
+        Components: Sum
+      - Name: PointwiseL2Norm(ThreeIndexConstraint)
+        NormType: L2Norm
+        Components: Sum
+      - Name: PointwiseL2Norm(FourIndexConstraint)
+        NormType: L2Norm
+        Components: Sum
+- Trigger:
+    Slabs:
+      Specified:
+        Values:
+        - 0
+        - 5
+  Events:
+  - ObserveFields:
+      SubfileName: VolumeData
+      VariablesToObserve:
+      - SpacetimeMetric
+      - Pi
+      - Phi
+      - GaugeH
+      - PointwiseL2Norm(GaugeConstraint)
+      - PointwiseL2Norm(ThreeIndexConstraint)
+      - PointwiseL2Norm(FourIndexConstraint)
+      InterpolateToMesh: None
+      ProjectToMesh: None
+      CoordinatesFloatingPointType: Double
+      FloatingPointTypes:
+      - Double
+      BlocksToObserve: All
+- Trigger:
+    Slabs:
+      Specified:
+        Values:
+        - 5
+  Events:
+  - Completion
+EventsAndTriggersAtSteps: null
+EventsAndDenseTriggers: null
+EventsRunAtCleanup:
+  ObservationValue: -1000.0
+  Events:
+  - ObserveTimeStepVolume:
+      SubfileName: FailureTimeStep
+      FloatingPointType: Double
+      CoordinatesFloatingPointType: Float
+Observers:
+  VolumeFileName: GhPhysicalGhostVolume
+  ReductionFileName: GhPhysicalGhostReductions
+  SurfaceFileName: GhPhysicalGhostSurfaces
+Interpolator:
+  Verbosity: Silent
+ApparentHorizons:
+  LMax: 10
+  ApparentHorizon: &id003
+    Criteria:
+    - Residual:
+        MinResidual: 0.01
+        MaxResidual: 0.1
+        MinResolutionL: 4
+    InitialGuess:
+      InitialL: 8
+      InitialShape:
+        Sphere:
+          Radius: 2.2
+          Center: *id002
+    FastFlow:
+      Flow: Fast
+      Alpha: 1.0
+      Beta: 0.5
+      AbsTol: 1e-12
+      TruncationTol: 1e-2
+      DivergenceTol: 1.2
+      DivergenceIter: 5
+      MaxIts: 100
+    Verbosity: Verbose
+    MaxComputeCoordsRetries: 3
+    BlocksForHorizonFind: All
+  ControlSystemSingleAh: *id003
+  ControlSystemCharSpeedAh: *id003
+InterpolationTargets:
+  BondiSachsInterpolation:
+    LMax: 16
+    Radius:
+    - 100
+    - 150
+    - 200
+    Center:
+    - 0
+    - 0
+    - 0
+    AngularOrdering: Cce
+  ExcisionBoundary: &id004
+    LMax: 8
+    Center: *id002
+    Radius: 2.5
+    AngularOrdering: Strahlkorper
+  ControlSystemCharSpeedExcision: *id004
+Cce:
+  BondiSachsOutputFilePrefix: BondiSachs
+ControlSystems:
+  WriteDataToDisk: true
+  MeasurementsPerUpdate: 4
+  DelayUpdate: true
+  Verbosity: Silent
+  Translation: None
+  Shape: None
+  Size: None

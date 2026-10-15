@@ -4,13 +4,9 @@
 #include "Framework/TestingFramework.hpp"
 
 #include <array>
-#include <filesystem>
-#include "Time/Slab.hpp"
-#include "Time/Time.hpp"
-#include "Evolution/Systems/GeneralizedHarmonic/BoundaryCorrections/AveragedUpwindPenalty.hpp"
-#include "NumericalAlgorithms/DiscontinuousGalerkin/Formulation.hpp"
 #include <complex>
 #include <cstddef>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <random>
@@ -19,6 +15,10 @@
 #include <unordered_map>
 #include <utility>
 #include <variant>
+#include "Evolution/Systems/GeneralizedHarmonic/BoundaryCorrections/AveragedUpwindPenalty.hpp"
+#include "NumericalAlgorithms/DiscontinuousGalerkin/Formulation.hpp"
+#include "Time/Slab.hpp"
+#include "Time/Time.hpp"
 
 #include "DataStructures/ComplexDataVector.hpp"
 #include "DataStructures/DataVector.hpp"
@@ -391,17 +391,17 @@ void test_option_parsing_and_serialization() {
     CHECK(worldtube->physical_sector() == Imposition::Bjorhus);
     CHECK(worldtube->gauge_sector() == Imposition::Frozen);
   }
-  test_serialization_via_base<gh::BoundaryConditions::BoundaryCondition<Dim>,
+  test_serialization_via_base<domain::BoundaryConditions::BoundaryCondition,
                               Worldtube>(
       gh::BoundaryConditions::detail::PerFieldConstraintSectors{
           Imposition::Frozen, Imposition::Bjorhus, Imposition::Bjorhus},
       Imposition::Frozen, Imposition::SommerfeldOutgoing, Model::None,
       std::nullopt);
-  test_serialization_via_base<gh::BoundaryConditions::BoundaryCondition<Dim>,
+  test_serialization_via_base<domain::BoundaryConditions::BoundaryCondition,
                               Worldtube>(
       Imposition::Bjorhus, Imposition::Bjorhus, Imposition::Frozen,
       Model::Quadrupole, std::optional<double>{1.0});
-  test_serialization_via_base<gh::BoundaryConditions::BoundaryCondition<Dim>,
+  test_serialization_via_base<domain::BoundaryConditions::BoundaryCondition,
                               Worldtube>(
       Imposition::Bjorhus, Imposition::Bjorhus, Imposition::Frozen,
       Model::Quadrupole, std::optional<double>{1.0},
@@ -561,7 +561,101 @@ void test_option_parsing_and_serialization() {
     CHECK(worldtube->physical_model() == Model::QuadrupoleCoulomb);
     CHECK(worldtube->mass() == std::optional<double>{1.0});
     CHECK(worldtube->moment_relaxation_time() == std::optional<double>{5.0});
+    CHECK_FALSE(worldtube->moment_relaxation_uses_model_time());
   }
+
+  {
+    const auto created = TestHelpers::test_creation<
+        std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+        Metavariables>(
+        "WorldtubeTypeD:\n"
+        "  ConstraintPreservingSector: Bjorhus\n"
+        "  PhysicalSector: Bjorhus\n"
+        "  GaugeSector: SommerfeldAbsorbing\n"
+        "  PhysicalModel: ThirdOrderGeometric\n"
+        "  Mass: 1.0\n"
+        "  MomentRelaxationTime: None");
+    const auto* worldtube = dynamic_cast<const Worldtube*>(created.get());
+    REQUIRE(worldtube != nullptr);
+    CHECK(worldtube->physical_model() == Model::ThirdOrderGeometric);
+    CHECK(worldtube->mass() == std::optional<double>{1.0});
+    CHECK(serialize_and_deserialize(*worldtube) == *worldtube);
+  }
+  {
+    const auto created = TestHelpers::test_creation<
+        std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+        Metavariables>(
+        "WorldtubeTypeD:\n"
+        "  ConstraintPreservingSector: Bjorhus\n"
+        "  PhysicalSector: Bjorhus\n"
+        "  GaugeSector: SommerfeldAbsorbing\n"
+        "  PhysicalModel: QuadrupoleGeometric\n"
+        "  Mass: 1.0\n"
+        "  MomentRelaxationTime:\n"
+        "    ModelTime:\n"
+        "      Timescale: 1.5\n");
+    const auto* worldtube = dynamic_cast<const Worldtube*>(created.get());
+    REQUIRE(worldtube != nullptr);
+    CHECK(worldtube->moment_relaxation_time() == std::optional<double>{1.5});
+    CHECK(worldtube->moment_relaxation_uses_model_time());
+    CHECK(serialize_and_deserialize(*worldtube) == *worldtube);
+    CHECK_THROWS_WITH(
+        (Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                   Imposition::SommerfeldAbsorbing, Model::Quadrupole, 1.,
+                   gh::BoundaryConditions::detail::ModelTimeRelaxation{1.}}),
+        Catch::Matchers::ContainsSubstring("ModelTime relaxation requires"));
+  }
+  {
+    const auto created = TestHelpers::test_creation<
+        std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
+        Metavariables>(
+        "WorldtubeTypeD:\n"
+        "  ConstraintPreservingSector: Bjorhus\n"
+        "  PhysicalSector: Bjorhus\n"
+        "  GaugeSector: SommerfeldAbsorbing\n"
+        "  PhysicalModel:\n"
+        "    QuadrupoleGeometricFixedPoint:\n"
+        "      RelativeTolerance: 1.e-10\n"
+        "      AbsoluteTolerance: 1.e-14\n"
+        "      MaxIterations: 20\n"
+        "      Damping: 0.7\n"
+        "  Mass: 1.0\n"
+        "  MomentRelaxationTime: None");
+    const auto* worldtube = dynamic_cast<const Worldtube*>(created.get());
+    REQUIRE(worldtube != nullptr);
+    REQUIRE(worldtube->psi0_fixed_point().has_value());
+    CHECK(worldtube->physical_model() == Model::QuadrupoleGeometric);
+    CHECK(worldtube->psi0_fixed_point()->damping == .7);
+    CHECK(worldtube->psi0_fixed_point()->max_iterations == 20);
+    CHECK(serialize_and_deserialize(*worldtube) == *worldtube);
+    using Fixed = gh::BoundaryConditions::detail::GeometricFixedPoint;
+    CHECK_THROWS_WITH(
+        (Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                   Imposition::SommerfeldAbsorbing, Fixed{}, 1., 1.}),
+        Catch::Matchers::ContainsSubstring(
+            "requires MomentRelaxationTime: None"));
+    for (const Fixed::Parameters bad : {Fixed::Parameters{-1., 1.e-14, 20, 1.},
+                                        {0., 0., 20, 1.},
+                                        {1.e-10, 0., 0, 1.},
+                                        {1.e-10, 0., 20, 0.},
+                                        {1.e-10, 0., 20, 1.1}}) {
+      CHECK_THROWS_WITH(
+          (Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                     Imposition::SommerfeldAbsorbing, Fixed{bad}, 1.}),
+          Catch::Matchers::ContainsSubstring(
+              "Invalid geometric Psi0 fixed-point settings"));
+    }
+  }
+  CHECK_THROWS_WITH(
+      (Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                 Imposition::SommerfeldAbsorbing, Model::ThirdOrderGeometric,
+                 1., 5.}),
+      Catch::Matchers::ContainsSubstring(
+          "ThirdOrderGeometric requires MomentRelaxationTime: None"));
+  CHECK_THROWS_WITH(
+      (Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                 Imposition::SommerfeldAbsorbing, Model::ThirdOrderGeometric}),
+      Catch::Matchers::ContainsSubstring("ThirdOrderGeometric needs the mass"));
   CHECK_THROWS_WITH(
       (TestHelpers::test_creation<
           std::unique_ptr<gh::BoundaryConditions::BoundaryCondition<Dim>>,
@@ -1539,6 +1633,20 @@ void test_quadrupole_model_on_boosted_kerr_schild() {
   CHECK_ITERABLE_CUSTOM_APPROX(with_quadrupole.dt_phi, with_type_d.dt_phi,
                                fd_approx);
 
+  // The fixed-point boundary must consume the cached target with exactly the
+  // same Weyl normalization and Bjorhus projection, without another fit.
+  {
+    auto cached = face_data;
+    cached.psi0_fixed_point = gh::worldtube::GeometricFixedPointFaceData{
+        cached.time, quadrupole.psi0_target, {3, 1.e-15, 1.e-11, .1}};
+    const auto correction = apply_worldtube(
+        Worldtube{Imposition::Bjorhus, Imposition::Bjorhus, Imposition::Frozen,
+                  gh::BoundaryConditions::detail::GeometricFixedPoint{}, 1.},
+        data, 0., sphere.domain, sphere.element, sphere.functions_of_time,
+        cached);
+    check_corrections_equal(correction, with_quadrupole);
+  }
+
   // With the fitted moments stored as the relaxed moments of the face data,
   // the condition skips the fit and imposes them: the same corrections
   {
@@ -1759,25 +1867,38 @@ void test_reference_replay() {
   const ExcisedSphere sphere{};
   const auto data=make_face_data(make_not_null(&generator),5,-.45);
   gh::worldtube::KretschmannFaceData<3> fd{};
-  fd.replay=gh::worldtube::FaceReplayData<3>{data.spacetime_metric,data.pi,data.phi,data.normal_covector,6};
+  fd.replay = gh::worldtube::FaceReplayData<3>{
+      data.spacetime_metric, data.pi, data.phi, data.normal_covector, 6};
   for(auto& c:fd.replay->pi)c+=.001;
   for(auto& c:fd.replay->phi)c-=.002;
   for(auto& c:fd.replay->raw_normal)c*=1.7;
   CHECK(serialize_and_deserialize(fd)==fd);
-  const auto apply=[&](const std::string& sector){return apply_worldtube(
-    Worldtube{Imposition::Bjorhus,Imposition::Bjorhus,Replay{Params{"unused.bin","Replay",sector,1,std::nullopt}},Model::None},
-    data,0.,sphere.domain,sphere.element,sphere.functions_of_time,fd);};
+  const auto apply = [&](const std::string& sector) {
+    return apply_worldtube(
+        Worldtube{
+            Imposition::Bjorhus, Imposition::Bjorhus,
+            Replay{Params{"unused.bin", "Replay", sector, 1, std::nullopt}},
+            Model::None},
+        data, 0., sphere.domain, sphere.element, sphere.functions_of_time, fd);
+  };
   const auto reference=apply("None");
-  const auto original=apply_worldtube(Worldtube{Imposition::Bjorhus,Imposition::Bjorhus,gh::BoundaryConditions::detail::AlgebraicGauge{0.},Model::None},data,0.,sphere.domain,sphere.element,sphere.functions_of_time);
+  const auto original = apply_worldtube(
+      Worldtube{Imposition::Bjorhus, Imposition::Bjorhus,
+                gh::BoundaryConditions::detail::AlgebraicGauge{0.},
+                Model::None},
+      data, 0., sphere.domain, sphere.element, sphere.functions_of_time);
   check_corrections_equal(apply("All"),original);
   // With identical metric on the traces, reference flux has precisely the
   // same characteristic basis. Independently call the numerical flux and lift.
   auto expected=make_corrections(5);auto donor_normal=data.normal_covector;
   for(auto& c:donor_normal)c*=-1.;const tnsr::I<DataVector,3> velocity(5,0.);
   gh::BoundaryCorrections::AveragedUpwindPenalty<3>{}.dg_boundary_terms(
-    make_not_null(&expected.dt_spacetime_metric),make_not_null(&expected.dt_pi),make_not_null(&expected.dt_phi),
-    data.spacetime_metric,data.pi,data.phi,data.gamma1,data.gamma2,data.normal_covector,velocity,
-    fd.replay->metric,fd.replay->pi,fd.replay->phi,data.gamma1,data.gamma2,donor_normal,velocity,dg::Formulation::StrongInertial);
+      make_not_null(&expected.dt_spacetime_metric),
+      make_not_null(&expected.dt_pi), make_not_null(&expected.dt_phi),
+      data.spacetime_metric, data.pi, data.phi, data.gamma1, data.gamma2,
+      data.normal_covector, velocity, fd.replay->metric, fd.replay->pi,
+      fd.replay->phi, data.gamma1, data.gamma2, donor_normal, velocity,
+      dg::Formulation::StrongInertial);
   for(auto& c:expected.dt_spacetime_metric)c*=(-.5*6.*5.*1.7);
   for(auto& c:expected.dt_pi)c*=(-.5*6.*5.*1.7);
   for(auto& c:expected.dt_phi)c*=(-.5*6.*5.*1.7);
@@ -1789,7 +1910,8 @@ void test_reference_replay() {
     add_to(make_not_null(&sum.dt_pi),mixed.dt_pi);
     add_to(make_not_null(&sum.dt_phi),mixed.dt_phi);
   }
-  add_to(make_not_null(&sum.dt_spacetime_metric),reference.dt_spacetime_metric,-2.);
+  add_to(make_not_null(&sum.dt_spacetime_metric), reference.dt_spacetime_metric,
+         -2.);
   add_to(make_not_null(&sum.dt_pi),reference.dt_pi,-2.);
   add_to(make_not_null(&sum.dt_phi),reference.dt_phi,-2.);
   check_corrections_equal(sum,original);
@@ -1799,46 +1921,72 @@ void test_reference_replay() {
   // it must recover the original boundary correction on this shared basis.
   auto complementary=apply("CPAndPhysical");
   const auto gauge_only=apply("Gauge");
-  add_to(make_not_null(&complementary.dt_spacetime_metric),gauge_only.dt_spacetime_metric);
+  add_to(make_not_null(&complementary.dt_spacetime_metric),
+         gauge_only.dt_spacetime_metric);
   add_to(make_not_null(&complementary.dt_pi),gauge_only.dt_pi);
   add_to(make_not_null(&complementary.dt_phi),gauge_only.dt_phi);
-  add_to(make_not_null(&complementary.dt_spacetime_metric),reference.dt_spacetime_metric,-1.);
+  add_to(make_not_null(&complementary.dt_spacetime_metric),
+         reference.dt_spacetime_metric, -1.);
   add_to(make_not_null(&complementary.dt_pi),reference.dt_pi,-1.);
   add_to(make_not_null(&complementary.dt_phi),reference.dt_phi,-1.);
   check_corrections_equal(complementary,original);
-  const auto parsed_complement=TestHelpers::test_creation<Worldtube>(
-    "ConstraintPreservingSector: Bjorhus\nPhysicalSector: Bjorhus\n"
-    "GaugeSector:\n  ReferenceReplay:\n    File: unused.bin\n    Mode: Replay\n"
-    "    ModelSector: CPAndPhysical\n    Stride: 1\n    SchwarzschildReference: None\n"
-    "PhysicalModel: None\nMass: None\nMomentRelaxationTime: None\n");
+  const auto parsed_complement = TestHelpers::test_creation<Worldtube>(
+      "ConstraintPreservingSector: Bjorhus\nPhysicalSector: Bjorhus\n"
+      "GaugeSector:\n  ReferenceReplay:\n    File: unused.bin\n    Mode: "
+      "Replay\n"
+      "    ModelSector: CPAndPhysical\n    Stride: 1\n    "
+      "SchwarzschildReference: None\n"
+      "PhysicalModel: None\nMass: None\nMomentRelaxationTime: None\n");
   CHECK(parsed_complement.face_replay()->model_sector=="CPAndPhysical");
   CHECK(serialize_and_deserialize(parsed_complement)==parsed_complement);
 
   // Face tape: preserve distinct startup states at identical physical times,
   // exact normal samples, and a fifth-degree time dependence under decimation.
   const std::string file="FaceReplayTest"+std::to_string(generator())+".bin";
-  const Mesh<3> mesh(std::array<size_t,3>{3,3,5},
-    std::array<Spectral::Basis,3>{Spectral::Basis::Legendre,Spectral::Basis::SphericalHarmonic,Spectral::Basis::SphericalHarmonic},
-    std::array<Spectral::Quadrature,3>{Spectral::Quadrature::GaussLobatto,Spectral::Quadrature::Gauss,Spectral::Quadrature::Equiangular});
+  const Mesh<3> mesh(
+      std::array<size_t, 3>{3, 3, 5},
+      std::array<Spectral::Basis, 3>{Spectral::Basis::Legendre,
+                                     Spectral::Basis::SphericalHarmonic,
+                                     Spectral::Basis::SphericalHarmonic},
+      std::array<Spectral::Quadrature, 3>{Spectral::Quadrature::GaussLobatto,
+                                          Spectral::Quadrature::Gauss,
+                                          Spectral::Quadrature::Equiangular});
   tnsr::I<DataVector,3> coords(45,0.);get<0>(coords)=2.5;
   tnsr::aa<DataVector,3> g(45,0.),pi(45,0.);tnsr::iaa<DataVector,3> phi(45,0.);
-  InverseJacobian<DataVector,3,Frame::ElementLogical,Frame::Inertial> jac(45,0.);get<0,0>(jac)=1.;
+  InverseJacobian<DataVector, 3, Frame::ElementLogical, Frame::Inertial> jac(
+      45, 0.);
+  get<0, 0>(jac) = 1.;
   std::optional<gh::worldtube::FaceReplayData<3>> recorded{};
-  auto fill=[&](double value){for(auto& c:g)c=value;for(auto& c:pi)c=2.*value;for(auto& c:phi)c=3.*value;};
+  auto fill = [&](double value) {
+    for (auto& c : g)
+      c = value;
+    for (auto& c : pi)
+      c = 2. * value;
+    for (auto& c : phi)
+      c = 3. * value;
+  };
   auto eval=[&](const Params& opt,int64_t slab_number,double t){
     const auto slab=Slab::with_duration_from_start(t,.01);
     const TimeStepId id(true,slab_number,slab.start());
-    gh::worldtube::update_face_replay(make_not_null(&recorded),opt,g,pi,phi,coords,mesh,jac,id,t);
+    gh::worldtube::update_face_replay(make_not_null(&recorded), opt, g, pi, phi,
+                                      coords, mesh, jac, id, t);
   };
   const Params record{file,"Record","None",1,std::nullopt};
   fill(10.);eval(record,-3,0.);fill(20.);eval(record,-2,0.);
-  for(int64_t i=0;i<=20;++i){double t=.1*static_cast<double>(i);fill(1.+pow(t,5));eval(record,i,t);}
+  for (int64_t i = 0; i <= 20; ++i) {
+    double t = .1 * static_cast<double>(i);
+    fill(1. + pow(t, 5));
+    eval(record, i, t);
+  }
   const Params exact{file,"Replay","None",1,std::nullopt};
   eval(exact,-3,0.);CHECK(get<0,0>(recorded->metric)[0]==10.);
   eval(exact,-2,0.);CHECK(get<0,0>(recorded->metric)[0]==20.);
   eval(exact,7,.7);CHECK(get<0,0>(recorded->metric)[0]==1.+pow(.1*7.,5));
   const Params interpolated{file,"Replay","None",2,std::nullopt};
-  for(double t:{.03,.35,1.17,1.97}){eval(interpolated,0,t);CHECK(get<0,0>(recorded->metric)[0]==approx(1.+pow(t,5)));}
+  for (double t : {.03, .35, 1.17, 1.97}) {
+    eval(interpolated, 0, t);
+    CHECK(get<0, 0>(recorded->metric)[0] == approx(1. + pow(t, 5)));
+  }
   std::filesystem::remove(file);
 }
 

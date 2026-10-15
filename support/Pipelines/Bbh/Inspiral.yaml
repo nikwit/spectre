@@ -610,6 +610,12 @@ ApparentHorizons:
   ControlSystemCharSpeedAhB: *AhB
 
 InterpolationTargets:
+  # Only records when the GhWorldtube event is triggered.
+  GhWorldtube:
+    LMax: 16
+    Center: [*XCoordB, *YOffset, *ZOffset]
+    Radius: 0.3
+    AngularOrdering: Strahlkorper
   BondiSachsInterpolation:
     LMax: 16
     Radius: [100, 150, 200]

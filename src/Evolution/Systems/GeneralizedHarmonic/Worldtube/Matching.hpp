@@ -60,7 +60,24 @@ enum class PhysicalModel {
   /// static-like mode grows at about 0.03/M for an excision at 3M, which the
   /// moment relaxation removes. Needs the same inputs as `Quadrupole` and
   /// the excision outside about \f$2.4M\f$.
-  QuadrupoleCoulomb
+  QuadrupoleCoulomb,
+  /// Order two with common tidal axes from the screen-metric Laplace
+  /// eigenmap and polar transport of the registered complex dyad.
+  /// Requires a round inertial-coordinate sphere and a complete
+  /// spherical-harmonic face. Translation, rotation and uniform expansion are
+  /// allowed; non-spherical shape maps are rejected. Radius, boost and fit
+  /// frame match Quadrupole.
+  QuadrupoleGeometric,
+  /// Geometric third-order tide: octupoles and causal, transported dotted
+  /// quadrupoles, including induction, near-zone and slice-time terms.
+  /// Same round-sphere restriction as QuadrupoleGeometric. Requires the
+  /// face-data action and MomentRelaxationTime: None.
+  ThirdOrderGeometric,
+  /// One real ten-column longitudinal response fit, using Psi1,2,3 and the
+  /// live spacetime gradient of K. Includes the analytic type-D seed response;
+  /// only the completed incoming Psi0 is imposed. Requires a full round sphere
+  /// and unrelaxed live moments.
+  QuadrupoleLongitudinal
 };
 
 /// Whether the model is one of the order-two models, which need the mass
@@ -131,9 +148,11 @@ Scalar<DataVector> normal_derivative_of_coulomb(
  * `KretschmannFaceData::filtered_moments` the boundary condition imposes.
  * `PhysicalModel::None` is not a model and is rejected.
  *
- * The construction consumes the interior \f$\Psi_0\f$ through the invariants
- * and the type-D solve, so an evolution imposing the result is the fixed
- * point iteration of the note's circularity discussion.
+ * With `use_fixed_point`, QuadrupoleGeometric consumes the converged target
+ * cached by the face-data action. Imposed moments are rejected in this mode.
+ * Otherwise the construction consumes the interior \f$\Psi_0\f$ through the
+ * invariants and the type-D solve, so an evolution imposing the result is the
+ * fixed point iteration of the note's circularity discussion.
  */
 MatchingEvaluation evaluate_matching(
     PhysicalModel model, std::optional<double> mass,
@@ -144,7 +163,23 @@ MatchingEvaluation evaluate_matching(
     const Scalar<DataVector>& lapse,
     const tnsr::I<DataVector, 3, Frame::Inertial>& shift,
     const KretschmannFaceData<3>* face_data,
-    const std::optional<gr::np::TidalMoments>& imposed_moments = std::nullopt);
+    const std::optional<gr::np::TidalMoments>& imposed_moments = std::nullopt,
+    bool use_fixed_point = false);
+
+/// Diagnostic variant: use fit_psi only in the moment-fit right-hand side.
+/// All five NR slots are pulled back using the unmodified live registration.
+/// Requires QuadrupoleGeometric, without imposed moments or a fixed point.
+MatchingEvaluation evaluate_matching_with_fit_input(
+    PhysicalModel model, std::optional<double> mass,
+    const tnsr::ii<DataVector, 3, Frame::Inertial>& electric,
+    const tnsr::ii<DataVector, 3, Frame::Inertial>& magnetic,
+    const tnsr::ii<DataVector, 3, Frame::Inertial>& spatial_metric,
+    const tnsr::i<DataVector, 3, Frame::Inertial>& unit_normal_covector,
+    const Scalar<DataVector>& lapse,
+    const tnsr::I<DataVector, 3, Frame::Inertial>& shift,
+    const KretschmannFaceData<3>* face_data,
+    const std::optional<gr::np::TidalMoments>& imposed_moments = std::nullopt,
+    bool use_fixed_point = false, const gr::np::WeylScalars* fit_psi = nullptr);
 }  // namespace gh::worldtube
 
 template <>

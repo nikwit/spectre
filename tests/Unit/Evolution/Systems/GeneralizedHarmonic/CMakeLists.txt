@@ -64,3 +64,43 @@ target_link_libraries(
   SphericalHarmonics
   Utilities
 )
+
+# Keep the moving-sphere replay regression independently buildable.
+set(LIBRARY Test_GhSphereReplay)
+set(LIBRARY_SOURCES
+  Worldtube/Test_MomentFeedback.cpp
+  Worldtube/Test_QhatRadialGauge.cpp
+  Worldtube/Test_SphereReplay.cpp
+  )
+add_test_library(${LIBRARY} "${LIBRARY_SOURCES}")
+target_link_libraries(
+  ${LIBRARY}
+  PRIVATE
+  CoordinateMaps
+  DomainCreators
+  FunctionsOfTime
+  GeneralizedHarmonic
+  H5
+  SphericalHarmonics
+  Utilities
+  )
+
+set(LIBRARY Test_GhPhysicalBoundaryTrace)
+set(LIBRARY_SOURCES
+  Worldtube/Test_PhysicalBoundaryEvolution.cpp
+  Worldtube/Test_PhysicalBoundaryTarget.cpp
+  Worldtube/Test_PhysicalBoundaryTrace.cpp
+  )
+add_test_library(${LIBRARY} "${LIBRARY_SOURCES}")
+target_link_libraries(
+  ${LIBRARY}
+  PRIVATE
+  CoordinateMaps
+  DataStructuresHelpers
+  DomainCreators
+  FunctionsOfTime
+  GeneralRelativitySolutions
+  GeneralizedHarmonic
+  Time
+  Utilities
+  )
