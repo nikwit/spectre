@@ -32,7 +32,8 @@ struct IteratePunctureField {
   static constexpr size_t Dim = 3;
 
   using inbox_tags = tmpl::list<Tags::SelfForceInbox<Dim>>;
-  using simple_tags = tmpl::list<Tags::IteratedPunctureField<Dim>>;
+  using simple_tags =
+      tmpl::list<Tags::IteratedPunctureField<Dim>, Tags::PunctureFieldScratch>;
 
   template <typename DbTagsList, typename... InboxTags, typename Metavariables,
             typename ArrayIndex, typename ActionList,
@@ -52,12 +53,12 @@ struct IteratePunctureField {
     if (not inbox.count(time_step_id)) {
       return {Parallel::AlgorithmExecution::Retry, std::nullopt};
     }
-    db::mutate<Tags::IteratedPunctureField<Dim>>(
+    db::mutate<Tags::IteratedPunctureField<Dim>, Tags::PunctureFieldScratch>(
         [&self_force_data = get(inbox.at(time_step_id)),
          &position_velocity = db::get<Tags::ParticlePositionVelocity<Dim>>(box),
          &centered_face_coordinates, charge = db::get<Tags::Charge>(box),
          &puncture_field = db::get<Tags::PunctureFieldConfig>(box)](
-            const auto iterated_puncture_field) {
+            const auto iterated_puncture_field, const auto workspace) {
           tnsr::I<double, Dim> iterated_acceleration{
               {self_force_data[0], self_force_data[1], self_force_data[2]}};
           const size_t face_size =
@@ -70,7 +71,7 @@ struct IteratePunctureField {
           puncture_field.apply_puncture(
               make_not_null(&iterated_puncture_field->value()),
               centered_face_coordinates.value(), position_velocity[0],
-              position_velocity[1], iterated_acceleration);
+              position_velocity[1], iterated_acceleration, workspace.get());
           Variables<tmpl::list<CurvedScalarWave::Tags::Psi,
                                ::Tags::dt<CurvedScalarWave::Tags::Psi>,
                                ::Tags::deriv<CurvedScalarWave::Tags::Psi,

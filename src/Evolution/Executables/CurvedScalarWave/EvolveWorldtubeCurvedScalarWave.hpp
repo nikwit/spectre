@@ -41,6 +41,7 @@
 #include "Evolution/Systems/CurvedScalarWave/SpectralFilter.hpp"
 #include "Evolution/Systems/CurvedScalarWave/System.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/CalculateGeodesicPunctureField.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/InitializeConstraintGammas.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/InitializeCurrentIteration.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/IteratePunctureField.hpp"
@@ -253,6 +254,8 @@ struct EvolutionMetavars {
 
   using step_actions = tmpl::flatten<tmpl::list<
       CurvedScalarWave::Actions::CalculateGrVars<system, true>,
+      Actions::MutateApply<
+          CurvedScalarWave::Worldtube::CalculateGeodesicPunctureField>,
       CurvedScalarWave::Worldtube::Actions::SendToWorldtube,
       CurvedScalarWave::Worldtube::Actions::IteratePunctureField,
       CurvedScalarWave::Worldtube::Actions::ReceiveWorldtubeData,
@@ -311,8 +314,6 @@ struct EvolutionMetavars {
           CurvedScalarWave::Worldtube::Tags::FaceCoordinatesCompute<
               volume_dim, Frame::Inertial, true>,
           CurvedScalarWave::Worldtube::Tags::GeodesicAccelerationCompute<3>,
-          CurvedScalarWave::Worldtube::Tags::GeodesicPunctureFieldCompute<
-              volume_dim>,
           CurvedScalarWave::Worldtube::Tags::FaceQuantitiesCompute,
           ::domain::Tags::GridToInertialInverseJacobian<volume_dim>>>,
       ::evolution::dg::Initialization::Mortars<volume_dim>,

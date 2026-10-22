@@ -26,6 +26,7 @@
 #include "Domain/Structure/InitialElementIds.hpp"
 #include "Domain/TagsTimeDependent.hpp"
 #include "Evolution/Systems/CurvedScalarWave/System.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/ElementActions/CalculateGeodesicPunctureField.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/PunctureField.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/SingletonActions/InitializeElementFacesGridCoordinates.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/Tags.hpp"
@@ -627,8 +628,6 @@ void test_face_quantities_compute() {
 void test_puncture_field() {
   INFO("test_puncture_field");
   static constexpr size_t Dim = 3;
-  ::TestHelpers::db::test_compute_tag<Tags::GeodesicPunctureFieldCompute<Dim>>(
-      "GeodesicPunctureField");
   MAKE_GENERATOR(gen);
   std::uniform_real_distribution<> dist(-1., 1.);
   const tnsr::I<double, Dim, Frame::Inertial> charge_pos{{7.1, 0., 0.}};
@@ -643,43 +642,54 @@ void test_puncture_field() {
           make_not_null(&gen), dist, DataVector(50));
   random_points.get(0) += charge_pos.get(0);
 
-  const auto puncture_field_options =
-      CurvedScalarWave::Worldtube::PunctureField{
-          CurvedScalarWave::Worldtube::PunctureField::Schwarzschild{1, 1.}};
-  const auto box_abutting = db::create<
-      db::AddSimpleTags<Tags::FaceCoordinates<Dim, Frame::Inertial, true>,
-                        Tags::ParticlePositionVelocity<Dim>,
-                        Tags::GeodesicAcceleration<Dim>,
-                        Tags::PunctureFieldConfig, Tags::Charge>,
-      db::AddComputeTags<Tags::GeodesicPunctureFieldCompute<Dim>>>(
-      std::make_optional<tnsr::I<DataVector, Dim, Frame::Inertial>>(
-          random_points),
-      pos_vel, charge_acc, puncture_field_options, charge);
+  for (const size_t order : {size_t{0}, size_t{1}, size_t{2}}) {
+    const auto puncture_field_options =
+        CurvedScalarWave::Worldtube::PunctureField{
+            CurvedScalarWave::Worldtube::PunctureField::Schwarzschild{order,
+                                                                      1.}};
+    auto box_abutting = db::create<db::AddSimpleTags<
+        Tags::FaceCoordinates<Dim, Frame::Inertial, true>,
+        Tags::ParticlePositionVelocity<Dim>, Tags::GeodesicAcceleration<Dim>,
+        Tags::PunctureFieldConfig, Tags::Charge,
+        Tags::GeodesicPunctureField<Dim>, Tags::PunctureFieldScratch>>(
+        std::make_optional<tnsr::I<DataVector, Dim, Frame::Inertial>>(
+            random_points),
+        pos_vel, charge_acc, puncture_field_options, charge,
+        Tags::GeodesicPunctureField<3>::type{}, PunctureFieldWorkspace{});
 
-  const auto singular_field =
-      get<Tags::GeodesicPunctureField<Dim>>(box_abutting);
+    db::mutate_apply<CalculateGeodesicPunctureField>(
+        make_not_null(&box_abutting));
+    CHECK(db::get<Tags::PunctureFieldScratch>(box_abutting).empty() ==
+          (order < 2));
+    const auto singular_field =
+        get<Tags::GeodesicPunctureField<Dim>>(box_abutting);
 
-  CHECK(singular_field.has_value());
-  Variables<tmpl::list<CurvedScalarWave::Tags::Psi,
-                       ::Tags::dt<CurvedScalarWave::Tags::Psi>,
-                       ::Tags::deriv<CurvedScalarWave::Tags::Psi,
-                                     tmpl::size_t<3>, Frame::Inertial>>>
-      expected{};
-  puncture_field_options.apply_puncture(make_not_null(&expected), random_points,
-                                        charge_pos, charge_vel, charge_acc);
-  expected *= charge;
-  CHECK_VARIABLES_APPROX(singular_field.value(), expected);
-  std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>> nullopt{};
-  const auto box_not_abutting = db::create<
-      db::AddSimpleTags<Tags::FaceCoordinates<Dim, Frame::Inertial, true>,
-                        Tags::ParticlePositionVelocity<Dim>,
-                        Tags::GeodesicAcceleration<Dim>,
-                        Tags::PunctureFieldConfig, Tags::Charge>,
-      db::AddComputeTags<Tags::GeodesicPunctureFieldCompute<Dim>>>(
-      nullopt, pos_vel, charge_acc, puncture_field_options, charge);
-  const auto puncture_field_nullopt =
-      get<Tags::GeodesicPunctureField<Dim>>(box_not_abutting);
-  CHECK(not puncture_field_nullopt.has_value());
+    CHECK(singular_field.has_value());
+    Variables<tmpl::list<CurvedScalarWave::Tags::Psi,
+                         ::Tags::dt<CurvedScalarWave::Tags::Psi>,
+                         ::Tags::deriv<CurvedScalarWave::Tags::Psi,
+                                       tmpl::size_t<3>, Frame::Inertial>>>
+        expected{};
+    puncture_field_options.apply_puncture(make_not_null(&expected),
+                                          random_points, charge_pos, charge_vel,
+                                          charge_acc);
+    expected *= charge;
+    CHECK_VARIABLES_APPROX(singular_field.value(), expected);
+    std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>> nullopt{};
+    auto box_not_abutting = db::create<db::AddSimpleTags<
+        Tags::FaceCoordinates<Dim, Frame::Inertial, true>,
+        Tags::ParticlePositionVelocity<Dim>, Tags::GeodesicAcceleration<Dim>,
+        Tags::PunctureFieldConfig, Tags::Charge,
+        Tags::GeodesicPunctureField<Dim>, Tags::PunctureFieldScratch>>(
+        nullopt, pos_vel, charge_acc, puncture_field_options, charge,
+        Tags::GeodesicPunctureField<3>::type{}, PunctureFieldWorkspace{});
+    db::mutate_apply<CalculateGeodesicPunctureField>(
+        make_not_null(&box_not_abutting));
+    CHECK(db::get<Tags::PunctureFieldScratch>(box_not_abutting).empty());
+    const auto puncture_field_nullopt =
+        get<Tags::GeodesicPunctureField<Dim>>(box_not_abutting);
+    CHECK(not puncture_field_nullopt.has_value());
+  }
 }
 
 void test_puncture_field_options() {
@@ -820,6 +830,8 @@ SPECTRE_TEST_CASE("Unit.Evolution.Systems.CurvedScalarWave.Worldtube.Tags",
   TestHelpers::db::test_simple_tag<Tags::EvolvedVelocity<3>>("EvolvedVelocity");
   TestHelpers::db::test_simple_tag<Tags::GeodesicPunctureField<3>>(
       "GeodesicPunctureField");
+  TestHelpers::db::test_simple_tag<Tags::PunctureFieldScratch>(
+      "PunctureFieldScratch");
   TestHelpers::db::test_simple_tag<Tags::IteratedPunctureField<3>>(
       "IteratedPunctureField");
   TestHelpers::db::test_simple_tag<Tags::ObserveCoefficientsTrigger>(

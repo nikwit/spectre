@@ -26,6 +26,7 @@
 #include "Evolution/Systems/CurvedScalarWave/BackgroundSpacetime.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Tags.hpp"
 #include "Evolution/Systems/CurvedScalarWave/Worldtube/PunctureField.hpp"
+#include "Evolution/Systems/CurvedScalarWave/Worldtube/PunctureFieldWorkspace.hpp"
 #include "IO/Logging/Verbosity.hpp"
 #include "NumericalAlgorithms/LinearOperators/PartialDerivatives.hpp"
 #include "Options/Auto.hpp"
@@ -732,11 +733,16 @@ struct ExpansionOrder : db::SimpleTag {
   }
 };
 
-/// @{
+/// Scratch storage owned by each element and reused by puncture evaluations.
+struct PunctureFieldScratch : db::SimpleTag {
+  using type = CurvedScalarWave::Worldtube::PunctureFieldWorkspace;
+};
+
 /*!
- * Computes the puncture field on an element face abutting the worldtube
+ * Holds the puncture field on an element face abutting the worldtube
  * assuming geodesic acceleration. If the current element does not abut the
- * worldtube this holds a std::nullopt.
+ * worldtube this holds a std::nullopt. Updated once per element stage by
+ * CalculateGeodesicPunctureField.
  */
 template <size_t Dim>
 struct GeodesicPunctureField : db::SimpleTag {
@@ -745,29 +751,6 @@ struct GeodesicPunctureField : db::SimpleTag {
       ::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<3>,
                     Frame::Inertial>>>>;
 };
-
-template <size_t Dim>
-struct GeodesicPunctureFieldCompute : GeodesicPunctureField<Dim>,
-                                      db::ComputeTag {
-  using base = GeodesicPunctureField<Dim>;
-  using argument_tags =
-      tmpl::list<FaceCoordinates<Dim, Frame::Inertial, true>,
-                 ParticlePositionVelocity<Dim>, GeodesicAcceleration<Dim>,
-                 Charge, PunctureFieldConfig>;
-  using return_type = std::optional<Variables<tmpl::list<
-      CurvedScalarWave::Tags::Psi, ::Tags::dt<CurvedScalarWave::Tags::Psi>,
-      ::Tags::deriv<CurvedScalarWave::Tags::Psi, tmpl::size_t<3>,
-                    Frame::Inertial>>>>;
-  static void function(
-      const gsl::not_null<return_type*> result,
-      const std::optional<tnsr::I<DataVector, Dim, Frame::Inertial>>&
-          inertial_face_coords_centered,
-      const std::array<tnsr::I<double, Dim, ::Frame::Inertial>, 2>&
-          particle_position_velocity,
-      const tnsr::I<double, Dim>& particle_acceleration, double charge,
-      const CurvedScalarWave::Worldtube::PunctureField& puncture_field);
-};
-/// @}
 
 /*!
  * \brief Holds the current iteration of the puncture field computed with the
