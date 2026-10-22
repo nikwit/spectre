@@ -8,6 +8,7 @@ set(LIBRARY_SOURCES
   Test_AccelerationTermsOrder2.cpp
   Test_KerrSchildDerivatives.cpp
   Test_PunctureField.cpp
+  Test_PunctureFieldOrder2.cpp
   Test_RadiusFunctions.cpp
   Test_PunctureInitialData.cpp
   Test_SelfForce.cpp

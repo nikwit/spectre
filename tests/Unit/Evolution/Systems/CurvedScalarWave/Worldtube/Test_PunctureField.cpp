@@ -125,15 +125,19 @@ void test_derivative() {
   for (size_t order = 0; order <= 2; ++order) {
     CAPTURE(order);
     const auto puncture_field = make_schwarzschild_puncture_field(order);
-    const auto random_position =
+    auto random_position =
         make_with_random_values<tnsr::I<double, 3, Frame::Inertial>>(
             make_not_null(&gen), make_not_null(&pos_dist), 1);
-    const auto random_velocity =
+    auto random_velocity =
         make_with_random_values<tnsr::I<double, 3, Frame::Inertial>>(
             make_not_null(&gen), make_not_null(&vel_acc_dist), 1);
-    const auto random_acceleration =
+    auto random_acceleration =
         make_with_random_values<tnsr::I<double, 3, Frame::Inertial>>(
             make_not_null(&gen), make_not_null(&vel_acc_dist), 1);
+    // The generated punctures assume equatorial particle motion.
+    get<2>(random_position) = 0.;
+    get<2>(random_velocity) = 0.;
+    get<2>(random_acceleration) = 0.;
     const auto helper_func =
         [&random_position, &random_velocity, &random_acceleration,
          &puncture_field](const std::array<double, 3>& point) {

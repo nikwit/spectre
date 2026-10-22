@@ -25,6 +25,8 @@ class er;
 /// \endcond
 
 namespace CurvedScalarWave::Worldtube {
+class PunctureFieldWorkspace;
+
 /*!
  * \brief Dispatcher to compute the puncture/singular field for a scalar charge
  * on a generic orbit in Schwarzschild or Kerr spacetime. The Kerr puncture
@@ -150,6 +152,7 @@ class PunctureField {
   /*!
    * \brief Compute and write the puncture field and its derivatives for the
    * configured puncture model and expansion order.
+   * At order two, an optional element-local workspace reuses scratch storage.
    */
   void apply_puncture(
       gsl::not_null<Variables<tmpl::list<
@@ -160,7 +163,8 @@ class PunctureField {
       const tnsr::I<DataVector, 3, Frame::Inertial>& centered_coords,
       const tnsr::I<double, 3>& particle_position,
       const tnsr::I<double, 3>& particle_velocity,
-      const tnsr::I<double, 3>& particle_acceleration) const;
+      const tnsr::I<double, 3>& particle_acceleration,
+      PunctureFieldWorkspace* workspace = nullptr) const;
 
   /*!
    * \brief Compute and write the corrections to the
@@ -261,6 +265,12 @@ void puncture_field_1(
  * explicit time derivative of the second-order coefficient which is one
  * order beyond the guaranteed accuracy of the expansion. For accelerated
  * motion, add the cumulative correction from `acceleration_terms_2`.
+ *
+ * Evaluation uses a fixed instantaneous spatial rotation to place the
+ * particle on the positive x axis; the inertial time derivative is retained
+ * and the spatial gradient is rotated back. An optional element-local
+ * `workspace` retains intermediate buffers between calls. With no workspace,
+ * temporary storage is allocated for this call only.
  */
 void puncture_field_2(
     gsl::not_null<Variables<tmpl::list<
@@ -271,7 +281,8 @@ void puncture_field_2(
     const tnsr::I<DataVector, 3, Frame::Inertial>& centered_coords,
     const tnsr::I<double, 3>& particle_position,
     const tnsr::I<double, 3>& particle_velocity,
-    const tnsr::I<double, 3>& particle_acceleration, double bh_mass);
+    const tnsr::I<double, 3>& particle_acceleration, double bh_mass,
+    PunctureFieldWorkspace* workspace = nullptr);
 
 /*!
  * \brief Computes the acceleration terms of a puncture/singular field

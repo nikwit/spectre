@@ -69,7 +69,8 @@ void PunctureField::apply_puncture(
     const tnsr::I<DataVector, 3, Frame::Inertial>& centered_coords,
     const tnsr::I<double, 3>& particle_position,
     const tnsr::I<double, 3>& particle_velocity,
-    const tnsr::I<double, 3>& particle_acceleration) const {
+    const tnsr::I<double, 3>& particle_acceleration,
+    PunctureFieldWorkspace* workspace) const {
   if (type_ == Type::Kerr) {
     ERROR("Kerr puncture not implemented yet");
   }
@@ -83,8 +84,8 @@ void PunctureField::apply_puncture(
                      black_hole_mass_);
   } else if (expansion_order_ == 2) {
     puncture_field_2(result, centered_coords, particle_position,
-                     particle_velocity, particle_acceleration,
-                     black_hole_mass_);
+                     particle_velocity, particle_acceleration, black_hole_mass_,
+                     workspace);
   } else {
     ERROR(
         "The puncture field is only implemented up to expansion order 2 but "
