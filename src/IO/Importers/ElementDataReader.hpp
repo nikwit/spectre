@@ -7,6 +7,7 @@
 #include <string>
 #include <unordered_set>
 
+#include "DataStructures/DataBox/DataBox.hpp"
 #include "IO/Importers/Tags.hpp"
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/Algorithms/AlgorithmNodegroup.hpp"
@@ -15,12 +16,14 @@
 #include "Parallel/ParallelComponentHelpers.hpp"
 #include "Parallel/Phase.hpp"
 #include "Parallel/PhaseDependentActionList.hpp"
+#include "Utilities/Gsl.hpp"
 
 namespace importers {
 
 namespace detail {
 template <size_t Dim>
 struct InitializeElementDataReader;
+struct ResetCompletedImports;
 }  // namespace detail
 
 /*!
@@ -44,9 +47,12 @@ struct ElementDataReader {
   using chare_type = Parallel::Algorithms::Nodegroup;
   static constexpr bool checkpoint_data = false;
   using metavariables = Metavariables;
-  using phase_dependent_action_list = tmpl::list<Parallel::PhaseActions<
-      Parallel::Phase::Initialization,
-      tmpl::list<detail::InitializeElementDataReader<Dim>>>>;
+  using phase_dependent_action_list = tmpl::list<
+      Parallel::PhaseActions<
+          Parallel::Phase::Initialization,
+          tmpl::list<detail::InitializeElementDataReader<Dim>>>,
+      Parallel::PhaseActions<Parallel::Phase::RegisterWithElementDataReader,
+                             tmpl::list<detail::ResetCompletedImports>>>;
   using simple_tags_from_options = Parallel::get_simple_tags_from_options<
       Parallel::get_initialization_actions_list<phase_dependent_action_list>>;
 
@@ -63,6 +69,25 @@ struct ElementDataReader {
 };
 
 namespace detail {
+/// Registration may update coordinates after initial p refinement. Permit the
+/// next import to resample even when its file/observation identifier is
+/// unchanged. The phase boundary ensures all registration updates finish before
+/// reading.
+struct ResetCompletedImports {
+  template <typename DbTagsList, typename... InboxTags, typename Metavariables,
+            typename ArrayIndex, typename ActionList,
+            typename ParallelComponent>
+  static Parallel::iterable_action_return_t apply(
+      db::DataBox<DbTagsList>& box, const tuples::TaggedTuple<InboxTags...>&,
+      const Parallel::GlobalCache<Metavariables>&, const ArrayIndex&,
+      ActionList, const ParallelComponent*) {
+    db::mutate<Tags::ElementDataAlreadyRead>(
+        [](const auto already_read) { already_read->clear(); },
+        make_not_null(&box));
+    return {Parallel::AlgorithmExecution::Pause, 0};
+  }
+};
+
 template <size_t Dim>
 struct InitializeElementDataReader {
   using simple_tags =

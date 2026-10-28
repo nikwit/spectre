@@ -5,6 +5,7 @@
 
 #include "NumericalAlgorithms/LinearOperators/Filters/Hypercube.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -87,6 +88,33 @@ template <size_t Dim, typename TagList>
 std::unique_ptr<Filter<Dim, TagList>> Hypercube<Dim, TagList>::get_clone()
     const {
   return std::make_unique<Hypercube>(*this);
+}
+
+template <size_t Dim, typename TagList>
+std::optional<std::array<std::vector<double>, Dim>>
+Hypercube<Dim, TagList>::volume_filter_response(const Mesh<Dim>& mesh) const {
+  if (not supports_mesh(mesh)) {
+    return std::nullopt;
+  }
+  std::array<std::vector<double>, Dim> response{};
+  const bool active = enable_ and (volume_filter_on_substep_ or
+                                   volume_filter_every_n_steps_.has_value());
+  for (size_t d = 0; d < Dim; ++d) {
+    if (mesh.basis(d) != Spectral::Basis::Legendre and
+        mesh.basis(d) != Spectral::Basis::Chebyshev) {
+      return std::nullopt;
+    }
+    response[d].resize(mesh.extents(d), 1.0);
+    if (active and mesh.extents(d) > 1) {
+      for (size_t k = 0; k < mesh.extents(d); ++k) {
+        response[d][k] =
+            exp(-36.0 * pow(static_cast<double>(k) /
+                                static_cast<double>(mesh.extents(d) - 1),
+                            2.0 * half_power_));
+      }
+    }
+  }
+  return response;
 }
 
 template <size_t Dim, typename TagList>
@@ -321,8 +349,7 @@ const Matrix& Hypercube<Dim, TagList>::filter_matrix(
 template <size_t Dim, typename TagList>
 bool operator==(const Hypercube<Dim, TagList>& lhs,
                 const Hypercube<Dim, TagList>& rhs) {
-  return lhs.half_power_ == rhs.half_power_ and
-         lhs.enable_ == rhs.enable_ and
+  return lhs.half_power_ == rhs.half_power_ and lhs.enable_ == rhs.enable_ and
          lhs.blocks_and_groups_to_filter_ ==
              rhs.blocks_and_groups_to_filter_ and
          lhs.blocks_to_filter_ == rhs.blocks_to_filter_ and

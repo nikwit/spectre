@@ -12,6 +12,10 @@
 #include <utility>
 #include <vector>
 
+#include "DataStructures/DataVector.hpp"
+#include "DataStructures/Tensor/TypeAliases.hpp"
+#include "NumericalAlgorithms/Spectral/Mesh.hpp"
+
 /// \cond
 template <size_t Dim>
 class Block;
@@ -50,6 +54,14 @@ enum class ElementWeight {
 };
 
 std::ostream& operator<<(std::ostream& os, ElementWeight weight);
+
+/// Cost of an element using its current mesh and grid-frame coordinates.
+/// This is the same cost model used for initial placement, so it can also be
+/// used after p refinement without reverting to the initial block extents.
+template <size_t Dim>
+double element_cost(const Mesh<Dim>& mesh,
+                    const tnsr::I<DataVector, Dim, Frame::Grid>& grid_coords,
+                    ElementWeight weight);
 
 /// \brief Get the cost of each `Element` in a list of `Block`s where
 /// `element_weight` specifies which weight distribution scheme to use

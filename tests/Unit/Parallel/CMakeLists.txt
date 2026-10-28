@@ -156,6 +156,26 @@ add_algorithm_test(
 
 add_algorithm_test_with_restart_from_checkpoint("CheckpointRestart")
 
+# Exercise actual migration on two processors, including checkpoint restart
+# after the ownership change. Keep its checkpoint files out of other tests.
+add_standalone_test_executable(Test_ElementRedistribution)
+target_link_libraries(Test_ElementRedistribution PRIVATE
+  ${ALGORITHM_TEST_LINK_LIBRARIES} DomainCreators ParallelAmr DiscontinuousGalerkin)
+if (CHARM_USE_MPI)
+  set(REDISTRIBUTION_CHARM_ARGS "+n2 +p2")
+else()
+  set(REDISTRIBUTION_CHARM_ARGS "+p2")
+endif()
+set(REDISTRIBUTION_TEST_DIR
+  "${CMAKE_CURRENT_BINARY_DIR}/ElementRedistribution")
+set(REDISTRIBUTION_TEST_INPUT
+  "${CMAKE_CURRENT_SOURCE_DIR}/Test_ElementRedistribution.yaml")
+set(REDISTRIBUTION_TEST_COMMAND
+  "${CMAKE_BINARY_DIR}/bin/charmrun ${CMAKE_BINARY_DIR}/bin/Test_ElementRedistribution ${REDISTRIBUTION_CHARM_ARGS}")
+add_test(NAME Unit.Parallel.ElementRedistribution COMMAND ${SHELL_EXECUTABLE} -c
+  "mkdir -p ${REDISTRIBUTION_TEST_DIR} && cd ${REDISTRIBUTION_TEST_DIR} && rm -rf Checkpoints && ${REDISTRIBUTION_TEST_COMMAND} --input-file ${REDISTRIBUTION_TEST_INPUT} && SPECTRE_RESTART_TEST=1 ${REDISTRIBUTION_TEST_COMMAND} +restart Checkpoints/Checkpoint_0000 && rm -rf Checkpoints")
+set_standalone_test_properties(Unit.Parallel.ElementRedistribution)
+
 # Tests that do not require their own Chare setup and can work with the
 # unit tests
 set(LIBRARY "Test_Parallel")

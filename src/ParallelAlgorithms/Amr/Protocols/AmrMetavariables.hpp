@@ -14,6 +14,11 @@ namespace amr::protocols {
 ///
 /// A class conforming to this protocol is placed in the metavariables to
 /// provide the following:
+/// - `criteria_change_action` (optional): A simple action broadcast to the
+///   `element_array` when restart overlays change the AMR criteria. It should
+///   invalidate any criterion-dependent history without reading the criteria,
+///   since other nodes may not have updated their caches yet. Without this
+///   alias, changing criteria assumes there is no such history to invalidate.
 /// - `element_array`: The array component on which AMR is performed.
 /// - `projectors`: A type list of AMR projectors (each of which must conform to
 ///   amr::protocols::Projector) that will be applied by:

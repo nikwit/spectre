@@ -48,8 +48,12 @@ enum class Phase {
   BuildMatrix,
   ///  phase in which sanity checks are done after AMR
   CheckDomain,
+  /// Check whether initial p adjustment requires another iteration
+  CheckInitialPRefinement,
   ///  a cleanup phase
   Cleanup,
+  /// Collect current element costs before deterministic redistribution
+  CollectElementDistribution,
   ///  a phase in which the rotation control system is disable and the
   ///  rotation function of time is switched to settling to a constant.
   DisableRotationControl,
@@ -72,9 +76,13 @@ enum class Phase {
   InitializeTimeStepperHistory,
   ///  phase in which components are migrated
   LoadBalancing,
+  /// Compute and deliver destinations before deterministic redistribution
+  PlanElementDistribution,
   ///  phase in which components know an error occurred and they need to do some
   ///  sort of cleanup, such as dumping data to disk.
   PostFailureCleanup,
+  /// Migrate elements to the destinations computed from their current meshes
+  RedistributeElements,
   ///  phase in which components register with other components
   Register,
   ///  phase in which components register with the data importer components

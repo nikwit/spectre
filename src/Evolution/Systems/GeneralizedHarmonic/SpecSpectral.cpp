@@ -3,6 +3,10 @@
 
 #include "Evolution/Systems/GeneralizedHarmonic/SpecSpectral.hpp"
 
+#include <algorithm>
+
+#include "Domain/Structure/BlockGroups.hpp"
+
 #include "Utilities/Math.hpp"
 #include "Utilities/Overloader.hpp"
 #include "Utilities/Serialization/PupStlCpp17.hpp"
@@ -40,6 +44,8 @@ void SpecSpectral::GaussianTarget::pup(PUP::er& p) {
   p | target;
 }
 
+SpecSpectral::SpatialTarget::SpatialTarget() = default;
+
 SpecSpectral::SpatialTarget::SpatialTarget(
     const double background_in, std::vector<GaussianTarget> gaussians_in,
     const Options::Context& context)
@@ -74,23 +80,63 @@ void SpecSpectral::SpatialTarget::pup(PUP::er& p) {
   p | gaussians;
 }
 
+SpecSpectral::RadiusDependentStart::RadiusDependentStart() = default;
+
+SpecSpectral::RadiusDependentStart::RadiusDependentStart(
+    const double time_in, std::vector<std::string> blocks_in,
+    const double radius_plus_time_in, const Options::Context& context)
+    : time(time_in),
+      blocks(std::move(blocks_in)),
+      radius_plus_time(radius_plus_time_in) {
+  if (not std::isfinite(time) or not std::isfinite(radius_plus_time) or
+      blocks.empty()) {
+    PARSE_ERROR(context,
+                "Junk timing requires finite times and nonempty Blocks.");
+  }
+}
+
+double SpecSpectral::RadiusDependentStart::release_time(
+    const Domain<3>& domain, const size_t block_id,
+    const tnsr::I<DataVector, 3, Frame::Grid>& coordinates) const {
+  std::vector<std::string> names{};
+  for (const auto& block : domain.blocks()) {
+    names.push_back(block.name());
+  }
+  const auto ids =
+      domain::block_ids_from_names(blocks, names, domain.block_groups());
+  if (std::find(ids.begin(), ids.end(), block_id) == ids.end()) {
+    return time;
+  }
+  DataVector radius_squared(coordinates[0].size(), 0.0);
+  for (size_t d = 0; d < 3; ++d) {
+    radius_squared += square(coordinates[d]);
+  }
+  return std::max(time, sqrt(max(radius_squared)) + radius_plus_time);
+}
+
+void SpecSpectral::RadiusDependentStart::pup(PUP::er& p) {
+  p | time;
+  p | blocks;
+  p | radius_plus_time;
+}
+
 SpecSpectral::SpecSpectral(RelativeTruncationTarget::type spectral_target,
                            const std::array<double, 2>& constraint_targets,
                            const bool force, const size_t minimum_modes,
                            const size_t cooldown, const double adjustment_limit,
-                           const double start_time, const bool verbose,
+                           StartTime::type start_time, const bool verbose,
                            const double time_between_changes,
                            const Options::Context& context)
     : SpecSpectral(std::move(spectral_target), constraint_targets, force,
                    MinimumModes::type{minimum_modes}, cooldown,
-                   adjustment_limit, start_time, verbose, time_between_changes,
-                   context) {}
+                   adjustment_limit, std::move(start_time), verbose,
+                   time_between_changes, context) {}
 
 SpecSpectral::SpecSpectral(RelativeTruncationTarget::type spectral_target,
                            const std::array<double, 2>& constraint_targets,
                            const bool force, MinimumModes::type minimum_modes,
                            const size_t cooldown, const double adjustment_limit,
-                           const double start_time, const bool verbose,
+                           StartTime::type start_time, const bool verbose,
                            const double time_between_changes,
                            const Options::Context& context)
     : settings_{0.0,
@@ -101,8 +147,14 @@ SpecSpectral::SpecSpectral(RelativeTruncationTarget::type spectral_target,
                 adjustment_limit,
                 time_between_changes},
       minimum_modes_(std::move(minimum_modes)),
-      start_time_(start_time),
       verbose_(verbose) {
+  if (std::holds_alternative<double>(start_time)) {
+    start_time_ = std::get<double>(start_time);
+  } else {
+    radius_dependent_start_ =
+        std::get<RadiusDependentStart>(std::move(start_time));
+    start_time_ = radius_dependent_start_->time;
+  }
   if (std::holds_alternative<double>(spectral_target)) {
     settings_.spectral_target = std::get<double>(spectral_target);
   } else {
@@ -110,7 +162,7 @@ SpecSpectral::SpecSpectral(RelativeTruncationTarget::type spectral_target,
     settings_.spectral_target = spatial_target_->background;
   }
   if (not std::isfinite(settings_.spectral_target) or
-      settings_.spectral_target <= 0.0 or not std::isfinite(start_time) or
+      settings_.spectral_target <= 0.0 or not std::isfinite(start_time_) or
       cooldown < 1 or not std::isfinite(time_between_changes) or
       time_between_changes < 0.0) {
     PARSE_ERROR(context,
@@ -190,6 +242,7 @@ void SpecSpectral::pup(PUP::er& p) {
   p | spatial_target_;
   p | minimum_modes_;
   p | start_time_;
+  p | radius_dependent_start_;
   p | verbose_;
 }
 }  // namespace gh

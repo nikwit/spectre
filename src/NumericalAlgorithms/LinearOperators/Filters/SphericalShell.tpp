@@ -6,6 +6,7 @@
 #include "NumericalAlgorithms/LinearOperators/Filters/SphericalShell.hpp"
 
 #include <array>
+#include <cmath>
 #include <functional>
 #include <optional>
 #include <pup_stl.h>
@@ -16,6 +17,7 @@
 
 #include "DataStructures/ApplyMatrices.hpp"
 #include "DataStructures/Matrix.hpp"
+#include "Domain/Structure/BlockGroups.hpp"
 #include "NumericalAlgorithms/Spectral/Basis.hpp"
 #include "NumericalAlgorithms/Spectral/Filtering.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
@@ -23,7 +25,6 @@
 #include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/SpherepackCache.hpp"
 #include "NumericalAlgorithms/TensorYlm/Filter.hpp"
-#include "Domain/Structure/BlockGroups.hpp"
 #include "Options/ParseError.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Serialization/PupStlCpp17.hpp"
@@ -80,6 +81,45 @@ void SphericalShell<TagList>::pup(PUP::er& p) {
 template <typename TagList>
 std::unique_ptr<Filter<3, TagList>> SphericalShell<TagList>::get_clone() const {
   return std::make_unique<SphericalShell>(*this);
+}
+
+template <typename TagList>
+std::optional<std::array<std::vector<double>, 3>>
+SphericalShell<TagList>::volume_filter_response(const Mesh<3>& mesh) const {
+  if (not supports_mesh(mesh)) {
+    return std::nullopt;
+  }
+  const size_t ell_max = mesh.extents(1) - 1;
+  std::array<std::vector<double>, 3> response{};
+  response[0].resize(mesh.extents(0), 1.0);
+  response[1].resize(ell_max + 1, 1.0);
+  const bool active = enable_ and (volume_filter_on_substep_ or
+                                   volume_filter_every_n_steps_.has_value());
+  if (active) {
+    if (num_modes_to_kill_ > ell_max) {
+      return std::nullopt;
+    }
+    if (radial_half_power_.has_value() and mesh.extents(0) > 1) {
+      for (size_t k = 0; k < mesh.extents(0); ++k) {
+        response[0][k] =
+            exp(-36.0 * pow(static_cast<double>(k) /
+                                static_cast<double>(mesh.extents(0) - 1),
+                            2.0 * *radial_half_power_));
+      }
+    }
+    const size_t cutoff = ell_max - num_modes_to_kill_;
+    for (size_t ell = 0; ell <= ell_max; ++ell) {
+      response[1][ell] =
+          ell > cutoff ? 0.0
+          : angular_half_power_.has_value()
+              ? exp(-36.0 * pow(static_cast<double>(ell) /
+                                    static_cast<double>(cutoff + 1),
+                                2.0 * *angular_half_power_))
+              : 1.0;
+    }
+  }
+  response[2] = response[1];
+  return response;
 }
 
 template <typename TagList>
@@ -186,6 +226,9 @@ void SphericalShell<TagList>::apply_in_volume(
 
   // Cache the angular filter matrices
   if (cached_l_max_ != l_max) {
+    // The GH/CSW matrix fillers reuse matrices when filter parameters match;
+    // their holder does not track l_max. Replacing it is required after AMR.
+    filter_matrices_ = {};
     fill_tensor_ylm_filters<TagList>(make_not_null(&filter_matrices_), l_max,
                                      num_modes_to_kill_, angular_half_power_,
                                      normalization_);
@@ -254,6 +297,7 @@ void SphericalShell<TagList>::apply_on_boundary(
 
   // Cache the angular filter matrices
   if (cached_l_max_ != l_max) {
+    filter_matrices_ = {};
     fill_tensor_ylm_filters<TagList>(make_not_null(&filter_matrices_), l_max,
                                      num_modes_to_kill_, angular_half_power_,
                                      normalization_);
@@ -266,10 +310,9 @@ void SphericalShell<TagList>::apply_on_boundary(
     temp_storage_.initialize(needed_temp_size);
   }
 
-  apply_tensor_ylm_filter(vars, make_not_null(&temp_storage_),
-                          jac_grid_to_inertial.value(),
-                          inv_jac_grid_to_inertial.value(), filter_matrices_,
-                          l_max, 1);
+  apply_tensor_ylm_filter(
+      vars, make_not_null(&temp_storage_), jac_grid_to_inertial.value(),
+      inv_jac_grid_to_inertial.value(), filter_matrices_, l_max, 1);
 }
 
 template <typename TagList>

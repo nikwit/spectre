@@ -74,12 +74,27 @@ double get_num_points_and_grid_spacing_cost(
       logical_coordinates(mesh);
   const tnsr::I<DataVector, Dim, Frame::Grid> grid_coords =
       element_map(logical_coords);
-  const double min_grid_spacing =
-      minimum_grid_spacing(mesh.extents(), grid_coords);
-
-  return mesh.number_of_grid_points() / sqrt(min_grid_spacing);
+  return element_cost(mesh, grid_coords,
+                      ElementWeight::NumGridPointsAndGridSpacing);
 }
 }  //  namespace
+
+template <size_t Dim>
+double element_cost(const Mesh<Dim>& mesh,
+                    const tnsr::I<DataVector, Dim, Frame::Grid>& grid_coords,
+                    const ElementWeight weight) {
+  switch (weight) {
+    case ElementWeight::Uniform:
+      return 1.;
+    case ElementWeight::NumGridPoints:
+      return mesh.number_of_grid_points();
+    case ElementWeight::NumGridPointsAndGridSpacing:
+      return mesh.number_of_grid_points() /
+             sqrt(minimum_grid_spacing(mesh.extents(), grid_coords));
+    default:
+      ERROR("Unknown ElementWeight type");
+  }
+}
 
 std::ostream& operator<<(std::ostream& os, ElementWeight weight) {
   switch (weight) {
@@ -323,6 +338,9 @@ size_t BlockZCurveProcDistribution<Dim>::get_proc_for_element(
 #define GET_DIM(data) BOOST_PP_TUPLE_ELEM(0, data)
 
 #define INSTANTIATION(r, data)                                               \
+  template double element_cost(                                           \
+      const Mesh<GET_DIM(data)>&,                                         \
+      const tnsr::I<DataVector, GET_DIM(data), Frame::Grid>&, ElementWeight); \
   template class BlockZCurveProcDistribution<GET_DIM(data)>;                 \
   double get_num_points_and_grid_spacing_cost(                               \
       const ElementId<GET_DIM(data)>& element_id,                            \

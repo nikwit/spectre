@@ -296,6 +296,37 @@ void test_set_initial_data(
   CHECK_ITERABLE_CUSTOM_APPROX(get_element_tag(Tags::Phi<DataVector, 3>{}),
                                (get<Tags::Phi<DataVector, 3>>(kerr_gh_vars)),
                                custom_approx);
+  if (not is_numeric) {
+    // Startup AMR revisits the analytic-data action after a mesh change.
+    CHECK(ActionTesting::get_next_action_index<element_array>(runner,
+                                                              element_id) == 0);
+    auto& box = ActionTesting::get_databox<element_array>(
+        make_not_null(&runner), element_id);
+    const Mesh<3> new_mesh{10, Spectral::Basis::Legendre,
+                           Spectral::Quadrature::GaussLobatto};
+    const auto new_logical = logical_coordinates(new_mesh);
+    db::mutate<domain::Tags::Mesh<3>,
+               domain::Tags::Coordinates<3, Frame::Inertial>,
+               domain::Tags::InverseJacobian<3, Frame::ElementLogical,
+                                             Frame::Inertial>>(
+        [&new_mesh, &new_logical, &map](
+            const auto mesh_ptr, const auto coords_ptr, const auto jac_ptr) {
+          *mesh_ptr = new_mesh;
+          *coords_ptr = map(new_logical);
+          *jac_ptr = map.inv_jacobian(new_logical);
+        },
+        make_not_null(&box));
+    ActionTesting::set_phase(make_not_null(&runner), Parallel::Phase::Testing);
+    ActionTesting::next_action<element_array>(make_not_null(&runner),
+                                              element_id);
+    CHECK(
+        get_element_tag(gr::Tags::SpacetimeMetric<DataVector, 3>{})[0].size() ==
+        1000);
+    const auto fresh = kerr.variables(map(new_logical), 0., gh_system_vars{});
+    CHECK_ITERABLE_CUSTOM_APPROX(
+        get_element_tag(gr::Tags::SpacetimeMetric<DataVector, 3>{}),
+        (get<gr::Tags::SpacetimeMetric<DataVector, 3>>(fresh)), custom_approx);
+  }
 }
 }  // namespace
 

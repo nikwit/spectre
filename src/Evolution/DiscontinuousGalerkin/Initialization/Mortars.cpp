@@ -378,6 +378,13 @@ void ProjectMortars<Dim>::apply(
 
   auto new_mortar_infos = detail::mortar_infos(domain, new_element, new_mesh,
                                                neighbor_mesh, lts_mode);
+  for (auto& [id, info] : new_mortar_infos) {
+    if (const auto old = mortar_infos->find(id); old != mortar_infos->end()) {
+      // p changes do not change equal-rate region membership. In particular,
+      // nonconforming interfaces must retain their synchronized stepping.
+      info.time_stepping_policy() = old->second.time_stepping_policy();
+    }
+  }
 
   // The old mortars must be removed from the MortarMaps before the
   // new ones can be added to avoid potentially exceeding the
@@ -389,15 +396,39 @@ void ProjectMortars<Dim>::apply(
   std::vector<NewMortarEntry> new_mortars{};
 
   for (const auto& [direction, neighbors] : new_element.neighbors()) {
-    ASSERT(new_element.face_types().at(direction) !=
-               domain::FaceType::MultipleNonconforming,
-           "This code needs updating to handle nonconforming blocks");
     const auto sliced_away_dimension = direction.dimension();
     const auto old_face_mesh = old_mesh.on_interface(sliced_away_dimension);
     const auto new_face_mesh = new_mesh.on_interface(sliced_away_dimension);
     const bool face_mesh_changed = old_face_mesh != new_face_mesh;
     if (face_mesh_changed) {
       (*normal_covector_and_magnitude)[direction] = std::nullopt;
+    }
+    if (not neighbors.are_conforming()) {
+      if (old_element.neighbors().at(direction) != neighbors) {
+        ERROR(
+            "AMR across nonconforming block interfaces currently supports "
+            "p refinement only");
+      }
+      for (const auto& neighbor : neighbors) {
+        const DirectionalId<Dim> mortar_id{
+            direction, new_element.face_types().at(direction) ==
+                               domain::FaceType::MultipleNonconforming
+                           ? new_element.id()
+                           : neighbor};
+        if (new_mortar_infos.at(mortar_id).time_stepping_policy() !=
+            TimeSteppingPolicy::EqualRate) {
+          ERROR("Nonconforming AMR interfaces require equal-rate stepping");
+        }
+        // The mortar is this element's face. The interpolators were rebuilt
+        // by mortar_infos above, using both updated meshes. Consumed data is
+        // cleared below; leave the communication clock at its current value.
+        mortar_mesh->at(mortar_id) = new_face_mesh;
+        if (new_element.face_types().at(direction) ==
+            domain::FaceType::MultipleNonconforming) {
+          break;
+        }
+      }
+      continue;
     }
     for (const auto& neighbor : neighbors) {
       const DirectionalId<Dim> mortar_id{direction, neighbor};
@@ -417,8 +448,9 @@ void ProjectMortars<Dim>::apply(
         mortar_mesh->at(mortar_id) = new_mortar_mesh;
         // mortar_data does not need projecting as it has already been used
         // and will be resized automatically
-        if (mesh_changed and not mortar_data_history->empty()) {
-          auto& boundary_history = mortar_data_history->at(mortar_id);
+        if (const auto history = mortar_data_history->find(mortar_id);
+            mesh_changed and history != mortar_data_history->end()) {
+          auto& boundary_history = history->second;
           auto local_history = boundary_history.local();
           const auto project_local_boundary_data =
               [&new_face_mesh, &new_mesh](

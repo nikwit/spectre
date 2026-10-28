@@ -6,14 +6,19 @@
 #include <array>
 #include <cstddef>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <pup.h>
 #include <utility>
+#include <vector>
 
 #include "DataStructures/DataBox/Tag.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/TypeAliases.hpp"
 #include "Domain/Amr/Flag.hpp"
 #include "Domain/Structure/Element.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/SphericalShellPowerMonitor.hpp"
+#include "NumericalAlgorithms/LinearOperators/Filters/Filter.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
 #include "ParallelAlgorithms/Amr/Protocols/Projector.hpp"
 #include "Utilities/Gsl.hpp"
@@ -25,6 +30,43 @@ class GaugeCondition;
 }
 
 namespace gh::spec_amr {
+/// The independent spectral extents of one element, as in SpEC's
+/// IndependentGridExtents. A spherical shell has one radial and one angular
+/// extent, even though its Mesh has three dimensions.
+class RefinementVariables {
+ public:
+  enum class Kind { Polynomial, SphericalHarmonic };
+
+  /// Default to three independent polynomial orders (the existing controller).
+  RefinementVariables() = default;
+  explicit RefinementVariables(const Mesh<3>& mesh);
+
+  size_t size() const { return number_of_variables_; }
+  Kind kind(size_t variable) const;
+  size_t variable_for_dimension(size_t dimension) const;
+
+  /// Number of spectral modes per independent variable: N for a polynomial
+  /// and l_max + 1 for S2. Unused storage entries are zero.
+  std::array<size_t, 3> mode_counts(const Mesh<3>& mesh) const;
+  /// Expand independent decisions to mesh directions. For S2 the same angular
+  /// decision controls both theta and phi; h changes in S2 are forbidden.
+  std::array<amr::Flag, 3> logical_flags(
+      const std::array<amr::Flag, 3>& independent_flags) const;
+  /// Inverse mapping for an existing request. Coupled directions must agree.
+  std::array<amr::Flag, 3> independent_flags(
+      const std::array<amr::Flag, 3>& logical_flags) const;
+
+  void pup(PUP::er& p);
+  friend bool operator==(const RefinementVariables&,
+                         const RefinementVariables&) = default;
+
+ private:
+  size_t number_of_variables_{3};
+  std::array<Kind, 3> kinds_{
+      {Kind::Polynomial, Kind::Polynomial, Kind::Polynomial}};
+  std::array<size_t, 3> variable_for_dimension_{{0, 1, 2}};
+};
+
 /// Relative high-mode amplitude, including the prospective filtered p-down
 /// spectrum. Pile-up follows SpEC's multi-fit diagnostic, excluding roundoff
 /// and the highest filtered mode. Mode indices are retained across parity gaps.
@@ -37,13 +79,48 @@ struct Spectrum {
 };
 Spectrum diagnose_power(const DataVector& power, size_t filtered_modes = 1);
 
+/// Source-faithful SpEC diagnostic: compact exact zeros, retain their original
+/// indices for fits, and round the effective filter count. The optional count
+/// describes the same local filter evaluated at one lower independent extent.
+/// The legacy diagnose_power remains available to the hybrid controller.
+Spectrum diagnose_spec_power(
+    const DataVector& power, double filtered_modes,
+    std::optional<double> after_p_down_filtered_modes = std::nullopt);
+
+struct FilteredModes {
+  std::array<double, 3> current{};
+  std::array<double, 3> after_p_down{};
+  std::array<bool, 3> can_decrease{{true, true, true}};
+};
+/// Sum 1-response per independent topology, using the actual element filter
+/// both at the current mesh and at each prospective one-mode-lower mesh.
+FilteredModes filtered_modes(
+    const Mesh<3>& mesh,
+    const Filters::Filter<
+        3, ylm::TensorYlm::filter_detail::gh_spacetime_vars_list>& filter);
+
+/// One-direction polynomial transforms, RMS over transverse nodal points.
+std::array<DataVector, 3> polynomial_power(const DataVector& component,
+                                           const Mesh<3>& mesh);
+/// SpEC's final topological aggregation (including its outer square root).
+std::array<double, 3> aggregate_constraints(
+    const std::array<double, 3>& directional_rms,
+    const RefinementVariables& variables);
+
 struct Diagnostics {
-  // Metric and combined Pi/Phi, respectively. RMS over independent tensor
-  // components and transverse modal indices (not directional Legendre L2).
+  RefinementVariables refinement_variables{};
+  // Metric and combined Pi/Phi, respectively. diagnose_spec averages transverse
+  // nodal points on I1 and tensor-harmonic coefficients on S2. The legacy
+  // diagnose uses full tensor-product modal averaging.
+  // Arrays are indexed by independent refinement variable, not mesh dimension.
+  // Only refinement_variables.size() entries are active. In particular, an S2
+  // spectrum must appear once, not once each for theta and phi.
   std::array<std::array<Spectrum, 3>, 2> spectra{};
-  // Nodal RMS of directionally projected C_ia and C_iab. As in SpEC's
-  // component sum, each independent tensor component is counted once.
+  // Projected C_ia and C_iab. diagnose_spec uses SpEC's topological aggregation
+  // of directional nodal RMS; the legacy diagnose returns directional RMS.
+  // Each independent remaining tensor component is counted once.
   std::array<std::array<double, 3>, 2> constraints{};
+  FilteredModes filter{};
 };
 Diagnostics diagnose(const tnsr::aa<DataVector, 3>& metric,
                      const tnsr::aa<DataVector, 3>& pi,
@@ -54,13 +131,43 @@ Diagnostics diagnose(const tnsr::aa<DataVector, 3>& metric,
                      const gauges::GaugeCondition& gauge,
                      const Scalar<DataVector>& gamma2);
 
+/// SpEC diagnostics for polynomial and I1 x S2 elements. Angular spectra use
+/// tensor harmonics in the grid frame; radial spectra use the inertial tensor
+/// components. The transient transform cache is bounded to the current l_max.
+/// Projected constraints follow NormOfProjectedDerivConstraint, including its
+/// separate element/grid and grid/inertial Jacobian normalization.
+Diagnostics diagnose_spec(
+    const tnsr::aa<DataVector, 3>& metric, const tnsr::aa<DataVector, 3>& pi,
+    const tnsr::iaa<DataVector, 3>& phi, const Mesh<3>& mesh,
+    const InverseJacobian<DataVector, 3, Frame::ElementLogical,
+                          Frame::Inertial>& inverse_jacobian,
+    const Jacobian<DataVector, 3, Frame::Grid, Frame::Inertial>& grid_jacobian,
+    const tnsr::I<DataVector, 3>& coordinates, double time,
+    const gauges::GaugeCondition& gauge, const Scalar<DataVector>& gamma2,
+    const FilteredModes& filter,
+    gsl::not_null<power_monitor::CartToSphereMatrices*> transform_cache);
+
 /// Serialized per-element history. Reset on h changes; retained on p changes
 /// so the next call can detect the *realized* mesh change. Observations do not
 /// update it. Target adjustment retains constraint history across p changes,
 /// as in SpEC, including in the prospective-removal forecast.
 struct History {
+  RefinementVariables refinement_variables{};
+  // Transient, per-element cache. Sharing avoids copying sparse matrices when
+  // evaluating on a history snapshot. It carries no numerical history and is
+  // rebuilt after migration; global criteria must not cache element meshes.
+  std::shared_ptr<power_monitor::CartToSphereMatrices> transform_cache{};
+  // Startup iterations do not advance evolution history or its cooldowns.
+  bool initializing{false};
+  bool initial_cycle_detected{false};
+  std::vector<std::array<size_t, 3>> initial_meshes{};
+  // Cached grid-frame radius-plus-time restriction, retained across p changes.
+  double radius_release_time{std::numeric_limits<double>::signaling_NaN()};
   size_t calls{0};
   double time{-std::numeric_limits<double>::infinity()};
+  // Extents and all directional histories use independent-variable indices.
+  // The third entry is unused on a spherical shell. decision is expanded into
+  // logical mesh directions only at the controller boundary.
   std::array<size_t, 3> extents{};
   std::array<size_t, 3> last_change{};
   std::array<double, 3> last_change_time{
@@ -73,6 +180,14 @@ struct History {
   std::array<double, 3> log10_target_shift{};
   std::array<amr::Flag, 3> decision{};
   void pup(PUP::er& p) {
+    if (p.isUnpacking()) {
+      transform_cache.reset();
+    }
+    p | refinement_variables;
+    p | initializing;
+    p | initial_cycle_detected;
+    p | initial_meshes;
+    p | radius_release_time;
     p | calls;
     p | time;
     p | extents;
@@ -123,7 +238,12 @@ std::array<amr::Flag, 3> decide(gsl::not_null<History*> history,
 /// Standalone SpEC-style p control. Both addition and removal are decided
 /// from the grouped spectra and projected constraints, without an upstream
 /// refinement request. Even with adjustment_limit == 0, addition requires
-/// spectral error above the target. No h changes are requested.
+/// spectral error above the target. No h changes are requested. When
+/// History::initializing is set, bypass evolution cooldowns and permit removal
+/// on the first call. Detect recurring meshes, and retain only the target shift
+/// and startup mesh history. extents contains independent spectral mode counts
+/// (RefinementVariables::mode_counts), not the raw mesh extents. Changes remain
+/// one spectral mode per iteration. The returned flags use logical dimensions.
 std::array<amr::Flag, 3> decide_p(gsl::not_null<History*> history,
                                   const Diagnostics& diagnostics,
                                   const std::array<size_t, 3>& extents,

@@ -1,0 +1,169 @@
+# Distributed under the MIT License.
+# See LICENSE.txt for details.
+
+# Exercise repeated p increases and decreases at a polynomial / I1 x S2
+# interface, while the other radial S2 face has conservative LTS histories.
+# The equal-rate interface takes 32 steps per slab; the outer shell uses
+# larger local time steps.
+# Both bases start at the DriveToTarget extents, so each AMR call reverses
+# the previous change.
+
+# Use the synchronized AMR phase, as in the GH SpecSpectral controller.
+
+Executable: EvolveScalarWave3DAmrPhase
+Testing:
+  Check: parse;execute
+  Timeout: 120
+ExpectedOutput:
+- Reductions.h5
+---
+
+Parallelization:
+  ElementDistribution: NumGridPoints
+ResourceInfo:
+  AvoidGlobalProc0: false
+  Singletons: Auto
+InitialData: &id001
+  RegularSphericalWave:
+    Profile:
+      Gaussian:
+        Amplitude: 1.0
+        Width: 1.0
+        Center: 2.4
+Amr:
+  Criteria:
+  - DriveToTargetNumberOfGridPoints:
+      Target:
+      - 9
+      - 9
+      - 17
+      OscillationAtTarget:
+      - IncreaseResolution
+      - IncreaseResolution
+      - IncreaseResolution
+  EnableInBlocks: All
+  Policies:
+    AllowCoarsening: true
+    EnforceTwoToOneBalanceInNormalDirection: true
+    Isotropy: Anisotropic
+    Limits:
+      RefinementLevel: Auto
+      NumPolynomialModes: Auto
+      FourierM: Auto
+      SphericalHarmonicL: Auto
+      ErrorBeyondLimits: false
+  Verbosity: Debug
+PhaseChangeAndTriggers:
+- Trigger:
+    Slabs:
+      Specified:
+        Values:
+        - 2
+        - 4
+        - 6
+        - 8
+  PhaseChanges:
+  - VisitAndReturn(EvaluateAmrCriteria)
+  - VisitAndReturn(AdjustDomain)
+  - VisitAndReturn(CheckDomain)
+Evolution:
+  InitialTime: 0.0
+  InitialTimeStep: 0.000125
+  InitialSlabSize: 0.004
+  MinimumTimeStep: 1e-7
+  LocalTimeStepping: Conservative
+  TimeStepper:
+    AdamsMoultonPcMonotonic:
+      Order: 4
+  LtsStepChoosers:
+  - Constant: 0.001
+  VariableOrderAlgorithm:
+    GoalOrder: 4
+DomainCreator:
+  NonconformingSphericalShells:
+    InnerRadius: 1.9
+    InterfaceRadius: 2.4
+    OuterRadius: 2.9
+    Interior:
+      ExciseWithBoundaryCondition: &id002
+        DirichletAnalytic:
+          AnalyticPrescription: *id001
+    InitialCubeRefinement:
+    - 0
+    - 0
+    InitialSHRefinement: 1
+    InitialCubeGridPoints:
+    - 9
+    - 17
+    InitialSHGridPoints:
+    - 8
+    - 9
+    RadialPartitioning:
+    - []
+    - []
+    RadialDistribution:
+    - - Linear
+    - - Linear
+    UseEquiangularMap: false
+    TimeDependentMaps: None
+    OuterBoundaryCondition: *id002
+SpatialDiscretization:
+  BoundaryCorrection:
+    UpwindPenalty: null
+  DiscontinuousGalerkin:
+    Filtering:
+    - Hypercube:
+        HalfPower: 128
+        Enable: true
+        BlocksToFilter: All
+        VolumeFilterOnSubstep: true
+        BoundaryCorrectionFilterOnSubstep: false
+        VolumeFilterEveryNSteps: None
+        BoundaryCorrectionFilterEveryNSteps: None
+    - SphericalShell:
+        NumModesToKill: 1
+        AngularHalfPower: 128
+        RadialHalfPower: 128
+        BlocksToFilter: All
+        Enable: true
+        VolumeFilterOnSubstep: true
+        BoundaryCorrectionFilterOnSubstep: false
+        VolumeFilterEveryNSteps: None
+        BoundaryCorrectionFilterEveryNSteps: None
+    Formulation: StrongInertial
+    Quadrature: GaussLobatto
+EventsAndTriggersAtCheckpoints: null
+EventsAndTriggersAtSlabs:
+- Trigger:
+    Slabs:
+      Specified:
+        Values:
+        - 10
+  Events:
+  - Completion
+- Trigger: Always
+  Events:
+  - ObserveAmrStats:
+      PrintToTerminal: true
+      ObservePerCore: false
+  - ObserveTimeStep:
+      SubfileName: TimeSteps
+      PrintTimeToTerminal: false
+      ObservePerCore: false
+  - ObserveNorms:
+      SubfileName: Errors
+      TensorsToObserve:
+      - Name: Error(Psi)
+        NormType: L2Norm
+        Components: Sum
+      - Name: Error(Pi)
+        NormType: L2Norm
+        Components: Sum
+      - Name: Error(Phi)
+        NormType: L2Norm
+        Components: Sum
+EventsAndTriggersAtSteps: null
+EventsAndDenseTriggers: null
+Observers:
+  VolumeFileName: Volume
+  ReductionFileName: Reductions

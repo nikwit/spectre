@@ -3,6 +3,8 @@
 
 #include "Framework/TestingFramework.hpp"
 
+#include <optional>
+
 #include "DataStructures/DataBox/ObservationBox.hpp"
 #include "DataStructures/ModalVector.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/ChalmersWithSpecCoarsening.hpp"
@@ -12,10 +14,22 @@
 #include "Framework/TestCreation.hpp"
 #include "Framework/TestHelpers.hpp"
 #include "NumericalAlgorithms/LinearOperators/CoefficientTransforms.hpp"
+#include "NumericalAlgorithms/LinearOperators/Filters/Hypercube.hpp"
 #include "NumericalAlgorithms/Spectral/LogicalCoordinates.hpp"
 #include "Utilities/Serialization/RegisterDerivedClassesWithCharm.hpp"
 
 namespace {
+using GridJacobian = domain::Tags::Jacobian<3, Frame::Grid, Frame::Inertial>;
+using FilterTag = Filters::Tags::SpectralFilter<
+    3, ylm::TensorYlm::filter_detail::gh_spacetime_vars_list>;
+GridJacobian::type identity_grid_jacobian(const size_t n) {
+  GridJacobian::type jac(n, 0.0);
+  for (size_t d = 0; d < 3; ++d) {
+    jac.get(d, d) = 1.0;
+  }
+  return jac;
+}
+
 using Metric = gr::Tags::SpacetimeMetric<DataVector, 3>;
 using Pi = gh::Tags::Pi<DataVector, 3>;
 using Phi = gh::Tags::Phi<DataVector, 3>;
@@ -212,6 +226,10 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.SpatialTarget",
   const Target one{1.e-4, {Gaussian{{0., 0., 0.}, 2., 1., 1.e-8}}};
   CHECK(one(coords) == approx(1.e-6));
   CHECK(serialize_and_deserialize(one)(coords) == approx(1.e-6));
+  const auto optional_target =
+      serialize_and_deserialize(std::optional<Target>{one});
+  REQUIRE(optional_target.has_value());
+  CHECK((*optional_target)(coords) == approx(1.e-6));
   // Maximize each profile separately before the logarithmic blend.
   const Target two{1.e-4,
                    {Gaussian{{0., 0., 0.}, 2., 1., 1.e-8},
@@ -630,14 +648,18 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.DiagnosticsAndHistory",
                                                          false, false};
   const Criterion criterion{
       refinement, 1.e-4, {{1.e-3, 1.e-3}}, true, true, 7, 2, 0., false};
-  auto box = db::create<tmpl::list<
-      domain::Tags::Mesh<3>, Metric, Pi, Phi, Inverse, Coordinates,
-      GridCoordinates, ::Tags::Time, gh::gauges::Tags::GaugeCondition,
-      gh::Tags::ConstraintGamma2, gh::spec_amr::HistoryTag>>(
+  auto box = db::create<
+      tmpl::list<domain::Tags::Mesh<3>, Metric, Pi, Phi, Inverse, Coordinates,
+                 GridCoordinates, ::Tags::Time,
+                 gh::gauges::Tags::GaugeCondition, gh::Tags::ConstraintGamma2,
+                 gh::spec_amr::HistoryTag, GridJacobian, FilterTag>>(
       mesh, metric, pi, phi, inverse, coords, grid_coords, 0.,
       std::unique_ptr<gh::gauges::GaugeCondition>(
           std::make_unique<gh::gauges::Harmonic>()),
-      gamma2, gh::spec_amr::History{});
+      gamma2, gh::spec_amr::History{}, identity_grid_jacobian(n),
+      FilterTag::type(new Filters::Hypercube<
+                      3, ylm::TensorYlm::filter_detail::gh_spacetime_vars_list>(
+          36, true, std::nullopt, false, false, 1, std::nullopt)));
   auto observation = make_observation_box<tmpl::list<>>(make_not_null(&box));
   Parallel::GlobalCache<Metavariables> cache{};
   const ElementId<3> id{0};
@@ -861,14 +883,18 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.WrapperTargetShift",
   initial_history.time = -1.;
   initial_history.extents = mesh.extents().indices();
   initial_history.constraints = diagnostics.constraints;
-  auto box = db::create<tmpl::list<
-      domain::Tags::Mesh<3>, Metric, Pi, Phi, Inverse, Coordinates,
-      GridCoordinates, ::Tags::Time, gh::gauges::Tags::GaugeCondition,
-      gh::Tags::ConstraintGamma2, gh::spec_amr::HistoryTag>>(
+  auto box = db::create<
+      tmpl::list<domain::Tags::Mesh<3>, Metric, Pi, Phi, Inverse, Coordinates,
+                 GridCoordinates, ::Tags::Time,
+                 gh::gauges::Tags::GaugeCondition, gh::Tags::ConstraintGamma2,
+                 gh::spec_amr::HistoryTag, GridJacobian, FilterTag>>(
       mesh, metric, pi, phi, inverse, coords, grid_coords, 0.,
       std::unique_ptr<gh::gauges::GaugeCondition>(
           std::make_unique<gh::gauges::Harmonic>()),
-      gamma2, initial_history);
+      gamma2, initial_history, identity_grid_jacobian(n),
+      FilterTag::type(new Filters::Hypercube<
+                      3, ylm::TensorYlm::filter_detail::gh_spacetime_vars_list>(
+          36, true, std::nullopt, false, false, 1, std::nullopt)));
   auto observation = make_observation_box<tmpl::list<>>(make_not_null(&box));
   Parallel::GlobalCache<Metavariables> cache{};
   const ElementId<3> id{0};

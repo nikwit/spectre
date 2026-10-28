@@ -29,6 +29,10 @@ constexpr size_t angular_monitor_index = 1;
 
 void fill_cart_to_sphere_matrices(
     const gsl::not_null<CartToSphereMatrices*> matrices, const size_t ell_max) {
+  if (matrices->ell_max != ell_max) {
+    *matrices = CartToSphereMatrices{};
+    matrices->ell_max = ell_max;
+  }
   if (not matrices->i.has_value()) {
     matrices->i.emplace();
     ylm::TensorYlm::fill_cart_to_sphere<
@@ -65,7 +69,8 @@ GhShellPowerMonitors gh_shell_power_monitors(
         gh_vars,
     const Mesh<3>& mesh,
     const InverseJacobian<DataVector, 3, Frame::Inertial, Frame::Grid>&
-        jac_inertial_to_grid) {
+        jac_inertial_to_grid,
+    const AngularNormalization normalization) {
   if (mesh.basis(0) == Spectral::Basis::SphericalHarmonic or
       mesh.basis(1) != Spectral::Basis::SphericalHarmonic or
       mesh.basis(2) != Spectral::Basis::SphericalHarmonic) {
@@ -97,6 +102,10 @@ GhShellPowerMonitors gh_shell_power_monitors(
   result.phi[radial_monitor_index] =
       PowerMonitors::spherical_shell_tensor_radial_power_monitor(
           get<gh::Tags::Phi<DataVector, 3, Frame::Inertial>>(gh_vars), mesh);
+  result.pi_phi[radial_monitor_index] =
+      sqrt((10.0 * square(result.pi[radial_monitor_index]) +
+            30.0 * square(result.phi[radial_monitor_index])) /
+           40.0);
 
   fill_cart_to_sphere_matrices(cart_to_sphere_matrices, ell_max);
   Variables<ylm::TensorYlm::filter_detail::gh_spatial_vars_list<Frame::Grid>>
@@ -175,6 +184,24 @@ GhShellPowerMonitors gh_shell_power_monitors(
           gh_spatial_tensor_ylm_coefficients),
       mesh);
 
+  if (normalization == AngularNormalization::SpEC) {
+    // SpEC's SumSpinWeightedYlmCoefs uses TensorYlmStorageIterator also for
+    // the scalar 00 sectors. It counts the identically zero imaginary m=0
+    // slot. Keep that convention for its AMR diagnostics, while preserving
+    // the independent-real normalization of the existing monitor interface.
+    for (size_t ell = 0; ell <= ell_max; ++ell) {
+      metric_counts[ell] += radial_extents;
+      pi_counts[ell] += radial_extents;
+    }
+  }
+  result.pi_phi[angular_monitor_index] =
+      result.pi[angular_monitor_index] + result.phi[angular_monitor_index];
+  auto derivative_counts = pi_counts;
+  for (size_t ell = 0; ell <= ell_max; ++ell) {
+    derivative_counts[ell] += phi_counts[ell];
+  }
+  PowerMonitors::normalize_spherical_shell_angular_power(
+      make_not_null(&result.pi_phi[angular_monitor_index]), derivative_counts);
   PowerMonitors::normalize_spherical_shell_angular_power(
       make_not_null(&result.spacetime_metric[angular_monitor_index]),
       metric_counts);

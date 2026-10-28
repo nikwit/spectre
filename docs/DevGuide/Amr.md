@@ -176,6 +176,74 @@ polynomial order (p-refinement).  A criterion does not need to handle
 anything that is enforced by the amr::Policies such as worry about
 bounds on the refinement level or number of grid points.
 
+### Independent spectral extents in the GH SpEC-style controller
+
+`gh::spec_amr::RefinementVariables` describes the independent refinement
+variables of an element from its local mesh. A polynomial element has three
+independent orders. A spherical-harmonic shell has a radial order and a single
+angular order, with `m_max == l_max`. Its two angular mesh dimensions share one
+spectral diagnostic and one history of constraint forecasts, target shifts and
+cooldowns. The controller expands the angular decision into logical AMR flags
+only on return. In its fixed-size diagnostic and history arrays, only the
+first `RefinementVariables::size()` entries are active; unused entries do not
+participate in decisions.
+
+`gh::SpecSpectral` uses `gh::spec_amr::diagnose_spec` on both polynomial
+(Legendre or Chebyshev) and `I1 x S2` elements. Polynomial and shell-radial
+power monitors transform only the monitored direction, leaving transverse
+points nodal. Shell-angular power uses tensor spherical harmonics in the grid
+frame, with spin-dependent coefficient counts. The Pi/Phi group combines
+squared coefficients and counts before normalization. It follows SpEC's
+storage convention, including the zero imaginary m=0 scalar slot.
+
+The SpEC diagnostic compacts exact zeros for weighted tails while retaining
+original indices for slope fits. Projected constraints use SpEC's separate
+element-to-grid and grid-to-inertial normalization, then its topological
+aggregation: `sqrt(RMS_d)` for I1 and
+`sqrt((RMS_theta + RMS_phi)/2)` for S2. These are deliberate changes to the
+previous `SpecSpectral` polynomial diagnostic conventions, so previous
+constraint tolerance values should not be interpreted as unchanged norm
+thresholds. The older `ChalmersWithSpecCoarsening` controller and the legacy
+`diagnose` / `diagnose_power` helpers retain their original diagnostics.
+
+The element's actual `Filters::Tags::SpectralFilter` supplies its modal volume
+response. The effective filtered count is `sum(1-response)`, rounded by the
+spectrum diagnostic. The filter is also queried at each prospective lower
+independent extent for the removal forecast. Disabled volume filters and
+`Filters::None` give zero filtered modes; boundary filtering does not change
+this count. The count describes a single filter application, not accumulated
+damping over many timesteps. Missing filter metadata is an error instead of
+an assumption of one filtered mode. A prospective mesh unsupported by the
+local filter inhibits removal. `Hypercube`, `SphericalShell` and `None`
+provide this query; other filters must implement it before use here.
+
+Cartesian-to-tensor-harmonic matrices are cached per element, replaced when
+l_max changes, and rebuilt after migration. They are not numerical history.
+The minimum-point bounds remain in logical mesh coordinates; the two angular
+bounds are combined into a single S2 floor. This is a diagnostic/controller
+adapter, not an implementation of adaptive h refinement, adaptive filters or
+the rest of SpEC's domain controller. Reference fixtures and their scope are
+documented in
+`tests/Unit/Evolution/Systems/GeneralizedHarmonic/SpecAmrReference/README.md`.
+
+At a nonconforming polynomial / spherical-harmonic interface, p AMR preserves
+the connectivity and equal-rate stepping policy. Each side uses its own face
+mesh as its mortar; the wedge-side interpolator is rebuilt using both updated
+meshes. The S2 side keeps a single self-keyed mortar rather than storing every
+wedge in its fixed-size neighbor-mesh table. Logical h levels on opposite
+sides are not comparable, so the two-to-one check is skipped there. Splitting
+or joining an element adjacent to such an interface is not supported.
+Resolution changes must run through `EvaluateAmrCriteria` / `AdjustDomain`
+so the two sides exchange their proposed meshes before rebuilding the
+interpolators. The legacy `RefineMesh` event does not provide that exchange.
+Conservative LTS on other faces retains its history and projects only the
+local geometric data. Volume time-stepper values and derivatives are
+projected without restarting the integrator. The mixed-interface projector
+regression checks both sides, changes on neighbors alone, and serialization
+between AMR calls; the scalar-wave input
+`tests/InputFiles/ScalarWave/NonconformingSphericalWaveAmrLts.yaml` exercises
+repeated p increases and decreases during evolution with LTS.
+
 ### AMR Policies {#dev_guide_amr_policies}
 
 The current AMR algorithm has a set of rules that are enforced after
@@ -373,3 +441,117 @@ PhaseChangeAndTriggers:
 Both `EvaluateAmrCriteria` and `AdjustDomain` are required in order
 for AMR to work.  `VisitAndReturn(CheckDomain)` performs diagnostics
 and can be omitted.  To turn off AMR, omit the three phase changes above.
+
+#### Initial p adjustment and junk-radiation timing for BBH
+
+`EvolveGhBinaryBlackHole` can adjust its initial polynomial orders before
+time-stepper self-start. With `SpecSpectral` as the sole AMR criterion, add
+the following entry alongside the normal evolution AMR phase changes:
+
+```yaml
+PhaseChangeAndTriggers:
+  - Trigger: {Not: Always}
+    PhaseChanges:
+      - InitialPRefinement:
+          MaxIterations: 40
+```
+
+The controller runs automatically during startup; the false trigger prevents
+evolution from requesting it again. Each iteration evaluates `SpecSpectral`,
+applies the existing p-refinement policies and neighbor updates, and resamples
+the original initial data on the resulting mesh. It then reapplies the initial
+gauge constraints before evaluating again. Time, the h mesh and element
+ownership stay fixed. Startup bypasses the criterion's time gates and cooldown,
+permits coarsening on its first call, and does not advance the evolution
+decision history. Unlike SpEC's multi-mode initial changes, each iteration
+changes at most one point per direction.
+
+Iterations stop when no permitted changes remain or `MaxIterations` is reached;
+an element also stops requesting changes if its startup mesh cycles. The final
+mesh always receives resampled data, including at the iteration limit. Output
+reports changed elements, increasing directions blocked by policies, and
+cycling elements. Stopping at a nonfatal point cap or iteration limit does not
+mean that all error targets were met. Existing `Amr.Policies.Limits` settings,
+including `ErrorBeyondLimits`, still apply. Omitting `InitialPRefinement`
+preserves the previous startup behavior.
+
+To suppress adaptation to outgoing junk radiation in the outer wave zone,
+replace the scalar `StartTime` inside `SpecSpectral` with, for example:
+
+```yaml
+StartTime:
+  Time: 0.0
+  Blocks: [Envelope, OuterShell0, OuterShell1]
+  RadiusPlusTime: 200.0
+```
+
+`Blocks` accepts domain block names and block-group names. Select the actual
+wave-zone groups in the domain; the names above include the envelope of a
+partitioned `BinaryCompactObject` domain. The envelope is included because
+outgoing junk crosses it before reaching the outer shells. Each selected element freezes all
+three p decisions until
+`time >= max(Time, max_initial_grid_radius + RadiusPlusTime)`. The maximum
+radius is cached from the element's initial grid points, so later p changes
+do not move the threshold. Constraint and spectral diagnostics and their
+history continue to update during this radial hold. Other blocks follow the
+ordinary scalar `Time` gate. Both gates are bypassed during initial p
+adjustment, which can also be used independently of the radial hold.
+
+`RadiusPlusTime` is an absolute time offset. For a run starting at `t0`, use
+`t0 + delay` if the desired release is `t0 + radius + delay`. SpEC's standard
+bound-orbit SKS/SSphKS/CFMS setup uses `delay = max(200, 3 * initial_separation)`;
+its SHK setup uses `2 * initial_separation`. Choose the offset to match the
+initial-data family. The original scalar `StartTime: 0.0` remains supported
+and imposes no radius-dependent restriction.
+
+
+#### Redistributing BBH elements after p adjustment
+
+The initial element distribution precedes initial p adjustment, so it can
+become imbalanced as the polynomial orders change. `EvolveGhBinaryBlackHole`
+provides `RedistributeElements` as a phase change. It uses the current mesh and
+grid coordinates with the same `Parallelization.ElementDistribution` cost
+model and block Z-curve partitioner used for initial placement. `RoundRobin`
+also remains supported. Processors reserved by `ResourceInfo` remain excluded.
+
+For example, redistribute after the first slab and every 100 slabs thereafter:
+
+```yaml
+PhaseChangeAndTriggers:
+  # Keep the normal AMR entries above this entry, so coincident triggers first
+  # adjust the mesh, then redistribute it.
+  - Trigger:
+      Slabs:
+        EvenlySpaced:
+          Interval: 100
+          Offset: 1
+    PhaseChanges:
+      - RedistributeElements
+```
+
+Phase changes are checked after advancing time. Offset 1 avoids waiting for
+slab 100 before the first redistribution. There is no separate startup option
+or junk-traversal delay for redistribution; the `SpecSpectral.StartTime` hold
+restricts mesh adaptation only.
+
+Configure `RedistributeElements` once. Synchronized phases collect the
+current costs, deliver the new destinations, migrate the halted elements,
+then rebuild equal-rate time-stepping sections in `UpdateSections`.
+Before migration, the old section cookies and multicast trees are discarded
+at a quiescent slab boundary. Section creation does not reset the fixed LTS
+ratios or mortar policies. Checkpoint restart also recreates these sections
+before evolution resumes. The BBH p projectors retain the initial h refinement
+levels so section membership can be reconstructed after mesh adjustment.
+The element IDs, meshes, evolved fields, time-stepper and mortar histories,
+and inboxes are retained. Migration calls the same element registration hooks
+as the load-balancing phase, without invoking Charm's measured load balancer.
+The output reports how many elements will move and the predicted maximum to
+mean processor cost before and after redistribution. These are cost estimates,
+not measured speedups.
+
+This implementation supports ordinary element arrays with a fixed h mesh
+(uniform h within each block), varying p, and equal-rate sections on mixed
+polynomial / spherical-harmonic interfaces. Other active Charm array sections
+and multigrid copies remain unsupported. It rejects unsupported layouts before
+migration. It does not enable h
+adaptation, change domain topology, or restart the evolution.

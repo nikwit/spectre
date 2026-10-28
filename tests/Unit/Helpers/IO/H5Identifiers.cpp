@@ -96,10 +96,10 @@ H5IdentifierSnapshot snapshot_h5_identifiers() {
       H5Fget_obj_count(H5F_OBJ_ALL, H5F_OBJ_ALL);
   CHECK_H5(number_of_file_objects, "Failed to count open HDF5 file objects");
   snapshot.number_of_file_objects = static_cast<size_t>(number_of_file_objects);
-  snapshot.datatype_probe =
-      probe("datatype", []() { return H5Tcopy(H5T_NATIVE_INT); }, H5Tclose);
-  snapshot.dataspace_probe =
-      probe("dataspace", []() { return H5Screate(H5S_SCALAR); }, H5Sclose);
+  snapshot.datatype_probe = probe(
+      "datatype", []() { return H5Tcopy(H5T_NATIVE_INT); }, H5Tclose);
+  snapshot.dataspace_probe = probe(
+      "dataspace", []() { return H5Screate(H5S_SCALAR); }, H5Sclose);
   snapshot.property_list_probe = probe(
       "property list", []() { return H5Pcreate(H5P_DATASET_CREATE); },
       H5Pclose);

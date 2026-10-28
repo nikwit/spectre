@@ -11,5 +11,7 @@ spectre_target_headers(
   ${LIBRARY}
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
+  InitialPRefinement.hpp
+  ResetSpecAmrHistory.hpp
   SetInitialData.hpp
   )

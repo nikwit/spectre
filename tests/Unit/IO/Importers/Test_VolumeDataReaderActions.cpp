@@ -80,6 +80,9 @@ struct MockElementArray {
                          domain::Tags::Mesh<2>>>,
                      importers::Actions::RegisterWithElementDataReader>>,
       Parallel::PhaseActions<
+          Parallel::Phase::RegisterWithElementDataReader,
+          tmpl::list<importers::Actions::RegisterWithElementDataReader>>,
+      Parallel::PhaseActions<
           Parallel::Phase::Testing,
           tmpl::list<importers::Actions::ReadVolumeData<TestVolumeData,
                                                         import_tags_list>,
@@ -92,10 +95,14 @@ struct MockVolumeDataReader {
   using metavariables = Metavariables;
   using chare_type = ActionTesting::MockNodeGroupChare;
   using array_index = size_t;
-  using phase_dependent_action_list = tmpl::list<Parallel::PhaseActions<
-      Parallel::Phase::Initialization,
-      tmpl::list<importers::detail::InitializeElementDataReader<
-          metavariables::volume_dim>>>>;
+  using phase_dependent_action_list =
+      tmpl::list<Parallel::PhaseActions<
+                     Parallel::Phase::Initialization,
+                     tmpl::list<importers::detail::InitializeElementDataReader<
+                         metavariables::volume_dim>>>,
+                 Parallel::PhaseActions<
+                     Parallel::Phase::RegisterWithElementDataReader,
+                     tmpl::list<importers::detail::ResetCompletedImports>>>;
 };
 
 template <bool AddSubcell>
@@ -290,6 +297,39 @@ void test_actions(const std::variant<double, importers::ObservationSelector>&
             get<TensorTag>(all_sample_data.at(id)));
     }
     first_invocation = false;
+  }
+
+  if constexpr (not AddSubcell) {
+    // A second registration/import cycle must resample at the changed p mesh,
+    // despite using the same file and volume-data identifier.
+    ActionTesting::set_phase(make_not_null(&runner),
+                             Parallel::Phase::RegisterWithElementDataReader);
+    ActionTesting::next_action<reader_component>(make_not_null(&runner), 0);
+    CHECK(get_reader_tag(importers::Tags::ElementDataAlreadyRead{}).empty());
+    const Mesh<2> new_mesh{5, Spectral::Basis::Legendre,
+                           Spectral::Quadrature::GaussLobatto};
+    for (const auto& id : element_ids) {
+      auto& box =
+          ActionTesting::get_databox<element_array>(make_not_null(&runner), id);
+      db::mutate<domain::Tags::Mesh<2>,
+                 domain::Tags::Coordinates<2, Frame::Inertial>>(
+          [&new_mesh](const auto mesh, const auto coords) {
+            *mesh = new_mesh;
+            *coords = tnsr::I<DataVector, 2>(new_mesh.number_of_grid_points(), 1.);
+          },
+          make_not_null(&box));
+      ActionTesting::next_action<element_array>(make_not_null(&runner), id);
+      runner.template invoke_queued_simple_action<reader_component>(0);
+    }
+    ActionTesting::set_phase(make_not_null(&runner), Parallel::Phase::Testing);
+    for (const auto& id : element_ids) {
+      ActionTesting::next_action<element_array>(make_not_null(&runner), id);
+      runner.template invoke_queued_simple_action<reader_component>(0);
+      ActionTesting::next_action<element_array>(make_not_null(&runner), id);
+      CHECK(get<0>(get_element_tag(VectorTag{}, id)).size() == 25);
+      CHECK(get<0>(get_element_tag(VectorTag{}, id))[0] ==
+            get<0>(get<VectorTag>(all_sample_data.at(id)))[0]);
+    }
   }
 
   for (size_t i = 0; i < all_element_data.size(); ++i) {

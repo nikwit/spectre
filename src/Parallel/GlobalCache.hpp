@@ -364,6 +364,10 @@ class GlobalCache
   ///
   /// This is used when reparsing an input file to update option values during
   /// a restart from a checkpoint.
+  /// Tags may provide `on_options_changed<Metavariables>(cache)` to invalidate
+  /// dependent state. The hook runs on each node after replacing that tag,
+  /// only if its serialized value changed. Hooks must not assume other nodes
+  /// or tags have been updated yet. Quiescence completes before Restart.
   void overlay_cache_data(tuples::tagged_tuple_from_typelist<
                           Parallel::get_overlayable_tag_list<Metavariables>>
                               data_to_overlay);
@@ -658,8 +662,22 @@ void GlobalCache<Metavariables>::overlay_cache_data(
         data_to_overlay) {
   tmpl::for_each<Parallel::get_overlayable_tag_list<Metavariables>>(
       [this, &data_to_overlay]<typename Tag>(tmpl::type_<Tag> /*meta*/) {
+        bool changed = false;
+        if constexpr (requires {
+                        Tag::template on_options_changed<Metavariables>(*this);
+                      }) {
+          changed = serialize(tuples::get<Tag>(const_global_cache_)) !=
+                    serialize(tuples::get<Tag>(data_to_overlay));
+        }
         tuples::get<Tag>(const_global_cache_) =
             std::move(tuples::get<Tag>(data_to_overlay));
+        if constexpr (requires {
+                        Tag::template on_options_changed<Metavariables>(*this);
+                      }) {
+          if (changed) {
+            Tag::template on_options_changed<Metavariables>(*this);
+          }
+        }
       });
 }
 
@@ -841,6 +859,7 @@ void GlobalCache<Metavariables>::pup(PUP::er& p) {
   p | mutable_global_cache_;
   p | main_proxy_;
   p | parallel_components_have_been_set_;
+  p | resource_info_;
   p | resource_info_has_been_set_;
   p | my_proc_;
   p | my_node_;

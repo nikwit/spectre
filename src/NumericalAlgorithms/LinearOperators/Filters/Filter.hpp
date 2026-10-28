@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -117,6 +118,17 @@ class Filter : public PUP::able {
 
   /// \brief Returns `true` if this filter can filter the `mesh`.
   virtual bool supports_mesh(const Mesh<Dim>& mesh) const = 0;
+
+  /// Modal amplitude response of one application of the volume filter, for
+  /// diagnostics. Disabled volume filtering has unit response. Polynomial
+  /// directions have one entry per mode; both S2 directions have one entry
+  /// per ell (not per phi point). This does not include boundary filtering or
+  /// repeated applications at the configured cadence. An unimplemented
+  /// response is nullopt, so a diagnostic cannot silently assume a filter.
+  virtual std::optional<std::array<std::vector<double>, Dim>>
+  volume_filter_response(const Mesh<Dim>& /*mesh*/) const {
+    return std::nullopt;
+  }
 
   /// \brief A human-readable name for the concrete filter type, used in
   /// diagnostics.

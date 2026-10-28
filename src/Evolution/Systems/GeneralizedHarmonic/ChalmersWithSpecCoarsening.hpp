@@ -221,8 +221,10 @@ class ChalmersWithSpecCoarsening : public amr::Criterion {
       }
       return refinement_.evaluate_with_target_factors(box, cache, id, factors);
     }();
-    auto result = spec_amr::decide(
-        history, diagnostics, mesh.extents().indices(), time, before, settings);
+    auto result =
+        spec_amr::decide(history, diagnostics,
+                         diagnostics.refinement_variables.mode_counts(mesh),
+                         time, before, settings);
     if (not active) {
       result = before;
       history->decision = result;

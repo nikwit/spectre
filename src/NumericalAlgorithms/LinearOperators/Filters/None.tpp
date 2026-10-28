@@ -12,12 +12,29 @@
 #include <vector>
 
 #include "Domain/Structure/BlockGroups.hpp"
+#include "NumericalAlgorithms/Spectral/Basis.hpp"
 #include "NumericalAlgorithms/Spectral/Mesh.hpp"
+#include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "Options/ParseError.hpp"
 #include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/Serialization/PupStlCpp17.hpp"
 
 namespace Filters {
+template <size_t Dim, typename TagList>
+std::optional<std::array<std::vector<double>, Dim>>
+None<Dim, TagList>::volume_filter_response(const Mesh<Dim>& mesh) const {
+  std::array<std::vector<double>, Dim> response{};
+  for (size_t d = 0; d < Dim; ++d) {
+    const size_t modes =
+        mesh.basis(d) == Spectral::Basis::SphericalHarmonic and
+                mesh.quadrature(d) == Spectral::Quadrature::Equiangular
+            ? (mesh.extents(d) + 1) / 2
+            : mesh.extents(d);
+    response[d].resize(modes, 1.0);
+  }
+  return response;
+}
+
 template <size_t Dim, typename TagList>
 None<Dim, TagList>::None(
     const std::optional<std::vector<std::string>>& blocks_to_filter,

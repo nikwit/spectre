@@ -23,6 +23,11 @@ set(LIBRARY_SOURCES
   Test_Characteristics.cpp
   Test_ChalmersConstraintFeedback.cpp
   Test_SpecAmr.cpp
+  Test_SpecAmrReference.cpp
+  Test_SpecAmrShell.cpp
+  Test_SpecAmrRefinementVariables.cpp
+  Test_InitialPRefinement.cpp
+  Test_RedistributeElements.cpp
   Test_Constraints.cpp
   Test_DuDt.cpp
   Test_DuDtTempTags.cpp

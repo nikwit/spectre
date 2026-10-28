@@ -119,6 +119,33 @@ def fetch_job_data(
     return job_data
 
 
+def get_work_dir(work_dir: str, std_out: str) -> str:
+    """Recover a run directory when a batch script changed directories.
+
+    Slurm records the directory where sbatch was invoked. A scheduler context
+    beside the output can identify the actual run directory, but must agree
+    with both the directory and output path before we use it.
+    """
+    if not std_out:
+        return work_dir
+    output_path = Path(work_dir) / std_out
+    run_dir = output_path.parent
+    if run_dir == Path(work_dir):
+        return work_dir
+    try:
+        with open(run_dir / "SchedulerContext.yaml", "r") as context_file:
+            context = yaml.safe_load(context_file)
+    except (OSError, yaml.YAMLError):
+        return work_dir
+    if (
+        isinstance(context, dict)
+        and context.get("run_dir") == str(run_dir)
+        and context.get("out_file") == str(output_path)
+    ):
+        return str(run_dir)
+    return work_dir
+
+
 def get_input_file(comment: Optional[str], work_dir: str) -> Optional[str]:
     """Find the input file corresponding to a job.
 
@@ -398,6 +425,13 @@ def fetch_status(
     # Do nothing if job list is empty
     if len(job_data) == 0:
         return job_data
+
+    # Resolve batch-script directory changes before grouping segments or
+    # invalidating jobs that Slurm reports in the same submission directory.
+    job_data["WorkDir"] = [
+        get_work_dir(work_dir, std_out)
+        for work_dir, std_out in zip(job_data["WorkDir"], job_data["StdOut"])
+    ]
 
     # Remove deleted jobs
     if not show_deleted:
