@@ -11,10 +11,48 @@ import numpy as np
 import pandas as pd
 
 from spectre.IO.H5 import to_dataframe
+from spectre.Visualization.PlotTrajectories import import_A_and_B
 
-from .ExecutableStatus import EvolutionStatus, list_reduction_files
+from .ExecutableStatus import (
+    EvolutionStatus,
+    list_reduction_files,
+    list_reduction_files_up_to,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def num_orbits(reduction_files) -> float:
+    """Number of orbits covered by the horizon-center observations.
+
+    The orbital phase is the unwrapped azimuthal angle of the separation
+    between the horizons about the z axis, which is the angle the rotation
+    control system accumulates for non-precessing binaries. Pass the reduction
+    files of all segments of the run so the phase can be tracked over restarts.
+
+    Raises if the samples are too far apart to unwrap the phase or if the time
+    series has a gap, e.g. because a segment is missing.
+    """
+    AhA, AhB = import_A_and_B(reduction_files)
+    separation = AhA[:, 1:3] - AhB[:, 1:3]
+    phase = np.unwrap(np.arctan2(separation[:, 1], separation[:, 0]))
+    if np.any(np.abs(np.diff(phase)) > 0.5 * np.pi):
+        raise ValueError(
+            "Horizon centers are sampled more than a quarter orbit apart, so"
+            " the orbital phase can't be unwrapped reliably."
+        )
+    # Restarts replay the samples since the last checkpoint, so consecutive
+    # segments overlap rather than leave gaps. A gap much larger than the
+    # sampling interval means data are missing.
+    time_intervals = np.diff(AhA[:, 0])
+    if len(time_intervals) > 0 and np.any(
+        time_intervals > 100.0 * np.median(time_intervals)
+    ):
+        raise ValueError(
+            "Horizon centers have a gap in time much larger than the sampling"
+            " interval, so some segments are missing."
+        )
+    return (phase[-1] - phase[0]) / (2.0 * np.pi)
 
 
 class EvolveGhBinaryBlackHole(EvolutionStatus):
@@ -38,19 +76,6 @@ class EvolveGhBinaryBlackHole(EvolutionStatus):
             return {}
         with open_reductions_file:
             result = self.time_status(input_file, open_reductions_file)
-            # Number of orbits. We use the rotation control system for this.
-            try:
-                rotation_z = to_dataframe(
-                    open_reductions_file["ControlSystems/Rotation/z.dat"],
-                    slice=np.s_[-1:],
-                )
-                # Assume the initial rotation angle is 0 for now. We can update
-                # this to read the initial rotation angle once we can read
-                # previous segments / checkpoints of a simulation.
-                covered_angle = rotation_z["FunctionOfTime"].iloc[-1]
-                result["Orbits"] = covered_angle / (2.0 * np.pi)
-            except:
-                logger.debug("Unable to extract orbits.", exc_info=True)
             # Euclidean separation between horizons
             try:
                 ah_centers = [
@@ -87,6 +112,13 @@ class EvolveGhBinaryBlackHole(EvolutionStatus):
                 logger.debug(
                     "Unable to extract three index constraint.", exc_info=True
                 )
+        # Number of orbits, accumulated over all segments of the run
+        try:
+            result["Orbits"] = num_orbits(
+                list_reduction_files_up_to(work_dir, input_file)
+            )
+        except:
+            logger.debug("Unable to extract orbits.", exc_info=True)
         return result
 
     def format(self, field, value):

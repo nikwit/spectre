@@ -41,6 +41,31 @@ def list_reduction_files(job: dict, input_file: dict):
     )
 
 
+def list_reduction_files_up_to(work_dir: str, input_file: dict) -> List[Path]:
+    """Reduction files of the run up to and including the 'work_dir' segment.
+
+    Earlier segments with the same label as the 'work_dir' segment are included
+    so quantities that accumulate over restarts can be reconstructed. If the
+    'work_dir' is not a segment, only its own reduction file is returned.
+    """
+    reductions_file_name = input_file["Observers"]["ReductionFileName"] + ".h5"
+    segment = Segment.match(work_dir)
+    if segment:
+        reduction_files = [
+            other_segment.path / reductions_file_name
+            for other_segment in list_segments(segment.path.resolve().parent)
+            if other_segment.label == segment.label
+            and other_segment.id <= segment.id
+        ]
+    else:
+        reduction_files = [Path(work_dir) / reductions_file_name]
+    return [
+        reduction_file
+        for reduction_file in reduction_files
+        if reduction_file.exists()
+    ]
+
+
 def get_start_time(spectre_out: Path):
     with open(spectre_out, "r") as f:
         for line in f:

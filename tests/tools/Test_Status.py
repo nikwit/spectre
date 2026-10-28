@@ -16,6 +16,37 @@ from spectre.tools.Status.ExecutableStatus import match_executable_status
 from spectre.tools.Status.Status import get_executable_name, get_input_file
 
 
+def write_centers(open_h5_file, times, phases):
+    """Write horizon centers of a unit circular orbit at the 'phases'"""
+    for ab, sign in zip("AB", (1.0, -1.0)):
+        subfile = open_h5_file.insert_dat(
+            f"/ApparentHorizons/ObservationAh{ab}_Centers",
+            legend=[
+                "Time",
+                "GridCenter_x",
+                "GridCenter_y",
+                "GridCenter_z",
+                "InertialCenter_x",
+                "InertialCenter_y",
+                "InertialCenter_z",
+            ],
+            version=0,
+        )
+        for time, phase in zip(times, phases):
+            subfile.append(
+                [
+                    time,
+                    sign,
+                    0.0,
+                    0.0,
+                    sign * np.cos(phase),
+                    sign * np.sin(phase),
+                    0.0,
+                ]
+            )
+        open_h5_file.close_current_object()
+
+
 class TestExecutableStatus(unittest.TestCase):
     def setUp(self):
         self.input_file = {
@@ -52,38 +83,12 @@ class TestExecutableStatus(unittest.TestCase):
             time_subfile.append([1.0, 0.5, 2.0, 3.0])
             time_subfile.append([2.0, 0.5, 3.0, 4.0])
             open_h5_file.close_current_object()
-            # Control systems data
-            rotation_subfile = open_h5_file.insert_dat(
-                "/ControlSystems/Rotation/z",
-                legend=["FunctionOfTime"],
-                version=0,
+            # AH data: half an orbit
+            write_centers(
+                open_h5_file,
+                times=[0.0, 1.0, 2.0, 3.0],
+                phases=np.linspace(0.0, np.pi, 4),
             )
-            rotation_subfile.append([0.0])
-            rotation_subfile.append([np.pi])
-            open_h5_file.close_current_object()
-            # AH data
-            aha_subfile = open_h5_file.insert_dat(
-                "/ApparentHorizons/ObservationAhA_Centers",
-                legend=[
-                    "InertialCenter_x",
-                    "InertialCenter_y",
-                    "InertialCenter_z",
-                ],
-                version=0,
-            )
-            aha_subfile.append([1.0, 0.0, 0.0])
-            open_h5_file.close_current_object()
-            ahb_subfile = open_h5_file.insert_dat(
-                "/ApparentHorizons/ObservationAhB_Centers",
-                legend=[
-                    "InertialCenter_x",
-                    "InertialCenter_y",
-                    "InertialCenter_z",
-                ],
-                version=0,
-            )
-            ahb_subfile.append([-1.0, 0.0, 0.0])
-            open_h5_file.close_current_object()
             # Constraints
             constraints_subfile = open_h5_file.insert_dat(
                 "/Norms",
@@ -129,9 +134,53 @@ class TestExecutableStatus(unittest.TestCase):
         status = executable_status.status(self.input_file, self.work_dir)
         self.assertEqual(status["Time"], 2.0)
         self.assertEqual(status["Speed"], 2400.0)
-        self.assertEqual(status["Orbits"], 0.5)
+        self.assertAlmostEqual(status["Orbits"], 0.5)
         self.assertEqual(status["Separation"], 2.0)
         self.assertEqual(status["3-Index Constraint"], 1.0e-4)
+
+    def test_evolve_bbh_orbits_over_segments(self):
+        executable_status = match_executable_status("EvolveGhBinaryBlackHole")
+
+        def write_segment(segments_dir, segment_id, times, orbits):
+            segment_dir = os.path.join(
+                self.work_dir, segments_dir, f"{segment_id:04d}_Inspiral"
+            )
+            os.makedirs(segment_dir)
+            with spectre_h5.H5File(
+                os.path.join(segment_dir, "Reductions.h5"), "w"
+            ) as open_h5_file:
+                write_centers(
+                    open_h5_file,
+                    times=times,
+                    phases=2.0 * np.pi * np.array(orbits),
+                )
+            return segment_dir
+
+        # The orbit count accumulates over the segments up to the one being
+        # reported. A restart replays the samples since the last checkpoint,
+        # so segments overlap in time.
+        segment_dirs = [
+            write_segment("Segments", 0, [0.0, 1.0, 2.0], [0.0, 0.1, 0.2]),
+            write_segment("Segments", 1, [2.0, 3.0, 4.0], [0.2, 0.3, 0.4]),
+            write_segment("Segments", 2, [3.0, 4.0, 5.0], [0.3, 0.4, 0.5]),
+        ]
+        for segment_dir, expected_orbits in zip(segment_dirs, [0.2, 0.4, 0.5]):
+            status = executable_status.status(self.input_file, segment_dir)
+            self.assertAlmostEqual(status["Orbits"], expected_orbits)
+        # A gap in the time series, e.g. from a missing segment, invalidates
+        # the orbit count
+        write_segment("Gap", 0, [0.0, 1.0, 2.0], [0.0, 0.1, 0.2])
+        segment_dir = write_segment(
+            "Gap", 1, [500.0, 501.0, 502.0], [0.2, 0.3, 0.4]
+        )
+        status = executable_status.status(self.input_file, segment_dir)
+        self.assertNotIn("Orbits", status)
+        # Samples more than a quarter orbit apart can't be unwrapped
+        segment_dir = write_segment(
+            "Sparse", 0, [0.0, 1.0, 2.0], [0.0, 0.4, 0.8]
+        )
+        status = executable_status.status(self.input_file, segment_dir)
+        self.assertNotIn("Orbits", status)
 
     def test_evolve_single_bh_status(self):
         executable_status = match_executable_status("EvolveGhSingleBlackHole")
