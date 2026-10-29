@@ -35,6 +35,7 @@ target_link_libraries(
   Initialization
   Interpolation
   Parallel
+  Spectral
   Utilities
   )
 

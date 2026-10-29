@@ -3,6 +3,7 @@
 
 #include "Framework/TestingFramework.hpp"
 
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -34,6 +35,7 @@
 #include "IO/Importers/ElementDataReader.hpp"
 #include "IO/Importers/Tags.hpp"
 #include "NumericalAlgorithms/Spectral/Basis.hpp"
+#include "NumericalAlgorithms/Spectral/LogicalCoordinates.hpp"
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "Parallel/ArrayComponentId.hpp"
 #include "Parallel/ArrayIndex.hpp"
@@ -315,7 +317,8 @@ void test_actions(const std::variant<double, importers::ObservationSelector>&
                  domain::Tags::Coordinates<2, Frame::Inertial>>(
           [&new_mesh](const auto mesh, const auto coords) {
             *mesh = new_mesh;
-            *coords = tnsr::I<DataVector, 2>(new_mesh.number_of_grid_points(), 1.);
+            *coords =
+                tnsr::I<DataVector, 2>(new_mesh.number_of_grid_points(), 1.);
           },
           make_not_null(&box));
       ActionTesting::next_action<element_array>(make_not_null(&runner), id);
@@ -365,4 +368,75 @@ SPECTRE_TEST_CASE("Unit.IO.Importers.VolumeDataReaderActions", "[Unit][IO]") {
       test_actions<true>(0., true, true),
       Catch::Matchers::ContainsSubstring(
           "Cannot do barycentric interpolation with Basis::FiniteDifference"));
+}
+
+namespace {
+template <size_t Dim>
+void test_spherical_import(const Mesh<Dim>& source_mesh,
+                           const Mesh<Dim>& target_mesh) {
+  const size_t source_l = source_mesh.extents(Dim - 2) - 1;
+  const auto fields = [source_l](const Mesh<Dim>& mesh,
+                                 const bool keep_high_mode) {
+    const auto x = logical_coordinates(mesh);
+    const auto& theta = x.get(Dim - 2);
+    const auto& phi = x.get(Dim - 1);
+    DataVector radial(mesh.number_of_grid_points(), 1.);
+    if constexpr (Dim == 3) {
+      radial += x.get(0) + square(x.get(0));
+    }
+    const DataVector low =
+        radial * (1. + .2 * cos(theta) + .3 * sin(theta) * cos(phi));
+    // A pure l=m=source_l mode tests that coarsening restricts modes rather
+    // than aliasing them onto the coarser angular grid.
+    const DataVector high =
+        keep_high_mode
+            ? radial * pow(sin(theta), static_cast<double>(source_l)) *
+                  cos(static_cast<double>(source_l) * phi)
+            : DataVector(mesh.number_of_grid_points(), 0.);
+    VectorTag::type result(mesh.number_of_grid_points());
+    get<0>(result) = low + .1 * high;
+    get<1>(result) = 2. * low - .3 * high;
+    return result;
+  };
+  tuples::tagged_tuple_from_typelist<import_tags_list> source{}, target{};
+  get<VectorTag>(source) = fields(source_mesh, true);
+  get<TensorTag>(target) = TensorTag::type(size_t{2}, -29.);
+  tuples::tagged_tuple_from_typelist<
+      db::wrap_tags_in<importers::Tags::Selected, import_tags_list>>
+      selected{std::string{"V"}, std::nullopt};
+  importers::detail::interpolate_selected_fields<import_tags_list, Dim>(
+      make_not_null(&target), source, source_mesh, target_mesh, selected);
+  const auto expected =
+      fields(target_mesh, target_mesh.extents(Dim - 2) > source_l);
+  CHECK_ITERABLE_APPROX(get<VectorTag>(target), expected);
+  CHECK(get<TensorTag>(target) == TensorTag::type(size_t{2}, -29.));
+}
+}  // namespace
+
+// [[TimeOut, 30]]
+SPECTRE_TEST_CASE("Unit.IO.Importers.SphericalPRefinement", "[Unit][IO]") {
+  const auto sphere = [](const size_t l) {
+    return Mesh<2>{
+        {{l + 1, 2 * l + 1}},
+        {{Spectral::Basis::SphericalHarmonic,
+          Spectral::Basis::SphericalHarmonic}},
+        {{Spectral::Quadrature::Gauss, Spectral::Quadrature::Equiangular}}};
+  };
+  const auto shell = [](const size_t nr, const size_t l) {
+    return Mesh<3>{
+        {{nr, l + 1, 2 * l + 1}},
+        {{Spectral::Basis::Legendre, Spectral::Basis::SphericalHarmonic,
+          Spectral::Basis::SphericalHarmonic}},
+        {{Spectral::Quadrature::GaussLobatto, Spectral::Quadrature::Gauss,
+          Spectral::Quadrature::Equiangular}}};
+  };
+  for (const size_t l : {size_t{4}, size_t{6}, size_t{8}}) {
+    test_spherical_import(sphere(6), sphere(l));
+    for (const size_t nr : {size_t{3}, size_t{5}, size_t{7}}) {
+      test_spherical_import(shell(5, 6), shell(nr, l));
+    }
+  }
+  // The actual first q8 shell resampling that failed during startup.
+  test_spherical_import(shell(12, 26), shell(11, 25));
+  test_spherical_import(shell(11, 25), shell(12, 26));
 }

@@ -32,6 +32,8 @@
 #include "IO/Importers/Tags.hpp"
 #include "NumericalAlgorithms/Interpolation/RegularGridInterpolant.hpp"
 #include "NumericalAlgorithms/Spectral/LogicalCoordinates.hpp"
+#include "NumericalAlgorithms/Spectral/Projection.hpp"
+#include "NumericalAlgorithms/Spectral/SegmentSize.hpp"
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/ArrayCollection/IsDgElementCollection.hpp"
 #include "Parallel/ArrayComponentId.hpp"
@@ -45,6 +47,7 @@
 #include "Utilities/FileSystem.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Literals.hpp"
+#include "Utilities/MakeArray.hpp"
 #include "Utilities/Overloader.hpp"
 #include "Utilities/Requires.hpp"
 #include "Utilities/Serialization/Serialize.hpp"
@@ -235,9 +238,22 @@ void interpolate_selected_fields(
     const Mesh<Dim>& source_mesh, const Mesh<Dim>& target_mesh,
     const tuples::tagged_tuple_from_typelist<
         db::wrap_tags_in<Tags::Selected, FieldTagsList>>& selected_fields) {
-  const intrp::RegularGrid<Dim> interpolator{source_mesh, target_mesh};
+  // RegularGrid treats each logical direction independently, so it cannot
+  // resample the coupled theta/phi basis of a sphere or spherical shell.
+  // Use the same modal transfer as p refinement for these meshes, including
+  // restriction when the target has fewer angular modes.
+  bool spherical_mesh = false;
+  if constexpr (Dim >= 2) {
+    spherical_mesh =
+        source_mesh.basis(Dim - 2) == Spectral::Basis::SphericalHarmonic and
+        source_mesh.basis(Dim - 1) == Spectral::Basis::SphericalHarmonic;
+  }
+  std::optional<intrp::RegularGrid<Dim>> interpolator{};
+  if (not spherical_mesh) {
+    interpolator.emplace(source_mesh, target_mesh);
+  }
   tmpl::for_each<FieldTagsList>([&source_element_data, &target_element_data,
-                                 &interpolator,
+                                 &source_mesh, &target_mesh, &interpolator,
                                  &selected_fields](auto field_tag_v) {
     using field_tag = tmpl::type_from<decltype(field_tag_v)>;
     const auto& selection = get<Tags::Selected<field_tag>>(selected_fields);
@@ -246,13 +262,18 @@ void interpolate_selected_fields(
     }
     const auto& source_tensor_data = get<field_tag>(source_element_data);
     auto& target_tensor_data = get<field_tag>(*target_element_data);
-    // Iterate independent components of the tensor
     for (size_t i = 0; i < source_tensor_data.size(); ++i) {
       const DataVector& source_tensor_component = source_tensor_data[i];
       DataVector& target_tensor_component = target_tensor_data[i];
-      // Interpolate
-      interpolator.interpolate(make_not_null(&target_tensor_component),
-                               source_tensor_component);
+      if (interpolator.has_value()) {
+        interpolator->interpolate(make_not_null(&target_tensor_component),
+                                  source_tensor_component);
+      } else {
+        Spectral::project(make_not_null(&target_tensor_component),
+                          source_tensor_component, source_mesh, target_mesh,
+                          make_array<Dim>(Spectral::SegmentSize::Full),
+                          make_array<Dim>(Spectral::SegmentSize::Full));
+      }
     }
   });
 }
