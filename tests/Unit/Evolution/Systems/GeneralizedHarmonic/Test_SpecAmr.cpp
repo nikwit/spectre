@@ -984,3 +984,53 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.WrapperTargetShift",
         Catch::Matchers::ContainsSubstring("TruncationErrorAdjustmentLimit"));
   }
 }
+
+// SpEC DoMultipleRuns.input and AmrDriver.input use the same lev targets at
+// unequal mass, with each Gaussian width set by the opposite hole position.
+SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.UnequalMassTargets",
+                  "[Unit][Evolution]") {
+  using Gaussian = gh::SpecSpectral::GaussianTarget;
+  using Target = gh::SpecSpectral::SpatialTarget;
+  for (const double q : {1., 4., 8., 16.}) {
+    CAPTURE(q);
+    const double xa = 16. / (1. + q);
+    const double xb = -q * xa;
+    for (const int lev : {0, 1, 2, 3}) {
+      CAPTURE(lev);
+      const double background = 0.000216536 * pow(4., -lev);
+      const Target target{
+          background,
+          {Gaussian{{xa, .04, -.02}, -xb, 1., background * 1.e-4},
+           Gaussian{{xb, .04, -.02}, xa, 1., background * 1.e-4}}};
+      GridCoordinates::type coords(1, 0.);
+      coords.get(1) = .04;
+      coords.get(2) = -.02;
+      coords.get(0) = xa;
+      const double overlap_a = exp(-square(1. + q));
+      const double at_a =
+          background * pow(10., -4. * (1. + overlap_a) / (2. + overlap_a));
+      CHECK(target(coords) == approx(at_a));
+      coords.get(0) = xb;
+      const double overlap_b = exp(-square(1. + 1. / q));
+      const double at_b =
+          background * pow(10., -4. * (1. + overlap_b) / (2. + overlap_b));
+      CHECK(target(coords) == approx(at_b));
+      if (q > 1.) {
+        CHECK(at_b < at_a);
+      } else {
+        CHECK(at_b == approx(at_a));
+      }
+      // An element spanning both centers maximizes profiles separately.
+      // Its target is not the minimum of the pointwise blended targets.
+      GridCoordinates::type spanning(2, 0.);
+      spanning.get(0) = DataVector{xa, xb};
+      spanning.get(1) = .04;
+      spanning.get(2) = -.02;
+      CHECK(target(spanning) == approx(background * pow(10., -8. / 3.)));
+      CHECK(target(spanning) < at_a);
+      CHECK(target(spanning) < at_b);
+      CHECK(serialize_and_deserialize(target)(spanning) ==
+            approx(target(spanning)));
+    }
+  }
+}

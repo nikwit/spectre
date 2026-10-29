@@ -419,3 +419,72 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.ShellDiagnostics",
     CHECK(restored.refinement_variables == saved.refinement_variables);
   }
 }
+
+// A physical rescaling is relevant for q8: Phi and C_iab scale as 1/M,
+// C_ia as 1/M^2. SpEC's final square root makes the AMR diagnostic scale as
+// 1/sqrt(M) and 1/M respectively. There is no compensating mass factor in
+// its lev targets. Exercise both masses and a nonidentity grid map.
+// [[TimeOut, 20]]
+SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.UnequalMassConstraints",
+                  "[Unit][Evolution]") {
+  using namespace gh::spec_amr;
+  const auto mesh = shell_mesh(7, 6);
+  const size_t n = mesh.number_of_grid_points();
+  const auto filter = shell_filter(std::nullopt, 36);
+  const auto info = filtered_modes(mesh, filter);
+  const gh::gauges::Harmonic gauge{};
+  gh::power_monitor::CartToSphereMatrices cache{};
+  for (const bool moving : {false, true}) {
+    std::array<std::array<double, 3>, 2> reference{};
+    for (const double mass : {1., .5, 8. / 9., 1. / 9.}) {
+      CAPTURE(moving, mass);
+      const domain::creators::SphericalShells creator{
+          4. * mass, 7. * mass, 0, mesh.extents(0), mesh.extents(1) - 1,
+          {}, domain::CoordinateMaps::Distribution::Linear};
+      const auto domain = creator.create_domain();
+      const ElementMap<3, Frame::Inertial> map{
+          ElementId<3>{0}, domain.blocks()[0].stationary_map().get_clone()};
+      const auto logical = logical_coordinates(mesh);
+      const auto jac = map.jacobian(logical);
+      auto grid_jac = identity(n);
+      if (moving) {
+        grid_jac.get(0, 1) = .3;
+        grid_jac.get(1, 2) = -.2;
+        grid_jac.get(2, 0) = .4;
+      }
+      auto composed = jac;
+      for (size_t i = 0; i < 3; ++i) {
+        for (size_t d = 0; d < 3; ++d) {
+          composed.get(i, d) = 0.;
+          for (size_t j = 0; j < 3; ++j) {
+            composed.get(i, d) += grid_jac.get(i, j) * jac.get(j, d);
+          }
+        }
+      }
+      const auto inv = determinant_and_inverse(composed).second;
+      Metric::type metric(n, 0.);
+      metric.get(0, 0) = -1.;
+      for (size_t d = 1; d < 4; ++d) {
+        metric.get(d, d) = 1.;
+      }
+      Pi::type pi(n, 0.);
+      Phi::type phi(n, 0.);
+      phi.get(0, 0, 0) = 1.e-3 / mass;
+      phi.get(1, 0, 0) = 2.e-3 / mass;
+      phi.get(2, 0, 0) = -3.e-3 / mass;
+      const Scalar<DataVector> gamma2(n, 1. / mass);
+      const auto data = diagnose_spec(metric, pi, phi, mesh, inv, grid_jac,
+                                     map(logical), 0., gauge, gamma2, info,
+                                     make_not_null(&cache));
+      if (mass == 1.) {
+        reference = data.constraints;
+      }
+      for (size_t v = 0; v < 2; ++v) {
+        CHECK(reference[0][v] > 0.);
+        CHECK(reference[1][v] > 0.);
+        CHECK(data.constraints[0][v] * mass == approx(reference[0][v]));
+        CHECK(data.constraints[1][v] * sqrt(mass) == approx(reference[1][v]));
+      }
+    }
+  }
+}
