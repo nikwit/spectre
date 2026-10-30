@@ -711,9 +711,11 @@ struct EvolutionMetavars {
           Parallel::PhaseActions<
               Parallel::Phase::InitializeTimeStepperHistory,
               SelfStart::self_start_procedure<step_actions, system>>,
-          Parallel::PhaseActions<Parallel::Phase::CheckDomain,
-                                 tmpl::list<::amr::Actions::SendAmrDiagnostics,
-                                            Parallel::Actions::TerminatePhase>>,
+          Parallel::PhaseActions<
+              Parallel::Phase::CheckDomain,
+              tmpl::list<gh::Actions::CheckInitialPRefinementResult,
+                         ::amr::Actions::SendAmrDiagnostics,
+                         Parallel::Actions::TerminatePhase>>,
           Parallel::PhaseActions<
               Parallel::Phase::Evolve,
               tmpl::flatten<tmpl::list<
@@ -786,6 +788,7 @@ struct EvolutionMetavars {
                     tmpl::bind<intrp::Tags::PointInfo, tmpl::_1,
                                tmpl::pin<tmpl::size_t<volume_dim>>>>>,
             gh::bbh::Tags::ElementCompletionRequested,
+            gh::Actions::detail::MeshBeforeInitialPRefinement,
             // Section recreation enumerates the unchanged h mesh from these
             // levels, including after p adjustment and checkpoint restart.
             ::domain::Tags::InitialRefinementLevels<volume_dim>,

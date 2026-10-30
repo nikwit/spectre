@@ -3,6 +3,10 @@
 
 #pragma once
 
+#include <string>
+#include <vector>
+
+#include "Options/Options.hpp"
 #include "Options/String.hpp"
 #include "ParallelAlgorithms/Amr/Policies/Isotropy.hpp"
 #include "ParallelAlgorithms/Amr/Policies/Limits.hpp"
@@ -50,9 +54,19 @@ class Policies {
         "Whether or not to allow coarsening or only refining."};
   };
 
-  using options =
+  /// Central p-mesh planning, anchored at the named excision spheres.
+  struct ObjectShellFloors {
+    using type = std::vector<std::string>;
+    static constexpr Options::String help =
+        "Excision sphere names whose innermost retained angular resolution "
+        "is a floor on their connected spherical shells. For a binary use "
+        "[ExcisionSphereA, ExcisionSphereB]. Empty disables central planning. "
+        "Currently supports p changes on a fixed topology only.";
+  };
+  using legacy_options =
       tmpl::list<Isotropy, Limits, EnforceTwoToOneBalanceInNormalDirection,
                  AllowCoarsening>;
+  using options = tmpl::push_back<legacy_options, ObjectShellFloors>;
 
   static constexpr Options::String help = {
       "Policies controlling adaptive mesh refinement."};
@@ -61,7 +75,8 @@ class Policies {
 
   Policies(amr::Isotropy isotropy, const amr::Limits& limits,
            bool enforce_two_to_one_balance_in_normal_direction,
-           bool allow_coarsening);
+           bool allow_coarsening,
+           std::vector<std::string> object_shell_floors = {});
 
   amr::Isotropy isotropy() const { return isotropy_; }
 
@@ -73,6 +88,10 @@ class Policies {
 
   bool allow_coarsening() const { return allow_coarsening_; }
 
+  const std::vector<std::string>& object_shell_floors() const {
+    return object_shell_floors_;
+  }
+
   void pup(PUP::er& p);
 
  private:
@@ -80,6 +99,7 @@ class Policies {
   amr::Limits limits_{};
   bool enforce_two_to_one_balance_in_normal_direction_{true};
   bool allow_coarsening_{true};
+  std::vector<std::string> object_shell_floors_{};
 };
 
 std::ostream& operator<<(std::ostream& os, const Policies& policies);
@@ -88,3 +108,15 @@ bool operator==(const Policies& lhs, const Policies& rhs);
 
 bool operator!=(const Policies& lhs, const Policies& rhs);
 }  // namespace amr
+
+// Older inputs omit ObjectShellFloors. Preserve that syntax with an empty list.
+template <>
+struct Options::create_from_yaml<amr::Policies> {
+  template <typename Metavariables>
+  static amr::Policies create(const Options::Option& option) {
+    return create<void>(option);
+  }
+};
+template <>
+amr::Policies Options::create_from_yaml<amr::Policies>::create<void>(
+    const Options::Option& option);

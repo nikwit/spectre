@@ -294,6 +294,24 @@ void test(const Event& event, const Event& observe_event) {
                                          domain::Tags::Element<1>>(
               runner, element_id) == element);
 
+    db::mutate<amr::Tags::Policies>(
+        [](const auto box_policies) {
+          *box_policies = amr::Policies{amr::Isotropy::Anisotropic,
+                                        amr::Limits{},
+                                        false,
+                                        true,
+                                        {"ExcisionSphereA"}};
+        },
+        make_not_null(&box));
+    CHECK_THROWS_WITH(
+        event.run(make_not_null(&obs_box),
+                  ActionTesting::cache<element_component>(runner, element_id),
+                  element_id, std::add_pointer_t<element_component>{},
+                  {"Unused", -1.0}),
+        Catch::Matchers::ContainsSubstring(
+            "cannot enforce the central policy"));
+    CHECK(db::get<domain::Tags::Mesh<1>>(box) == mesh);
+
     const amr::Policies error_policies{
         amr::Isotropy::Anisotropic,
         amr::Limits{{{0, 0}}, {{2, 4}}, std::nullopt, std::nullopt, true}, true,

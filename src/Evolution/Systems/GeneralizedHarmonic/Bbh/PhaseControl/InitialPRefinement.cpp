@@ -40,7 +40,6 @@ std::optional<Parallel::Phase> InitialPRefinement::next_phase(
     return Phase::CheckInitialPRefinement;
   }
   if (phase == Phase::CheckInitialPRefinement) {
-    state->changed = changed > 0;
     Parallel::printf(
         "InitialPRefinement iteration=%zu changed_elements=%zu "
         "policy_limited_directions=%zu cycling_elements=%zu\n",
@@ -50,6 +49,12 @@ std::optional<Parallel::Phase> InitialPRefinement::next_phase(
     return Phase::AdjustDomain;
   }
   if (phase == Phase::AdjustDomain) {
+    return Phase::CheckDomain;
+  }
+  if (phase == Phase::CheckDomain) {
+    state->changed = changed > 0;
+    Parallel::printf("InitialPRefinement realized_changed_elements=%zu\n",
+                     changed);
     if (state->changed) {
       return Phase::RegisterWithElementDataReader;
     }

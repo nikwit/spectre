@@ -236,7 +236,7 @@ void test() {
   const Mesh<1> element_4_mesh{std::array{7_st}, Spectral::Basis::Legendre,
                                Spectral::Quadrature::GaussLobatto};
   const Mesh<1> element_3_mesh_post_refinement{
-      std::array{6_st}, Spectral::Basis::Legendre,
+      std::array{KeepCoarseGrids ? 6_st : 9_st}, Spectral::Basis::Legendre,
       Spectral::Quadrature::GaussLobatto};
 
   amr::Info<1> element_1_info{{amr::Flag::Join}, element_2_mesh};

@@ -275,9 +275,10 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.JunkGate",
   CHECK(db::get<History>(box).calls == 0);
   CHECK(db::get<History>(box).radius_release_time == 220.);
   // Bad group names must not silently disable the gate.
-  CHECK_THROWS(
+  CHECK_THROWS_WITH(
       gh::SpecSpectral::RadiusDependentStart(0., {"Typo"}, 200.)
-          .release_time(db::get<domain::Tags::Domain<3>>(box), 0, grid_coords));
+          .release_time(db::get<domain::Tags::Domain<3>>(box), 0, grid_coords),
+      Catch::Matchers::ContainsSubstring("The block or group 'Typo'"));
 }
 
 SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.StartupPhases",
@@ -303,7 +304,9 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.StartupPhases",
   CHECK(jump(Phase::EvaluateAmrCriteria) == Phase::CheckInitialPRefinement);
   tuples::get<ChangedElements>(data) = 3;
   CHECK(jump(Phase::CheckInitialPRefinement) == Phase::AdjustDomain);
-  CHECK(jump(Phase::AdjustDomain) == Phase::RegisterWithElementDataReader);
+  CHECK(jump(Phase::AdjustDomain) == Phase::CheckDomain);
+  tuples::get<ChangedElements>(data) = 3;
+  CHECK(jump(Phase::CheckDomain) == Phase::RegisterWithElementDataReader);
   CHECK(jump(Phase::RegisterWithElementDataReader) == std::nullopt);
   CHECK(jump(Phase::ImportInitialData) == std::nullopt);
   CHECK(jump(Phase::InitializeInitialDataDependentQuantities) ==
@@ -312,18 +315,24 @@ SPECTRE_TEST_CASE("Unit.GeneralizedHarmonic.SpecAmr.StartupPhases",
   tuples::get<ChangedElements>(data) = 1;
   CHECK(jump(Phase::CheckInitialPRefinement) == Phase::AdjustDomain);
   // Even the final permitted change must be followed by reimport, before exit.
-  CHECK(jump(Phase::AdjustDomain) == Phase::RegisterWithElementDataReader);
+  CHECK(jump(Phase::AdjustDomain) == Phase::CheckDomain);
+  tuples::get<ChangedElements>(data) = 1;
+  CHECK(jump(Phase::CheckDomain) == Phase::RegisterWithElementDataReader);
   CHECK(jump(Phase::InitializeInitialDataDependentQuantities) ==
         Phase::Register);
   CHECK(tuples::get<StateTag>(data).finished);
   CHECK(jump(Phase::EvaluateAmrCriteria) == std::nullopt);
-  // Nonfatal capped requests stop the loop when no permitted changes remain.
+  // A central floor cancels local coarsening proposals. The loop stops on
+  // realized meshes, even though the pre-planning reduction reported changes.
   controller.initialize_phase_data_impl(make_not_null(&data));
   CHECK(jump(Phase::InitializeInitialDataDependentQuantities) ==
         Phase::EvaluateAmrCriteria);
+  tuples::get<ChangedElements>(data) = 2;
   tuples::get<LimitedDirections>(data) = 5;
   CHECK(jump(Phase::CheckInitialPRefinement) == Phase::AdjustDomain);
-  CHECK(jump(Phase::AdjustDomain) == Phase::Register);
+  CHECK(jump(Phase::AdjustDomain) == Phase::CheckDomain);
+  CHECK(tuples::get<ChangedElements>(data) == 0);
+  CHECK(jump(Phase::CheckDomain) == Phase::Register);
   CHECK(tuples::get<StateTag>(data).iteration == 1);
   CHECK(tuples::get<LimitedDirections>(data) == 0);
   CHECK(serialize_and_deserialize(controller)

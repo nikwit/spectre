@@ -63,6 +63,13 @@ void test_option_parsing() {
           TestHelpers::test_creation<amr::Policies>(creation_string.str());
       CHECK(policies == amr::Policies{isotropy, specified_limits,
                                       enforce_two_to_one, allow_coarsening});
+      const auto with_floors = TestHelpers::test_creation<amr::Policies>(
+          creation_string.str() +
+          "ObjectShellFloors: [ExcisionSphereA, ExcisionSphereB]\n");
+      CHECK(with_floors.object_shell_floors() ==
+            std::vector<std::string>{"ExcisionSphereA", "ExcisionSphereB"});
+      CHECK(with_floors != policies);
+      test_serialization(with_floors);
     }
     {
       INFO("default limits");

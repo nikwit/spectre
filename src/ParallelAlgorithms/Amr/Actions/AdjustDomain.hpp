@@ -241,14 +241,12 @@ struct AdjustDomain {
           std::move(new_neighbor_meshes));
 
       // Check for p-refinement
-      if (alg::any_of(my_amr_flags, [](amr::Flag flag) {
-            return (flag == amr::Flag::IncreaseResolution or
-                    flag == amr::Flag::DecreaseResolution);
-          })) {
+      if (my_amr_info.new_mesh != old_mesh) {
         db::mutate<::domain::Tags::Mesh<volume_dim>>(
-            [&old_mesh,
-             &my_amr_flags](const gsl::not_null<Mesh<volume_dim>*> mesh) {
-              *mesh = amr::projectors::mesh(old_mesh, my_amr_flags);
+            [&my_amr_info](const gsl::not_null<Mesh<volume_dim>*> mesh) {
+              // The agreed target is authoritative, including multi-mode
+              // corrections made by a central mesh policy.
+              *mesh = my_amr_info.new_mesh;
             },
             make_not_null(&box));
 

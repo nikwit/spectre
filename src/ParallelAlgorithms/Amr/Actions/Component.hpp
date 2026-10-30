@@ -13,6 +13,7 @@
 #include "ParallelAlgorithms/Amr/Actions/AdjustDomain.hpp"
 #include "ParallelAlgorithms/Amr/Actions/ElementsRegistration.hpp"
 #include "ParallelAlgorithms/Amr/Actions/EvaluateRefinementCriteria.hpp"
+#include "ParallelAlgorithms/Amr/Actions/PlanMesh.hpp"
 #include "ParallelAlgorithms/Amr/Actions/PrepareRefinementCriteria.hpp"
 #include "ParallelAlgorithms/Amr/Criteria/Tags/Criteria.hpp"
 #include "ParallelAlgorithms/Amr/Policies/Tags.hpp"
@@ -42,7 +43,8 @@ struct Component {
   static constexpr bool checkpoint_data = true;
 
   using const_global_cache_tags =
-      tmpl::list<amr::Criteria::Tags::Criteria,
+      tmpl::list<domain::Tags::Domain<volume_dim>,
+                 amr::Criteria::Tags::Criteria,
                  amr::Tags::AmrBlocks<volume_dim>, amr::Tags::Policies,
                  logging::Tags::Verbosity<amr::OptionTags::AmrGroup>>;
 
@@ -57,8 +59,11 @@ struct Component {
               tmpl::list<::amr::Actions::UpdateSections<ElementArray>>,
               tmpl::list<>>>>;
 
-  using simple_tags_from_options = Parallel::get_simple_tags_from_options<
-      Parallel::get_initialization_actions_list<phase_dependent_action_list>>;
+  using simple_tags_from_options =
+      tmpl::push_back<Parallel::get_simple_tags_from_options<
+                          Parallel::get_initialization_actions_list<
+                              phase_dependent_action_list>>,
+                      planning::Tags::State>;
 
   static void execute_next_phase(
       const Parallel::Phase next_phase,
@@ -78,6 +83,21 @@ struct Component {
       }
     }
     if (Parallel::Phase::AdjustDomain == next_phase) {
+      if (not Parallel::get<amr::Tags::Policies>(local_cache)
+                  .object_shell_floors()
+                  .empty()) {
+        if constexpr (volume_dim == 3 and
+                      not metavariables::amr::keep_coarse_grids and
+                      not Parallel::is_dg_element_collection_v<ElementArray>) {
+          Parallel::simple_action<planning::Actions::Begin<>>(
+              Parallel::get_parallel_component<Component>(local_cache));
+        } else {
+          ERROR(
+              "ObjectShellFloors requires a 3D element array without coarse "
+              "grids");
+        }
+        return;
+      }
       if constexpr (Parallel::is_dg_element_collection_v<ElementArray>) {
         Parallel::threaded_action<Parallel::Actions::SimpleActionOnElement<
             ::amr::Actions::AdjustDomain, true>>(element_array);

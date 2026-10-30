@@ -222,3 +222,6 @@ target_link_libraries(
   SystemUtilities
   Utilities
 )
+
+add_algorithm_test("AmrMeshPlan")
+target_link_libraries(Test_AmrMeshPlan PRIVATE ParallelAmr LinearOperators TensorYlm GeneralizedHarmonic)

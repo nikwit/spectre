@@ -117,7 +117,8 @@ class InitialPRefinement : public PhaseChange {
                                  tuples::get<ChangedElements>(*data),
                                  tuples::get<LimitedDirections>(*data),
                                  tuples::get<CyclingElements>(*data));
-    if (current_phase == Phase::CheckInitialPRefinement) {
+    if (current_phase == Phase::CheckInitialPRefinement or
+        current_phase == Phase::CheckDomain) {
       tuples::get<ChangedElements>(*data) = 0;
       tuples::get<LimitedDirections>(*data) = 0;
       tuples::get<CyclingElements>(*data) = 0;

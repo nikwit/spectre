@@ -119,6 +119,14 @@ class RefineMesh : public Event {
           criterion->p_refine_in_domain_adjustment_phase()) {
         continue;
       }
+      if (not db::get<amr::Tags::Policies>(*box)
+                  .object_shell_floors()
+                  .empty()) {
+        ERROR(
+            "ObjectShellFloors requires p-refinement through "
+            "EvaluateAmrCriteria/AdjustDomain; a local RefineMesh event "
+            "cannot enforce the central policy");
+      }
       auto decision = criterion->evaluate(observation_box, cache, element_id);
       ASSERT(alg::none_of(decision,
                           [](amr::Flag flag) {

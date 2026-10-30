@@ -36,6 +36,7 @@ set(LIBRARY_SOURCES
   Projectors/Test_Mesh.cpp
   Projectors/Test_Tensors.cpp
   Projectors/Test_Variables.cpp
+  Test_MeshPlan.cpp
   Test_Protocols.cpp
   Test_Tags.cpp
   )
@@ -49,6 +50,7 @@ target_link_libraries(
   AmrCriteria
   AmrEvents
   AmrPolicies
+  ParallelAmr
   AmrProjectors
   CoordinateMaps
   Domain
