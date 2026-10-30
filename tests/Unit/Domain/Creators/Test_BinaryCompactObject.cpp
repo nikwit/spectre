@@ -31,6 +31,7 @@
 #include "Domain/Creators/TimeDependentOptions/ShapeMap.hpp"
 #include "Domain/Domain.hpp"
 #include "Domain/FunctionsOfTime/FixedSpeedCubic.hpp"
+#include "Domain/FunctionsOfTime/FunctionOfTime.hpp"
 #include "Domain/FunctionsOfTime/PiecewisePolynomial.hpp"
 #include "Domain/FunctionsOfTime/QuaternionFunctionOfTime.hpp"
 #include "Domain/Structure/ObjectLabel.hpp"
@@ -43,6 +44,7 @@
 #include "Options/Protocols/FactoryCreation.hpp"
 #include "PointwiseFunctions/GeneralRelativity/KerrHorizon.hpp"
 #include "Utilities/CartesianProduct.hpp"
+#include "Utilities/EqualWithinRoundoff.hpp"
 #include "Utilities/Literals.hpp"
 #include "Utilities/MakeArray.hpp"
 #include "Utilities/ProtocolHelpers.hpp"
@@ -436,9 +438,14 @@ std::string create_option_string(
     const bool use_logarithmic_map_AB, const bool use_equiangular_map,
     const size_t additional_refinement_outer,
     const size_t additional_refinement_A, const size_t additional_refinement_B,
-    const double opening_angle, const bool add_boundary_condition) {
+    const double opening_angle, const bool add_boundary_condition,
+    const bool use_spherical_harmonics_shell_a = false,
+    const bool use_spherical_harmonics_shell_b = false,
+    const std::optional<double> cube_scale_override = std::nullopt) {
   const std::string cube_scale =
-      (excise_A and excise_B and opening_angle == 90) ? "1.5" : "1.0";
+      cube_scale_override.has_value()
+          ? std::to_string(cube_scale_override.value())
+          : ((excise_A and excise_B and opening_angle == 90) ? "1.5" : "1.0");
   const std::string time_dependence{
       add_time_dependence
           ? ("  TimeDependentMaps:\n"
@@ -468,13 +475,17 @@ std::string create_option_string(
                          "      SizeInitialValues: [0.0, -0.1, 0.01]\n"
                          "      TransitionEndsAtCube: false\n"s
                        : "    ShapeMapA: None\n"s) +
-             (excise_B ? "    ShapeMapB:\n"
-                         "      LMax: 8\n"
-                         "      CoefficientTruncationLimit: 0.\n"
-                         "      InitialValues: Spherical\n"
-                         "      SizeInitialValues: [0.0, -0.2, 0.02]\n"
-                         "      TransitionEndsAtCube: true"s
-                       : "    ShapeMapB: None"s))
+             (excise_B
+                  ? "    ShapeMapB:\n"
+                    "      LMax: 8\n"
+                    "      CoefficientTruncationLimit: 0.\n"
+                    "      InitialValues: Spherical\n"
+                    "      SizeInitialValues: [0.0, -0.2, 0.02]\n"
+                    // a spherical-harmonic object shell needs the shape
+                    // transition to end at the sphere
+                    "      TransitionEndsAtCube: "s +
+                        (use_spherical_harmonics_shell_b ? "false"s : "true"s)
+                  : "    ShapeMapB: None"s))
           : "  TimeDependentMaps: None"};
   const std::string interior_A{
       add_boundary_condition
@@ -511,6 +522,9 @@ std::string create_option_string(
          (use_logarithmic_map_AB ? "1.0"s : "None"s) +
          "\n"
          "    CubeLogMapStrength: None\n"
+         "    UseSphericalHarmonics: " +
+         stringize(use_spherical_harmonics_shell_a) +
+         "\n"
          "  ObjectB:\n"
          "    InnerRadius: 0.2\n"
          "    OuterRadius: 1.0\n"
@@ -519,6 +533,9 @@ std::string create_option_string(
          (use_logarithmic_map_AB ? "1.0"s : "None"s) +
          "\n"
          "    CubeLogMapStrength: None\n"
+         "    UseSphericalHarmonics: " +
+         stringize(use_spherical_harmonics_shell_b) +
+         "\n"
          "  CenterOfMassOffset: [0.1, 0.2]\n"
          "  Envelope:\n"
          "    Radius: 22.0\n"
@@ -535,19 +552,41 @@ std::string create_option_string(
          "  InitialRefinement:\n" +
          (excise_A ? "" : "    ObjectAInterior: [1, 1, 1]\n") +
          (excise_B ? "" : "    ObjectBInterior: [1, 1, 1]\n") +
-         "    ObjectAShell: [1, 1, " +
-         std::to_string(1 + additional_refinement_A) +
-         "]\n"
-         "    ObjectBShell: [1, 1, " +
-         std::to_string(1 + additional_refinement_B) +
-         "]\n"
+         // spherical-harmonic shell blocks only support radial refinement,
+         // specified as a single number
+         (use_spherical_harmonics_shell_a
+              ? "    ObjectAShell: 1\n"s
+              : "    ObjectAShell: [1, 1, " +
+                    std::to_string(1 + additional_refinement_A) + "]\n") +
+         (use_spherical_harmonics_shell_b
+              ? "    ObjectBShell: 1\n"s
+              : "    ObjectBShell: [1, 1, " +
+                    std::to_string(1 + additional_refinement_B) + "]\n") +
          "    ObjectACube: [1, 1, 1]\n"
          "    ObjectBCube: [1, 1, 1]\n"
          "    Envelope: [1, 1, 1]\n"
          "    OuterShell0: [1, 1, " +
          std::to_string(1 + additional_refinement_outer) + "]\n" +
          (excise_B ? "    OuterShell1: [1, 1, 0]\n" : "") +
-         "  InitialGridPoints: 3\n" + "  CubeScale: " + cube_scale +
+         // spherical-harmonic shell blocks require grid points as
+         // [radial_points, L_max] with L_max >= 6
+         ((use_spherical_harmonics_shell_a or use_spherical_harmonics_shell_b)
+              ? "  InitialGridPoints:\n" +
+                    (excise_A ? ""s : "    ObjectAInterior: [3, 3, 3]\n"s) +
+                    (excise_B ? ""s : "    ObjectBInterior: [3, 3, 3]\n"s) +
+                    (use_spherical_harmonics_shell_a
+                         ? "    ObjectAShell: [3, 7]\n"s
+                         : "    ObjectAShell: [3, 3, 3]\n"s) +
+                    (use_spherical_harmonics_shell_b
+                         ? "    ObjectBShell: [3, 7]\n"s
+                         : "    ObjectBShell: [3, 3, 3]\n"s) +
+                    "    ObjectACube: [3, 3, 3]\n"
+                    "    ObjectBCube: [3, 3, 3]\n"
+                    "    Envelope: [3, 3, 3]\n"
+                    "    OuterShell0: [3, 3, 3]\n"s +
+                    (excise_B ? "    OuterShell1: [3, 3, 3]\n"s : ""s)
+              : "  InitialGridPoints: 3\n"s) +
+         "  CubeScale: " + cube_scale +
          "\n"
          "  UseEquiangularMap: " +
          stringize(use_equiangular_map) +
@@ -1148,6 +1187,33 @@ void test_parse_errors() {
   // test_connectivity function.
 }
 
+// Verify that the neighbor graph is two-sided: for every neighbor entry
+// A->B in direction `d` with orientation `O`, block B must have the reverse
+// entry B->A in direction `O(d).opposite()` with orientation
+// `O.inverse_map()`.
+void check_two_sided_neighbor_consistency(const Domain<3>& domain) {
+  const auto& blocks = domain.blocks();
+  for (const auto& block : blocks) {
+    for (const auto& [direction, block_neighbors] : block.neighbors()) {
+      for (const size_t neighbor_id : block_neighbors.ids()) {
+        CAPTURE(block.id());
+        CAPTURE(direction);
+        CAPTURE(neighbor_id);
+        const auto& orientation = block_neighbors.orientation(neighbor_id);
+        const auto direction_in_neighbor = orientation(direction).opposite();
+        CAPTURE(direction_in_neighbor);
+        const auto& neighbor = blocks[neighbor_id];
+        REQUIRE(neighbor.neighbors().count(direction_in_neighbor) == 1);
+        const auto& reverse_neighbors =
+            neighbor.neighbors().at(direction_in_neighbor);
+        REQUIRE(reverse_neighbors.ids().count(block.id()) == 1);
+        CHECK(reverse_neighbors.orientation(block.id()) ==
+              orientation.inverse_map());
+      }
+    }
+  }
+}
+
 void test_spherical_harmonics_wavezone() {
   INFO("Test BinaryCompactObject with SphericalHarmonicsInWavezone=true");
   // Both objects excised, no radial partitioning -> 1 SH outer shell block.
@@ -1215,6 +1281,7 @@ void test_spherical_harmonics_wavezone() {
 
   // Verify the domain can be constructed and inspect neighbor topology.
   const auto domain_sh = bco_sh.create_domain();
+  check_two_sided_neighbor_consistency(domain_sh);
   const auto& blocks = domain_sh.blocks();
   REQUIRE(blocks.size() == 35);
 
@@ -1289,6 +1356,7 @@ void test_spherical_harmonics_wavezone() {
       create_outer_boundary_condition()};
 
   const auto domain_sh2 = bco_sh2.create_domain();
+  check_two_sided_neighbor_consistency(domain_sh2);
   const auto& blocks2 = domain_sh2.blocks();
   REQUIRE(blocks2.size() == 36);
 
@@ -1458,6 +1526,247 @@ void test_spherical_harmonics_wavezone() {
           "only valid for spherical-harmonic shell blocks"));
 }
 
+void test_spherical_harmonics_object_shells(const double cube_scale) {
+  INFO("Test BinaryCompactObject with spherical-harmonic object shells");
+  CAPTURE(cube_scale);
+  using GridPointsMap = std::unordered_map<
+      std::string, std::variant<std::array<size_t, 3>, std::array<size_t, 2>>>;
+  using RefinementMap =
+      std::unordered_map<std::string,
+                         std::variant<std::array<size_t, 3>, size_t>>;
+
+  const auto check_shell_geometry =
+      [](const Block<3>& block, const double x_coord, const double inner_radius,
+         const double outer_radius) {
+        const double theta = 0.8;
+        const double phi = 1.1;
+        for (const double xi : {-1.0, 1.0}) {
+          CAPTURE(xi);
+          const double radius = xi < 0.0 ? inner_radius : outer_radius;
+          const auto coords = block.stationary_map()(
+              tnsr::I<double, 3, Frame::BlockLogical>{{xi, theta, phi}});
+          const tnsr::I<double, 3, Frame::Inertial> expected_coords{
+              {x_coord + radius * sin(theta) * cos(phi),
+               radius * sin(theta) * sin(phi), radius * cos(theta)}};
+          CHECK_ITERABLE_APPROX(coords, expected_coords);
+        }
+      };
+
+  for (const auto& [sh_a, sh_b] :
+       {std::pair{true, false}, std::pair{false, true},
+        std::pair{true, true}}) {
+    CAPTURE(sh_a, sh_b);
+    const bool sh_wavezone = sh_a and sh_b;
+    RefinementMap refinements{};
+    GridPointsMap grid_points{};
+    for (const std::string name :
+         {"ObjectAShell", "ObjectACube", "ObjectBShell", "ObjectBCube",
+          "Envelope", "OuterShell0"}) {
+      refinements.emplace(name, std::array<size_t, 3>{1, 1, 1});
+      grid_points.emplace(name, std::array<size_t, 3>{3, 3, 3});
+    }
+    for (const auto& [name, use_sh] :
+         {std::pair{"ObjectAShell", sh_a}, std::pair{"ObjectBShell", sh_b},
+          std::pair{"OuterShell0", sh_wavezone}}) {
+      if (use_sh) {
+        refinements.at(name) = size_t{2};
+        grid_points.at(name) = std::array<size_t, 2>{4, 7};
+      }
+    }
+    const domain::creators::BinaryCompactObject bco{
+        Object{0.3,
+               1.0,
+               3.0,
+               {{create_inner_boundary_condition()}},
+               2.0,
+               1.5,
+               sh_a},
+        Object{0.5,
+               1.0,
+               -3.0,
+               {{create_inner_boundary_condition()}},
+               std::nullopt,
+               std::nullopt,
+               sh_b},
+        std::array<double, 2>{{0.0, 0.0}},
+        25.5,
+        32.4,
+        cube_scale,
+        refinements,
+        grid_points,
+        true,
+        Distribution::Projective,
+        std::vector<double>{},
+        Distribution::Linear,
+        120.0,
+        sh_wavezone,
+        false,
+        std::nullopt,
+        create_outer_boundary_condition()};
+    const size_t num_blocks = sh_wavezone ? 25 : 39;
+    CHECK(bco.block_names().size() == num_blocks);
+    const auto domain = bco.create_domain();
+    check_two_sided_neighbor_consistency(domain);
+    const auto& blocks = domain.blocks();
+    REQUIRE(blocks.size() == num_blocks);
+    const auto bcs = bco.external_boundary_conditions();
+    REQUIRE(bcs.size() == num_blocks);
+    if (sh_wavezone) {
+      CHECK(bco.block_names()[24] == "OuterShell0");
+      CHECK(not bco.block_groups().contains("OuterShell0"));
+    }
+    for (const auto& [name, shell_id, use_sh, x, inner_radius] :
+         {std::tuple{"ObjectAShell", size_t{0}, sh_a, 3.0, 0.3},
+          std::tuple{"ObjectBShell", sh_a ? size_t{7} : size_t{12}, sh_b, -3.0,
+                     0.5}}) {
+      if (not use_sh) {
+        continue;
+      }
+      CAPTURE(name, shell_id);
+      CHECK(bco.block_names()[shell_id] == std::string{name} + "0");
+      CHECK(bco.block_groups().at(name) ==
+            std::unordered_set<std::string>{std::string{name} + "0"});
+      CHECK(bco.initial_extents()[shell_id] == std::array<size_t, 3>{4, 8, 15});
+      CHECK(bco.initial_refinement_levels()[shell_id] ==
+            std::array<size_t, 3>{2, 0, 0});
+      check_shell_geometry(blocks[shell_id], x, inner_radius, 1.0);
+      CHECK(bcs[shell_id].count(Direction<3>::lower_xi()) == 1);
+      CHECK(bcs[shell_id].count(Direction<3>::lower_zeta()) == 0);
+      CHECK(blocks[shell_id].neighbors().count(Direction<3>::lower_xi()) == 0);
+      const auto& neighbors =
+          blocks[shell_id].neighbors().at(Direction<3>::upper_xi());
+      CHECK(neighbors.ids().size() == 6);
+      // Both radial axes point outward; angular directions use self().
+      const OrientationMap<3> shell_to_cube{
+          {{Direction<3>::upper_zeta(), Direction<3>::self(),
+            Direction<3>::self()}}};
+      for (size_t cube_id = shell_id + 1; cube_id <= shell_id + 6; ++cube_id) {
+        CHECK(neighbors.orientation(cube_id) == shell_to_cube);
+        const auto& cube_neighbors =
+            blocks[cube_id].neighbors().at(Direction<3>::lower_zeta());
+        CHECK(cube_neighbors.ids() == std::unordered_set<size_t>{shell_id});
+        CHECK(cube_neighbors.orientation(shell_id) ==
+              shell_to_cube.inverse_map());
+      }
+      if (shell_id == 0) {
+        const auto& shell_map = blocks[0].stationary_map();
+        const auto inner_jacobian = shell_map.jacobian(
+            tnsr::I<double, 3, Frame::BlockLogical>{{-1.0, 1.0, 0.7}});
+        const auto outer_jacobian = shell_map.jacobian(
+            tnsr::I<double, 3, Frame::BlockLogical>{{1.0, 1.0, 0.7}});
+        // Check that the nonunit logarithmic-map strength is applied.
+        CHECK(std::hypot(get<0, 0>(outer_jacobian), get<1, 0>(outer_jacobian),
+                         get<2, 0>(outer_jacobian)) /
+                  std::hypot(get<0, 0>(inner_jacobian),
+                             get<1, 0>(inner_jacobian),
+                             get<2, 0>(inner_jacobian)) ==
+              approx(2.0 / 0.3));
+      }
+    }
+  }
+
+  CHECK_THROWS_WITH(
+      domain::creators::BinaryCompactObject(
+          Object{0.3, 1.0, 3.0, false, std::nullopt, std::nullopt, true},
+          Object{0.5, 1.0, -3.0, true, std::nullopt, std::nullopt, false},
+          std::array<double, 2>{{0.0, 0.0}}, 25.5, 32.4, 1.0, 0_st, 4_st, true,
+          Distribution::Projective, std::vector<double>{}, Distribution::Linear,
+          120.0, false, false, std::nullopt, nullptr,
+          Options::Context{false, {}, 1, 1}),
+      Catch::Matchers::ContainsSubstring("requires excising Object A"));
+
+  const auto sh_time_dep_creator =
+      TestHelpers::test_option_tag<domain::OptionTags::DomainCreator<3>,
+                                   Metavariables<3, true>>(
+          create_option_string(true, true, true, false, true, 0, 0, 0, 120.0,
+                               true, true, false, cube_scale));
+  REQUIRE(sh_time_dep_creator != nullptr);
+  CHECK_NOTHROW(sh_time_dep_creator->create_domain());
+  CHECK(not sh_time_dep_creator->functions_of_time().empty());
+
+  auto invalid_transition_options =
+      create_option_string(true, true, true, false, true, 0, 0, 0, 120.0, true,
+                           true, false, cube_scale);
+  const std::string valid_transition = "TransitionEndsAtCube: false";
+  invalid_transition_options.replace(
+      invalid_transition_options.find(valid_transition),
+      valid_transition.size(), "TransitionEndsAtCube: true");
+  const auto invalid_transition_creator =
+      TestHelpers::test_option_tag<domain::OptionTags::DomainCreator<3>,
+                                   Metavariables<3, true>>(
+          invalid_transition_options);
+  CHECK_THROWS_WITH(
+      invalid_transition_creator->create_domain(),
+      Catch::Matchers::ContainsSubstring(
+          "Set 'TransitionEndsAtCube' to 'false' for this object"));
+
+  // Both objects with a spherical-harmonic shell AND a shape map each. This
+  // is the configuration used to evolve a binary with one Ylm shell per
+  // object, so both shape maps must transition to the sphere.
+  const auto sh_both_time_dep_creator =
+      TestHelpers::test_option_tag<domain::OptionTags::DomainCreator<3>,
+                                   Metavariables<3, true>>(
+          create_option_string(true, true, true, false, true, 0, 0, 0, 120.0,
+                               true, true, true, cube_scale));
+  REQUIRE(sh_both_time_dep_creator != nullptr);
+  const auto time_dependent_domain = sh_both_time_dep_creator->create_domain();
+  check_two_sided_neighbor_consistency(time_dependent_domain);
+  auto functions_of_time = sh_both_time_dep_creator->functions_of_time();
+  for (const auto& name : {"ShapeA", "ShapeB"}) {
+    auto initial_values = functions_of_time.at(name)->func_and_2_derivs(1.0);
+    initial_values[0][2] = 0.02;
+    functions_of_time.at(name) =
+        std::make_unique<domain::FunctionsOfTime::PiecewisePolynomial<2>>(
+            1.0, std::move(initial_values),
+            std::numeric_limits<double>::infinity());
+  }
+  const auto& time_dependent_blocks = time_dependent_domain.blocks();
+  for (const size_t shell_id : {0_st, 7_st}) {
+    CAPTURE(shell_id);
+    const auto& shell = time_dependent_blocks[shell_id];
+    REQUIRE(shell.has_distorted_frame());
+    const auto inner_grid_coords = shell.moving_mesh_logical_to_grid_map()(
+        tnsr::I<double, 3, Frame::BlockLogical>{{-1.0, 1.0, 0.7}});
+    const auto inner_distorted_coords =
+        shell.moving_mesh_grid_to_distorted_map()(inner_grid_coords, 1.2,
+                                                  functions_of_time);
+    CHECK_FALSE(equal_within_roundoff(get<0>(inner_grid_coords),
+                                      get<0>(inner_distorted_coords)));
+    for (size_t cube_id = shell_id + 1; cube_id <= shell_id + 6; ++cube_id) {
+      CAPTURE(cube_id);
+      const auto& cube = time_dependent_blocks[cube_id];
+      CHECK_FALSE(cube.has_distorted_frame());
+      const auto cube_grid_coords = cube.moving_mesh_logical_to_grid_map()(
+          tnsr::I<double, 3, Frame::BlockLogical>{{0.2, -0.4, -1.0}});
+      const auto shell_logical_coords =
+          shell.moving_mesh_logical_to_grid_map().inverse(cube_grid_coords);
+      REQUIRE(shell_logical_coords.has_value());
+      CHECK(get<0>(*shell_logical_coords) == approx(1.0));
+      const auto shell_grid_coords =
+          shell.moving_mesh_logical_to_grid_map()(*shell_logical_coords);
+      CHECK_ITERABLE_APPROX(shell_grid_coords, cube_grid_coords);
+      for (const double time : {1.0, 1.2}) {
+        CAPTURE(time);
+        const auto distorted_coords = shell.moving_mesh_grid_to_distorted_map()(
+            shell_grid_coords, time, functions_of_time);
+        CHECK_ITERABLE_APPROX(
+            make_array(get<0>(distorted_coords), get<1>(distorted_coords),
+                       get<2>(distorted_coords)),
+            make_array(get<0>(shell_grid_coords), get<1>(shell_grid_coords),
+                       get<2>(shell_grid_coords)));
+        const auto inertial_coords = shell.moving_mesh_grid_to_inertial_map()(
+            shell_grid_coords, time, functions_of_time);
+        CHECK_ITERABLE_APPROX(inertial_coords,
+                              cube.moving_mesh_grid_to_inertial_map()(
+                                  cube_grid_coords, time, functions_of_time));
+        CHECK_ITERABLE_APPROX(inertial_coords,
+                              shell.moving_mesh_distorted_to_inertial_map()(
+                                  distorted_coords, time, functions_of_time));
+      }
+    }
+  }
+}
+
 template <domain::ObjectLabel Object>
 using HardcodedShape =
     domain::creators::time_dependent_options::ShapeMapOptions<true, Object>;
@@ -1567,5 +1876,8 @@ SPECTRE_TEST_CASE("Unit.Domain.Creators.BinaryCompactObject",
   test_binary_factory();
   test_parse_errors();
   test_spherical_harmonics_wavezone();
+  for (const double cube_scale : {1.0, 1.5}) {
+    test_spherical_harmonics_object_shells(cube_scale);
+  }
   test_kerr_horizon_conforming();
 }

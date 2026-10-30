@@ -88,6 +88,12 @@ namespace domain::creators {
  *   object. This layer has a spherical outer boundary - if the corresponding
  *   interior block exists, then the layer is a cube-to-sphere transition; if
  *   the interior block is excised, then the layer is a spherical shell.
+ *   For an excised object, `UseSphericalHarmonics` replaces these six blocks
+ *   with a single spherical-harmonic shell. If a shape map is used, this
+ *   requires `TransitionEndsAtCube: false`. Specify the
+ *   shell's grid points as `[radial_points, L_max]` and its h-refinement as
+ *   a single radial refinement level, using the `ObjectAShell` or
+ *   `ObjectBShell` block group.
  * - **Object A/B cube**: The 6 blocks that surround each object with a cube.
  *   Around each compact object, this layer transitions from a sphere to a cube.
  * - **Envelope**: The 10 blocks that transition from the two inner cubes to a
@@ -157,6 +163,8 @@ class BinaryCompactObject : public DomainCreator<3> {
   using Identity = CoordinateMaps::Identity<1>;
   using Identity2D = CoordinateMaps::Identity<2>;
   using Interval = CoordinateMaps::Interval;
+  using SphericalShellMap =
+      CoordinateMaps::ProductOf2Maps<Interval, Identity2D>;
   using RadialInterval3D =
       CoordinateMaps::ProductOf3Maps<Identity, Identity, Interval>;
   // The Translation type is no longer needed, but it is kept here for backwards
@@ -199,6 +207,10 @@ class BinaryCompactObject : public DomainCreator<3> {
           domain::CoordinateMaps::SphericalToCartesianPfaffian>,
       domain::CoordinateMap<Frame::BlockLogical, Frame::Inertial,
                             RadialInterval3D, CoordinateMaps::Wedge<3>,
+                            Affine3D>,
+      domain::CoordinateMap<Frame::BlockLogical, Frame::Inertial,
+                            SphericalShellMap, SphericalShellMap,
+                            CoordinateMaps::SphericalToCartesianPfaffian,
                             Affine3D>,
       bco::TimeDependentMapOptions<false>::maps_list>>;
 
@@ -280,6 +292,15 @@ class BinaryCompactObject : public DomainCreator<3> {
           "at radius 0. Larger values move the origin closer to the inner "
           "radius, concentrating grid points near the object."};
     };
+    struct UseSphericalHarmonics {
+      using type = bool;
+      static type suggested_value() { return false; }
+      static constexpr Options::String help = {
+          "Use a spherical-harmonic basis in this object's shell (a single "
+          "block) instead of the default 6-wedge basis. Requires the interior "
+          "is excised and the shape-map transition ends "
+          "at the sphere (TransitionEndsAtCube: false)."};
+    };
     template <typename Metavariables>
     using options = tmpl::list<
         InnerRadius, OuterRadius, XCoord,
@@ -287,12 +308,13 @@ class BinaryCompactObject : public DomainCreator<3> {
             domain::BoundaryConditions::has_boundary_conditions_base_v<
                 typename Metavariables::system>,
             Interior, ExciseInterior>,
-        ShellLogMapStrength, CubeLogMapStrength>;
+        ShellLogMapStrength, CubeLogMapStrength, UseSphericalHarmonics>;
     Object() {}  // NOLINT(modernize-use-equals-default)
     Object(double local_inner_radius, double local_outer_radius,
            double local_x_coord, std::optional<Excision> interior,
            std::optional<double> local_shell_log_map_strength,
-           std::optional<double> local_cube_log_map_strength = std::nullopt)
+           std::optional<double> local_cube_log_map_strength = std::nullopt,
+           bool local_use_spherical_harmonics = false)
         : inner_radius(local_inner_radius),
           outer_radius(local_outer_radius),
           x_coord(local_x_coord),
@@ -301,11 +323,13 @@ class BinaryCompactObject : public DomainCreator<3> {
                   ? std::make_optional(std::move(interior->boundary_condition))
                   : std::nullopt),
           shell_log_map_strength(local_shell_log_map_strength),
-          cube_log_map_strength(local_cube_log_map_strength) {}
+          cube_log_map_strength(local_cube_log_map_strength),
+          use_spherical_harmonics(local_use_spherical_harmonics) {}
     Object(double local_inner_radius, double local_outer_radius,
            double local_x_coord, bool local_excise_interior,
            std::optional<double> local_shell_log_map_strength,
-           std::optional<double> local_cube_log_map_strength = std::nullopt)
+           std::optional<double> local_cube_log_map_strength = std::nullopt,
+           bool local_use_spherical_harmonics = false)
         : inner_radius(local_inner_radius),
           outer_radius(local_outer_radius),
           x_coord(local_x_coord),
@@ -315,7 +339,8 @@ class BinaryCompactObject : public DomainCreator<3> {
                         domain::BoundaryConditions::BoundaryCondition>>{nullptr}
                   : std::nullopt),
           shell_log_map_strength(local_shell_log_map_strength),
-          cube_log_map_strength(local_cube_log_map_strength) {}
+          cube_log_map_strength(local_cube_log_map_strength),
+          use_spherical_harmonics(local_use_spherical_harmonics) {}
 
     /// Whether or not the object should be excised from the domain, leaving a
     /// spherical hole. When this is true, `inner_boundary_condition` is
@@ -331,6 +356,7 @@ class BinaryCompactObject : public DomainCreator<3> {
         inner_boundary_condition;
     std::optional<double> shell_log_map_strength{};
     std::optional<double> cube_log_map_strength{};
+    bool use_spherical_harmonics{false};
   };
 
   // Simpler version of an object: a single cube centered on (xCoord,0,0)
@@ -623,6 +649,8 @@ class BinaryCompactObject : public DomainCreator<3> {
           std::unique_ptr<domain::FunctionsOfTime::FunctionOfTime>> override;
 
  private:
+  bool is_spherical_harmonic_block(size_t block_id) const;
+
   typename ObjectA::type object_A_{Object{}};
   typename ObjectB::type object_B_{Object{}};
   std::array<double, 2> center_of_mass_offset_{};
@@ -630,7 +658,7 @@ class BinaryCompactObject : public DomainCreator<3> {
   double outer_radius_ = std::numeric_limits<double>::signaling_NaN();
   std::vector<std::array<size_t, 3>> initial_refinement_;
   // For most blocks this stores the number of grid points in each logical
-  // direction. For spherical-harmonic shell blocksthe angular entries instead
+  // direction. For spherical-harmonic shell blocks the angular entries instead
   // store the spherical-harmonic degrees {n_radial, l_max, m_max}, because
   // ell is unambiguous whereas the implied number of collocation points
   // depends on the spectral implementation. The conversion of (l_max, m_max)
@@ -666,6 +694,9 @@ class BinaryCompactObject : public DomainCreator<3> {
   bool is_excised_b_ = false;
   bool use_single_block_a_ = false;
   bool use_single_block_b_ = false;
+  bool spherical_harmonics_in_object_a_shell_ = false;
+  bool spherical_harmonics_in_object_b_shell_ = false;
+  size_t first_block_object_b_{};
   std::optional<bco::TimeDependentMapOptions<false>> time_dependent_options_;
   double opening_angle_ = std::numeric_limits<double>::signaling_NaN();
   bool spherical_harmonics_in_wavezone_ = false;
