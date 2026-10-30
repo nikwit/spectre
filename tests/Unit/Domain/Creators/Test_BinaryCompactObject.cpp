@@ -41,6 +41,7 @@
 #include "Helpers/Domain/Creators/TestHelpers.hpp"
 #include "Helpers/Domain/DomainTestHelpers.hpp"
 #include "Informer/InfoFromBuild.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/SpherepackIterator.hpp"
 #include "Options/Protocols/FactoryCreation.hpp"
 #include "PointwiseFunctions/GeneralRelativity/KerrHorizon.hpp"
 #include "Utilities/CartesianProduct.hpp"
@@ -1674,6 +1675,27 @@ void test_spherical_harmonics_object_shells(const double cube_scale) {
           120.0, false, false, std::nullopt, nullptr,
           Options::Context{false, {}, 1, 1}),
       Catch::Matchers::ContainsSubstring("requires excising Object A"));
+  CHECK_THROWS_WITH(
+      domain::creators::BinaryCompactObject(
+          Object{0.3, 1.0, 3.0, true, std::nullopt, std::nullopt, false},
+          Object{0.5, 1.0, -3.0, false, std::nullopt, std::nullopt, true},
+          std::array<double, 2>{{0.0, 0.0}}, 25.5, 32.4, 1.0, 0_st, 4_st, true,
+          Distribution::Projective, std::vector<double>{}, Distribution::Linear,
+          120.0, false, false, std::nullopt, nullptr,
+          Options::Context{false, {}, 1, 1}),
+      Catch::Matchers::ContainsSubstring("requires excising Object B"));
+  // The worldtube assumes Legendre collocation points on the excision surface
+  CHECK_THROWS_WITH(
+      domain::creators::BinaryCompactObject(
+          Object{0.3, 1.0, 3.0, true, std::nullopt, std::nullopt, true},
+          Object{0.5, 1.0, -3.0, true, std::nullopt, std::nullopt, false},
+          std::array<double, 2>{{0.0, 0.0}}, 25.5, 32.4, 1.0, 0_st, 4_st, true,
+          Distribution::Projective, std::vector<double>{}, Distribution::Linear,
+          120.0, false, true, std::nullopt, nullptr,
+          Options::Context{false, {}, 1, 1}),
+      Catch::Matchers::ContainsSubstring(
+          "Using a spherical-harmonic shell for Object A is not supported "
+          "with 'UseWorldtube: true'"));
 
   const auto sh_time_dep_creator =
       TestHelpers::test_option_tag<domain::OptionTags::DomainCreator<3>,
@@ -1691,14 +1713,13 @@ void test_spherical_harmonics_object_shells(const double cube_scale) {
   invalid_transition_options.replace(
       invalid_transition_options.find(valid_transition),
       valid_transition.size(), "TransitionEndsAtCube: true");
-  const auto invalid_transition_creator =
-      TestHelpers::test_option_tag<domain::OptionTags::DomainCreator<3>,
-                                   Metavariables<3, true>>(
-          invalid_transition_options);
+  // This is a parse error, so it is reported with option context
   CHECK_THROWS_WITH(
-      invalid_transition_creator->create_domain(),
+      (TestHelpers::test_option_tag<domain::OptionTags::DomainCreator<3>,
+                                    Metavariables<3, true>>(
+          invalid_transition_options)),
       Catch::Matchers::ContainsSubstring(
-          "Set 'TransitionEndsAtCube' to 'false' for this object"));
+          "Set 'TransitionEndsAtCube' to 'false' in 'ShapeMapA'"));
 
   // Both objects with a spherical-harmonic shell AND a shape map each. This
   // is the configuration used to evolve a binary with one Ylm shell per
@@ -1712,9 +1733,10 @@ void test_spherical_harmonics_object_shells(const double cube_scale) {
   const auto time_dependent_domain = sh_both_time_dep_creator->create_domain();
   check_two_sided_neighbor_consistency(time_dependent_domain);
   auto functions_of_time = sh_both_time_dep_creator->functions_of_time();
+  // Deform the excision surfaces with an l=2 mode (LMax is 8)
   for (const auto& name : {"ShapeA", "ShapeB"}) {
     auto initial_values = functions_of_time.at(name)->func_and_2_derivs(1.0);
-    initial_values[0][2] = 0.02;
+    initial_values[0][ylm::SpherepackIterator{8, 8}.set(2, 0)()] = 0.02;
     functions_of_time.at(name) =
         std::make_unique<domain::FunctionsOfTime::PiecewisePolynomial<2>>(
             1.0, std::move(initial_values),

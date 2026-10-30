@@ -483,6 +483,24 @@ bool TimeDependentMapOptions<IsCylindrical>::has_distorted_frame_options(
 }
 
 template <bool IsCylindrical>
+bool TimeDependentMapOptions<IsCylindrical>::transition_ends_at_cube(
+    const domain::ObjectLabel object) const {
+  ASSERT(has_distorted_frame_options(object),
+         "No shape map options were specified for object " << object);
+  if constexpr (IsCylindrical) {
+    return false;
+  } else {
+    return object == domain::ObjectLabel::A
+               ? time_dependent_options::
+                     transition_ends_at_cube_from_shape_options(
+                         shape_options_A_.value())
+               : time_dependent_options::
+                     transition_ends_at_cube_from_shape_options(
+                         shape_options_B_.value());
+  }
+}
+
+template <bool IsCylindrical>
 template <domain::ObjectLabel Object>
 typename TimeDependentMapOptions<IsCylindrical>::template MapType<
     Frame::Distorted, Frame::Inertial>

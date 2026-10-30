@@ -291,6 +291,17 @@ struct TimeDependentMapOptions {
   bool has_distorted_frame_options(domain::ObjectLabel object) const;
 
   /*!
+   * \brief Whether the shape-map transition function of this object ends at
+   * the cube surrounding the object (`true`) or at the outer radius of the
+   * sphere around the object (`false`).
+   *
+   * Requires that shape map options were specified for this object, see
+   * `has_distorted_frame_options()`. Always `false` for the cylindrical domain,
+   * which has no cube around the objects.
+   */
+  bool transition_ends_at_cube(domain::ObjectLabel object) const;
+
+  /*!
    * \brief Type to pass to `grid_to_distorted_map()` and
    * `grid_to_inertial_map()`.
    *

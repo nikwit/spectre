@@ -4,6 +4,7 @@
 #include "Framework/TestingFramework.hpp"
 
 #include <array>
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -11,6 +12,7 @@
 #include <unordered_map>
 
 #include "DataStructures/DataVector.hpp"
+#include "DataStructures/Tensor/Tensor.hpp"
 #include "Domain/Creators/BinaryCompactObject.hpp"
 #include "Domain/Creators/TimeDependentOptions/BinaryCompactObject.hpp"
 #include "Domain/Creators/TimeDependentOptions/ExpansionMap.hpp"
@@ -25,7 +27,9 @@
 #include "Domain/Structure/ObjectLabel.hpp"
 #include "Informer/InfoFromBuild.hpp"
 #include "NumericalAlgorithms/SphericalHarmonics/Spherepack.hpp"
+#include "NumericalAlgorithms/SphericalHarmonics/SpherepackIterator.hpp"
 #include "Utilities/CartesianProduct.hpp"
+#include "Utilities/EqualWithinRoundoff.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/MakeArray.hpp"
 
@@ -741,6 +745,107 @@ void test_errors() {
 #endif
 }
 
+// A single spherical-harmonic shell block around an excised object uses the
+// shape map at index 12, whose transition function ends at the sphere.
+void test_spherical_harmonic_shell_map() {
+  INFO("Shape map for a spherical-harmonic object shell");
+  const std::array<double, 3> radii{{0.1, 0.5, 1.0}};
+  const std::array<double, 3> center_a{{5.0, 0.0, 0.0}};
+  const std::array<double, 3> center_b{{-5.0, 0.0, 0.0}};
+  // Object A's shape map transitions to the sphere, Object B's to the cube
+  TimeDependentMapOptions<false> options{
+      1.0,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      time_dependent_options::ShapeMapOptions<true, domain::ObjectLabel::A>{
+          8, {}, std::nullopt, 0.0, false},
+      time_dependent_options::ShapeMapOptions<true, domain::ObjectLabel::B>{
+          8, {}, std::nullopt, 0.0, true},
+      std::nullopt};
+  CHECK(not options.transition_ends_at_cube(domain::ObjectLabel::A));
+  CHECK(options.transition_ends_at_cube(domain::ObjectLabel::B));
+  options.build_maps(std::array{center_a, center_b}, std::nullopt, std::nullopt,
+                     std::array{0.0, 0.0, 0.0}, radii, radii, false, false,
+                     25.0, 100.0);
+
+  const auto shell_map =
+      options.grid_to_distorted_map<domain::ObjectLabel::A>(12);
+  REQUIRE(shell_map != nullptr);
+  CHECK(not shell_map->is_identity());
+  CHECK(options.grid_to_inertial_map<domain::ObjectLabel::A>(12, true) !=
+        nullptr);
+  CHECK(options.distorted_to_inertial_map<domain::ObjectLabel::A>(12, true) !=
+        nullptr);
+  const auto wedge_map =
+      options.grid_to_distorted_map<domain::ObjectLabel::A>(0);
+  REQUIRE(wedge_map != nullptr);
+
+  // Deform the excision surface with an l=2 mode so the shape maps are not
+  // the identity
+  auto functions_of_time = options.create_functions_of_time({});
+  auto initial_values = functions_of_time.at("ShapeA")->func_and_2_derivs(1.0);
+  initial_values[0][ylm::SpherepackIterator{8, 8}.set(2, 0)()] = 0.02;
+  functions_of_time.at("ShapeA") =
+      std::make_unique<domain::FunctionsOfTime::PiecewisePolynomial<2>>(
+          1.0, std::move(initial_values),
+          std::numeric_limits<double>::infinity());
+
+  // A point on the excision surface within the +z wedge (index 0)
+  const double theta = 0.3;
+  const double phi = 0.7;
+  const auto point_at_radius = [&center_a, &theta, &phi](const double radius) {
+    return tnsr::I<double, 3, Frame::Grid>{
+        {center_a[0] + radius * sin(theta) * cos(phi),
+         center_a[1] + radius * sin(theta) * sin(phi),
+         center_a[2] + radius * cos(theta)}};
+  };
+  const auto excision_point = point_at_radius(radii[0]);
+  const auto deformed_excision_point =
+      (*shell_map)(excision_point, 1.0, functions_of_time);
+  CHECK_FALSE(equal_within_roundoff(get<2>(deformed_excision_point),
+                                    get<2>(excision_point)));
+  // The shell map and the wedge maps deform the excision surface identically
+  CHECK_ITERABLE_APPROX(deformed_excision_point,
+                        (*wedge_map)(excision_point, 1.0, functions_of_time));
+  // The shell map is the identity at the outer radius of the shell, where the
+  // undeformed cube blocks begin
+  const auto outer_point = point_at_radius(radii[1]);
+  const auto mapped_outer_point =
+      (*shell_map)(outer_point, 1.0, functions_of_time);
+  CHECK_ITERABLE_APPROX(
+      make_array(get<0>(mapped_outer_point), get<1>(mapped_outer_point),
+                 get<2>(mapped_outer_point)),
+      make_array(get<0>(outer_point), get<1>(outer_point),
+                 get<2>(outer_point)));
+
+  CHECK_THROWS_WITH(
+      options.grid_to_distorted_map<domain::ObjectLabel::B>(12),
+      Catch::Matchers::ContainsSubstring(
+          "Set 'TransitionEndsAtCube' to 'false' for this object"));
+  CHECK_THROWS_WITH(
+      options.grid_to_inertial_map<domain::ObjectLabel::B>(12, true),
+      Catch::Matchers::ContainsSubstring(
+          "Set 'TransitionEndsAtCube' to 'false' for this object"));
+  // When the transition ends at the sphere, only the shell wedges (0-5) and
+  // the single shell block (12) have a shape map
+  CHECK(options.grid_to_distorted_map<domain::ObjectLabel::A>(6) == nullptr);
+  CHECK(options.grid_to_distorted_map<domain::ObjectLabel::A>(13) == nullptr);
+  CHECK_THROWS_WITH(
+      options.grid_to_distorted_map<domain::ObjectLabel::B>(13),
+      Catch::Matchers::ContainsSubstring("Max value allowed is 12"));
+  CHECK_THROWS_WITH(
+      options.grid_to_inertial_map<domain::ObjectLabel::B>(13, true),
+      Catch::Matchers::ContainsSubstring("Max value allowed is 12"));
+#ifdef SPECTRE_DEBUG
+  CHECK_THROWS_WITH(TimeDependentMapOptions<false>{}.transition_ends_at_cube(
+                        domain::ObjectLabel::A),
+                    Catch::Matchers::ContainsSubstring(
+                        "No shape map options were specified for object A"));
+#endif
+}
+
 void test_worldtube_fots() {
   const std::array<double, 3> size_a_opts{{1.3, 1.2, 1.1}};
   const std::array<double, 3> size_b_opts{{1.4, 1.5, 1.6}};
@@ -871,6 +976,7 @@ SPECTRE_TEST_CASE(
   check_names<false>();
   test_errors<true>();
   test_errors<false>();
+  test_spherical_harmonic_shell_map();
   test_worldtube_fots();
 }
 }  // namespace domain::creators::bco

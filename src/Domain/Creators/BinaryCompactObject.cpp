@@ -463,6 +463,36 @@ BinaryCompactObject::BinaryCompactObject(
         "malformed. A recommended radius is:\n"
             << suggested_value);
   }
+  // Requirements specific to a single spherical-harmonic shell block around an
+  // object. These are checked here so they are reported as parse errors with
+  // option context, rather than failing later in `create_domain()`.
+  const auto validate_spherical_harmonic_shell =
+      [this, &context](const Object& object, const domain::ObjectLabel label) {
+        if (not object.is_excised()) {
+          PARSE_ERROR(context, "Using a spherical-harmonic shell for Object "
+                                   << label << " requires excising Object "
+                                   << label << ".");
+        }
+        if (use_worldtube_) {
+          PARSE_ERROR(context,
+                      "Using a spherical-harmonic shell for Object "
+                          << label
+                          << " is not supported with 'UseWorldtube: true'. The "
+                             "worldtube assumes Legendre collocation points on "
+                             "the excision surface.");
+        }
+        if (time_dependent_options_.has_value() and
+            time_dependent_options_->has_distorted_frame_options(label) and
+            time_dependent_options_->transition_ends_at_cube(label)) {
+          PARSE_ERROR(context,
+                      "Using a spherical-harmonic shell for Object "
+                          << label
+                          << " requires a shape-map transition that ends at "
+                             "the sphere. Set 'TransitionEndsAtCube' to "
+                             "'false' in 'ShapeMap"
+                          << label << "'.");
+        }
+      };
   // The following options are irrelevant if the inner regions are covered
   // with simple blocks, so we only check them if object_A_ uses the first
   // variant type.
@@ -490,11 +520,8 @@ BinaryCompactObject::BinaryCompactObject(
           "of Layer 1 enveloping Object A requires excising the interior of "
           "Object A");
     }
-    if (spherical_harmonics_in_object_a_shell_ and not object_a.is_excised()) {
-      PARSE_ERROR(
-          context,
-          "Using a spherical-harmonic shell for Object A requires excising "
-          "Object A.");
+    if (spherical_harmonics_in_object_a_shell_) {
+      validate_spherical_harmonic_shell(object_a, domain::ObjectLabel::A);
     }
     if (not object_a.is_excised() and
         not equal_within_roundoff(cube_scale, 1.0)) {
@@ -535,11 +562,8 @@ BinaryCompactObject::BinaryCompactObject(
           "of Layer 1 enveloping Object B requires excising the interior of "
           "Object B");
     }
-    if (spherical_harmonics_in_object_b_shell_ and not object_b.is_excised()) {
-      PARSE_ERROR(
-          context,
-          "Using a spherical-harmonic shell for Object B requires excising "
-          "Object B.");
+    if (spherical_harmonics_in_object_b_shell_) {
+      validate_spherical_harmonic_shell(object_b, domain::ObjectLabel::B);
     }
     if (not object_b.is_excised() and
         not equal_within_roundoff(cube_scale, 1.0)) {
@@ -795,6 +819,21 @@ bool BinaryCompactObject::is_spherical_harmonic_block(
           block_id < first_outer_shell_block_ + number_of_outer_shells_);
 }
 
+std::unordered_map<size_t, Direction<3>> BinaryCompactObject::excision_faces(
+    const size_t first_block) const {
+  std::unordered_map<size_t, Direction<3>> faces{};
+  if (is_spherical_harmonic_block(first_block)) {
+    // A single shell block with the radial direction along xi
+    faces.emplace(first_block, Direction<3>::lower_xi());
+  } else {
+    // Six wedges with the radial direction along zeta
+    for (size_t i = 0; i < 6; ++i) {
+      faces.emplace(first_block + i, Direction<3>::lower_zeta());
+    }
+  }
+  return faces;
+}
+
 std::vector<std::array<size_t, 3>> BinaryCompactObject::initial_extents()
     const {
   // Convert stored {n_radial, l_max, m_max} to collocation extents on
@@ -819,34 +858,23 @@ Domain<3> BinaryCompactObject::create_domain() const {
 
   Maps maps{};
 
-  // ObjectA/B is on the right/left, respectively.
-  const Affine3D translation_A{
-      Affine{-1.0, 1.0, -1.0 + x_coord_a_ - offset_x_coord_a_,
-             1.0 + x_coord_a_ - offset_x_coord_a_},
-      Affine{-1.0, 1.0, -1.0 + center_of_mass_offset_[0],
-             1.0 + center_of_mass_offset_[0]},
-      Affine{-1.0, 1.0, -1.0 + center_of_mass_offset_[1],
-             1.0 + center_of_mass_offset_[1]}};
-  const Affine3D translation_B{
-      Affine{-1.0, 1.0, -1.0 + x_coord_b_ - offset_x_coord_b_,
-             1.0 + x_coord_b_ - offset_x_coord_b_},
-      Affine{-1.0, 1.0, -1.0 + center_of_mass_offset_[0],
-             1.0 + center_of_mass_offset_[0]},
-      Affine{-1.0, 1.0, -1.0 + center_of_mass_offset_[1],
-             1.0 + center_of_mass_offset_[1]}};
-
-  // Spherical-harmonic shells are centered on the objects. For CubeScale > 1,
-  // the surrounding cubes have different centers, accounted for by the focal
-  // offsets in their wedge maps.
-  const auto object_translation = [this](const double x_coord) {
-    return Affine3D{Affine{-1.0, 1.0, -1.0 + x_coord, 1.0 + x_coord},
+  // Translation of blocks built around the origin to (x_center, y, z), where
+  // (y, z) is the center-of-mass offset.
+  const auto translation = [this](const double x_center) {
+    return Affine3D{Affine{-1.0, 1.0, -1.0 + x_center, 1.0 + x_center},
                     Affine{-1.0, 1.0, -1.0 + center_of_mass_offset_[0],
                            1.0 + center_of_mass_offset_[0]},
                     Affine{-1.0, 1.0, -1.0 + center_of_mass_offset_[1],
                            1.0 + center_of_mass_offset_[1]}};
   };
+  // ObjectA/B is on the right/left, respectively. For CubeScale > 1 the cube
+  // around each object is offset from the object, and the wedge maps account
+  // for the object's position through their focal offsets.
+  const Affine3D translation_A = translation(x_coord_a_ - offset_x_coord_a_);
+  const Affine3D translation_B = translation(x_coord_b_ - offset_x_coord_b_);
 
-  const auto object_shell_map = [&object_translation](const Object& object) {
+  // Spherical-harmonic shells are centered on the objects.
+  const auto object_shell_map = [&translation](const Object& object) {
     const auto radial_map =
         object.shell_log_map_strength.has_value()
             ? radial_distribution_log_map(object.inner_radius,
@@ -861,7 +889,7 @@ Domain<3> BinaryCompactObject::create_domain() const {
                      CoordinateMaps::Distribution::Linear},
             Identity2D{}},
         CoordinateMaps::SphericalToCartesianPfaffian{},
-        object_translation(object.x_coord));
+        translation(object.x_coord));
   };
 
   // Build the coordinate maps for one radial layer (shell or cube) around an
@@ -1035,16 +1063,6 @@ Domain<3> BinaryCompactObject::create_domain() const {
   // Each object can optionally be filled with a cube-shaped block, in which
   // case the enclosing wedges configured above transition from the cube to a
   // sphere.
-  const auto excision_directions = [this](const size_t first_block) {
-    const bool spherical_harmonics = is_spherical_harmonic_block(first_block);
-    std::unordered_map<size_t, Direction<3>> directions{};
-    for (size_t i = 0; i < (spherical_harmonics ? size_t{1} : size_t{6}); ++i) {
-      directions.emplace(first_block + i, spherical_harmonics
-                                              ? Direction<3>::lower_xi()
-                                              : Direction<3>::lower_zeta());
-    }
-    return directions;
-  };
   std::unordered_map<std::string, ExcisionSphere<3>> excision_spheres{};
   if (not use_single_block_a_) {
     if (not is_excised_a_) {
@@ -1081,7 +1099,7 @@ Domain<3> BinaryCompactObject::create_domain() const {
                             tnsr::I<double, 3, Frame::Grid>{
                                 {x_coord_a_, center_of_mass_offset_[0],
                                  center_of_mass_offset_[1]}},
-                            excision_directions(0)});
+                            excision_faces(0)});
     }
   }
   if (not use_single_block_b_) {
@@ -1119,7 +1137,7 @@ Domain<3> BinaryCompactObject::create_domain() const {
                             tnsr::I<double, 3, Frame::Grid>{
                                 {x_coord_b_, center_of_mass_offset_[0],
                                  center_of_mass_offset_[1]}},
-                            excision_directions(first_block_object_b_)});
+                            excision_faces(first_block_object_b_)});
     }
   }
 
@@ -1164,13 +1182,25 @@ Domain<3> BinaryCompactObject::create_domain() const {
       for (size_t wedge = first_wedge; wedge < end_wedge; ++wedge) {
         wedge_ids.insert(wedge);
         orientations.emplace(wedge, shell_to_wedge);
-        neighbors[wedge].emplace(
-            Direction<3>{2, face.opposite().side()},
-            BlockNeighbors<3>{{shell}, {{shell, wedge_to_shell}}, false});
+        const Direction<3> wedge_face{2, face.opposite().side()};
+        [[maybe_unused]] const bool inserted =
+            neighbors[wedge]
+                .emplace(wedge_face,
+                         BlockNeighbors<3>{
+                             {shell}, {{shell, wedge_to_shell}}, false})
+                .second;
+        ASSERT(inserted, "Block " << wedge << " already has a neighbor in "
+                                  << wedge_face << ", so it cannot face the "
+                                  << "spherical-harmonic shell block "
+                                  << shell);
       }
-      neighbors[shell].emplace(
-          face, BlockNeighbors<3>{std::move(wedge_ids), std::move(orientations),
-                                  false});
+      [[maybe_unused]] const bool inserted =
+          neighbors[shell]
+              .emplace(face, BlockNeighbors<3>{std::move(wedge_ids),
+                                               std::move(orientations), false})
+              .second;
+      ASSERT(inserted, "Spherical-harmonic shell block "
+                           << shell << " already has a neighbor in " << face);
     };
     if (spherical_harmonics_in_object_a_shell_) {
       connect_shell(0, Direction<3>::upper_xi(), 1, 7);
@@ -1380,11 +1410,8 @@ BinaryCompactObject::external_boundary_conditions() const {
   const auto set_inner_boundary_condition = [this, &boundary_conditions](
                                                 const Object& object,
                                                 const size_t first_block) {
-    const bool spherical_harmonics = is_spherical_harmonic_block(first_block);
-    const auto direction = spherical_harmonics ? Direction<3>::lower_xi()
-                                               : Direction<3>::lower_zeta();
-    for (size_t i = 0; i < (spherical_harmonics ? size_t{1} : size_t{6}); ++i) {
-      boundary_conditions[first_block + i][direction] =
+    for (const auto& [block, direction] : excision_faces(first_block)) {
+      boundary_conditions[block][direction] =
           object.inner_boundary_condition.value()->get_clone();
     }
   };

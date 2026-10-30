@@ -650,6 +650,10 @@ class BinaryCompactObject : public DomainCreator<3> {
 
  private:
   bool is_spherical_harmonic_block(size_t block_id) const;
+  // The faces abutting the excision of the object whose first block is
+  // `first_block`, as a map from block id to the direction of the face.
+  std::unordered_map<size_t, Direction<3>> excision_faces(
+      size_t first_block) const;
 
   typename ObjectA::type object_A_{Object{}};
   typename ObjectB::type object_B_{Object{}};

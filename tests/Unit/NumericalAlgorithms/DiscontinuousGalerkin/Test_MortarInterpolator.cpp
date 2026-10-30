@@ -285,8 +285,12 @@ void check_bco_pairing(const Domain<3>& domain,
   }
   CAPTURE(max_err_to_host);
   CAPTURE(max_err_to_neighbor);
-  CHECK(max_err_to_host < 1.0e-3);
-  CHECK(max_err_to_neighbor < 1.0e-3);
+  // The shell represents f exactly, so interpolating to the wedge faces is
+  // exact to roundoff. The wedges only approximate f (which is not a
+  // polynomial in their logical coordinates), so interpolating to the shell is
+  // limited by the wedges' resolution. Measured errors are ~1e-16 and ~1e-9.
+  CHECK(max_err_to_host < 1.0e-12);
+  CHECK(max_err_to_neighbor < 1.0e-8);
   // Every shell face point must be covered by at least one wedge element
   CHECK(alg::none_of(shell_point_contributions,
                      [](const size_t n) { return n == 0; }));
@@ -303,7 +307,7 @@ void test_bco_object_shells(const double cube_scale) {
                          std::variant<std::array<size_t, 3>, size_t>>;
   const domain::creators::BinaryCompactObject bco{
       Object{1.6, 2.7, 7.0, true, 1.8, 1.3, true},
-      Object{1.9, 2.7, -1e-64, true, std::nullopt, 1.4, true},
+      Object{1.9, 2.7, -7.0, true, std::nullopt, 1.4, true},
       std::array<double, 2>{{0.0, 0.0}},
       50.0,
       500.0,
@@ -341,10 +345,10 @@ void test_bco_object_shells(const double cube_scale) {
   {
     INFO("ObjectB pairing (shell block 7, cubes 8-13)");
     check_bco_pairing(domain, refinements, extents, 7, Direction<3>::upper_xi(),
-                      Direction<3>::lower_zeta(), {{-1e-64, 0.0, 0.0}});
+                      Direction<3>::lower_zeta(), {{-7.0, 0.0, 0.0}});
   }
   {
-    INFO("Wavezone pairing (shell block 24, envelope 14-24)");
+    INFO("Wavezone pairing (shell block 24, envelope 14-23)");
     check_bco_pairing(domain, refinements, extents, 24,
                       Direction<3>::lower_xi(), Direction<3>::upper_zeta(),
                       {{0.0, 0.0, 0.0}});
