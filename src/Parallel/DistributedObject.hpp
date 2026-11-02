@@ -244,6 +244,21 @@ class DistributedObject<ParallelComponent,
 
   void pup(PUP::er& p) override;  // NOLINT
 
+  /// Queue this entry method through the element proxy, then halt the
+  /// algorithm. Migration must serialize a halted algorithm outside an action.
+  void migrate(const int target_proc) {
+    if constexpr (std::is_same_v<chare_type, Algorithms::Array>) {
+      if (phase_ != Phase::RedistributeElements or performing_action_ or
+          not terminate_) {
+        ERROR("Deterministic migration requires a halted algorithm in "
+              "RedistributeElements.");
+      }
+      this->ckMigrate(target_proc);
+    } else {
+      ERROR("Deterministic migration is only supported for arrays.");
+    }
+  }
+
   /*!
    * \brief Calls the `apply` function `Action` after a reduction has been
    * completed.
@@ -696,7 +711,8 @@ void DistributedObject<
     }
     p | inboxes_;
     if constexpr (Parallel::is_dg_element_collection_v<ParallelComponent>) {
-      if (phase_ == Parallel::Phase::LoadBalancing) {
+      if (phase_ == Parallel::Phase::LoadBalancing or
+          phase_ == Parallel::Phase::RedistributeElements) {
         ERROR(
             "Can't do load balacing phase with DG element collection right "
             "now.");
@@ -712,7 +728,8 @@ void DistributedObject<
       // of checkpointing, though it means the restart must occur on the same
       // hardware configuration (same number of nodes and same procs per node)
       // used when writing the checkpoint.
-      if (phase_ == Parallel::Phase::LoadBalancing) {
+      if (phase_ == Parallel::Phase::LoadBalancing or
+          phase_ == Parallel::Phase::RedistributeElements) {
         // The deregistration and registration below does not actually insert
         // anything into the PUP::er stream, so nothing is done on a sizing pup.
         if (p.isPacking()) {

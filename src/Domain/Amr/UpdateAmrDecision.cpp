@@ -3,6 +3,8 @@
 
 #include "Domain/Amr/UpdateAmrDecision.hpp"
 
+#include <algorithm>
+
 #include "Domain/Amr/Flag.hpp"
 #include "Domain/Amr/Helpers.hpp"
 #include "Domain/Structure/Direction.hpp"
@@ -10,6 +12,7 @@
 #include "Domain/Structure/ElementId.hpp"
 #include "Domain/Structure/Neighbors.hpp"
 #include "Utilities/ErrorHandling/Assert.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/GenerateInstantiations.hpp"
 #include "Utilities/Gsl.hpp"
 
@@ -37,13 +40,29 @@ bool update_amr_decision(
       // finding the same neighbor twice (which can happen with periodic
       // domains) is okay, and may be needed when examining a Join
       neighbor_found = true;
+      if (not neighbors_in_dir.are_conforming()) {
+        // Logical h levels on the two sides do not describe comparable
+        // physical regions. In particular, balancing a whole S2 against
+        // angularly split wedges would spuriously request angular h splits.
+        const auto changes_h = [](const auto& flags) {
+          return std::any_of(flags.begin(), flags.end(), [](const auto flag) {
+            return flag == Flag::Split or flag == Flag::Join;
+          });
+        };
+        if (changes_h(*my_current_amr_flags) or changes_h(neighbor_amr_flags)) {
+          ERROR(
+              "AMR across nonconforming block interfaces currently supports "
+              "p refinement only");
+        }
+        continue;
+      }
       const Direction<VolumeDim> direction_to_neighbor =
           direction_neighbors.first;
       const OrientationMap<VolumeDim>& orientation_of_neighbor =
           neighbors_in_dir.orientation(neighbor_id);
       const std::array<size_t, VolumeDim> neighbor_desired_levels =
-          desired_refinement_levels_of_neighbor(
-              neighbor_id, neighbor_amr_flags, orientation_of_neighbor);
+          desired_refinement_levels_of_neighbor(neighbor_id, neighbor_amr_flags,
+                                                orientation_of_neighbor);
 
       // update flags if my element wants to be two or more levels
       // coarser than the neighbor in any dimension (unless it is not
@@ -96,7 +115,7 @@ bool update_amr_decision(
           direction_to_neighbor.dimension();
       if (has_potential_sibling(element_id, direction_to_neighbor) and
           Flag::Join == gsl::at(*my_current_amr_flags,
-                                     dimension_of_direction_to_neighbor) and
+                                dimension_of_direction_to_neighbor) and
           (my_desired_levels != neighbor_desired_levels)) {
         gsl::at(*my_current_amr_flags, dimension_of_direction_to_neighbor) =
             Flag::DoNothing;

@@ -13,7 +13,7 @@
 #include "Utilities/Serialization/RegisterDerivedClassesWithCharm.hpp"
 
 // Chosen in CMakeLists.txt
-using metavariables = EvolutionMetavars<DIM>;
+using metavariables = EvolutionMetavars<DIM, not AMR_IN_PHASE>;
 
 extern "C" void CkRegisterMainModule() {
   Parallel::charmxx::register_main_module<metavariables>();

@@ -51,12 +51,16 @@
 #include "Evolution/Initialization/Evolution.hpp"
 #include "Evolution/Initialization/NonconservativeSystem.hpp"
 #include "Evolution/Systems/Cce/Callbacks/DumpBondiSachsOnWorldtube.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Actions/InitialPRefinement.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Actions/ResetSpecAmrHistory.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Actions/SetInitialData.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Bbh/Callbacks/UpdateCompletionCriteria.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Bbh/CompletionCriteria.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Bbh/CompletionSingleton.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Bbh/Events/CheckConstraintThresholds.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/Bbh/PhaseControl/CheckpointAndExitIfComplete.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Bbh/PhaseControl/InitialPRefinement.hpp"
+#include "Evolution/Systems/GeneralizedHarmonic/Bbh/PhaseControl/RedistributeElements.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/Bjorhus.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/DemandOutgoingCharSpeeds.hpp"
 #include "Evolution/Systems/GeneralizedHarmonic/BoundaryConditions/DirichletMinkowski.hpp"
@@ -130,6 +134,7 @@
 #include "ParallelAlgorithms/Amr/Projectors/Tensors.hpp"
 #include "ParallelAlgorithms/Amr/Projectors/Variables.hpp"
 #include "ParallelAlgorithms/Amr/Protocols/AmrMetavariables.hpp"
+#include "ParallelAlgorithms/Amr/RedistributeElements.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/FailedHorizonFind.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/ObserveCenters.hpp"
 #include "ParallelAlgorithms/ApparentHorizonFinder/Callbacks/ObserveFieldsOnHorizon.hpp"
@@ -251,6 +256,7 @@ struct EvolutionMetavars {
   using initialize_initial_data_dependent_quantities_actions =
       tmpl::list<gh::gauges::SetPiAndPhiFromConstraints<
                      gh::Solutions::all_solutions<volume_dim>, volume_dim>,
+                 gh::Actions::PrepareInitialPRefinement,
                  Parallel::Actions::TerminatePhase>;
 
   // NOLINTNEXTLINE(google-runtime-references)
@@ -542,10 +548,12 @@ struct EvolutionMetavars {
             tmpl::list<gh::gauges::DampedHarmonic, gh::gauges::Harmonic>>,
         tmpl::pair<MathFunction<1, Frame::Inertial>,
                    MathFunctions::all_math_functions<1, Frame::Inertial>>,
-        tmpl::pair<PhaseChange,
-                   tmpl::push_back<
-                       PhaseControl::factory_creatable_classes,
-                       gh::bbh::phase_control::CheckpointAndExitIfComplete>>,
+        tmpl::pair<
+            PhaseChange,
+            tmpl::push_back<PhaseControl::factory_creatable_classes,
+                            gh::bbh::phase_control::CheckpointAndExitIfComplete,
+                            gh::bbh::phase_control::InitialPRefinement,
+                            gh::bbh::phase_control::RedistributeElements>>,
         tmpl::pair<StepChooser<StepChooserUse::LtsStep>,
                    StepChoosers::standard_step_choosers<system>>,
         tmpl::pair<StepChooser<StepChooserUse::Slab>,
@@ -662,12 +670,34 @@ struct EvolutionMetavars {
           Parallel::PhaseActions<
               Parallel::Phase::InitializeInitialDataDependentQuantities,
               initialize_initial_data_dependent_quantities_actions>,
-          Parallel::PhaseActions<Parallel::Phase::Register,
-                                 tmpl::list<dg_registration_list,
-                                            Parallel::Actions::TerminatePhase>>,
-          Parallel::PhaseActions<Parallel::Phase::Restart,
-                                 tmpl::list<dg_registration_list,
-                                            Parallel::Actions::TerminatePhase>>,
+          Parallel::PhaseActions<
+              Parallel::Phase::Register,
+              tmpl::list<gh::Actions::FinishInitialPRefinement,
+                         dg_registration_list,
+                         Parallel::Actions::TerminatePhase>>,
+          Parallel::PhaseActions<
+              Parallel::Phase::CheckInitialPRefinement,
+              tmpl::list<gh::Actions::CheckInitialPRefinement,
+                         Parallel::Actions::TerminatePhase>>,
+          Parallel::PhaseActions<
+              Parallel::Phase::CollectElementDistribution,
+              tmpl::list<evolution::dg::Initialization::Actions::
+                             ResetEqualRateSections<volume_dim>,
+                         ::amr::redistribution::Actions::Collect>>,
+          Parallel::PhaseActions<
+              Parallel::Phase::RedistributeElements,
+              tmpl::list<::amr::redistribution::Actions::Migrate>>,
+          Parallel::PhaseActions<
+              Parallel::Phase::UpdateSections,
+              tmpl::list<evolution::dg::Initialization::Actions::
+                             CreateEqualRateSections<volume_dim>,
+                         Parallel::Actions::TerminatePhase>>,
+          Parallel::PhaseActions<
+              Parallel::Phase::Restart,
+              tmpl::list<dg_registration_list,
+                         evolution::dg::Initialization::Actions::
+                             CreateEqualRateSections<volume_dim, true>,
+                         Parallel::Actions::TerminatePhase>>,
           Parallel::PhaseActions<
               Parallel::Phase::WriteCheckpoint,
               tmpl::list<evolution::Actions::RunEventsAndTriggers<
@@ -720,6 +750,7 @@ struct EvolutionMetavars {
 
   struct amr : tt::ConformsTo<::amr::protocols::AmrMetavariables> {
     using element_array = gh_dg_element_array;
+    using criteria_change_action = gh::Actions::ResetSpecAmrHistory;
     using projectors = tmpl::list<
         gh::spec_amr::ProjectHistory,
         Initialization::ProjectTimeStepping<volume_dim>,
@@ -735,7 +766,6 @@ struct EvolutionMetavars {
             Initialization::Tags::InitialTimeDelta,
             Initialization::Tags::InitialSlabSize,
             ::domain::Tags::InitialExtents<volume_dim>,
-            ::domain::Tags::InitialRefinementLevels<volume_dim>,
             evolution::dg::Tags::Quadrature,
             Tags::StepperErrors<typename system::variables_tag>,
             SelfStart::Tags::InitialValue<typename system::variables_tag>,
@@ -751,6 +781,10 @@ struct EvolutionMetavars {
                     tmpl::bind<intrp::Tags::PointInfo, tmpl::_1,
                                tmpl::pin<tmpl::size_t<volume_dim>>>>>,
             gh::bbh::Tags::ElementCompletionRequested,
+            // Section recreation enumerates the unchanged h mesh from these
+            // levels, including after p adjustment and checkpoint restart.
+            ::domain::Tags::InitialRefinementLevels<volume_dim>,
+            ::amr::redistribution::Tags::TargetProc,
             evolution::dg::Tags::ChangeFixedLtsRatio::NumberOfExpectedMessages,
             evolution::dg::Tags::ChangeFixedLtsRatio::NewStepSize,
             Tags::FixedLtsRatio,
@@ -764,6 +798,7 @@ struct EvolutionMetavars {
 
   using component_list = tmpl::flatten<tmpl::list<
       ::amr::Component<EvolutionMetavars>,
+      ::amr::redistribution::Component<EvolutionMetavars>,
       observers::Observer<EvolutionMetavars>,
       observers::ObserverWriter<EvolutionMetavars>,
       importers::ElementDataReader<EvolutionMetavars>,

@@ -93,6 +93,7 @@ DomainCreator:
             NegativeExpansion: None
             {% endif %}
       UseLogarithmicMap: True
+      UseSphericalHarmonics: false
     ObjectB:
       InnerRadius: {{ ExcisionRadiusLeft }}
       OuterRadius: {{ ObjectOuterRadius }}
@@ -112,6 +113,7 @@ DomainCreator:
             NegativeExpansion: None
             {% endif %}
       UseLogarithmicMap: True
+      UseSphericalHarmonics: false
     CenterOfMassOffset: [*y_offset, *z_offset]
     Envelope:
       Radius: &outer_shell_inner_radius {{ EnvelopeRadius }}

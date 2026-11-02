@@ -81,6 +81,8 @@ module AlgorithmArray {
 
     entry void set_terminate(bool);
 
+    entry void migrate(int target_proc);
+
     template <typename ThisAction, typename PhaseIndex, typename DataBoxIndex>
     entry[local] bool invoke_iterable_action();
 

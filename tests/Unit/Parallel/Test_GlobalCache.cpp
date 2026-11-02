@@ -46,10 +46,18 @@ struct name {
 
 struct age {
   using type = int;
+  static constexpr bool is_overlayable = true;
+  static inline size_t changes = 0;
+  template <typename Metavariables>
+  static void on_options_changed(Parallel::GlobalCache<Metavariables>& cache) {
+    SPECTRE_PARALLEL_REQUIRE(179 == Parallel::get<age>(cache));
+    ++changes;
+  }
 };
 
 struct height {
   using type = double;
+  static constexpr bool is_overlayable = true;
 };
 
 struct weight {
@@ -293,6 +301,9 @@ void TestArrayChare<Metavariables>::run_test_one() {
   serialize_and_deserialize(
       make_not_null(&serialized_and_deserialized_global_cache), local_cache);
   SPECTRE_PARALLEL_REQUIRE(
+      serialized_and_deserialized_global_cache.get_resource_info() ==
+      local_cache.get_resource_info());
+  SPECTRE_PARALLEL_REQUIRE(
       expected_name ==
       Parallel::get<name>(serialized_and_deserialized_global_cache));
   SPECTRE_PARALLEL_REQUIRE(
@@ -526,6 +537,16 @@ void Test_GlobalCache<Metavariables>::run_single_core_test() {
   SPECTRE_PARALLEL_REQUIRE(30 == Parallel::get<animal>(cache).number_of_legs());
   SPECTRE_PARALLEL_REQUIRE(30 ==
                            Parallel::get<animal_base>(cache).number_of_legs());
+
+  // Identical overlays preserve dependent state, while changes notify the
+  // tag after updating its value. Tags without a hook can also be overlaid.
+  cache.overlay_cache_data({178, 2.3});
+  SPECTRE_PARALLEL_REQUIRE(0 == age::changes);
+  SPECTRE_PARALLEL_REQUIRE(2.3 == Parallel::get<height>(cache));
+  cache.overlay_cache_data({179, 2.4});
+  SPECTRE_PARALLEL_REQUIRE(1 == age::changes);
+  cache.overlay_cache_data({179, 2.4});
+  SPECTRE_PARALLEL_REQUIRE(1 == age::changes);
 }
 
 template <typename Metavariables>
@@ -598,6 +619,7 @@ Test_GlobalCache<Metavariables>::Test_GlobalCache(CkArgMsg*
   const auto& cache_resource_info = local_cache->get_resource_info();
 
   SPECTRE_PARALLEL_REQUIRE(cache_resource_info == resource_info);
+
 
   CkEntryOptions global_cache_dependency;
   global_cache_dependency.setGroupDepID(global_cache_proxy_.ckGetGroupID());

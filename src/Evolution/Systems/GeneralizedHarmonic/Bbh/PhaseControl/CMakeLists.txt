@@ -5,6 +5,8 @@ spectre_target_sources(
   ${LIBRARY}
   PRIVATE
   CheckpointAndExitIfComplete.cpp
+  InitialPRefinement.cpp
+  RedistributeElements.cpp
   )
 
 spectre_target_headers(
@@ -12,4 +14,6 @@ spectre_target_headers(
   INCLUDE_DIRECTORY ${CMAKE_SOURCE_DIR}/src
   HEADERS
   CheckpointAndExitIfComplete.hpp
+  InitialPRefinement.hpp
+  RedistributeElements.hpp
   )

@@ -18,7 +18,9 @@ std::vector<Phase> known_phases() {
   return {Phase::AdjustDomain,
           Phase::BuildMatrix,
           Phase::CheckDomain,
+          Phase::CheckInitialPRefinement,
           Phase::Cleanup,
+          Phase::CollectElementDistribution,
           Phase::DisableRotationControl,
           Phase::EvaluateAmrCriteria,
           Phase::Evolve,
@@ -29,7 +31,9 @@ std::vector<Phase> known_phases() {
           Phase::InitializeInitialDataDependentQuantities,
           Phase::InitializeTimeStepperHistory,
           Phase::LoadBalancing,
+          Phase::PlanElementDistribution,
           Phase::PostFailureCleanup,
+          Phase::RedistributeElements,
           Phase::Register,
           Phase::RegisterWithElementDataReader,
           Phase::Restart,
@@ -48,8 +52,12 @@ std::ostream& operator<<(std::ostream& os, const Phase& phase) {
       return os << "BuildMatrix";
     case Parallel::Phase::CheckDomain:
       return os << "CheckDomain";
+    case Parallel::Phase::CheckInitialPRefinement:
+      return os << "CheckInitialPRefinement";
     case Parallel::Phase::Cleanup:
       return os << "Cleanup";
+    case Parallel::Phase::CollectElementDistribution:
+      return os << "CollectElementDistribution";
     case Parallel::Phase::DisableRotationControl:
       return os << "DisableRotationControl";
     case Parallel::Phase::EvaluateAmrCriteria:
@@ -70,8 +78,12 @@ std::ostream& operator<<(std::ostream& os, const Phase& phase) {
       return os << "InitializeTimeStepperHistory";
     case Parallel::Phase::LoadBalancing:
       return os << "LoadBalancing";
+    case Parallel::Phase::PlanElementDistribution:
+      return os << "PlanElementDistribution";
     case Parallel::Phase::PostFailureCleanup:
       return os << "PostFailureCleanup";
+    case Parallel::Phase::RedistributeElements:
+      return os << "RedistributeElements";
     case Parallel::Phase::Register:
       return os << "Register";
     case Parallel::Phase::RegisterWithElementDataReader:

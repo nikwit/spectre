@@ -73,9 +73,25 @@ The reason for this "opt-in" design is that in general, most tags interact with
 past or current simulation data in a way that would invalidate the simulation
 state if the tag were modified on restart (example: changing the domain
 invalidates all spatial data, changing the timestepper invalidates the history).
-Only tags that do not interact with the state should be permitted to be updated.
+Only tags whose effects on the saved state can be handled safely should be
+permitted to be updated.
 For example: activation thresholds on various algorithms, or frequency of data
 observation, are safe parameters to modify.
+
+Tags that need to invalidate dependent state can provide a static function
+`on_options_changed<Metavariables>(Parallel::GlobalCache<Metavariables>&)`.
+The cache calls it on each node after replacing that tag, only when its
+serialized value differs. The hook must not depend on other tags or nodes
+having received their new values yet. Its actions finish before `Restart`.
+
+For example, `EvolveGhBinaryBlackHole` permits changing `Amr: Criteria:` in a
+restart overlay. Changing these criteria resets their cached targets and
+decision history, while preserving the mesh, evolved fields, time-stepper
+histories and control systems from the binary checkpoint. An unchanged
+criterion configuration retains its history. This allows branching to a
+different AMR tolerance after junk radiation without reinitializing the
+controllers through a volume-data import. Specify the complete criterion list
+in the overlay; criteria are replaced rather than merged individually.
 
 The executable will update the global cache with new input file values during
 the phase `UpdateOptionsAtRestartFromCheckpoint`. The restart logic

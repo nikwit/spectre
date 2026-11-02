@@ -292,14 +292,19 @@ struct SetInitialData {
     using initial_data_classes =
         tmpl::at<typename Metavariables::factory_creation::factory_classes,
                  evolution::initial_data::InitialData>;
-    return call_with_dynamic_type<Parallel::iterable_action_return_t,
-                                  initial_data_classes>(
+    auto result = call_with_dynamic_type<Parallel::iterable_action_return_t,
+                                         initial_data_classes>(
         &db::get<evolution::initial_data::Tags::InitialData>(box),
         [&box, &cache, &array_index,
          &parallel_component](const auto* const initial_data) {
           return apply(make_not_null(&box), *initial_data, cache, array_index,
                        parallel_component);
         });
+    if (std::get<0>(result) == Parallel::AlgorithmExecution::Pause) {
+      // Revisit the analytic-data action if startup AMR re-enters this phase.
+      std::get<1>(result) = tmpl::index_of<ActionList, SetInitialData>::value;
+    }
+    return result;
   }
 
  private:

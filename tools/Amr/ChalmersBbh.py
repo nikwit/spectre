@@ -60,17 +60,21 @@ def resolve_input_paths(value, directory):
             resolve_input_paths(v, directory)
 
 
-def trigger(times):
-    return {"Times": {"Specified": {"Values": times}}}
+def trigger(slabs):
+    return {"Slabs": {"Specified": {"Values": slabs}}}
 
 
-def times(initial, duration, interval):
+def slab_numbers(duration, interval, slab_size):
     count = round(duration / interval)
     if count < 1 or not math.isclose(count * interval, duration, abs_tol=1e-10):
         raise ValueError(
             "Durations must be multiples of observation/AMR intervals"
         )
-    return [round(initial + n * interval, 12) for n in range(count + 1)]
+    # Times requires exact equality. Rounding requested times or repeatedly
+    # adding a non-binary slab size can miss triggers, especially when starting
+    # from a volume dump at a nonzero time. This pilot has constant slab size.
+    stride = round(interval / slab_size)
+    return [n * stride for n in range(count + 1)]
 
 
 def observe_fields(subfile, variables):
@@ -142,9 +146,8 @@ def configuration(base, case, settings):
     # Near-merger changes remain in the base input; finish before they activate.
     smoke = case.endswith("smoke") or case.startswith("restart-")
     duration = s.smoke_duration if smoke else s.duration
-    end = initial + duration
-    amr_times = times(initial, duration, s.amr_interval)
-    volume_times = times(initial, duration, s.volume_interval)
+    amr_slabs = slab_numbers(duration, s.amr_interval, slab)
+    volume_slabs = slab_numbers(duration, s.volume_interval, slab)
     fixed = case.startswith("fixed")
     if case == "fixed-fine":
         domain["InitialGridPoints"] = add_points(
@@ -241,7 +244,7 @@ def configuration(base, case, settings):
     if not fixed:
         phases.append(
             {
-                "Trigger": trigger(amr_times[1:-1]),
+                "Trigger": trigger(amr_slabs[1:-1]),
                 "PhaseChanges": [
                     "VisitAndReturn(EvaluateAmrCriteria)",
                     "VisitAndReturn(AdjustDomain)",
@@ -254,7 +257,7 @@ def configuration(base, case, settings):
     if case == "restart-checkpoint":
         phases.append(
             {
-                "Trigger": trigger([initial + s.restart_at]),
+                "Trigger": trigger([round(s.restart_at / slab)]),
                 "PhaseChanges": ["VisitAndReturn(WriteCheckpoint)"],
             }
         )
@@ -269,7 +272,7 @@ def configuration(base, case, settings):
     events.extend(
         [
             {
-                "Trigger": trigger(amr_times),
+                "Trigger": trigger(amr_slabs),
                 "Events": [
                     {
                         "ObserveAmrStats": {
@@ -296,7 +299,7 @@ def configuration(base, case, settings):
                 ],
             },
             {
-                "Trigger": trigger(volume_times),
+                "Trigger": trigger(volume_slabs),
                 "Events": [
                     observe_fields(
                         "AmrFields",
@@ -314,12 +317,7 @@ def configuration(base, case, settings):
                 ],
             },
             {
-                "Trigger": {
-                    "TimeCompares": {
-                        "Comparison": "GreaterThanOrEqualTo",
-                        "Value": end,
-                    }
-                },
+                "Trigger": trigger([amr_slabs[-1]]),
                 "Events": ["Completion"],
             },
         ]
@@ -327,7 +325,7 @@ def configuration(base, case, settings):
     if s.mesh_observations:
         events.append(
             {
-                "Trigger": trigger(amr_times),
+                "Trigger": trigger(amr_slabs),
                 "Events": [observe_fields("AmrMeshes", ["Lapse"])],
             }
         )

@@ -1,0 +1,437 @@
+{
+  "spec_revision": "8b1d47c13b09b5383e6fbf8bab5bf8e90b285d6d",
+  "source_sha256": {
+    "Spectral/SpectralFunctionals/ComputeGridDiagnostics.cpp": "8a49d7a918bb337e08a850e70f31e521eb409a92f707c106852cfa9f885a393c",
+    "Utils/Math/PolynomialFit.cpp": "5957baf5e31a21b435aff959bc93eb7931d11acf8be0aa82a9a1aa27a7b87b05",
+    "Evolution/FoshSystem/DualFrameSystem/NormOfProjectedDerivConstraint.cpp": "d494485cd3834d273632a32b6f1596f27f4d1e5b6bd4a5e654dcc53bf922c4dd",
+    "ComputeItems/NumberOfFilteredModes.cpp": "89025dd31fefb7bcf2a00b7df82529d233a62ba944aa10a8be335ee5d7fa14fc",
+    "Evolution/AmrDrivers/ChangeSpectralGrid.cpp": "2a0c44f150daf07cadc8186ae676c7dd056cfc6a3596e797ade6a92bd8c03a9d",
+    "Utils/LowLevelUtils/SimpleNorms.cpp": "6466c28a1f92b28e81964fc719add4a0f80284aa581ddca710499a37cc300ada",
+    "Spectral/BasisFunctions/TensorSphericalHarmonics/YlmStorageIterator.hpp": "ba0166321083c3b3ce8866454bdaa53cca2da273125faf857560d8436567c157",
+    "Spectral/BasisFunctions/TensorSphericalHarmonics/YlmStorageIterator.cpp": "4e5ece7b397e269485d60262fc5aef7a28a2185e946d53f6d033b061af63fe91",
+    "Spectral/BasisFunctions/TensorSphericalHarmonics/TensorYlmStorageIterator.hpp": "9b1a5f9260b1e8d323d6771877723280062a7b8669f353f0398efeb6631af8ef",
+    "Spectral/BasisFunctions/TensorSphericalHarmonics/TensorYlmStorageIterator.cpp": "5f4d2277591ef10ca220c61f01ad7f0f74874fab816bc90ce3f719d324cf25a1",
+    "Spectral/BasisFunctions/TensorSphericalHarmonics/TensorYlmCoefficient.cpp": "5f308d15f1abfa31771e08f4d75aef2533860a34a2a1529771157c76e5e8bc92"
+  },
+  "source_execution": "Unmodified arithmetic fragments; original linear fit; container/profiler compatibility only.",
+  "spectra": [
+    {
+      "name": "smooth",
+      "power": [
+        1.0,
+        0.3639564716740963,
+        0.13085497200792942,
+        0.04621068505778861,
+        0.016061300100106028,
+        0.00554450928985808,
+        0.00192570142323541,
+        0.0006801248569655549,
+        0.0002448459627416133,
+        8.918503543169604e-05,
+        3.245380621934717e-05,
+        1.166368174076562e-05
+      ],
+      "filtered_modes": 1,
+      "log10_error": -4.2262771030967965,
+      "log10_next_error": -3.7871390410933086,
+      "convergence": 0.454000397220005,
+      "pile_up": 4.1478228616678355e-13,
+      "degenerate": false
+    },
+    {
+      "name": "unfiltered",
+      "power": [
+        1.0,
+        0.47299458190389915,
+        0.21222623971879215,
+        0.09000550719038419,
+        0.03770169755482567,
+        0.01658912939499525,
+        0.00778791901363555,
+        0.003711309241576473,
+        0.0016946550929596202,
+        0.0007283688124846955,
+        0.00030418534537745987,
+        0.00013136608848522002
+      ],
+      "filtered_modes": 0,
+      "log10_error": -3.662560789375967,
+      "log10_next_error": -3.29099285078173,
+      "convergence": 0.35300968995303583,
+      "pile_up": 5.952167575566804e-13,
+      "degenerate": false
+    },
+    {
+      "name": "three_filtered",
+      "power": [
+        1.0,
+        0.414856952196734,
+        0.16569501575460352,
+        0.06354093797571168,
+        0.024168363355447506,
+        0.00952053786266843,
+        0.003925453048836584,
+        0.0016369558718534918,
+        0.0006621694870816465,
+        0.00025636461730722316,
+        9.727989444555316e-05,
+        3.782020069679416e-05,
+        1.5423726542112166e-05,
+        6.4421271836990535e-06
+      ],
+      "filtered_modes": 3,
+      "log10_error": -3.760968500311342,
+      "log10_next_error": -3.3460196891742267,
+      "convergence": 0.40232475582954674,
+      "pile_up": 2.343333502528918e-13,
+      "degenerate": false
+    },
+    {
+      "name": "pile_up",
+      "power": [
+        1.0,
+        0.3,
+        0.09,
+        0.027,
+        0.0081,
+        0.00243,
+        0.0008,
+        0.0008,
+        0.0008,
+        0.0008,
+        0.0008,
+        0.0008
+      ],
+      "filtered_modes": 1,
+      "log10_error": -3.0969100125428,
+      "log10_next_error": -3.096908625260401,
+      "convergence": 0.5222769055085842,
+      "pile_up": 4.336048226021696,
+      "degenerate": false
+    },
+    {
+      "name": "zero",
+      "power": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "filtered_modes": 1,
+      "log10_error": 0.0,
+      "log10_next_error": 0.0,
+      "convergence": 0.0,
+      "pile_up": 0.0,
+      "degenerate": true
+    },
+    {
+      "name": "flat",
+      "power": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "filtered_modes": 1,
+      "log10_error": 0.0,
+      "log10_next_error": 0.0,
+      "convergence": 0.0,
+      "pile_up": 0.0,
+      "degenerate": true
+    },
+    {
+      "name": "parity_gaps",
+      "power": [
+        1.0,
+        0.0,
+        0.15848931924611134,
+        0.0,
+        0.025118864315095794,
+        0.0,
+        0.003981071705534969,
+        0.0,
+        0.000630957344480193,
+        0.0,
+        0.0001,
+        0.0,
+        1.5848931924611107e-05
+      ],
+      "filtered_modes": 1,
+      "log10_error": -1.123945274000355,
+      "log10_next_error": -0.8,
+      "convergence": 0.4,
+      "pile_up": 1.2664165549094176e-14,
+      "degenerate": false
+    },
+    {
+      "name": "leading_zero",
+      "power": [
+        0.0,
+        0.3981071705534972,
+        0.15848931924611134,
+        0.0630957344480193,
+        0.025118864315095794,
+        0.01,
+        0.003981071705534969,
+        0.0015848931924611126,
+        0.000630957344480193,
+        0.00025118864315095795,
+        0.0001,
+        3.9810717055349695e-05
+      ],
+      "filtered_modes": 1,
+      "log10_error": -2.9608533362894094,
+      "log10_next_error": -2.5608533362894095,
+      "convergence": 0.4000000000000001,
+      "pile_up": 8.864915884366058e-14,
+      "degenerate": false
+    },
+    {
+      "name": "resolved_polynomial",
+      "power": [
+        1.0,
+        0.2,
+        0.03,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "filtered_modes": 1,
+      "log10_error": -0.6989700043360187,
+      "log10_next_error": 0.0,
+      "convergence": 0.6989700043360187,
+      "pile_up": 0.0,
+      "degenerate": false
+    },
+    {
+      "name": "roundoff_tail",
+      "power": [
+        1.0,
+        0.1,
+        0.01,
+        0.001,
+        0.0001,
+        1e-05,
+        1e-06,
+        1e-07,
+        1e-08,
+        1e-16,
+        1e-17,
+        1e-18
+      ],
+      "filtered_modes": 1,
+      "log10_error": -15.950859992257465,
+      "log10_next_error": -11.676496666490493,
+      "convergence": 1.0003473927067759,
+      "pile_up": 6.474366516473988e-14,
+      "degenerate": false
+    }
+  ],
+  "constraints": [
+    {
+      "name": "three_I1",
+      "directional_rms": [
+        0.0001,
+        0.0004,
+        0.0009
+      ],
+      "topology_dimensions": [
+        1,
+        1,
+        1
+      ],
+      "spec_aggregated": [
+        0.01,
+        0.02,
+        0.03
+      ]
+    },
+    {
+      "name": "I1_S2",
+      "directional_rms": [
+        0.0001,
+        0.0004,
+        0.0009
+      ],
+      "topology_dimensions": [
+        1,
+        2
+      ],
+      "spec_aggregated": [
+        0.01,
+        0.025495097567963924
+      ]
+    }
+  ],
+  "permissions": [
+    {
+      "name": "add",
+      "log10_error": -3.7,
+      "log10_next_error": -3.4,
+      "constraint_ratio": 0.01,
+      "pile_up": 0.0,
+      "force": true,
+      "allow_add": true,
+      "allow_drop": false
+    },
+    {
+      "name": "drop",
+      "log10_error": -5.0,
+      "log10_next_error": -4.7,
+      "constraint_ratio": 0.01,
+      "pile_up": 0.0,
+      "force": true,
+      "allow_add": false,
+      "allow_drop": true
+    },
+    {
+      "name": "constraint_blocks_drop",
+      "log10_error": -5.0,
+      "log10_next_error": -4.7,
+      "constraint_ratio": 1.0,
+      "pile_up": 0.0,
+      "force": true,
+      "allow_add": true,
+      "allow_drop": false
+    },
+    {
+      "name": "pile_up_blocks_add",
+      "log10_error": -3.7,
+      "log10_next_error": -3.4,
+      "constraint_ratio": 0.01,
+      "pile_up": 2.0,
+      "force": true,
+      "allow_add": false,
+      "allow_drop": false
+    },
+    {
+      "name": "unforced_pile_up",
+      "log10_error": -3.7,
+      "log10_next_error": -3.4,
+      "constraint_ratio": 0.01,
+      "pile_up": 2.0,
+      "force": false,
+      "allow_add": true,
+      "allow_drop": false
+    }
+  ],
+  "filter_example": {
+    "response": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      0.9,
+      0.5,
+      0.0,
+      0.0
+    ],
+    "effective_filtered_modes": 2.6,
+    "rounded_filtered_modes": 3
+  },
+  "angular_coefficient_counts": {
+    "l_max": 8,
+    "radial_points": 1,
+    "spacetime_metric": [
+      8,
+      32,
+      60,
+      80,
+      100,
+      120,
+      140,
+      160,
+      180
+    ],
+    "pi": [
+      8,
+      32,
+      60,
+      80,
+      100,
+      120,
+      140,
+      160,
+      180
+    ],
+    "phi": [
+      16,
+      88,
+      168,
+      240,
+      300,
+      360,
+      420,
+      480,
+      540
+    ]
+  },
+  "power_aggregation": {
+    "components": [
+      [
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        2.0,
+        0.0,
+        -1.0,
+        0.5,
+        1.0,
+        0.5,
+        2.0,
+        0.0,
+        0.0,
+        1.0,
+        0.5,
+        2.0
+      ],
+      [
+        0.5,
+        1.0,
+        0.0,
+        2.0,
+        -0.5,
+        3.0,
+        1.0,
+        0.0,
+        2.0,
+        1.0,
+        0.5,
+        1.0,
+        1.0,
+        0.0,
+        2.0,
+        0.5
+      ]
+    ],
+    "spec_power": [
+      1.1989578808281798,
+      1.4252192813739224,
+      1.5612494995995996,
+      1.7853571071357126
+    ]
+  }
+}

@@ -5,6 +5,7 @@
 
 #include <array>
 #include <charm++.h>
+#include <ckmulticast.h>
 #include <cstddef>
 #include <optional>
 #include <utility>
@@ -14,6 +15,7 @@
 #include "Evolution/DiscontinuousGalerkin/EqualRateLts/Tags/EqualRateRegionId.hpp"
 #include "Evolution/DiscontinuousGalerkin/EqualRateLts/Tags/EqualRateRegions.hpp"
 #include "Parallel/AlgorithmExecution.hpp"
+#include "Parallel/ArrayIndex.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "Parallel/Invoke.hpp"
 #include "Parallel/Section.hpp"
@@ -78,7 +80,7 @@ struct SetupLocalEqualRateRegion {
 };
 
 namespace Actions {
-template <size_t Dim>
+template <size_t Dim, bool ReplaceExisting = false>
 struct SetEqualRateSection {
   template <typename ParallelComponent, typename DbTags, typename Metavariables,
             typename ArrayIndex>
@@ -95,7 +97,7 @@ struct SetEqualRateSection {
           [&](const gsl::not_null<std::optional<Parallel::Section<
                   ParallelComponent, Tags::EqualRateRegionId>>*>
                   box_section) {
-            ASSERT(not box_section->has_value(),
+            ASSERT(ReplaceExisting or not box_section->has_value(),
                    "Already have an equal-rate section");
             box_section->emplace(std::move(section));
           },
@@ -118,29 +120,18 @@ struct SectionsToCreate {
 };
 }  // namespace SetupEqualRateRegions_detail
 
-/// Set up `FixedLtsRatio` and mortar time-stepping policies to
-/// disable local time-stepping in equal rate regions.
-template <typename Metavariables, size_t Dim, typename RegionGenerators>
-struct SetupEqualRateRegions {
- private:
-  using array_components = tmpl::filter<typename Metavariables::component_list,
-                                        Parallel::is_array<tmpl::_1>>;
-  static_assert(tmpl::size<array_components>::value == 1,
-                "Cannot identify element array.");
-
- public:
-  using ParallelComponent = tmpl::front<array_components>;
-
-  using const_global_cache_tags = tmpl::list<
-      evolution::dg::Tags::ConcreteEqualRateRegions<Dim, RegionGenerators>>;
-  using simple_tags = tmpl::list<
-      ::Tags::FixedLtsRatio,
-      Parallel::Tags::Section<ParallelComponent, Tags::EqualRateRegionId>>;
-  using compute_tags = tmpl::list<
-      evolution::dg::Tags::EqualRateRegionsRef<Dim, RegionGenerators>>;
-
-  template <typename DbTags, typename... InboxTags, typename ArrayIndex,
-            typename ActionList>
+/// Recreate sections on a fixed h mesh after all old sections have been reset.
+/// Does not change time steps, fixed LTS ratios, mortar policies, or histories.
+/// A phase boundary must separate resetting and recreating sections, and
+/// section installation must quiesce before any section reductions resume.
+/// Keep InitialRefinementLevels available across p refinement. On checkpoint
+/// restart only, use ReplaceExisting to overwrite cookies from the old process
+/// without trying to free their no longer valid multicast trees.
+template <size_t Dim, bool ReplaceExisting = false>
+struct CreateEqualRateSections {
+  template <typename DbTags, typename... InboxTags, typename Metavariables,
+            typename ArrayIndex, typename ActionList,
+            typename ParallelComponent>
   static Parallel::iterable_action_return_t apply(
       db::DataBox<DbTags>& box,
       const tuples::TaggedTuple<InboxTags...>& /*inboxes*/,
@@ -150,8 +141,6 @@ struct SetupEqualRateRegions {
     if (db::get<::Tags::LtsMode>(box) == LtsMode::Off) {
       return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
-
-    db::mutate_apply<SetupLocalEqualRateRegion<Dim>>(make_not_null(&box));
 
     // Set up sections.  This will be empty everywhere except element 0.
     const auto sections_to_create =
@@ -175,10 +164,86 @@ struct SetupEqualRateRegions {
       // sections.  Here we use an array broadcast and ignore the
       // message on most of the elements because section broadcasts
       // don't work.
-      Parallel::simple_action<SetEqualRateSection<Dim>>(component, section);
+      Parallel::simple_action<SetEqualRateSection<Dim, ReplaceExisting>>(
+          component, section);
     }
 
     return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+  }
+};
+
+/// Discard section reduction state before migration at a quiescent slab
+/// boundary. Exactly one member frees each old Charm multicast tree, including
+/// its children; the proxy cookie still identifies the original tree root.
+/// Recreate the sections in a later phase before evolution resumes.
+template <size_t Dim>
+struct ResetEqualRateSections {
+  template <typename DbTags, typename... InboxTags, typename Metavariables,
+            typename ArrayIndex, typename ActionList,
+            typename ParallelComponent>
+  static Parallel::iterable_action_return_t apply(
+      db::DataBox<DbTags>& box, const tuples::TaggedTuple<InboxTags...>&,
+      Parallel::GlobalCache<Metavariables>&, const ArrayIndex& id, ActionList,
+      const ParallelComponent*) {
+    using SectionTag =
+        Parallel::Tags::Section<ParallelComponent, Tags::EqualRateRegionId>;
+    db::mutate<SectionTag>(
+        [&id](const auto section) {
+          if (not section->has_value()) {
+            return;
+          }
+          auto& proxy = section->value().proxy();
+          ASSERT(
+              proxy.ckGetNumSubSections() == 1 and proxy.ckGetNumElements() > 0,
+              "Expected one nonempty equal-rate section.");
+          if (Parallel::ArrayIndex<ArrayIndex>{id} ==
+              proxy.ckGetArrayElements()[0]) {
+            ASSERT(
+                dynamic_cast<CkMulticastMgr*>(proxy.ckDelegatedTo()) != nullptr,
+                "Equal-rate sections require the Charm multicast manager.");
+            auto root_cookie = proxy.ckGetSectionInfo();
+            CProxy_CkMulticastMgr{proxy.ckDelegatedIdx()}[root_cookie.get_pe()]
+                .freeup(root_cookie);
+          }
+          section->reset();
+        },
+        make_not_null(&box));
+    return {Parallel::AlgorithmExecution::Continue, std::nullopt};
+  }
+};
+
+/// Set up `FixedLtsRatio`, mortar time-stepping policies, and sections to
+/// disable local time-stepping in equal rate regions.
+template <typename Metavariables, size_t Dim, typename RegionGenerators>
+struct SetupEqualRateRegions {
+ private:
+  using array_components = tmpl::filter<typename Metavariables::component_list,
+                                        Parallel::is_array<tmpl::_1>>;
+  static_assert(tmpl::size<array_components>::value == 1,
+                "Cannot identify element array.");
+
+ public:
+  using ParallelComponent = tmpl::front<array_components>;
+  using const_global_cache_tags = tmpl::list<
+      evolution::dg::Tags::ConcreteEqualRateRegions<Dim, RegionGenerators>>;
+  using simple_tags = tmpl::list<
+      ::Tags::FixedLtsRatio,
+      Parallel::Tags::Section<ParallelComponent, Tags::EqualRateRegionId>>;
+  using compute_tags = tmpl::list<
+      evolution::dg::Tags::EqualRateRegionsRef<Dim, RegionGenerators>>;
+
+  template <typename DbTags, typename... InboxTags, typename ArrayIndex,
+            typename ActionList>
+  static Parallel::iterable_action_return_t apply(
+      db::DataBox<DbTags>& box,
+      const tuples::TaggedTuple<InboxTags...>& inboxes,
+      Parallel::GlobalCache<Metavariables>& cache, const ArrayIndex& id,
+      ActionList actions, const ParallelComponent* component) {
+    if (db::get<::Tags::LtsMode>(box) != LtsMode::Off) {
+      db::mutate_apply<SetupLocalEqualRateRegion<Dim>>(make_not_null(&box));
+    }
+    return CreateEqualRateSections<Dim>::apply(box, inboxes, cache, id, actions,
+                                               component);
   }
 };
 }  // namespace Actions

@@ -138,7 +138,7 @@ class er;
 }  // namespace PUP
 /// \endcond
 
-template <size_t Dim>
+template <size_t Dim, bool PRefineOnlyInEvent = true>
 struct EvolutionMetavars {
   static constexpr size_t volume_dim = Dim;
 
@@ -369,7 +369,7 @@ struct EvolutionMetavars {
             Tags::ChangeSlabSize::NumberOfExpectedMessages,
             Tags::ChangeSlabSize::NewSlabSize>>;
     static constexpr bool keep_coarse_grids = false;
-    static constexpr bool p_refine_only_in_event = true;
+    static constexpr bool p_refine_only_in_event = PRefineOnlyInEvent;
   };
 
   struct registration

@@ -3,17 +3,26 @@
 
 import logging
 import os
+from pathlib import Path
 import shutil
 import unittest
+from unittest.mock import patch
 
 import numpy as np
+import pandas as pd
 import yaml
 
 import spectre.IO.H5 as spectre_h5
 from spectre.Informer import unit_test_build_path
 from spectre.support.Logging import configure_logging
 from spectre.tools.Status.ExecutableStatus import match_executable_status
-from spectre.tools.Status.Status import get_executable_name, get_input_file
+from spectre.tools.Status.Status import (
+    AVAILABLE_COLUMNS,
+    fetch_status,
+    get_executable_name,
+    get_input_file,
+    get_work_dir,
+)
 
 
 class TestExecutableStatus(unittest.TestCase):
@@ -199,6 +208,66 @@ class TestStatus(unittest.TestCase):
         self.assertEqual(
             get_input_file("", self.work_dir), self.input_file_path
         )
+
+    def test_get_work_dir(self):
+        submit_dir = str(Path(self.work_dir) / "submit")
+        output_path = str(Path(self.work_dir) / "spectre.out")
+        self.assertEqual(get_work_dir(submit_dir, ""), submit_dir)
+        self.assertEqual(get_work_dir(submit_dir, output_path), submit_dir)
+        context_path = Path(self.work_dir) / "SchedulerContext.yaml"
+        with context_path.open("w") as context_file:
+            yaml.safe_dump(
+                {"run_dir": self.work_dir, "out_file": output_path},
+                context_file,
+            )
+        self.assertEqual(get_work_dir(submit_dir, output_path), self.work_dir)
+        self.assertEqual(get_work_dir(self.work_dir, output_path), self.work_dir)
+        # A separate logs directory must not become the run directory just
+        # because it happens to contain a context from another submission.
+        for context in (
+            {"run_dir": submit_dir, "out_file": output_path},
+            {"run_dir": self.work_dir, "out_file": "another.out"},
+            None,
+        ):
+            with context_path.open("w") as context_file:
+                yaml.safe_dump(context, context_file)
+            self.assertEqual(get_work_dir(submit_dir, output_path), submit_dir)
+
+    def test_jobs_submitted_from_same_directory(self):
+        jobs = []
+        run_dirs = []
+        for i in range(3):
+            run_dir = Path(self.work_dir) / str(i) / "segments/0000_Inspiral"
+            run_dir.mkdir(parents=True)
+            run_dirs.append(str(run_dir))
+            output_path = str(run_dir / "spectre.out")
+            with (run_dir / "SchedulerContext.yaml").open("w") as context_file:
+                yaml.safe_dump(
+                    {
+                        "run_dir": str(run_dir),
+                        "out_file": output_path,
+                        "input_file": "InputFile.yaml",
+                    },
+                    context_file,
+                )
+            shutil.copyfile(self.input_file_path, run_dir / "InputFile.yaml")
+            job = {key: "" for key in AVAILABLE_COLUMNS if key != "SegmentId"}
+            job.update(
+                JobID=str(i),
+                State="RUNNING",
+                WorkDir=self.work_dir,
+                StdOut=output_path,
+                StdErr=output_path,
+            )
+            jobs.append(job)
+        with patch(
+            "spectre.tools.Status.Status.fetch_job_data",
+            return_value=pd.DataFrame(jobs),
+        ):
+            status = fetch_status()
+        self.assertEqual(set(status["WorkDir"]), set(run_dirs))
+        self.assertEqual(list(status["ExecutableName"]), ["MyExec"] * 3)
+        self.assertEqual(len(set(status["SegmentsDir"])), 3)
 
     def test_get_executable_name(self):
         self.assertEqual(

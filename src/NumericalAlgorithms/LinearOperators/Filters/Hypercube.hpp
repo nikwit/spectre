@@ -177,6 +177,9 @@ class Hypercube : public Filter<Dim, TagList> {
 
   bool supports_mesh(const Mesh<Dim>& mesh) const override;
 
+  std::optional<std::array<std::vector<double>, Dim>> volume_filter_response(
+      const Mesh<Dim>& mesh) const override;
+
   std::string name() const override { return "Hypercube"; }
 
   const std::optional<std::vector<size_t>>& blocks_to_filter() const override;

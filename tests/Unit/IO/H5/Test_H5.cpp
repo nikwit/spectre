@@ -18,6 +18,7 @@
 #include "DataStructures/BoostMultiArray.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Matrix.hpp"
+#include "Helpers/IO/H5Identifiers.hpp"
 #include "IO/H5/AccessType.hpp"
 #include "IO/H5/CheckH5.hpp"
 #include "IO/H5/Dat.hpp"
@@ -44,6 +45,43 @@ void test_types_equal() {
   CHECK_FALSE(h5::types_equal(h5::h5_type<double>(), h5::h5_type<float>()));
   CHECK_FALSE(h5::types_equal(h5::h5_type<char>(), h5::h5_type<float>()));
   CHECK_FALSE(h5::types_equal(h5::h5_type<int>(), h5::h5_type<float>()));
+}
+
+void test_attribute_datatype_lifetimes() {
+  const std::string file_name{"Unit.IO.H5.AttributeDatatypeLifetimes.h5"};
+  const hid_t file_id =
+      H5Fcreate(file_name.c_str(), h5::h5f_acc_trunc(), h5::h5p_default(),
+                h5::h5p_default());
+  CHECK_H5(file_id, "Failed to create attribute lifetime test file");
+  const auto datatype_count = []() {
+    return H5Fget_obj_count(H5F_OBJ_ALL, H5F_OBJ_DATATYPE);
+  };
+  // Attribute datatypes are transient objects, so count them across all files.
+  // Checking values alone would miss the handles leaked by repeated reads.
+  tmpl::for_each<tmpl::list<double, int, unsigned int, unsigned long>>(
+      [&file_id, &datatype_count](auto type_v) {
+        using T = typename decltype(type_v)::type;
+        const std::string name = "numbers_" + std::string(typeid(T).name());
+        const std::vector<T> values{1, 2, 3};
+        h5::write_to_attribute(file_id, name, values);
+        const auto before = datatype_count();
+        REQUIRE(before >= 0);
+        for (size_t i = 0; i < 32; ++i) {
+          CHECK(h5::read_rank1_attribute<T>(file_id, name) == values);
+        }
+        CHECK(datatype_count() == before);
+      });
+  const std::vector<std::string> strings{"header", "legend", "", " leading",
+                                         "trailing ", "  both  "};
+  h5::write_to_attribute(file_id, "strings", strings);
+  const auto before = datatype_count();
+  REQUIRE(before >= 0);
+  for (size_t i = 0; i < 32; ++i) {
+    CHECK(h5::read_rank1_attribute<std::string>(file_id, "strings") == strings);
+  }
+  CHECK(datatype_count() == before);
+  CHECK_H5(H5Fclose(file_id), "Failed to close attribute lifetime test file");
+  file_system::rm(file_name, true);
 }
 
 void test_read_data() {
@@ -279,10 +317,15 @@ void test_list_files() {
 }  // namespace
 
 SPECTRE_TEST_CASE("Unit.IO.H5", "[Unit][IO][H5]") {
+  const auto h5_identifiers = TestHelpers::io::snapshot_h5_identifiers();
   test_types_equal();
+  test_attribute_datatype_lifetimes();
   test_read_data();
   test_check_if_object_exists();
   test_contains_attribute_false();
+  // None of the above may leak HDF5 handles. Tests that throw from inside the
+  // h5 library are excluded since those legitimately leave handles open.
+  TestHelpers::io::check_no_leaked_h5_identifiers(h5_identifiers);
   test_errors();
   test_list_files();
 }
