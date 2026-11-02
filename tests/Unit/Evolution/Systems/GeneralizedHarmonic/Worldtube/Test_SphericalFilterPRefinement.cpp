@@ -19,6 +19,7 @@
 // Changing lmax must rebuild the angular matrices even when filter parameters
 // are unchanged. Exercise both production volume and face paths, including a
 // return to a previously used resolution, with the fused radial multiply.
+// [[TimeOut, 60]]
 SPECTRE_TEST_CASE("Unit.Gh.SphericalFilter.PRefinement", "[Unit][Evolution]") {
   using Tags = ylm::TensorYlm::filter_detail::gh_spacetime_vars_list;
   using Filter = Filters::SphericalShell<Tags>;
