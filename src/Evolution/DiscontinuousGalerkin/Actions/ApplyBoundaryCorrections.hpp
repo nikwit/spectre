@@ -632,16 +632,12 @@ struct ApplyBoundaryCorrections {
           evolution::dg::Tags::NormalCovectorAndMagnitude<volume_dim>,
           ::Tags::TimeStepper<TimeStepperType>,
           evolution::Tags::BoundaryCorrection,
-          tmpl::conditional_t<
-              DenseOutput, ::Tags::Time,
-              tmpl::list<
-                  ::Tags::TimeStep,
-                  Filters::Tags::SpectralFilter<volume_dim, FilterTagList>,
-                  ::Tags::StepNumberWithinSlab,
-                  domain::Tags::Jacobian<volume_dim, Frame::Grid,
-                                         Frame::Inertial>,
-                  domain::Tags::InverseJacobian<volume_dim, Frame::Grid,
-                                                Frame::Inertial>>>,
+          tmpl::conditional_t<DenseOutput, ::Tags::Time, ::Tags::TimeStep>,
+          Filters::Tags::SpectralFilter<volume_dim, FilterTagList>,
+          ::Tags::StepNumberWithinSlab,
+          domain::Tags::Jacobian<volume_dim, Frame::Grid, Frame::Inertial>,
+          domain::Tags::InverseJacobian<volume_dim, Frame::Grid,
+                                        Frame::Inertial>,
           tmpl::conditional_t<local_time_stepping, tmpl::list<>,
                               domain::Tags::DetInvJacobian<
                                   Frame::ElementLogical, Frame::Inertial>>>>,
@@ -729,15 +725,20 @@ struct ApplyBoundaryCorrections {
           face_normal_covector_and_magnitude,
       const LtsTimeStepper& time_stepper,
       const evolution::BoundaryCorrection& boundary_correction,
-      const double dense_output_time, const VolumeArgs&... volume_args) {
-    apply_impl(
-        vars_to_update, mortar_data, volume_mesh, element, mortar_meshes,
-        mortar_infos, dg_formulation, face_normal_covector_and_magnitude,
-        time_stepper, boundary_correction, TimeDelta{}, dense_output_time,
-        nullptr, static_cast<uint64_t>(0),
-        Jacobian<DataVector, volume_dim, Frame::Grid, Frame::Inertial>{},
-        InverseJacobian<DataVector, volume_dim, Frame::Grid, Frame::Inertial>{},
-        {}, volume_args...);
+      const double dense_output_time,
+      const Filters::Filter<volume_dim, FilterTagList>& boundary_filter,
+      const uint64_t step_number_within_slab,
+      const Jacobian<DataVector, volume_dim, Frame::Grid, Frame::Inertial>&
+          volume_jac_grid_to_inertial,
+      const InverseJacobian<DataVector, volume_dim, Frame::Grid,
+                            Frame::Inertial>& volume_inv_jac_grid_to_inertial,
+      const VolumeArgs&... volume_args) {
+    apply_impl(vars_to_update, mortar_data, volume_mesh, element, mortar_meshes,
+               mortar_infos, dg_formulation, face_normal_covector_and_magnitude,
+               time_stepper, boundary_correction, TimeDelta{},
+               dense_output_time, &boundary_filter, step_number_within_slab,
+               volume_jac_grid_to_inertial, volume_inv_jac_grid_to_inertial, {},
+               volume_args...);
   }
 
   template <typename DbTagsList, typename... InboxTags, typename ArrayIndex,
@@ -806,7 +807,9 @@ struct ApplyBoundaryCorrections {
     // The auxiliary boundary correction is not filtered currently (see the
     // filter application below), so the auxiliary pass skips the
     // filter-activity check and the face-Jacobian setup it would trigger.
-    if constexpr (not DenseOutput and not ComputeAuxiliary) {
+    // Dense output and normal LTS updates share cached coupling results, so
+    // both must compute the same filtered boundary correction.
+    if constexpr (not ComputeAuxiliary) {
       if (filter_ptr != nullptr and
           dynamic_cast<const Filters::None<volume_dim, FilterTagList>*>(
               filter_ptr) == nullptr) {
@@ -817,14 +820,9 @@ struct ApplyBoundaryCorrections {
       }
     }
 
-    const bool need_face_jacobians = [&]() {
-      if constexpr (DenseOutput) {
-        return false;
-      } else {
-        return boundary_filter_active and filter_ptr != nullptr and
-               filter_ptr->need_jacobians();
-      }
-    }();
+    const bool need_face_jacobians = boundary_filter_active and
+                                     filter_ptr != nullptr and
+                                     filter_ptr->need_jacobians();
 
     size_t max_face_grid_points = 0;
     if (need_face_jacobians) {
@@ -1124,7 +1122,7 @@ struct ApplyBoundaryCorrections {
                 return dt_boundary_correction_on_mortar;
               }();
               // The auxiliary boundary correction is not filtered currently
-              if constexpr (not DenseOutput and not ComputeAuxiliary) {
+              if constexpr (not ComputeAuxiliary) {
                 // Filter the boundary correction on the mortar before it is
                 // lifted into the volume.
                 if (boundary_filter_active) {

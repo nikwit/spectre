@@ -37,6 +37,7 @@
 #include "Evolution/ComputeTags.hpp"
 #include "Evolution/DiscontinuousGalerkin/Actions/ApplyBoundaryCorrections.hpp"
 #include "Evolution/DiscontinuousGalerkin/Actions/ComputeTimeDerivative.hpp"
+#include "Evolution/DiscontinuousGalerkin/Actions/ResetSpectralFilter.hpp"
 #include "Evolution/DiscontinuousGalerkin/CleanMortarHistory.hpp"
 #include "Evolution/DiscontinuousGalerkin/DgElementArray.hpp"
 #include "Evolution/DiscontinuousGalerkin/EqualRateLts/ChangeFixedLtsRatio.hpp"
@@ -589,6 +590,10 @@ struct EvolutionMetavars {
 
   using equal_rate_regions =
       tmpl::list<evolution::dg::NonconformingEqualRateRegions<volume_dim>>;
+
+  using spectral_filter_options_changed_action =
+      evolution::dg::Actions::ResetSpectralFilter<
+          volume_dim, typename system::variables_tag::tags_list>;
 
   static constexpr auto default_phase_order =
       std::array{Parallel::Phase::Initialization,

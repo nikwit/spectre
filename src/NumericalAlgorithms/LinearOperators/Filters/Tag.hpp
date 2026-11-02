@@ -16,7 +16,11 @@
 #include "NumericalAlgorithms/DiscontinuousGalerkin/Tags/OptionsGroup.hpp"
 #include "NumericalAlgorithms/LinearOperators/Filters/Filter.hpp"
 #include "Options/String.hpp"
+#include "Parallel/GlobalCache.hpp"
+#include "Parallel/Invoke.hpp"
+#include "Parallel/Printf/Printf.hpp"
 #include "Utilities/CloneUniquePtrs.hpp"
+#include "Utilities/ErrorHandling/Error.hpp"
 #include "Utilities/TMPL.hpp"
 
 namespace Filters::OptionTags {
@@ -64,6 +68,7 @@ template <size_t Dim, typename TagList>
 struct SpectralFilters : db::SimpleTag {
   using type = std::vector<std::unique_ptr<Filters::Filter<Dim, TagList>>>;
   static constexpr bool pass_metavariables = false;
+  static constexpr bool is_overlayable = true;
 
   using option_tags =
       tmpl::list<Filters::OptionTags::SpectralFilters<Dim, TagList>,
@@ -79,6 +84,33 @@ struct SpectralFilters : db::SimpleTag {
       filter->set_blocks_to_filter(block_names, block_groups);
     }
     return filters;
+  }
+
+  /// A checkpoint also contains a local clone on each element. Updating only
+  /// the global list would silently leave those clones using the old cadence.
+  template <typename Metavariables>
+  static void on_options_changed(Parallel::GlobalCache<Metavariables>& cache) {
+    if constexpr (requires {
+                    typename Metavariables::
+                        spectral_filter_options_changed_action;
+                    typename Metavariables::amr::element_array;
+                  }) {
+      if (Parallel::my_node<size_t>(cache) == 0) {
+        Parallel::printf(
+            "Spectral filter options changed; refreshing per-element "
+            "filters.\n");
+        Parallel::simple_action<
+            typename Metavariables::spectral_filter_options_changed_action>(
+            Parallel::get_parallel_component<
+                typename Metavariables::amr::element_array>(cache),
+            clone_unique_ptrs(Parallel::get<SpectralFilters>(cache)));
+      }
+    } else {
+      ERROR(
+          "This executable does not support changing spectral filters on "
+          "a checkpoint restart: it must provide an action to refresh "
+          "the per-element filters.");
+    }
   }
 };
 }  // namespace Filters::Tags

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "DataStructures/DataBox/DataBox.hpp"
+#include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/DataBox/Tag.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
@@ -21,6 +22,8 @@
 #include "Domain/Structure/Element.hpp"
 #include "Domain/Structure/ElementId.hpp"
 #include "Domain/Tags.hpp"
+#include "Evolution/DiscontinuousGalerkin/Actions/ResetSpectralFilter.hpp"
+#include "Evolution/DiscontinuousGalerkin/Initialization/SpectralFilters.tpp"
 #include "Framework/ActionTesting.hpp"
 #include "NumericalAlgorithms/LinearOperators/Filters/Filter.hpp"
 #include "NumericalAlgorithms/LinearOperators/Filters/None.hpp"
@@ -31,7 +34,11 @@
 #include "NumericalAlgorithms/Spectral/Quadrature.hpp"
 #include "Parallel/Phase.hpp"
 #include "ParallelAlgorithms/Actions/SpectralFilter.hpp"
+#include "Time/Slab.hpp"
 #include "Time/Tags/StepNumberWithinSlab.hpp"
+#include "Time/Tags/TimeStepId.hpp"
+#include "Time/Time.hpp"
+#include "Time/TimeSteppers/AdamsMoultonPc.hpp"
 #include "Utilities/Gsl.hpp"
 #include "Utilities/Serialization/CharmPupable.hpp"
 #include "Utilities/Serialization/RegisterDerivedClassesWithCharm.hpp"
@@ -168,15 +175,15 @@ struct ElementArray {
   using chare_type = ActionTesting::MockArrayChare;
   using array_index = int;
   using const_global_cache_tags = tmpl::list<>;
-  using phase_dependent_action_list =
-      tmpl::list<Parallel::PhaseActions<
-                     Parallel::Phase::Initialization,
-                     tmpl::list<ActionTesting::InitializeDataBox<
-                         tmpl::list<VarsTag, MeshTag, ElementTag, StepTag,
-                                    FilterTag, InvJacTag, JacTag>>>>,
-                 Parallel::PhaseActions<Parallel::Phase::Testing,
-                                        tmpl::list<dg::Actions::SpectralFilter<
-                                            1, tmpl::list<ScalarFieldTag>>>>>;
+  using phase_dependent_action_list = tmpl::list<
+      Parallel::PhaseActions<
+          Parallel::Phase::Initialization,
+          tmpl::list<ActionTesting::InitializeDataBox<tmpl::list<
+              VarsTag, MeshTag, ElementTag, StepTag, FilterTag, InvJacTag,
+              JacTag, ::Tags::Next<::Tags::TimeStepId>>>>>,
+      Parallel::PhaseActions<Parallel::Phase::Testing,
+                             tmpl::list<dg::Actions::SpectralFilter<
+                                 1, tmpl::list<ScalarFieldTag>>>>>;
 };
 
 struct Metavariables {
@@ -195,7 +202,8 @@ Jacobian<DataVector, 1, Frame::Grid, Frame::Inertial> make_identity_jac() {
 
 template <typename Filter, typename Callback>
 void run_action(std::unique_ptr<Filter> filter_ptr, const double initial_value,
-                const uint64_t step_number, Callback&& callback) {
+                const uint64_t step_number, Callback&& callback,
+                const TimeStepId& next_time_step_id = {}) {
   using element_array = ElementArray<Metavariables>;
   ActionTesting::MockRuntimeSystem<Metavariables> runner{{}};
   ActionTesting::emplace_component_and_initialize<element_array>(
@@ -205,7 +213,7 @@ void run_action(std::unique_ptr<Filter> filter_ptr, const double initial_value,
                Spectral::Quadrature::GaussLobatto},
        Element<1>{ElementId<1>{0}, {}}, step_number,
        std::unique_ptr<FilterBase>(std::move(filter_ptr)),
-       make_identity_inv_jac(), make_identity_jac()});
+       make_identity_inv_jac(), make_identity_jac(), next_time_step_id});
   ActionTesting::set_phase(make_not_null(&runner), Parallel::Phase::Testing);
   ActionTesting::next_action<element_array>(make_not_null(&runner), 0);
   std::forward<Callback>(callback)(runner);
@@ -264,6 +272,61 @@ void test_step_flag_applies_filter() {
              });
 }
 
+void test_refresh_checkpoint_filter() {
+  run_action(
+      std::make_unique<MockFilter>(true, false, false), 3., 0,
+      [](auto& runner) {
+        std::vector<std::unique_ptr<FilterBase>> filters;
+        filters.push_back(std::make_unique<MockFilter>(false, true, false));
+        ActionTesting::simple_action<
+            ElementArray<Metavariables>,
+            evolution::dg::Actions::ResetSpectralFilter<
+                1, tmpl::list<ScalarFieldTag>>>(make_not_null(&runner), 0,
+                                                std::move(filters));
+        const auto* filter = get_mock_filter(runner);
+        REQUIRE(filter != nullptr);
+        CHECK(not filter->apply_volume_filter_on_substep());
+        CHECK(filter->apply_volume_filter_on_this_step(0));
+        CHECK(get_scalar_field(runner) == DataVector(5, 6.));
+      });
+}
+
+// A predictor has the same physical end time as the completed corrector, but
+// must not be volume-filtered when only whole-step filtering is requested.
+void test_predictor_corrector_cadence() {
+  const TimeSteppers::AdamsMoultonPc<true> stepper{4};
+  const Slab slab{0., 1.};
+  for (const bool forward : {true, false}) {
+    const auto step = (forward ? 1 : -1) * slab.duration() / 4;
+    for (const bool error_control : {false, true}) {
+      TimeStepId id{forward, 0, forward ? slab.start() : slab.end()};
+      size_t full_step_applications = 0;
+      do {
+        const auto next = error_control
+                              ? stepper.next_time_id_for_error(id, step)
+                              : stepper.next_time_id(id, step);
+        const bool full_step = next.substep() == 0;
+        run_action(
+            std::make_unique<MockFilter>(false, true, false), 3., 0,
+            [full_step](const auto& runner) {
+              CHECK(get_scalar_field(runner) ==
+                    DataVector(5, full_step ? 6. : 3.));
+            },
+            next);
+        run_action(
+            std::make_unique<MockFilter>(true, false, false), 3., 0,
+            [](const auto& runner) {
+              CHECK(get_scalar_field(runner) == DataVector(5, 6.));
+            },
+            next);
+        full_step_applications += full_step ? 1 : 0;
+        id = next;
+      } while (id.substep() != 0);
+      CHECK(full_step_applications == 1);
+    }
+  }
+}
+
 // Test: need_jacobians=true → Jacobians populated in apply_in_volume.
 void test_jacobians_passed_when_needed() {
   run_action(std::make_unique<MockFilter>(/*apply_substep=*/true,
@@ -315,6 +378,8 @@ SPECTRE_TEST_CASE("Unit.ParallelAlgorithms.Actions.SpectralFilter",
   test_no_gating_flags_skips();
   test_substep_flag_applies_filter();
   test_step_flag_applies_filter();
+  test_refresh_checkpoint_filter();
+  test_predictor_corrector_cadence();
   test_jacobians_passed_when_needed();
   test_jacobians_not_passed_when_not_needed();
   test_unsupported_mesh_errors();

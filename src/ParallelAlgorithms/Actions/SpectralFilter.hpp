@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "DataStructures/DataBox/DataBox.hpp"
+#include "DataStructures/DataBox/Prefixes.hpp"
 #include "DataStructures/DataVector.hpp"
 #include "DataStructures/Tensor/Tensor.hpp"
 #include "DataStructures/Variables.hpp"
@@ -19,6 +20,7 @@
 #include "Parallel/AlgorithmExecution.hpp"
 #include "Parallel/GlobalCache.hpp"
 #include "Time/Tags/StepNumberWithinSlab.hpp"
+#include "Time/Tags/TimeStepId.hpp"
 #include "Utilities/Gsl.hpp"
 
 /// \cond
@@ -41,7 +43,13 @@ namespace dg::Actions {
  * The filter is skipped when:
  * - the filter is `Filters::None` (explicit no-op), or
  * - both `apply_volume_filter_on_substep()` and
- *   `apply_volume_filter_on_this_step(step_number)` return `false`.
+ *   `apply_volume_filter_on_this_step(step_number)` return `false`, or the
+ *   latter is enabled but the update has not completed a full time step.
+ *
+ * This action runs after UpdateU and before AdvanceTime. Therefore
+ * `Next<TimeStepId>`, rather than `TimeStepId`, identifies the updated state.
+ * An update completes a full step when the next ID has substep zero. In
+ * particular, a predictor at the end time is still an intermediate substep.
  *
  * The grid-to-inertial Jacobian and its inverse are only retrieved from the
  * DataBox when `Filters::Filter::need_jacobians()` returns `true`; otherwise
@@ -99,8 +107,11 @@ struct SpectralFilter {
 
     const auto step_number =
         static_cast<size_t>(db::get<::Tags::StepNumberWithinSlab>(box));
+    const bool full_step =
+        db::get<::Tags::Next<::Tags::TimeStepId>>(box).substep() == 0;
     if (not(filter.apply_volume_filter_on_substep() or
-            filter.apply_volume_filter_on_this_step(step_number))) {
+            (full_step and
+             filter.apply_volume_filter_on_this_step(step_number)))) {
       return {Parallel::AlgorithmExecution::Continue, std::nullopt};
     }
 

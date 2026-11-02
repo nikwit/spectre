@@ -1845,7 +1845,7 @@ class MockBoundaryFilter
           Jacobian<DataVector, 1, Frame::Grid, Frame::Inertial>>&
       /*jac*/) const override {}
   void apply_on_boundary(
-      gsl::not_null<Variables<tmpl::list<Var1, Var2<1>>>*> /*vars*/,
+      gsl::not_null<Variables<tmpl::list<Var1, Var2<1>>>*> vars,
       const Mesh<0>& /*face_mesh*/,
       const std::optional<InverseJacobian<DataVector, 1, Frame::Grid,
                                           Frame::Inertial>>& inv_jac,
@@ -1854,6 +1854,7 @@ class MockBoundaryFilter
     ++call_count_;
     saw_inv_jac_ = inv_jac.has_value();
     saw_jac_ = jac.has_value();
+    *vars *= 2.0;
   }
   size_t call_count() const { return call_count_; }
   bool saw_inv_jac() const { return saw_inv_jac_; }
@@ -1874,21 +1875,22 @@ class MockBoundaryFilter
 // NOLINTNEXTLINE
 PUP::able::PUP_ID MockBoundaryFilter::my_PUP_ID = 0;
 
-// Runs a 1D GTS GaussLobatto scenario with the given filter and calls
+// Runs a 1D GaussLobatto scenario with the given filter and calls
 // callback(runner, self_id) after the boundary-correction action completes.
 // The physical pass drives `ApplyBoundaryCorrectionsToTimeDerivative`; the
 // auxiliary pass (`IsAuxiliary`) drives
 // `ApplyAuxiliaryBoundaryCorrectionsToVariables` (which goes through the same
 // `ApplyBoundaryCorrections` mutator with `ComputeAuxiliary == true`) with
 // auxiliary-shaped mortar data.
-template <bool IsAuxiliary = false, typename Callback>
-void run_boundary_filter_test_1d_gts(
+template <bool IsAuxiliary = false, bool LocalTimeStepping = false,
+          typename Callback>
+void run_boundary_filter_test_1d(
     std::unique_ptr<Filters::Filter<1, tmpl::list<Var1, Var2<1>>>> filter_ptr,
     Callback&& callback) {
   constexpr size_t Dim = 1;
   using TagList = tmpl::list<Var1, Var2<Dim>>;
   using metavars = Metavariables<Dim, TestHelpers::SystemType::Conservative,
-                                 false, false, IsAuxiliary>;
+                                 LocalTimeStepping, false, IsAuxiliary>;
   using comp = component<metavars>;
   using MockRuntimeSystem = ActionTesting::MockRuntimeSystem<metavars>;
 
@@ -1905,12 +1907,13 @@ void run_boundary_filter_test_1d_gts(
   blocks[0] = Block<Dim>(nullptr, 0, {});
   Domain<Dim> domain{std::move(blocks)};
 
-  MockRuntimeSystem runner{{std::move(domain),
-                            std::vector<std::array<size_t, Dim>>{
-                                make_array<Dim>(2_st), make_array<Dim>(3_st)},
-                            LtsMode::Off,
-                            std::make_unique<BoundaryTerms<Dim>>(),
-                            dg::Formulation::StrongInertial}};
+  MockRuntimeSystem runner{
+      {std::move(domain),
+       std::vector<std::array<size_t, Dim>>{make_array<Dim>(2_st),
+                                            make_array<Dim>(3_st)},
+       LocalTimeStepping ? LtsMode::Conservative : LtsMode::Off,
+       std::make_unique<BoundaryTerms<Dim>>(),
+       dg::Formulation::StrongInertial}};
 
   const Mesh<Dim> mesh{5, Spectral::Basis::Legendre,
                        Spectral::Quadrature::GaussLobatto};
@@ -1979,6 +1982,27 @@ void run_boundary_filter_test_1d_gts(
   const evolution::dg::BoundaryData<Dim> data{
       mesh,        std::nullopt,      mortar_mesh, std::nullopt,
       {flux_data}, next_time_step_id, 1,           2};
+  if constexpr (LocalTimeStepping) {
+    // Unlike the general test's east neighbor, use equal step sizes here.
+    // Supply both time samples required by the second-order AB history.
+    const TimeStepId past_id{true, time_step_id.slab_number(),
+                             time_step_id.step_time() - time_step};
+    db::mutate<evolution::dg::Tags::MortarNextTemporalId<Dim>>(
+        [&mortar_id, &past_id](const auto ids) {
+          ids->at(mortar_id) = past_id;
+        },
+        make_not_null(&ActionTesting::get_databox<comp>(make_not_null(&runner),
+                                                        self_id)));
+    const evolution::dg::BoundaryData<Dim> past_data{
+        mesh,        std::nullopt, mortar_mesh, std::nullopt,
+        {flux_data}, time_step_id, 1,           2};
+    runner.template mock_distributed_objects<comp>()
+        .at(self_id)
+        .template receive_data<
+            evolution::dg::Tags::BoundaryCorrectionAndGhostCellsInbox<
+                Dim, false, IsAuxiliary>>(past_id,
+                                          std::pair{mortar_id, past_data});
+  }
   runner.template mock_distributed_objects<comp>()
       .at(self_id)
       .template receive_data<
@@ -2007,7 +2031,7 @@ const MockBoundaryFilter* get_mock_boundary_filter(
 }
 
 void test_boundary_filter_no_cadence_skips() {
-  run_boundary_filter_test_1d_gts(
+  run_boundary_filter_test_1d(
       std::make_unique<MockBoundaryFilter>(false, false, false),
       [](const auto& runner, const ElementId<1>& self_id) {
         const MockBoundaryFilter* mock =
@@ -2018,7 +2042,7 @@ void test_boundary_filter_no_cadence_skips() {
 }
 
 void test_boundary_filter_substep_applies() {
-  run_boundary_filter_test_1d_gts(
+  run_boundary_filter_test_1d(
       std::make_unique<MockBoundaryFilter>(true, false, false),
       [](const auto& runner, const ElementId<1>& self_id) {
         const MockBoundaryFilter* mock =
@@ -2029,7 +2053,7 @@ void test_boundary_filter_substep_applies() {
 }
 
 void test_boundary_filter_step_applies() {
-  run_boundary_filter_test_1d_gts(
+  run_boundary_filter_test_1d(
       std::make_unique<MockBoundaryFilter>(false, true, false),
       [](const auto& runner, const ElementId<1>& self_id) {
         const MockBoundaryFilter* mock =
@@ -2040,7 +2064,7 @@ void test_boundary_filter_step_applies() {
 }
 
 void test_boundary_filter_jacobians_passed_when_needed() {
-  run_boundary_filter_test_1d_gts(
+  run_boundary_filter_test_1d(
       std::make_unique<MockBoundaryFilter>(true, false, true),
       [](const auto& runner, const ElementId<1>& self_id) {
         const MockBoundaryFilter* mock =
@@ -2053,7 +2077,7 @@ void test_boundary_filter_jacobians_passed_when_needed() {
 }
 
 void test_boundary_filter_jacobians_not_passed_when_not_needed() {
-  run_boundary_filter_test_1d_gts(
+  run_boundary_filter_test_1d(
       std::make_unique<MockBoundaryFilter>(true, false, false),
       [](const auto& runner, const ElementId<1>& self_id) {
         const MockBoundaryFilter* mock =
@@ -2065,9 +2089,76 @@ void test_boundary_filter_jacobians_not_passed_when_not_needed() {
       });
 }
 
+void test_lts_dense_boundary_filter() {
+  run_boundary_filter_test_1d<false, true>(
+      std::make_unique<MockBoundaryFilter>(true, false, true),
+      [](auto& runner, const ElementId<1>& self_id) {
+        using metavars = Metavariables<1, TestHelpers::SystemType::Conservative,
+                                       true, false>;
+        using comp = component<metavars>;
+        using vars_tag = typename metavars::system::variables_tag;
+        auto& box =
+            ActionTesting::get_databox<comp>(make_not_null(&runner), self_id);
+        const auto& filter = dynamic_cast<const MockBoundaryFilter&>(
+            db::get<
+                Filters::Tags::SpectralFilter<1, tmpl::list<Var1, Var2<1>>>>(
+                box));
+        const auto expected = db::get<vars_tag>(box);
+        const auto normal_calls = filter.call_count();
+        REQUIRE(normal_calls > 0);
+        // Force dense output to populate a fresh coupling cache. Normal
+        // evolution must subsequently reuse these same filtered couplings.
+        db::mutate<evolution::dg::Tags::MortarDataHistory<1>>(
+            [](const auto histories) {
+              for (auto& [id, history] : *histories) {
+                (void)id;
+                history.clear_coupling_cache();
+              }
+            },
+            make_not_null(&box));
+        typename vars_tag::type dense{expected.number_of_grid_points(), 0.};
+        evolution::dg::ApplyBoundaryCorrections<true, metavars, true, false,
+                                                vars_tag>::
+            apply(make_not_null(&dense),
+                  db::get<evolution::dg::Tags::MortarDataHistory<1>>(box),
+                  db::get<domain::Tags::Mesh<1>>(box),
+                  db::get<domain::Tags::Element<1>>(box),
+                  db::get<evolution::dg::Tags::MortarMesh<1>>(box),
+                  db::get<evolution::dg::Tags::MortarInfo<1>>(box),
+                  db::get<::dg::Tags::Formulation>(box),
+                  db::get<evolution::dg::Tags::NormalCovectorAndMagnitude<1>>(
+                      box),
+                  db::get<Tags::TimeStepper<LtsTimeStepper>>(box),
+                  db::get<evolution::Tags::BoundaryCorrection>(box),
+                  db::get<Tags::Next<Tags::TimeStepId>>(box).substep_time(),
+                  filter, 0,
+                  db::get<
+                      domain::Tags::Jacobian<1, Frame::Grid, Frame::Inertial>>(
+                      box),
+                  db::get<domain::Tags::InverseJacobian<1, Frame::Grid,
+                                                        Frame::Inertial>>(box),
+                  db::get<VolumeTag>(box));
+        CHECK(filter.call_count() > normal_calls);
+        CHECK(filter.saw_jac());
+        CHECK(filter.saw_inv_jac());
+        CHECK_ITERABLE_APPROX(get<Var1>(dense), get<Var1>(expected));
+        CHECK_ITERABLE_APPROX(get<Var2<1>>(dense), get<Var2<1>>(expected));
+        const auto dense_calls = filter.call_count();
+        db::mutate<vars_tag>([](const auto vars) { *vars *= 0.; },
+                             make_not_null(&box));
+        db::mutate_apply<evolution::dg::ApplyBoundaryCorrections<
+            true, metavars, false, false, vars_tag>>(make_not_null(&box));
+        CHECK(filter.call_count() == dense_calls);
+        CHECK_ITERABLE_APPROX(get<Var1>(db::get<vars_tag>(box)),
+                              get<Var1>(expected));
+        CHECK_ITERABLE_APPROX(get<Var2<1>>(db::get<vars_tag>(box)),
+                              get<Var2<1>>(expected));
+      });
+}
+
 // Auxiliary boundary corrections are not filtered
 void test_auxiliary_boundary_no_filter_jacobians_passed_when_needed() {
-  run_boundary_filter_test_1d_gts</*IsAuxiliary=*/true>(
+  run_boundary_filter_test_1d</*IsAuxiliary=*/true>(
       std::make_unique<MockBoundaryFilter>(true, false, true),
       [](const auto& runner, const ElementId<1>& self_id) {
         const MockBoundaryFilter* mock =
@@ -2082,7 +2173,7 @@ void test_auxiliary_boundary_no_filter_jacobians_passed_when_needed() {
 }
 
 void test_auxiliary_boundary_no_filter_jacobians_not_passed_when_not_needed() {
-  run_boundary_filter_test_1d_gts</*IsAuxiliary=*/true>(
+  run_boundary_filter_test_1d</*IsAuxiliary=*/true>(
       std::make_unique<MockBoundaryFilter>(true, false, false),
       [](const auto& runner, const ElementId<1>& self_id) {
         const MockBoundaryFilter* mock =
@@ -2123,6 +2214,7 @@ SPECTRE_TEST_CASE("Unit.Evolution.DG.ApplyBoundaryCorrections",
   test_boundary_filter_step_applies();
   test_boundary_filter_jacobians_passed_when_needed();
   test_boundary_filter_jacobians_not_passed_when_not_needed();
+  test_lts_dense_boundary_filter();
 
   // LDG tests
   test_auxiliary_conforming();
