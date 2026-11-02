@@ -1,8 +1,8 @@
 // Distributed under the MIT License.
 // See LICENSE.txt for details.
 
-#include "Framework/TestingFramework.hpp"
 #include "Framework/TestHelpers.hpp"
+#include "Framework/TestingFramework.hpp"
 
 #include <array>
 #include <cmath>

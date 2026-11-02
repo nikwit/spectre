@@ -226,6 +226,31 @@ the rest of SpEC's domain controller. Reference fixtures and their scope are
 documented in
 `tests/Unit/Evolution/Systems/GeneralizedHarmonic/SpecAmrReference/README.md`.
 
+For spherical-harmonic shells around excised objects, the optional
+`Amr.Policies.ObjectShellFloors` setting can keep each object's outer shells
+at least as well resolved angularly as its innermost shell:
+
+```yaml
+Amr:
+  Policies:
+    # Specify the other AMR policies as usual.
+    ObjectShellFloors: [ExcisionSphereA, ExcisionSphereB]
+```
+
+The floor uses the retained angular cutoff after filtering, rather than the
+unfiltered `l_max`. It is computed from the innermost shell's proposed mesh
+in the current AMR cycle and can decrease again on later cycles. Each object's
+floor is independent. The connected radial chain ends at the transition to
+nonspherical elements. Radial refinement requests remain unchanged.
+
+With this option enabled, a central planning phase gathers the p-refinement
+requests and distributes consistent final element and neighbor meshes before
+projection. Startup refinement checks the realized changes after this
+planning step. The option requires anisotropic p refinement on a fixed
+topology and known angular filter widths. Incompatible resolution limits are
+reported as errors. The default is an empty list, which preserves the existing
+element-local planning and also accepts inputs that omit the option.
+
 At a nonconforming polynomial / spherical-harmonic interface, p AMR preserves
 the connectivity and equal-rate stepping policy. Each side uses its own face
 mesh as its mortar; the wedge-side interpolator is rebuilt using both updated
@@ -488,7 +513,8 @@ StartTime:
 `Blocks` accepts domain block names and block-group names. Select the actual
 wave-zone groups in the domain; the names above include the envelope of a
 partitioned `BinaryCompactObject` domain. The envelope is included because
-outgoing junk crosses it before reaching the outer shells. Each selected element freezes all
+outgoing junk crosses it before reaching the outer shells. Each selected
+element freezes all
 three p decisions until
 `time >= max(Time, max_initial_grid_radius + RadiusPlusTime)`. The maximum
 radius is cached from the element's initial grid points, so later p changes
@@ -499,7 +525,8 @@ adjustment, which can also be used independently of the radial hold.
 
 `RadiusPlusTime` is an absolute time offset. For a run starting at `t0`, use
 `t0 + delay` if the desired release is `t0 + radius + delay`. SpEC's standard
-bound-orbit SKS/SSphKS/CFMS setup uses `delay = max(200, 3 * initial_separation)`;
+bound-orbit SKS/SSphKS/CFMS setup uses
+`delay = max(200, 3 * initial_separation)`;
 its SHK setup uses `2 * initial_separation`. Choose the offset to match the
 initial-data family. The original scalar `StartTime: 0.0` remains supported
 and imposes no radius-dependent restriction.
